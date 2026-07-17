@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>E-Thesis Staff Checker</title>
+<style>
+  :root { --navy:#1a3a5c; --gold:#c9a227; --bg:#f5f6f8; }
+  * { box-sizing:border-box; font-family:'Segoe UI','Sarabun',Tahoma,sans-serif; }
+  body { background:var(--bg); margin:0; padding:24px; color:#222; }
+  .card { max-width:860px; margin:0 auto; background:#fff; border-radius:12px; position:relative;
+          box-shadow:0 2px 12px rgba(0,0,0,.08); padding:28px 32px; }
+  h1 { color:var(--navy); font-size:1.3rem; margin:0 0 4px; }
+  .sub { color:#777; font-size:.85rem; margin-bottom:20px; }
+  h2 { color:var(--navy); font-size:1rem; border-left:4px solid var(--gold);
+       padding-left:10px; margin:26px 0 12px; }
+  label { display:block; font-size:.85rem; font-weight:600; margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:8px 10px; border:1px solid #ccd;
+       border-radius:6px; font-size:.9rem; }
+  textarea { resize:vertical; }
+  .row { display:flex; gap:12px; } .row > div { flex:1; }
+  .committee-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .committee-row input.cname { flex:3; } .committee-row select { flex:2; }
+  .committee-row button { background:#e66; color:#fff; border:none; border-radius:6px;
+       padding:8px 12px; cursor:pointer; }
+  .addbtn { background:#eef; color:var(--navy); border:1px dashed var(--navy);
+       border-radius:6px; padding:8px 14px; cursor:pointer; font-size:.85rem; }
+  .actions { margin-top:28px; }
+  .primary { background:var(--navy); color:#fff; border:none; border-radius:8px;
+       padding:12px 22px; font-size:.95rem; cursor:pointer; }
+  .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
+       font-size:.82rem; border-radius:6px; margin-top:6px; }
+  input[type=file] { padding:8px; background:#fafafe; }
+  .logout { position:absolute; top:18px; right:24px; margin:0; }
+  .logout button { background:#fff; color:#596575; border:1px solid #ccd3dc;
+    border-radius:7px; padding:6px 10px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="card">
+  <form class="logout" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+  <h1>📋 E-Thesis Staff Checker</h1>
+  <div class="sub">อัปโหลด PDF + กรอกข้อมูลอนุมัติจากบัณฑิตวิทยาลัย ระบบตรวจให้อัตโนมัติ (ไม่ต้องผ่าน Claude)</div>
+  <div class="note">⚠️ ข้อมูลในฟอร์มนี้คือ "ความจริงอ้างอิง" — กรอกให้ตรงเอกสารอนุมัติทุกตัวอักษร</div>
+
+  <form id="f" action="/check" method="post" enctype="multipart/form-data">
+    <h2>0. ไฟล์เล่ม</h2>
+    <label>ไฟล์ PDF</label>
+    <input type="file" name="pdf" accept=".pdf" required>
+    <div class="note">รองรับไฟล์ PDF ขนาดไม่เกิน 25 MB และต้องเป็นไฟล์ที่ระบบดึงข้อความได้ ไม่รองรับไฟล์ที่มีรหัสผ่านหรือเป็นภาพสแกนทั้งเล่ม</div>
+
+    <h2>1. ประเภทและรูปแบบเล่ม</h2>
+    <div class="row">
+      <div><label>ประเภทเล่ม</label>
+        <select name="doc_type" required>
+          <option value="" disabled selected>กรุณาเลือกประเภทเล่ม</option>
+          <option value="THESIS">วิทยานิพนธ์ (Thesis)</option>
+          <option value="THEMATIC PAPER">สารนิพนธ์ (Thematic Paper)</option>
+          <option value="INDEPENDENT STUDY">การค้นคว้าอิสระ (Independent Study)</option>
+        </select></div>
+      <div><label>รูปแบบ</label>
+        <select name="format" required>
+          <option value="" disabled selected>กรุณาเลือกรูปแบบ</option>
+          <option value="1">รูปแบบ 1 — ดั้งเดิม</option>
+          <option value="2">รูปแบบ 2 — จากผลงานตีพิมพ์</option>
+        </select></div>
+      <div><label>หลักสูตร</label>
+        <select name="program_language" required>
+          <option value="" disabled selected>กรุณาเลือกหลักสูตร</option>
+          <option value="international">นานาชาติ (EN เท่านั้น)</option>
+          <option value="thai">ไทย — เล่มไทย</option>
+          <option value="thai_english">ไทย — เล่มอังกฤษ</option>
+        </select></div>
+      <div><label>โหมดตรวจชื่อบท</label>
+        <select name="chapters_mode" required>
+          <option value="" disabled selected>กรุณาเลือกโหมดตรวจ</option>
+          <option value="strict">strict (บังคับชื่อบทตามประกาศ)</option>
+          <option value="free">free (ไม่บังคับชื่อบท)</option>
+        </select></div>
+    </div>
+
+    <h2>2. ชื่อเรื่อง (ตาม บฑ.1)</h2>
+    <label>ชื่อเรื่องภาษาอังกฤษ</label>
+    <textarea name="title_en" rows="2" placeholder="THESIS TITLE ..."></textarea>
+    <label>ชื่อเรื่องภาษาไทย (ถ้ามี)</label>
+    <textarea name="title_th" rows="2" placeholder="หัวข้อภาษาไทย ..."></textarea>
+
+    <h2>3. นักศึกษา</h2>
+    <div class="row">
+      <div><label>ชื่อ-นามสกุล (ภาษาอังกฤษ)</label><input name="student_name" placeholder="FIRSTNAME LASTNAME"></div>
+      <div><label>ชื่อ-นามสกุล (ภาษาไทย — จำเป็นสำหรับหลักสูตรไทย)</label><input name="student_name_th" placeholder="ชื่อ นามสกุล"></div>
+    </div>
+    <div class="row">
+      <div><label>รหัสนักศึกษา</label><input name="student_id" placeholder="6xxxxxx"></div>
+    </div>
+    <div class="row">
+      <div><label>ชื่อปริญญา (สาขาวิชา)</label><input name="degree" placeholder="Doctor of Philosophy (...)"></div>
+    </div>
+    <div class="row">
+      <div><label>วันที่สอบผ่าน</label><input name="exam_date" placeholder="29 June 2026 / 29 มิถุนายน 2569"></div>
+      <div><label>ปีบนหน้าปก</label><input name="year" placeholder="2026 / 2569"></div>
+    </div>
+
+    <div class="note">ℹ️ หน้าลงนาม: ระบบตรวจให้เฉพาะ<b>ชื่อเรื่อง</b>และ<b>เลขหน้า (i/ii หรือ ก/ข)</b> — รายชื่อกรรมการ ตำแหน่งวางลายเซ็น และข้อความมุมล่างขวา เจ้าหน้าที่ตรวจเองตาม checklist ที่แนบท้ายรายงานผล</div>
+
+    <div class="actions">
+      <button type="submit" class="primary">🔍 ตรวจเล่ม</button>
+    </div>
+  </form>
+</div>
+
+
+
+<div id="overlay" style="display:none; position:fixed; inset:0; background:rgba(20,30,45,.75); z-index:99;">
+  <div style="max-width:420px; margin:22vh auto 0; background:#fff; border-radius:12px; padding:28px 32px; text-align:center;">
+    <div class="spin" style="width:44px;height:44px;border:5px solid #dde;border-top-color:#1a3a5c;border-radius:50%;margin:0 auto 16px;animation:sp 1s linear infinite;"></div>
+    <div style="font-weight:600; color:#1a3a5c; margin-bottom:6px;">กำลังตรวจเล่ม...</div>
+    <div id="stage" style="font-size:.9rem; color:#666;">กำลังอัปโหลดไฟล์...</div>
+  </div>
+</div>
+<style>@keyframes sp{to{transform:rotate(360deg)}}</style>
+
+<script>
+document.getElementById('f').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const overlay = document.getElementById('overlay');
+  const stage = document.getElementById('stage');
+  overlay.style.display = 'block';
+  stage.textContent = 'กำลังอัปโหลดไฟล์...';
+  try {
+    const resp = await fetch('/check', {method:'POST', body:new FormData(this)});
+    if (!resp.ok) throw new Error('อัปโหลดไม่สำเร็จ (' + resp.status + ')');
+    const {job_id} = await resp.json();
+    let pollFailures = 0;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch('/progress/' + job_id);
+        if (!r.ok) throw new Error('poll failed');
+        const p = await r.json();
+        pollFailures = 0;
+        stage.textContent = p.stage;
+        if (p.done) { clearInterval(timer); window.location.href = '/result/' + job_id; }
+      } catch(err) {
+        pollFailures += 1;
+        if (pollFailures >= 5) {
+          clearInterval(timer);
+          overlay.style.display = 'none';
+          alert('ขาดการเชื่อมต่อกับระบบตรวจ กรุณาลองใหม่');
+        }
+      }
+    }, 700);
+  } catch(err) {
+    overlay.style.display = 'none';
+    alert('เกิดข้อผิดพลาด: ' + err.message);
+  }
+});
+</script>
+</body>
+</html>
