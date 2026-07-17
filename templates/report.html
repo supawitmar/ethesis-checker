@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electronic file checking report</title>
+<style>
+  :root { --navy:#1a3a5c; --gold:#c9a227; --bg:#eef1f5;
+          --red:#c0392b; --red-bg:#fdf1f0; --orange:#d68910; --orange-bg:#fdf6ec;
+          --yellow:#b7950b; --yellow-bg:#fdfaea; --green:#1e8449; --green-bg:#eafaf1;
+          --purple:#7d3c98; --purple-bg:#f9f2fc; }
+  * { box-sizing:border-box; font-family:'Segoe UI','Sarabun',Tahoma,sans-serif; }
+  body { background:var(--bg); margin:0; padding:24px 16px; color:#26303b; }
+  .wrap { max-width:920px; margin:0 auto; }
+
+  .head { background:linear-gradient(135deg,#1a3a5c 0%,#27568a 100%); color:#fff;
+          border-radius:16px 16px 0 0; padding:24px 32px 20px; position:relative; }
+  .head h1 { font-size:1.3rem; margin:0; font-weight:600; }
+  .head .sub { font-size:.82rem; opacity:.75; margin-top:2px; }
+  .langbtn { position:absolute; top:20px; right:24px; background:rgba(255,255,255,.12);
+          color:#fff; border:1px solid rgba(255,255,255,.4); border-radius:99px;
+          padding:7px 18px; font-size:.82rem; cursor:pointer; font-weight:600; }
+  .langbtn:hover { background:rgba(255,255,255,.22); }
+  .logout-form { position:absolute; top:20px; right:80px; margin:0; }
+  .logout-form button { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35);
+                        border-radius:6px; padding:6px 10px; cursor:pointer; }
+  .stu { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px 24px;
+          margin-top:16px; font-size:.88rem; }
+  .stu .lb { opacity:.65; font-size:.75rem; }
+  .stu .vl { font-weight:600; }
+
+  .verdict-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+          background:#fff; padding:18px 32px; border-bottom:1px solid #e4e8ee; }
+  .verdict-label { font-size:.85rem; color:#5a6875; font-weight:600; }
+  .verdict-pill { font-size:1rem; font-weight:700; padding:10px 24px; border-radius:99px; }
+  .verdict-pill.pass { background:var(--green-bg); color:var(--green); }
+  .verdict-pill.fail { background:var(--red-bg); color:var(--red); }
+  .verdict-pill.pending { background:var(--orange-bg); color:var(--orange); }
+  .stats { display:flex; gap:10px; margin-left:auto; flex-wrap:wrap; }
+  .stat { text-align:center; min-width:84px; padding:8px 14px; border-radius:10px; }
+  .stat b { display:block; font-size:1.3rem; line-height:1.2; }
+  .stat span { font-size:.72rem; }
+  .stat.r { background:var(--red-bg); color:var(--red); }
+  .stat.o { background:var(--orange-bg); color:var(--orange); }
+  .stat.y { background:var(--yellow-bg); color:var(--yellow); }
+
+  .body { background:#fff; border-radius:0 0 16px 16px; padding:26px 32px 30px;
+          box-shadow:0 2px 14px rgba(20,40,70,.07); }
+  h2.sec { font-size:1rem; color:var(--navy); display:flex; align-items:center; gap:8px;
+           margin:26px 0 12px; padding-bottom:8px; border-bottom:2px solid #eef1f5; }
+  h2.sec .count { font-size:.75rem; font-weight:600; padding:2px 10px; border-radius:99px; background:#eef1f5; color:#667; }
+
+  .issue { display:grid; grid-template-columns:6px 1fr; border-radius:10px;
+           overflow:hidden; margin-bottom:10px; background:#fafbfc; border:1px solid #edf0f4; }
+  .issue .bar { background:#ccc; }
+  .issue.RED .bar { background:var(--red); } .issue.RED { background:var(--red-bg); border-color:#f6dedb; }
+  .issue.ORANGE .bar { background:var(--orange); } .issue.ORANGE { background:var(--orange-bg); border-color:#f4e5cd; }
+  .issue.YELLOW .bar { background:var(--yellow); } .issue.YELLOW { background:var(--yellow-bg); border-color:#f1e9c8; }
+  .issue .in { padding:12px 16px; }
+  .issue .loc { font-size:.78rem; font-weight:700; color:#5a6875; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .issue .loc .part { background:rgba(0,0,0,.06); border-radius:6px; padding:1px 8px; font-weight:600; }
+  .issue .loc .cat { background:#fff; border:1px solid rgba(0,0,0,.15); border-radius:99px;
+        padding:1px 10px; font-weight:600; font-size:.72rem; color:#5a4a70; }
+  .issue .found { font-size:.95rem; margin:6px 0 2px; font-weight:600; }
+  .issue .expected { font-size:.85rem; color:#4a5560; }
+  .issue .expected b { color:var(--navy); }
+  .issue .fix { font-size:.8rem; color:#8894a0; margin-top:6px; }
+  .issue .fix::before { content:"🛠 "; }
+  .ai-note { font-size:.8rem; color:#3d5a80; background:#eef4fb; border-left:3px solid #6a93c9;
+        border-radius:0 6px 6px 0; padding:6px 10px; margin-top:7px; }
+  .ai-note::before { content:"🤖 "; }
+  .ai-summary { background:#f3f7fd; border:1px solid #d6e3f5; border-radius:12px;
+        padding:16px 20px; font-size:.9rem; color:#2c3e50; white-space:pre-wrap; line-height:1.65; }
+  .ai-summary-caveat { font-size:.75rem; color:#8894a0; margin-top:8px; }
+  .rule-source { font-size:.76rem; color:#617184; margin-top:7px; padding-top:7px;
+        border-top:1px dashed rgba(60,80,100,.18); }
+  .rule-source b { color:var(--navy); }
+  .rule-source ul { margin:3px 0 0; padding-left:19px; }
+  .empty { color:#9aa5b0; font-size:.85rem; background:#f7f9fb; border:1px dashed #dde3ea;
+           border-radius:10px; padding:14px 18px; }
+
+  .hc { background:var(--purple-bg); border:1px solid #ecdcf4; border-radius:10px;
+        padding:12px 16px; margin-bottom:10px; }
+  .hc .row1 { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  .hc .t { font-weight:600; font-size:.92rem; color:#4a2a5c; }
+  .hc .w { font-size:.82rem; color:#7a668a; margin-top:2px; }
+  .hc .btns { margin-left:auto; display:flex; gap:8px; }
+  .pf { border:1.5px solid #cbb3da; background:#fff; color:#6a4a80; font-size:.82rem;
+        padding:7px 16px; border-radius:8px; cursor:pointer; font-weight:600; }
+  .pf.pass.on { background:var(--green-bg); border-color:var(--green); color:var(--green); }
+  .pf.fail.on { background:var(--red-bg); border-color:var(--red); color:var(--red); }
+  .hc.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
+  .hc.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
+  .issue-decide { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
+  .issue-decide .lbl { font-size:.78rem; font-weight:600; color:#5a6875; }
+  .issue-decide .pf { border-color:#c3cede; color:#4a5a70; }
+  .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
+  .issue.state-pass .bar { background:var(--green); }
+  .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
+  .issue.state-fail .bar { background:var(--red); }
+
+  .cmt-btn { border:none; background:transparent; color:#8894a0; font-size:.78rem;
+        cursor:pointer; padding:4px 8px; border-radius:6px; margin-top:6px; }
+  .cmt-btn:hover { background:rgba(0,0,0,.06); }
+  .note-editor { display:none; margin-top:8px; }
+  .note-editor.open { display:block; }
+  .note-editor textarea { width:100%; border:1px solid #c9d4e0; border-radius:8px;
+        padding:8px 12px; font-size:.85rem; min-height:60px; resize:vertical; }
+  .note-editor .save { margin-top:6px; background:var(--navy); color:#fff; border:none;
+        border-radius:7px; padding:7px 18px; font-size:.8rem; cursor:pointer; }
+  .note-view { display:none; margin-top:8px; background:#fff; border-left:3px solid var(--gold);
+        padding:8px 12px; font-size:.85rem; color:#4a5560; white-space:pre-wrap; border-radius:0; }
+  .note-view.show { display:block; }
+  .note-view b { color:var(--navy); }
+
+  .vf-group { border:1px solid #e2e8f0; border-radius:10px; margin-bottom:10px; overflow:hidden; }
+  .vf-topic { background:#f0f4fa; font-weight:700; font-size:.88rem; color:var(--navy);
+              padding:9px 16px; }
+  .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+            padding:7px 16px; border-top:1px solid #eef1f5; font-size:.85rem; }
+  .vf-loc { min-width:220px; color:#3d4c5e; }
+  .vf-badge { font-size:.75rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
+  .vf-badge.pass { background:var(--green-bg); color:var(--green); }
+  .vf-badge.fail { background:var(--red-bg); color:var(--red); }
+  .vf-badge.pending { background:var(--orange-bg); color:var(--orange); }
+  .vf-detail { color:#8894a0; font-size:.78rem; }
+
+  .infobox { background:#f0f4fa; border-radius:10px; padding:10px 16px; font-size:.82rem;
+             margin-bottom:8px; color:#3d4c5e; }
+  .infobox b { color:var(--navy); }
+  .actions { display:flex; gap:12px; margin-top:28px; flex-wrap:wrap; }
+  .btn { text-decoration:none; font-size:.9rem; padding:11px 22px; border-radius:9px; cursor:pointer; border:none; }
+  .btn.primary { background:var(--navy); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--navy); border:1.5px solid var(--navy); }
+
+  @media print {
+    body { background:#fff; padding:0; }
+    .body { box-shadow:none; }
+    .actions, .cmt-btn, .note-editor, .langbtn, .logout-form { display:none !important; }
+  }
+  @media (max-width:640px) {
+    .head, .verdict-bar, .body { padding-left:18px; padding-right:18px; }
+    .stats { margin-left:0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <button type="button" class="langbtn" id="langbtn" onclick="toggleLang()">EN</button>
+    <form class="logout-form" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+    <h1>Electronic file checking report</h1>
+    <div class="sub" data-th="รายงานผลการตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ บัณฑิตวิทยาลัย"
+         data-en="Graduate Studies e-thesis format checking report">รายงานผลการตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ บัณฑิตวิทยาลัย</div>
+    <div class="stu">
+      <div><div class="lb" data-th="ชื่อ-นามสกุลนักศึกษา" data-en="Student name">ชื่อ-นามสกุลนักศึกษา</div>
+        <div class="vl">{{ student.student_name or '-' }}</div></div>
+      <div><div class="lb" data-th="รหัสนักศึกษา" data-en="Student ID">รหัสนักศึกษา</div>
+        <div class="vl">{{ student.student_id or '-' }}</div></div>
+      <div style="grid-column:1/-1;"><div class="lb" data-th="ชื่อหัวข้อ (ภาษาอังกฤษ)" data-en="Thesis title (English)">ชื่อหัวข้อ (ภาษาอังกฤษ)</div>
+        <div class="vl">{{ student.title_en or '-' }}</div></div>
+    </div>
+  </div>
+
+  <div class="verdict-bar">
+    <div class="verdict-label" data-th="แจ้งผลการพิจารณา" data-en="Result of consideration">แจ้งผลการพิจารณา</div>
+    <div class="verdict-pill {{ 'pass' if report.verdict=='ผ่าน' else ('fail' if report.verdict=='ไม่ผ่าน' else 'pending') }}">
+      {{ 'ผ่าน (Passed)' if report.verdict=='ผ่าน' else ('ไม่ผ่าน (Not passed)' if report.verdict=='ไม่ผ่าน' else 'รอยืนยัน (Pending confirmation)') }}
+    </div>
+    <div class="stats">
+      <div class="stat r"><b>{{ report.issues_by_zone.RED | length }}</b><span data-th="ต้องแก้" data-en="Must fix">ต้องแก้</span></div>
+      <div class="stat o"><b>{{ report.issues_by_zone.ORANGE | length }}</b><span data-th="รอยืนยัน" data-en="Pending">รอยืนยัน</span></div>
+      <div class="stat y"><b>{{ report.issues_by_zone.YELLOW | length }}</b><span data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span></div>
+    </div>
+  </div>
+
+  <div class="body">
+    {% if report.verification %}
+    <h2 class="sec" style="margin-top:0;"><span data-th="📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" data-en="📋 Approved-data verification by location">📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง</span></h2>
+    {% for group in report.verification %}
+    <div class="vf-group">
+      <div class="vf-topic tr-dyn">{{ group.topic }}</div>
+      {% for c in group.checks %}
+      <div class="vf-row">
+        <span class="vf-loc tr-dyn">{{ c.location }}</span>
+        {% if c.status == 'pass' %}
+        <span class="vf-badge pass" data-th="✓ ตรง" data-en="✓ Match">✓ ตรง</span>
+        {% elif c.status == 'fail' %}
+        <span class="vf-badge fail" data-th="✗ ไม่ตรง" data-en="✗ Mismatch">✗ ไม่ตรง</span>
+        {% else %}
+        <span class="vf-badge pending" data-th="❓ รอยืนยัน" data-en="❓ To confirm">❓ รอยืนยัน</span>
+        {% endif %}
+        {% if c.detail %}<span class="vf-detail tr-dyn">{{ c.detail }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% set zone_meta = [('RED','🔴 ไม่ผ่าน','🔴 Must fix'),('ORANGE','🟠 รอยืนยัน','🟠 Pending confirmation'),('YELLOW','🟡 ข้อสังเกต','🟡 Notice')] %}
+    {% for zone, th_lbl, en_lbl in zone_meta %}
+    <h2 class="sec"><span data-th="{{ th_lbl }}" data-en="{{ en_lbl }}">{{ th_lbl }}</span>
+      <span class="count"><b>{{ report.issues_by_zone[zone] | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
+    {% if report.issues_by_zone[zone] %}
+      {% for it in report.issues_by_zone[zone] %}
+      <div class="issue {{ zone }}">
+        <div class="bar"></div>
+        <div class="in">
+          <div class="loc"><span class="part">{{ it.part }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
+          <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
+          <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
+          {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
+          {% if it.llm_opinion %}<div class="ai-note">{{ it.llm_opinion }}</div>{% endif %}
+          <div class="rule-source">
+            <b>{{ it.rule_id }} — {{ it.rule_title }}</b> ({{ it.rule_basis }})
+            <ul>{% for ref in it.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
+          </div>
+          {% if zone in ['ORANGE', 'YELLOW'] %}
+          <div class="issue-decide">
+            <span class="lbl" data-th="ผลพิจารณาของเจ้าหน้าที่:" data-en="Staff decision:">ผลพิจารณาของเจ้าหน้าที่:</span>
+            <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
+            <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
+          </div>
+          {% endif %}
+          <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
+          <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
+            <button type="button" class="save" onclick="saveNote(this)" data-th="บันทึก" data-en="Save">บันทึก</button></div>
+          <div class="note-view"></div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty" data-th="ไม่พบปัญหาในกลุ่มนี้" data-en="No issues in this group">ไม่พบปัญหาในกลุ่มนี้</div>
+    {% endif %}
+    {% endfor %}
+
+    {% if report.student_summary %}
+    <h2 class="sec"><span data-th="🤖 สรุปสำหรับส่งต่อนักศึกษา (ร่างโดย AI)" data-en="🤖 Student-facing summary (AI draft)">🤖 สรุปสำหรับส่งต่อนักศึกษา (ร่างโดย AI)</span></h2>
+    <div class="ai-summary">{{ report.student_summary }}</div>
+    <div class="ai-summary-caveat"
+         data-th="ข้อความนี้ AI ร่างจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
+         data-en="Drafted by AI from the findings above — staff should review before sending to the student.">
+      ข้อความนี้ AI ร่างจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา</div>
+    {% endif %}
+
+    {% if report.human_checklist %}
+    <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
+      <span class="count"><b>{{ report.human_checklist | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
+    {% for hc in report.human_checklist %}
+    <div class="hc">
+      <div class="row1">
+        <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div>
+          <div class="rule-source"><b>{{ hc.rule_id }} — {{ hc.rule_title }}</b>
+            <ul>{% for ref in hc.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
+          </div></div>
+        <div class="btns">
+          <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
+          <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
+        </div>
+      </div>
+      <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
+      <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
+        <button type="button" class="save" onclick="saveNote(this)" data-th="บันทึก" data-en="Save">บันทึก</button></div>
+      <div class="note-view"></div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if report.info %}
+    <h2 class="sec"><span data-th="ℹ️ ข้อมูลประกอบ" data-en="ℹ️ Information">ℹ️ ข้อมูลประกอบ</span></h2>
+    {% for it in report.info %}
+    <div class="infobox"><b class="tr-dyn">{{ it.topic }}</b> — <span class="tr-dyn">{{ it.detail }}</span></div>
+    {% endfor %}
+    {% endif %}
+
+    {% if report.not_checked %}
+    <h2 class="sec"><span data-th="⚠️ รายการที่ระบบไม่ได้ตรวจ" data-en="⚠️ Items not checked">⚠️ รายการที่ระบบไม่ได้ตรวจ</span></h2>
+    <div class="infobox">
+      <ul style="margin:0; padding-left:22px;">
+      {% for item in report.not_checked %}
+        <li class="tr-dyn">{{ item }}</li>
+      {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="actions">
+      <a class="btn primary" href="/" data-th="← ตรวจเล่มใหม่" data-en="← Check another file">← ตรวจเล่มใหม่</a>
+      <button class="btn ghost" onclick="window.print()" data-th="🖨 พิมพ์ / บันทึก PDF" data-en="🖨 Print / Save PDF">🖨 พิมพ์ / บันทึก PDF</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var LANG = 'th';
+
+var CATMAP = {
+  'สะกดผิด (typo)':'Typo / spelling', 'ขาดหาย/ไม่พบ':'Missing', 'ชื่อเรื่องไม่ตรง บฑ.1':'Title mismatch',
+  'ชื่อบทไม่ตรงประกาศ':'Chapter name (regulation)', 'ไม่ตรงข้อมูลอนุมัติ':'Approved-data mismatch',
+  'เลขหน้า':'Page numbering', 'จำนวนหน้าไม่ตรง':'Page count mismatch', 'เกินจำนวนหน้า':'Page limit exceeded',
+  'เกินจำนวนที่กำหนด':'Limit exceeded', 'รูปแบบตัวอักษร':'Text formatting', 'คำนำหน้านาม':'Name prefix',
+  'ภาษาไม่ครบตามหลักสูตร':'Language requirement', 'โครงสร้างเล่ม':'Document structure', 'อื่นๆ':'Other'
+};
+
+var TR = [
+  [/ชื่อเรื่อง \(ตาม บฑ.1\)/g, 'Thesis title (per Form บฑ.1)'],
+  [/ชื่อนักศึกษา/g, 'Student name'],
+  [/รหัสนักศึกษา/g, 'Student ID'],
+  [/ชื่อปริญญา/g, 'Degree name'],
+  [/วันที่สอบผ่าน/g, 'Exam pass date'],
+  [/ปีบนหน้าปก/g, 'Year on cover'],
+  [/หน้าปก \(ต้องไม่มีรหัส\)/g, 'Cover page (must not show ID)'],
+  [/ชื่อย่อในบทคัดย่อ \(หน้า ([^)]+)\)/g, 'Abbreviation in abstract (page $1)'],
+  [/ต่างเฉพาะวรรคตอน\/ช่องว่าง/g, 'Differs only in punctuation/spacing'],
+  [/มีข้อความเกิน: (.+)/g, 'Extra text present: $1'],
+  [/พบรหัสบนหน้าปก/g, 'ID found on cover'],
+  [/ไม่พบรหัส (\w+)/g, 'ID $1 not found'],
+  [/พบคำนำหน้านามหน้าชื่อ/g, 'Title prefix precedes the name'],
+  [/ระบบหาหน้าบทคัดย่อภาษาอังกฤษไม่เจอ/g, 'English abstract page not found'],
+  [/ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ/g, 'Abstract page in this language not found'],
+  [/หน้าลงนามหน้า (\d+) \(หน้า ([^)]+)\)/g, 'Approval page $1 (page $2)'],
+  [/หน้าลงนามหน้า (\d+)/g, 'Approval page $1'],
+  [/หน้าลงนาม (\d+) \(หน้า ([^)]+)\)/g, 'Approval page $1 (page $2)'],
+  [/หน้าลงนาม (\d+)/g, 'Approval page $1'],
+  [/บทคัดย่อภาษาไทย \(หน้า ([^)]+)\)/g, 'Thai abstract (page $1)'],
+  [/บทคัดย่อภาษาอังกฤษ \(หน้า ([^)]+)\)/g, 'English abstract (page $1)'],
+  [/บทคัดย่อ \(อังกฤษ\) \(เริ่มหน้า ([^)]+)\)/g, 'English abstract (from page $1)'],
+  [/บทคัดย่อ \(ไทย\) \(เริ่มหน้า ([^)]+)\)/g, 'Thai abstract (from page $1)'],
+  [/บทคัดย่อ \(หน้า ([^)]+)\)/g, 'Abstract (page $1)'],
+  [/กิตติกรรมประกาศ \(เริ่มหน้า ([^)]+)\)/g, 'Acknowledgements (from page $1)'],
+  [/ระบบไม่พบเลขหน้า "(.+?)" หรือ "(.+?)" บนหัว\/ท้ายหน้า/g, 'Page label "$1" or "$2" not found at top/bottom of page'],
+  [/ต้องมีเลขหน้า (\S+) \(อังกฤษ\) หรือ (\S+) \(ไทย\)/g, 'must be numbered $1 (EN) or $2 (TH)'],
+  [/ตรวจด้วยตา — PDF บางไฟล์ดึงเลขหน้าไม่ได้/g, 'Check manually — some PDFs do not expose page labels'],
+  [/พบหน้าที่ระบบดึงข้อความไม่ได้ \((.+?)\) และยืนยันลำดับเลขหน้าไม่ได้/g, 'Pages with no extractable text ($1); page numbering could not be verified'],
+  [/พบหน้าที่ระบบดึงข้อความไม่ได้ \((.+?)\) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง/g, 'Pages with no extractable text ($1); page numbering is still continuous'],
+  [/ไม่มีข้อความให้ดึงเลย อาจเป็นหน้ารูปภาพ\/สแกน เช่น ภาคผนวก/g, 'no text at all — likely image/scanned pages such as an appendix'],
+  [/มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น/g, 'page number only — likely an intentional blank page'],
+  [/หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้/g, 'Such pages with correct numbering are a notice only and can pass'],
+  [/เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ\/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง/g, 'Staff to verify image/blank pages and that numbering stays correct'],
+  [/ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้/g, 'Verify these are image pages or intentional blanks'],
+  [/หน้า (\S+)–หน้า (\S+) \((\d+) หน้า\)/g, 'pages $1–$2 ($3 pages)'],
+  [/ขนาดกระดาษ ([\d.]+)x([\d.]+) ซม\./g, 'Paper size $1 x $2 cm'],
+  [/เลขหน้าอารบิกแรกที่พบคือ (\d+)/g, 'First Arabic page number found is $1'],
+  [/เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1/g, 'Arabic numbering must start at 1 on Chapter 1'],
+  [/แก้การตั้งเลขหน้า/g, 'Fix the page numbering'],
+  [/เลขหน้ากระโดดจาก (\d+) ไป (\d+)/g, 'Page number jumps from $1 to $2'],
+  [/เลขหน้าต้องต่อเนื่อง ไม่ซ้ำ ไม่ข้าม/g, 'Page numbers must run continuously without gaps or repeats'],
+  [/ช่วงเลขหน้า (\d+)→(\d+)/g, 'Page range $1→$2'],
+  [/พบหน้าลงนาม (\d+) หน้า/g, 'Found $1 approval page(s)'],
+  [/ต้องมี 2 หน้า \(Advisory \+ Examination\)/g, 'Must have 2 pages (Advisory + Examination)'],
+  [/สารบัญมี (\d+) บท เนื้อหามี (\d+) บท/g, 'TOC lists $1 chapters but content has $2'],
+  [/จำนวนบทต้องเท่ากัน/g, 'Chapter counts must match'],
+  [/อัปเดตสารบัญหรือเนื้อหา/g, 'Update the TOC or the content'],
+  [/ชื่อบทในเนื้อหา: "(.+?)" ไม่ตรงกับสารบัญ/g, 'Chapter title in content "$1" differs from the TOC'],
+  [/ชื่อบทต้องสะกดตรงกันทั้งสองที่/g, 'Chapter titles must match exactly in both places'],
+  [/แก้ให้ตรงกัน/g, 'Make them identical'],
+  [/สารบัญระบุหน้า (\d+) แต่บทอยู่จริงหน้า (\d+)/g, 'TOC says page $1 but the chapter starts on page $2'],
+  [/เลขหน้าในสารบัญต้องตรงตำแหน่งจริง/g, 'TOC page numbers must match actual positions'],
+  [/อัปเดตสารบัญ/g, 'Update the TOC'],
+  [/ไม่อยู่ในสารบัญ/g, 'Not listed in the TOC'],
+  [/ทุกบทต้องปรากฏในสารบัญ/g, 'Every chapter must appear in the TOC'],
+  [/ระบบหาหน้าสารบัญไม่เจอ/g, 'TOC page not found'],
+  [/ต้องมีสารบัญเพื่อเทียบชื่อบท\/เลขหน้า/g, 'A TOC is required to verify chapter names and pages'],
+  [/ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท/g, '2026 regulation: traditional format requires 6 chapters'],
+  [/ปรับโครงบทตามประกาศ/g, 'Adjust the chapter structure per the regulation'],
+  [/รูปแบบตีพิมพ์ต้องมี 2-3 บท/g, 'Publication-based format requires 2–3 chapters'],
+  [/ตามประกาศ 2569 บทที่ (\d+) = "(.+?)" \/ "(.+?)"/g, 'Per the 2026 regulation, chapter $1 = "$2" / "$3"'],
+  [/แก้ตามประกาศ/g, 'Rename per the regulation'],
+  [/ชื่อบท "(.+?)"/g, 'Chapter title "$1"'],
+  [/พบ (\d+) บท/g, 'Found $1 chapters'],
+  [/หัวข้อ "(.+?)"/g, 'Heading "$1"'],
+  [/เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY/g, 'Use one term only: REFERENCES or BIBLIOGRAPHY'],
+  [/ลบคำที่ไม่ใช้/g, 'Remove the unused term'],
+  [/ไม่พบหน้ารายการอ้างอิง/g, 'References section not found'],
+  [/ต้องมี REFERENCES\/BIBLIOGRAPHY เสมอ/g, 'A REFERENCES/BIBLIOGRAPHY section is required'],
+  [/ไม่พบประวัติผู้วิจัย \(BIOGRAPHY\)/g, 'BIOGRAPHY section not found'],
+  [/ต้องมีและเป็นหน้าสุดท้ายของเล่ม/g, 'Required and must be the last section of the document'],
+  [/หลัง BIOGRAPHY ยังมีส่วนอื่น/g, 'Content appears after BIOGRAPHY'],
+  [/ประวัติผู้วิจัยต้องเป็นหน้าสุดท้าย/g, 'BIOGRAPHY must be the final section'],
+  [/ย้ายไปท้ายสุด/g, 'Move it to the end'],
+  [/เล่มมีภาคผนวก \(APPENDIX\) แต่ไม่ปรากฏในสารบัญ/g, 'Document has an APPENDIX but it is missing from the TOC'],
+  [/หัวข้อภาคผนวกต้องอยู่ในสารบัญ/g, 'The APPENDIX must be listed in the TOC'],
+  [/เพิ่ม APPENDIX\/ภาคผนวก ในสารบัญ/g, 'Add APPENDIX to the TOC'],
+  [/สารบัญระบุภาคผนวก \(APPENDIX\) แต่ไม่พบในเนื้อหาเล่ม/g, 'TOC lists an APPENDIX but none is found in the document'],
+  [/สารบัญต้องตรงกับเนื้อหาจริง/g, 'The TOC must match the actual content'],
+  [/ลบออกจากสารบัญ หรือเพิ่มภาคผนวกในเล่ม/g, 'Remove it from the TOC or add the appendix'],
+  [/กินพื้นที่ (\d+) หน้า/g, 'Spans $1 pages'],
+  [/กิตติกรรมประกาศต้องไม่เกิน (\d+) หน้า/g, 'Acknowledgements must not exceed $1 page(s)'],
+  [/บทคัดย่อ \(อังกฤษ\)ต้องไม่เกิน (\d+) หน้า/g, 'English abstract must not exceed $1 pages'],
+  [/บทคัดย่อ \(ไทย\)ต้องไม่เกิน (\d+) หน้า/g, 'Thai abstract must not exceed $1 pages'],
+  [/ตัดเนื้อหาให้สั้นลง/g, 'Shorten the content'],
+  [/พบตัวอักษรหนา (\d+) ตัวอักษร เช่น "(.+?)"/g, 'Found $1 bold characters, e.g. "$2"'],
+  [/หน้าบทคัดย่อต้องไม่ใช้ตัวอักษรหนา/g, 'Abstract pages must not use bold text'],
+  [/เอา bold ออกจากข้อความในหน้าบทคัดย่อ/g, 'Remove bold formatting from the abstract'],
+  [/ระบบไม่พบการระบุจำนวนหน้า \(เช่น 123 pages \/ 123 หน้า\)/g, 'Total page statement not found (e.g. "123 pages")'],
+  [/ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม/g, 'The abstract must state the total page count'],
+  [/ระบุจำนวนหน้า (\d+) แต่เลขหน้าสุดท้ายของเล่มคือ (\d+)/g, 'States $1 pages but the last page number is $2'],
+  [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้าย \((\d+)\)/g, 'The stated count must equal the last page number ($1)'],
+  [/แก้ตัวเลขให้ตรงเลขหน้าสุดท้าย/g, 'Correct the number to match the last page'],
+  [/Keywords (\d+) คำ/g, '$1 keywords'],
+  [/ไม่เกิน 5 คำตามประกาศ/g, 'Maximum 5 keywords per the regulation'],
+  [/ตัดให้เหลือ ≤5/g, 'Reduce to ≤5'],
+  [/เล่มเป็นรูปแบบ (\d+)/g, 'Document is format $1'],
+  [/ข้อมูลอนุมัติ: รูปแบบ (\d+)/g, 'Approved data: format $1'],
+  [/เล่มเป็น ([A-Z ]+)/g, 'Document type is $1'],
+  [/ข้อมูลอนุมัติ: ([A-Z ]+)/g, 'Approved data: $1'],
+  [/ตรวจว่าใช้ template ประเภทถูก/g, 'Verify the correct template type'],
+  [/ชื่อเรื่องไม่ตรงกับข้อมูลอนุมัติ \(คะแนนใกล้เคียง ([\d.]+)\)/g, 'Title does not match the approved data (similarity $1)'],
+  [/ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลอนุมัติ \(คะแนน ([\d.]+)\)/g, 'Second-language title does not match (similarity $1)'],
+  [/ต้องตรง บฑ.1: "(.+?)"/g, 'Must match Form บฑ.1: "$1"'],
+  [/เทียบทีละคำกับเอกสารอนุมัติ/g, 'Compare word-by-word with the approval document'],
+  [/ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ/g, 'Abstract page in this language not found'],
+  [/ชื่อเรื่อง "(.+?)" ต้องปรากฏในบทคัดย่อภาษานั้น/g, 'Title "$1" must appear in that abstract'],
+  [/ไม่พบชื่อ "(.+?)" ในเล่ม \(คะแนน ([\d.]+)\)/g, 'Name "$1" not found in the document (similarity $2)'],
+  [/ชื่อ-นามสกุลต้องตรงข้อมูลอนุมัติทุกจุด/g, 'The student name must match the approved data everywhere'],
+  [/ไม่ได้กรอกชื่อภาษาไทยของนักศึกษาในฟอร์ม/g, "Student's Thai name was not entered in the form"],
+  [/ไม่ได้กรอกชื่อภาษาอังกฤษของนักศึกษาในฟอร์ม/g, "Student's English name was not entered in the form"],
+  [/หลักสูตรไทยต้องตรวจ(.+?)ในหน้า(.+)/g, 'Thai programs require checking the name on the abstract page'],
+  [/กรอกฟอร์มให้ครบแล้วตรวจใหม่/g, 'Complete the form and re-run the check'],
+  [/ระบบหาหน้า(.+?)ไม่เจอ จึงเทียบ(.+?)ไม่ได้/g, 'That abstract page was not found, so the name could not be compared'],
+  [/ไม่พบ(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา) "(.+?)" หรือสะกดไม่ตรง \(คะแนน ([\d.]+)\)/g, 'Name "$2" not found or misspelled (similarity $3)'],
+  [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ของนักศึกษาต้องปรากฏในหน้า(.+?) สะกดตรงข้อมูลอนุมัติ/g, 'The student name must appear on that abstract page, spelled per the approved data'],
+  [/พบคำนำหน้านามหน้า(.+?) \(เช่น นาย\/นางสาว\/Mr\.\/Miss\)/g, 'A title prefix precedes the name (e.g. Mr./Miss)'],
+  [/ชื่อนักศึกษาต้องไม่มีคำนำหน้านาม/g, 'The student name must not include a title prefix'],
+  [/ลบคำนำหน้านามออก แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Remove the prefix; staff to confirm'],
+  [/ไม่พบรหัสนักศึกษา (\w+)/g, 'Student ID $1 not found'],
+  [/รหัสต้องปรากฏในบทคัดย่อ/g, 'The ID must appear in the abstract'],
+  [/ไม่พบชื่อปริญญา "(.+?)" \(คะแนน ([\d.]+)\)/g, 'Degree name "$1" not found (similarity $2)'],
+  [/ต้องตรงข้อมูลอนุมัติ/g, 'Must match the approved data'],
+  [/ไม่พบวันที่สอบ "(.+?)"/g, 'Exam date "$1" not found'],
+  [/วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน/g, 'Approval-page date must be the exam pass date'],
+  [/ไม่พบปี (\S+) บนหน้าปก/g, 'Year $1 not found on the cover'],
+  [/ปี = ปีที่มีผลสอบผ่าน/g, 'Year = the exam pass year'],
+  [/มีบทคัดย่อภาษาไทย/g, 'A Thai abstract is present'],
+  [/หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น/g, 'International programs use an English abstract only'],
+  [/ลบบทคัดย่อไทย/g, 'Remove the Thai abstract'],
+  [/พบบทคัดย่อ: EN=(\w+), TH=(\w+)/g, 'Abstracts found: EN=$1, TH=$2'],
+  [/หลักสูตรไทยต้องมีทั้ง 2 ภาษา/g, 'Thai programs require abstracts in both languages'],
+  [/รายชื่อกรรมการ ตำแหน่งวิชาการ และคุณวุฒิ บนหน้าลงนามทั้ง 2 หน้า/g, 'Committee names, academic titles, and degrees on both approval pages'],
+  [/เทียบกับ บฑ.1 \(หน้า 1\) และ บฑ.2 \(หน้า 2\) ทีละคน รวมการสะกด/g, 'Compare each person against Forms บฑ.1 (page 1) and บฑ.2 (page 2), including spelling'],
+  [/ลำดับและตำแหน่งการวางชื่อในตารางลายเซ็น/g, 'Order and placement of names in the signature table'],
+  [/ชื่อที่ 1 \(Major Advisor\/Chair\) แถวเดียวกับนักศึกษา คอลัมน์ขวา, ชื่อ 2-5 ไล่ลงขวา, ชื่อ 6 แถวเดียวกับชื่อ 5 ฝั่งซ้าย, 7-9 ไล่ขึ้น, ช่องที่เหลือถมขาว/g, 'Name 1 (Major Advisor/Chair) on the same row as the student, right column; names 2–5 down the right; name 6 level with name 5 on the left; 7–9 upward; unused slots whited out'],
+  [/หน้า 1 — ประธานหลักสูตร \(ระบุชื่อหลักสูตรให้ถูกต้อง\)/g, 'Page 1 — Program Director (verify the program name)'],
+  [/ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นชื่อหลักสูตร เช่น ปรัชญาดุษฎีบัณฑิต สาขาวิชา.../g, 'The bottom-right text must be the program name, e.g. Doctor of Philosophy Program in ...'],
+  [/หน้า 2 — คณบดี\/ผู้อำนวยการ \(ระบุหัวหน้าส่วนงานให้ถูกต้อง\)/g, 'Page 2 — Dean/Director (verify the head of unit)'],
+  [/ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นคณะ\/ส่วนงานที่นักศึกษาสังกัด เช่น คณะวิศวกรรมศาสตร์/g, "The bottom-right text must be the student's faculty/unit, e.g. Faculty of Engineering"],
+  [/บทที่พบในเนื้อหา/g, 'Chapters found in the content'],
+  [/บทที่ (\d+)/g, 'Chapter $1'],
+  [/บทคัดย่อภาษาไทย/g, 'Thai abstract'],
+  [/บทคัดย่อภาษาอังกฤษ/g, 'English abstract'],
+  [/กิตติกรรมประกาศ/g, 'Acknowledgements'],
+  [/บทคัดย่อ/g, 'Abstract'],
+  [/หน้าปก\/ลงนาม/g, 'Cover/approval page'],
+  [/หน้าปก/g, 'Cover page'],
+  [/สารบัญ vs เนื้อหา/g, 'TOC vs content'],
+  [/สารบัญ/g, 'Table of contents'],
+  [/ทั้งเล่ม/g, 'Whole document'],
+  [/โครงบท/g, 'Chapter structure'],
+  [/หน้าลงนาม/g, 'Approval pages'],
+  [/ตรวจการสะกด/g, 'Check the spelling'],
+  [/ตรวจด้วยตา/g, 'Check manually'],
+  [/\(หน้า (\w+)\)/g, '(page $1)'],
+  [/หน้าไม่ระบุเลข/g, 'page label unreadable'],
+  [/หน้า ([ivxlcdm]+)/gi, 'page $1'],
+  [/หน้า ([ก-ฮ])/g, 'page $1'],
+  [/หน้า (\d+)/g, 'Page $1']
+];
+
+function trEN(s){
+  for (var i = 0; i < TR.length; i++) s = s.replace(TR[i][0], TR[i][1]);
+  return s;
+}
+
+function applyLang(){
+  document.querySelectorAll('[data-th]').forEach(function(el){
+    el.textContent = el.dataset[LANG];
+  });
+  document.querySelectorAll('.tr-dyn').forEach(function(el){
+    if (!el.dataset.th0) el.dataset.th0 = el.textContent;
+    el.textContent = (LANG === 'en') ? trEN(el.dataset.th0) : el.dataset.th0;
+  });
+  document.querySelectorAll('.tr-cat').forEach(function(el){
+    if (!el.dataset.th0) el.dataset.th0 = el.textContent;
+    el.textContent = (LANG === 'en') ? (CATMAP[el.dataset.th0] || el.dataset.th0) : el.dataset.th0;
+  });
+  document.querySelectorAll('.note-editor textarea').forEach(function(t){
+    t.placeholder = (LANG === 'en') ? 'Type staff comment...' : 'พิมพ์ความเห็นของเจ้าหน้าที่...';
+  });
+  document.getElementById('langbtn').textContent = (LANG === 'en') ? 'ไทย' : 'EN';
+  document.documentElement.lang = LANG;
+}
+function toggleLang(){ LANG = (LANG === 'th') ? 'en' : 'th'; applyLang(); }
+
+function setPF(btn, state){
+  const card = btn.closest('.hc, .issue');
+  const already = btn.classList.contains('on');
+  card.querySelectorAll('.pf').forEach(b => b.classList.remove('on'));
+  card.classList.remove('state-pass','state-fail');
+  if (!already){
+    btn.classList.add('on');
+    card.classList.add('state-' + state);
+  }
+}
+function toggleNote(btn){
+  const box = btn.parentElement.querySelector('.note-editor');
+  if (box) box.classList.toggle('open');
+}
+function saveNote(btn){
+  const ed = btn.closest('.note-editor');
+  const container = ed.parentElement;
+  const view = container.querySelector('.note-view');
+  const cmtBtn = container.querySelector('.cmt-btn');
+  const txt = ed.querySelector('textarea').value.trim();
+  if (txt){
+    view.textContent = '';
+    const b = document.createElement('b');
+    b.textContent = (LANG === 'en') ? '📝 Staff comment: ' : '📝 ความเห็นเจ้าหน้าที่: ';
+    view.appendChild(b); view.appendChild(document.createTextNode(txt));
+    view.classList.add('show');
+    if (cmtBtn) cmtBtn.textContent = (LANG === 'en') ? '✎ Edit comment' : '✎ แก้ไขความเห็น';
+  } else {
+    view.classList.remove('show');
+    if (cmtBtn) cmtBtn.textContent = (LANG === 'en') ? '💬 Add comment' : '💬 เพิ่มความเห็น';
+  }
+  ed.classList.remove('open');
+}
+</script>
+</body>
+</html>

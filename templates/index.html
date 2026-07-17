@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>E-Thesis Staff Checker</title>
+<style>
+  :root { --navy:#1a3a5c; --gold:#c9a227; --bg:#f5f6f8; }
+  * { box-sizing:border-box; font-family:'Segoe UI','Sarabun',Tahoma,sans-serif; }
+  body { background:var(--bg); margin:0; padding:24px; color:#222; }
+  .card { max-width:860px; margin:0 auto; background:#fff; border-radius:12px; position:relative;
+          box-shadow:0 2px 12px rgba(0,0,0,.08); padding:28px 32px; }
+  h1 { color:var(--navy); font-size:1.3rem; margin:0 0 4px; }
+  .sub { color:#777; font-size:.85rem; margin-bottom:20px; }
+  h2 { color:var(--navy); font-size:1rem; border-left:4px solid var(--gold);
+       padding-left:10px; margin:26px 0 12px; }
+  label { display:block; font-size:.85rem; font-weight:600; margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:8px 10px; border:1px solid #ccd;
+       border-radius:6px; font-size:.9rem; }
+  textarea { resize:vertical; }
+  .row { display:flex; gap:12px; } .row > div { flex:1; }
+  .committee-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .committee-row input.cname { flex:3; } .committee-row select { flex:2; }
+  .committee-row button { background:#e66; color:#fff; border:none; border-radius:6px;
+       padding:8px 12px; cursor:pointer; }
+  .addbtn { background:#eef; color:var(--navy); border:1px dashed var(--navy);
+       border-radius:6px; padding:8px 14px; cursor:pointer; font-size:.85rem; }
+  .actions { margin-top:28px; }
+  .primary { background:var(--navy); color:#fff; border:none; border-radius:8px;
+       padding:12px 22px; font-size:.95rem; cursor:pointer; }
+  .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
+       font-size:.82rem; border-radius:6px; margin-top:6px; }
+  .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:8px; padding:14px; }
+  .import-box textarea { min-height:130px; margin-top:6px; }
+  .secondary { background:#fff; color:var(--navy); border:1px solid var(--navy); border-radius:7px;
+       padding:9px 14px; cursor:pointer; margin-top:10px; }
+  .import-status { font-size:.82rem; margin:8px 0 0; color:#43566a; }
+  .autofilled { background:#eef9f1; border-color:#79a987; }
+  input[type=file] { padding:8px; background:#fafafe; }
+  .logout { position:absolute; top:18px; right:24px; margin:0; }
+  .logout button { background:#fff; color:#596575; border:1px solid #ccd3dc;
+    border-radius:7px; padding:6px 10px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="card">
+  <form class="logout" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+  <h1>📋 E-Thesis Staff Checker</h1>
+  <div class="sub">อัปโหลด PDF + กรอกข้อมูลอนุมัติจากบัณฑิตวิทยาลัย ระบบตรวจให้อัตโนมัติ (ไม่ต้องผ่าน Claude)</div>
+  <div class="note">⚠️ ข้อมูลในฟอร์มนี้คือ "ความจริงอ้างอิง" — กรอกให้ตรงเอกสารอนุมัติทุกตัวอักษร</div>
+
+  <form id="f" action="/check" method="post" enctype="multipart/form-data">
+    <h2>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
+    <div class="import-box">
+      <label for="ethesis-source">คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่ครั้งเดียว</label>
+      <textarea id="ethesis-source" rows="6" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
+      <button type="button" class="secondary" id="parse-ethesis">อ่านข้อมูลและเติมแบบฟอร์ม</button>
+      <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม</p>
+    </div>
+
+    <h2>0. ไฟล์เล่ม</h2>
+    <label>ไฟล์ PDF</label>
+    <input type="file" name="pdf" accept=".pdf" required>
+    <div class="note">รองรับไฟล์ PDF ขนาดไม่เกิน 25 MB และต้องเป็นไฟล์ที่ระบบดึงข้อความได้ ไม่รองรับไฟล์ที่มีรหัสผ่านหรือเป็นภาพสแกนทั้งเล่ม</div>
+
+    <h2>1. ประเภทและรูปแบบเล่ม</h2>
+    <div class="row">
+      <div><label>ประเภทเล่ม</label>
+        <select name="doc_type" required>
+          <option value="" disabled selected>กรุณาเลือกประเภทเล่ม</option>
+          <option value="THESIS">วิทยานิพนธ์ (Thesis)</option>
+          <option value="THEMATIC PAPER">สารนิพนธ์ (Thematic Paper)</option>
+          <option value="INDEPENDENT STUDY">การค้นคว้าอิสระ (Independent Study)</option>
+        </select></div>
+      <div><label>รูปแบบ</label>
+        <select name="format" required>
+          <option value="" disabled selected>กรุณาเลือกรูปแบบ</option>
+          <option value="1">รูปแบบ 1 — ดั้งเดิม</option>
+          <option value="2">รูปแบบ 2 — จากผลงานตีพิมพ์</option>
+        </select></div>
+      <div><label>หลักสูตร</label>
+        <select name="program_language" id="program-language" required>
+          <option value="" disabled selected>กรุณาเลือกหลักสูตร</option>
+          <option value="international">นานาชาติ (EN เท่านั้น)</option>
+          <option value="thai">ไทย — เล่มไทย</option>
+          <option value="thai_english">ไทย — เล่มอังกฤษ</option>
+        </select></div>
+      <div><label>โหมดตรวจชื่อบท</label>
+        <select name="chapters_mode" required>
+          <option value="" disabled selected>กรุณาเลือกโหมดตรวจ</option>
+          <option value="strict">strict (บังคับชื่อบทตามประกาศ)</option>
+          <option value="free">free (ไม่บังคับชื่อบท)</option>
+        </select></div>
+    </div>
+
+    <h2>2. ชื่อเรื่อง (ตาม บฑ.1)</h2>
+    <label>ชื่อเรื่องภาษาอังกฤษ</label>
+    <textarea name="title_en" rows="2" placeholder="THESIS TITLE ..." required></textarea>
+    <label>ชื่อเรื่องภาษาไทย (จำเป็นสำหรับหลักสูตรไทย)</label>
+    <textarea name="title_th" rows="2" placeholder="หัวข้อภาษาไทย ..."></textarea>
+
+    <h2>3. นักศึกษา</h2>
+    <div class="row">
+      <div><label>ชื่อ-นามสกุล (ภาษาอังกฤษ)</label><input name="student_name" placeholder="FIRSTNAME LASTNAME" required></div>
+      <div><label>ชื่อ-นามสกุล (ภาษาไทย — จำเป็นสำหรับหลักสูตรไทย)</label><input name="student_name_th" placeholder="ชื่อ นามสกุล"></div>
+    </div>
+    <div class="row">
+      <div><label>รหัสนักศึกษา</label><input name="student_id" placeholder="6xxxxxx" required></div>
+    </div>
+    <div class="row">
+      <div><label>ชื่อปริญญาต้นฉบับจาก eThesis</label><input id="degree-source" placeholder="MASTER OF ENGINEERING (CIVIL ENGINEERING)" readonly></div>
+      <div><label>ชื่อปริญญาที่ใช้ตรวจ (Sentence case)</label><input name="degree" placeholder="Master of Engineering (Civil Engineering)" required></div>
+      <div><label>ชื่อปริญญาแบบย่อในบทคัดย่อ</label><input name="degree_abbr" placeholder="M.Eng. (CIVIL ENGINEERING)" required></div>
+    </div>
+    <div class="row">
+      <div><label>วันที่สอบผ่าน</label><input name="exam_date" placeholder="29 June 2026 / 29 มิถุนายน 2569" required></div>
+      <div><label>ปีบนหน้าปก</label><input name="year" placeholder="2026 / 2569" required></div>
+    </div>
+
+    <div class="note">🔴 ตรวจอย่างเข้ม: ข้อมูลจากแบบฟอร์มต้องตรงทุกตำแหน่งที่กำหนดตั้งแต่หน้าปกถึงบทคัดย่อ หากผิด ขาด หรือสะกดต่างแม้เล็กน้อย ระบบจะแสดงเป็นสีแดง</div>
+    <div class="note">ℹ️ หน้าลงนาม: ระบบตรวจให้เฉพาะ<b>ชื่อเรื่อง</b>และ<b>เลขหน้า (i/ii หรือ ก/ข)</b> — รายชื่อกรรมการ ตำแหน่งวางลายเซ็น และข้อความมุมล่างขวา เจ้าหน้าที่ตรวจเองตาม checklist ที่แนบท้ายรายงานผล</div>
+
+    <div class="actions">
+      <button type="submit" class="primary">🔍 ตรวจเล่ม</button>
+    </div>
+  </form>
+</div>
+
+
+
+<div id="overlay" style="display:none; position:fixed; inset:0; background:rgba(20,30,45,.75); z-index:99;">
+  <div style="max-width:420px; margin:22vh auto 0; background:#fff; border-radius:12px; padding:28px 32px; text-align:center;">
+    <div class="spin" style="width:44px;height:44px;border:5px solid #dde;border-top-color:#1a3a5c;border-radius:50%;margin:0 auto 16px;animation:sp 1s linear infinite;"></div>
+    <div style="font-weight:600; color:#1a3a5c; margin-bottom:6px;">กำลังตรวจเล่ม...</div>
+    <div id="stage" style="font-size:.9rem; color:#666;">กำลังอัปโหลดไฟล์...</div>
+  </div>
+</div>
+<style>@keyframes sp{to{transform:rotate(360deg)}}</style>
+
+<script>
+function detectLatestFormat(source, sourceHtml='') {
+  if (sourceHtml && typeof DOMParser !== 'undefined') {
+    const clipboardDocument = new DOMParser().parseFromString(sourceHtml, 'text/html');
+    const rows = Array.from(clipboardDocument.querySelectorAll('tr, [role="row"]'));
+    const latestRow = rows.find(row => /ล่าสุด/.test(row.textContent || ''));
+    if (latestRow) {
+      const selected = latestRow.querySelector('input:checked, input[checked], option:checked, option[selected]');
+      if (selected) {
+        const selectedId = selected.getAttribute('id') || '';
+        const label = selectedId
+          ? clipboardDocument.querySelector(`label[for="${CSS.escape(selectedId)}"]`)
+          : selected.closest('label');
+        const signal = [selected.getAttribute('value'), selectedId, selected.getAttribute('name'), label?.textContent]
+          .filter(Boolean).join(' ');
+        if (/รูปแบบ(?:ที่)?\s*1|format[_ -]?1|\b1\b/i.test(signal)) return '1';
+        if (/รูปแบบ(?:ที่)?\s*2|format[_ -]?2|\b2\b/i.test(signal)) return '2';
+      }
+    }
+  }
+
+  const normalized = source.replace(/\*\*/g, '').replace(/\u00a0/g, ' ');
+  const sectionPosition = normalized.indexOf('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
+  const formatSection = sectionPosition >= 0 ? normalized.slice(sectionPosition) : normalized;
+  const latestLine = formatSection.split(/\r?\n/).find(line => /ล่าสุด/.test(line)) || '';
+  const marked = latestLine.match(/(?:☑|✓|✔|●|◉|\[x\]|\(x\))\s*รูปแบบที่\s*([12])/i);
+  if (marked) return marked[1];
+  const choices = Array.from(latestLine.matchAll(/รูปแบบที่\s*([12])/g), match => match[1]);
+  return new Set(choices).size === 1 ? choices[0] : '';
+}
+
+function formatDegreeName(value) {
+  const minorWords = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
+  const normalized = value
+    .replace(/\s*\(\s*/g, ' (')
+    .replace(/\s*\)\s*/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return normalized.replace(/[a-z]+/g, (word, offset, whole) => {
+    const startsSection = offset === 0 || whole[offset - 1] === '(';
+    if (!startsSection && minorWords.has(word)) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  });
+}
+
+function formatDegreeAbbreviation(value) {
+  const normalized = value
+    .replace(/\s*\(\s*/g, ' (')
+    .replace(/\s*\)\s*/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = normalized.match(/^(.+?)(?:\s*\((.+)\))?$/);
+  if (!match) return '';
+  const degreeName = match[1].trim().toUpperCase();
+  const field = (match[2] || '').trim().toUpperCase();
+  const abbreviations = {
+    'DOCTOR OF PHILOSOPHY': 'Ph.D.',
+    'MASTER OF ENGINEERING': 'M.Eng.',
+    'MASTER OF SCIENCE': 'M.Sc.',
+    'MASTER OF ARTS': 'M.A.',
+    'MASTER OF BUSINESS ADMINISTRATION': 'M.B.A.',
+    'MASTER OF PUBLIC HEALTH': 'M.P.H.',
+    'MASTER OF NURSING SCIENCE': 'M.N.S.',
+    'MASTER OF EDUCATION': 'M.Ed.'
+  };
+  const abbreviation = abbreviations[degreeName];
+  if (!abbreviation) return '';
+  return field ? `${abbreviation} (${field})` : abbreviation;
+}
+
+function formatExamDate(value, useEnglish) {
+  const months = {
+    'มกราคม':'January', 'กุมภาพันธ์':'February', 'มีนาคม':'March',
+    'เมษายน':'April', 'พฤษภาคม':'May', 'มิถุนายน':'June',
+    'กรกฎาคม':'July', 'สิงหาคม':'August', 'กันยายน':'September',
+    'ตุลาคม':'October', 'พฤศจิกายน':'November', 'ธันวาคม':'December'
+  };
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(\d{1,2})\s+([^\s]+)\s+(25\d{2}|20\d{2})$/);
+  if (!useEnglish || !match || !months[match[2]]) return normalized;
+  const year = Number(match[3]) > 2400 ? Number(match[3]) - 543 : Number(match[3]);
+  return `${Number(match[1])} ${months[match[2]]} ${year}`;
+}
+
+function parseEthesisText(source, sourceHtml='') {
+  const lines = source
+    .replace(/\r/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/[\t ]+/g, ' ').trim())
+    .filter(Boolean);
+
+  const findLine = (label) => {
+    const index = lines.findIndex(line => line === label || line.startsWith(label + ' '));
+    if (index < 0) return {value:'', index:-1};
+    const sameLine = lines[index].slice(label.length).replace(/^\s*[:：]?\s*/, '').trim();
+    return {value:sameLine || lines[index + 1] || '', index};
+  };
+  const nextLine = (index, offset=1) => index >= 0 ? (lines[index + offset] || '') : '';
+  const data = {};
+
+  const studentId = findLine('รหัสนักศึกษา').value.match(/\b\d{7}\b/);
+  if (studentId) data.student_id = studentId[0];
+
+  const names = findLine('ชื่อ-สกุล');
+  if (names.value) {
+    if (/[ก-๙]/.test(names.value)) {
+      data.student_name_th = names.value.replace(/^(?:นาย|นางสาว|นาง|ดร\.?)\s*/, '');
+    } else {
+      data.student_name = names.value.replace(/^(?:MR|MRS|MISS|MS|DR)\.?\s+/i, '');
+    }
+    const followingName = nextLine(names.index, names.value === lines[names.index + 1] ? 2 : 1);
+    if (followingName && /[A-Za-z]/.test(followingName) && !/[ก-๙]/.test(followingName)) {
+      data.student_name = followingName.replace(/^(?:MR|MRS|MISS|MS|DR)\.?\s+/i, '');
+    }
+  }
+
+  data.title_th = findLine('ชื่อหัวข้อภาษาไทย').value;
+  data.title_en = findLine('ชื่อหัวข้อภาษาอังกฤษ').value;
+
+  const course = findLine('หลักสูตร').value;
+  const writingLanguage = findLine('ภาษาที่เขียน').value;
+  if (/นานาชาติ/i.test(course)) data.program_language = 'international';
+  else if (/อังกฤษ|english/i.test(writingLanguage)) data.program_language = 'thai_english';
+  else if (/ไทย|thai/i.test(writingLanguage)) data.program_language = 'thai';
+
+  const degree = findLine('ชื่อปริญญา');
+  if (degree.index >= 0) {
+    const candidates = [];
+    if (degree.value) candidates.push(degree.value);
+    for (let offset = 1; offset <= 2; offset += 1) {
+      const candidate = nextLine(degree.index, offset);
+      if (candidate && candidate !== degree.value) candidates.push(candidate);
+    }
+    const englishDegree = candidates.find(value => /[A-Za-z]/.test(value) && !/[ก-๙]/.test(value));
+    const thaiDegree = candidates.find(value => /[ก-๙]/.test(value));
+    data.degree_source = data.program_language === 'thai' ? thaiDegree : (englishDegree || thaiDegree);
+    data.degree = data.degree_source ? formatDegreeName(data.degree_source) : '';
+    if (englishDegree) data.degree_abbr = formatDegreeAbbreviation(englishDegree);
+  }
+
+  const examDateSource = findLine('วันที่สอบผ่าน').value;
+  data.exam_date = formatExamDate(examDateSource, data.program_language !== 'thai');
+  if (data.exam_date) {
+    const yearMatch = data.exam_date.match(/\b(25\d{2}|20\d{2})\b/);
+    if (yearMatch) {
+      const pageYear = Number(yearMatch[1]);
+      data.year = (data.program_language !== 'thai' && pageYear > 2400)
+        ? String(pageYear - 543) : String(pageYear);
+    }
+  }
+
+  const planValues = lines
+    .filter(line => line.startsWith('แผนการศึกษา '))
+    .map(line => line.slice('แผนการศึกษา'.length).trim());
+  if (planValues.some(value => value === 'วิทยานิพนธ์')) data.doc_type = 'THESIS';
+  else if (planValues.some(value => value === 'สารนิพนธ์')) data.doc_type = 'THEMATIC PAPER';
+  else if (planValues.some(value => value === 'การค้นคว้าอิสระ')) data.doc_type = 'INDEPENDENT STUDY';
+
+  data.format = detectLatestFormat(source, sourceHtml);
+
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value));
+}
+
+let ethSourceHtml = '';
+let ethSourcePlainText = '';
+document.getElementById('ethesis-source').addEventListener('paste', function(event){
+  ethSourceHtml = event.clipboardData?.getData('text/html') || '';
+  ethSourcePlainText = (event.clipboardData?.getData('text/plain') || '').trim();
+});
+
+document.getElementById('parse-ethesis').addEventListener('click', function(){
+  const source = document.getElementById('ethesis-source').value.trim();
+  const status = document.getElementById('import-status');
+  if (!source) {
+    status.textContent = 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน';
+    return;
+  }
+
+  document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  const matchingHtml = source === ethSourcePlainText ? ethSourceHtml : '';
+  const parsed = parseEthesisText(source, matchingHtml);
+  const hasFormatSection = source.includes('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
+  const labels = {
+    doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
+    title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
+    student_name_th:'ชื่อภาษาไทย', student_id:'รหัสนักศึกษา', degree_source:'ชื่อปริญญาต้นฉบับ',
+    degree:'ชื่อปริญญา Sentence case', degree_abbr:'ชื่อปริญญาแบบย่อในบทคัดย่อ',
+    exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก'
+  };
+  const filled = [];
+  Object.entries(parsed).forEach(([name, value]) => {
+    const field = name === 'degree_source'
+      ? document.getElementById('degree-source')
+      : document.querySelector(`[name="${name}"]`);
+    if (!field) return;
+    field.value = value;
+    field.classList.add('autofilled');
+    field.dispatchEvent(new Event('change', {bubbles:true}));
+    filled.push(labels[name] || name);
+  });
+
+  if (filled.length) {
+    const formatNotice = hasFormatSection && !parsed.format
+      ? ' ไม่พบเครื่องหมายเลือกในแถว “ล่าสุด” จึงยังไม่เลือกรูปแบบ กรุณาเลือกเอง'
+      : '';
+    status.textContent = `เติมให้แล้ว ${filled.length} ช่อง: ${filled.join(', ')} — ช่องสีเขียวคือค่าที่ระบบอ่านพบ กรุณาตรวจทานก่อนใช้งาน${formatNotice}`;
+  } else {
+    status.textContent = 'ยังอ่านข้อมูลจากข้อความนี้ไม่ได้ กรุณาตรวจว่าคัดลอกส่วนรายละเอียดนักศึกษาและหัวข้อวิทยานิพนธ์มาครบ';
+  }
+});
+
+function updateConditionalRequirements() {
+  const program = document.getElementById('program-language').value;
+  const requiresThai = program === 'thai' || program === 'thai_english';
+  document.querySelector('[name="title_th"]').required = requiresThai;
+  document.querySelector('[name="student_name_th"]').required = requiresThai;
+}
+
+document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
+updateConditionalRequirements();
+
+document.getElementById('f').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const overlay = document.getElementById('overlay');
+  const stage = document.getElementById('stage');
+  overlay.style.display = 'block';
+  stage.textContent = 'กำลังอัปโหลดไฟล์...';
+  try {
+    const resp = await fetch('/check', {method:'POST', body:new FormData(this)});
+    if (!resp.ok) {
+      const errorBody = await resp.json().catch(() => ({}));
+      throw new Error(errorBody.detail || ('อัปโหลดไม่สำเร็จ (' + resp.status + ')'));
+    }
+    const {job_id} = await resp.json();
+    let pollFailures = 0;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch('/progress/' + job_id);
+        if (!r.ok) throw new Error('poll failed');
+        const p = await r.json();
+        pollFailures = 0;
+        stage.textContent = p.stage;
+        if (p.done) { clearInterval(timer); window.location.href = '/result/' + job_id; }
+      } catch(err) {
+        pollFailures += 1;
+        if (pollFailures >= 5) {
+          clearInterval(timer);
+          overlay.style.display = 'none';
+          alert('ขาดการเชื่อมต่อกับระบบตรวจ กรุณาลองใหม่');
+        }
+      }
+    }, 700);
+  } catch(err) {
+    overlay.style.display = 'none';
+    alert('เกิดข้อผิดพลาด: ' + err.message);
+  }
+});
+</script>
+</body>
+</html>
