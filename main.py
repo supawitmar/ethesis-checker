@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 from checker import run_check
+from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
 BASE = Path(__file__).parent
 app = FastAPI(title="E-Thesis Staff Checker")
@@ -202,6 +203,7 @@ async def check(
     student_name_th: str = Form(""),
     student_id: str = Form(""),
     degree: str = Form(""),
+    degree_abbr: str = Form(""),
     exam_date: str = Form(""),
     year: str = Form(""),
     chapters_mode: str = Form("strict"),
@@ -215,15 +217,26 @@ async def check(
         raise HTTPException(status_code=400, detail="ประเภทหลักสูตรไม่ถูกต้อง")
     if chapters_mode not in {"strict", "free"}:
         raise HTTPException(status_code=400, detail="โหมดตรวจชื่อบทไม่ถูกต้อง")
+
+    form_values = {
+        "title_en": title_en.strip(), "title_th": title_th.strip(),
+        "student_name": student_name.strip(), "student_name_th": student_name_th.strip(),
+        "student_id": student_id.strip(), "degree": degree.strip(), "degree_abbr": degree_abbr.strip(),
+        "exam_date": exam_date.strip(), "year": year.strip(),
+    }
+    required_fields = FRONT_MATTER_RULES["required_form_fields"][program_language]
+    missing = [FORM_FIELD_LABELS[name] for name in required_fields if not form_values[name]]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="กรุณากรอกข้อมูลอ้างอิงให้ครบก่อนตรวจ: " + ", ".join(missing),
+        )
     if not JOB_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="มีงานตรวจเต็มจำนวน กรุณารอสักครู่แล้วลองใหม่")
 
     approved = {
         "doc_type": doc_type, "format": format, "program_language": program_language,
-        "title_en": title_en, "title_th": title_th,
-        "student_name": student_name, "student_name_th": student_name_th,
-        "student_id": student_id, "degree": degree,
-        "exam_date": exam_date, "year": year,
+        **form_values,
     }
 
     tmp_path = None

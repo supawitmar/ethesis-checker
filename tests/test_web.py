@@ -15,6 +15,13 @@ FORM = {
     "format": "1",
     "program_language": "international",
     "chapters_mode": "strict",
+    "title_en": "TEST TITLE",
+    "student_name": "TEST STUDENT",
+    "student_id": "6000000",
+    "degree": "Master of Engineering",
+    "degree_abbr": "M.Eng.",
+    "exam_date": "17 July 2026",
+    "year": "2026",
 }
 
 
@@ -98,6 +105,16 @@ class WebSmokeTests(unittest.TestCase):
             files={"pdf": ("fake.pdf", b"not a pdf", "application/pdf")},
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_rejects_missing_strict_reference_field(self):
+        form = {**FORM, "degree": ""}
+        response = self.client.post(
+            "/check",
+            data=form,
+            files={"pdf": ("test.pdf", make_pdf(), "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ชื่อปริญญา", response.json()["detail"])
 
     def test_rejects_corrupt_pdf(self):
         response = self.client.post(

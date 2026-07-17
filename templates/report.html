@@ -66,6 +66,10 @@
   .issue .expected b { color:var(--navy); }
   .issue .fix { font-size:.8rem; color:#8894a0; margin-top:6px; }
   .issue .fix::before { content:"🛠 "; }
+  .rule-source { font-size:.76rem; color:#617184; margin-top:7px; padding-top:7px;
+        border-top:1px dashed rgba(60,80,100,.18); }
+  .rule-source b { color:var(--navy); }
+  .rule-source ul { margin:3px 0 0; padding-left:19px; }
   .empty { color:#9aa5b0; font-size:.85rem; background:#f7f9fb; border:1px dashed #dde3ea;
            border-radius:10px; padding:14px 18px; }
 
@@ -158,7 +162,11 @@
           <div class="loc"><span class="part">{{ it.part }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
-          {% if it.fix %}<div class="fix"><span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
+          {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
+          <div class="rule-source">
+            <b>{{ it.rule_id }} — {{ it.rule_title }}</b> ({{ it.rule_basis }})
+            <ul>{% for ref in it.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
+          </div>
           <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
           <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
             <button type="button" class="save" onclick="saveNote(this)" data-th="บันทึก" data-en="Save">บันทึก</button></div>
@@ -177,7 +185,10 @@
     {% for hc in report.human_checklist %}
     <div class="hc">
       <div class="row1">
-        <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div></div>
+        <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div>
+          <div class="rule-source"><b>{{ hc.rule_id }} — {{ hc.rule_title }}</b>
+            <ul>{% for ref in hc.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
+          </div></div>
         <div class="btns">
           <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
           <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
@@ -228,15 +239,16 @@ var CATMAP = {
 };
 
 var TR = [
-  [/หน้าลงนามหน้า (\d+) \(หน้า PDF (\d+)\)/g, 'Approval page $1 (PDF page $2)'],
+  [/หน้าลงนามหน้า (\d+) \(หน้า ([^)]+)\)/g, 'Approval page $1 (page $2)'],
   [/หน้าลงนามหน้า (\d+)/g, 'Approval page $1'],
+  [/หน้าลงนาม (\d+) \(หน้า ([^)]+)\)/g, 'Approval page $1 (page $2)'],
   [/หน้าลงนาม (\d+)/g, 'Approval page $1'],
-  [/บทคัดย่อภาษาไทย \(หน้า PDF (\d+)\)/g, 'Thai abstract (PDF page $1)'],
-  [/บทคัดย่อภาษาอังกฤษ \(หน้า PDF (\d+)\)/g, 'English abstract (PDF page $1)'],
-  [/บทคัดย่อ \(อังกฤษ\) \(เริ่มหน้า PDF (\d+)\)/g, 'English abstract (from PDF page $1)'],
-  [/บทคัดย่อ \(ไทย\) \(เริ่มหน้า PDF (\d+)\)/g, 'Thai abstract (from PDF page $1)'],
-  [/บทคัดย่อ \(หน้า PDF (\d+)\)/g, 'Abstract (PDF page $1)'],
-  [/กิตติกรรมประกาศ \(เริ่มหน้า PDF (\d+)\)/g, 'Acknowledgements (from PDF page $1)'],
+  [/บทคัดย่อภาษาไทย \(หน้า ([^)]+)\)/g, 'Thai abstract (page $1)'],
+  [/บทคัดย่อภาษาอังกฤษ \(หน้า ([^)]+)\)/g, 'English abstract (page $1)'],
+  [/บทคัดย่อ \(อังกฤษ\) \(เริ่มหน้า ([^)]+)\)/g, 'English abstract (from page $1)'],
+  [/บทคัดย่อ \(ไทย\) \(เริ่มหน้า ([^)]+)\)/g, 'Thai abstract (from page $1)'],
+  [/บทคัดย่อ \(หน้า ([^)]+)\)/g, 'Abstract (page $1)'],
+  [/กิตติกรรมประกาศ \(เริ่มหน้า ([^)]+)\)/g, 'Acknowledgements (from page $1)'],
   [/ระบบไม่พบเลขหน้า "(.+?)" หรือ "(.+?)" บนหัว\/ท้ายหน้า/g, 'Page label "$1" or "$2" not found at top/bottom of page'],
   [/ต้องมีเลขหน้า (\S+) \(อังกฤษ\) หรือ (\S+) \(ไทย\)/g, 'must be numbered $1 (EN) or $2 (TH)'],
   [/ตรวจด้วยตา — PDF บางไฟล์ดึงเลขหน้าไม่ได้/g, 'Check manually — some PDFs do not expose page labels'],
@@ -361,6 +373,9 @@ var TR = [
   [/ตรวจการสะกด/g, 'Check the spelling'],
   [/ตรวจด้วยตา/g, 'Check manually'],
   [/\(หน้า (\w+)\)/g, '(page $1)'],
+  [/หน้าไม่ระบุเลข/g, 'page label unreadable'],
+  [/หน้า ([ivxlcdm]+)/gi, 'page $1'],
+  [/หน้า ([ก-ฮ])/g, 'page $1'],
   [/หน้า (\d+)/g, 'Page $1']
 ];
 
