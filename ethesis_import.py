@@ -43,12 +43,32 @@ MINOR_WORDS = {'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from',
 TICK = r'(?:☑|☒|✓|✔|●|◉|◾|■|\[x\]|\(x\))'
 
 
+# ฟอนต์ไทย Angsana/Cordia ใน eThesis PDF เก็บวรรณยุกต์/การันต์ไว้ใน
+# Private Use Area (U+F705-F70E) แยก 2 ชุด (ตำแหน่งปกติ/ตำแหน่งยกเหนือสระบน)
+# แมปกลับเป็นยูนิโค้ดปกติ ไม่งั้นชื่อ/หัวข้อภาษาไทยจะแสดงเป็นกล่องว่างในฟอร์ม
+_PUA_TONE = {
+    '\uf705': '\u0e48', '\uf706': '\u0e49', '\uf707': '\u0e4a',
+    '\uf708': '\u0e4b', '\uf709': '\u0e4c',
+    '\uf70a': '\u0e48', '\uf70b': '\u0e49', '\uf70c': '\u0e4a',
+    '\uf70d': '\u0e4b', '\uf70e': '\u0e4c',
+}
+_PUA_LEFTOVER = re.compile('[\uf700-\uf71f]')
+
+
+def _fix_thai_pua(text):
+    for pua, real in _PUA_TONE.items():
+        text = text.replace(pua, real)
+    # สระอำมักถูกแตกเป็น นิคหิต+สระอา (ํ + า) — รวมกลับเป็น ำ
+    text = text.replace('ํา', 'ำ')
+    return _PUA_LEFTOVER.sub('', text)
+
+
 def _lines(pdf_path):
     parts = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             parts.append(page.extract_text() or '')
-    text = '\n'.join(parts).replace('\r', '').replace('**', '').replace(' ', ' ')
+    text = _fix_thai_pua(chr(10).join(parts)).replace(chr(13), '').replace('**', '').replace(chr(0xa0), ' ')
     out = []
     for raw in text.split('\n'):
         line = re.sub(r'[\t ]+', ' ', raw).strip()
