@@ -243,13 +243,17 @@ function parseEthesisText(source, sourceHtml='') {
   const nextLine = (index, offset=1) => index >= 0 ? (lines[index + offset] || '') : '';
   const data = {};
 
-  const studentId = findLine('รหัสนักศึกษา').value.match(/\b\d{7}\b/);
+  // รหัสนักศึกษาอาจอยู่บรรทัดเดียวกับป้าย หรือบรรทัดถัดไป (เช่น "6537730 EGIT/D")
+  const idLine = findLine('รหัสนักศึกษา');
+  const studentId = [idLine.value, nextLine(idLine.index)].join(' ').match(/\b\d{7}\b/);
   if (studentId) data.student_id = studentId[0];
 
+  // คำนำหน้านามภาษาไทยที่ต้องตัดออก รวมแบบย่อ เช่น น.ส. = นางสาว
+  const THAI_PREFIX = /^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|ว่าที่\s*(?:ร|พ)\.?[ตทอ]\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*/;
   const names = findLine('ชื่อ-สกุล');
   if (names.value) {
     if (/[ก-๙]/.test(names.value)) {
-      data.student_name_th = names.value.replace(/^(?:นาย|นางสาว|นาง|ดร\.?)\s*/, '');
+      data.student_name_th = names.value.replace(THAI_PREFIX, '');
     } else {
       data.student_name = names.value.replace(/^(?:MR|MRS|MISS|MS|DR)\.?\s+/i, '');
     }
