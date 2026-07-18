@@ -104,6 +104,46 @@ def _next(lines, index, offset=1):
     return lines[index + offset] if index >= 0 and 0 <= index + offset < len(lines) else ''
 
 
+def _cell_value(pages, label):
+    """ดึงค่าของช่องที่ค่าอาจห่อหลายบรรทัด (เช่น ชื่อหัวข้อ) ด้วยพิกัด (geometry)
+
+    ในหน้า eThesis ป้ายอยู่คอลัมน์ซ้าย ค่าอยู่คอลัมน์ขวา เมื่อค่ายาวจะห่อเป็น
+    หลายแถว และป้ายถูกจัดกึ่งกลางแนวตั้งจึงไปแทรกอยู่ "ระหว่าง" แถวของค่า
+    (เช่น หัวข้อบรรทัดบน / ป้าย / หัวข้อบรรทัดล่าง) ทำให้อ่านแบบบรรทัดต่อบรรทัด
+    ได้ค่าไม่ครบ จึงจับแต่ละแถวของค่าเข้ากับป้ายซ้ายที่ใกล้สุดตามแนวตั้ง แล้ว
+    ต่อเฉพาะแถวที่เป็นของป้ายนี้เป็นข้อความเดียว (ไทยต่อชิด อังกฤษเว้นวรรค)
+    """
+    for page in pages:
+        words = [dict(w, text=_fix_thai_pua(w['text'])) for w in page.extract_words()]
+        target = next((w for w in words if w['text'].strip() == label), None)
+        if not target:
+            continue
+        target_top = round(target['top'], 1)
+        value_x = target['x1'] + 15
+        # ป้ายทั้งหมดในคอลัมน์ซ้าย (x0 ใกล้ป้ายนี้) ใช้เป็นจุดอ้างอิงแนวตั้ง
+        label_tops = sorted({round(w['top'], 1) for w in words
+                             if abs(w['x0'] - target['x0']) <= 30 and w['text'].strip()})
+        rows = {}
+        for w in words:
+            if w['x0'] < value_x:
+                continue
+            nearest = min(label_tops, key=lambda t: abs(t - w['top']))
+            if nearest == target_top:
+                rows.setdefault(round(w['top'], 1), []).append(w)
+        if not rows:
+            continue
+        out = ''
+        for top in sorted(rows):
+            for w in sorted(rows[top], key=lambda w: w['x0']):
+                token = w['text']
+                if out and (re.match(r'[A-Za-z0-9(]', token)
+                            or re.search(r'[A-Za-z0-9)]$', out)):
+                    out += ' '
+                out += token
+        return out.strip()
+    return ''
+
+
 def _degree_name(value):
     v = re.sub(r'\s*\(\s*', ' (', value)
     v = re.sub(r'\s*\)\s*', ')', v)
@@ -183,6 +223,9 @@ def parse_ethesis_pdf(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         lines = _lines_from_pages(pdf.pages)
         fmt = _detect_format(pdf)
+        # ชื่อหัวข้อมักห่อหลายบรรทัด ต้องอ่านด้วยพิกัด (geometry) ไม่งั้นได้ไม่ครบ
+        title_th = _cell_value(pdf.pages, 'ชื่อหัวข้อภาษาไทย')
+        title_en = _cell_value(pdf.pages, 'ชื่อหัวข้อภาษาอังกฤษ')
     data = {}
     if fmt:
         data['format'] = fmt
@@ -203,8 +246,8 @@ def parse_ethesis_pdf(pdf_path):
         if following and re.search(r'[A-Za-z]', following) and not re.search(r'[ก-๙]', following):
             data['student_name'] = EN_PREFIX.sub('', following)
 
-    data['title_th'] = _find(lines, 'ชื่อหัวข้อภาษาไทย')[0]
-    data['title_en'] = _find(lines, 'ชื่อหัวข้อภาษาอังกฤษ')[0]
+    data['title_th'] = title_th or _find(lines, 'ชื่อหัวข้อภาษาไทย')[0]
+    data['title_en'] = title_en or _find(lines, 'ชื่อหัวข้อภาษาอังกฤษ')[0]
 
     course = _find(lines, 'หลักสูตร')[0]
     writing = _find(lines, 'ภาษาที่เขียน')[0]

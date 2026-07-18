@@ -341,7 +341,7 @@ def _toc_chapter_title(text):
     จึงยอมรับ combining mark และช่องว่างแทรกระหว่างคำนำหน้ากับเลขบท
     """
     return re.sub(
-        r'^(?:CHAPTER|บทท)[ั-๎\s.]*\d+\s*',
+        r'^(?:CHAPTER|บทท)[ั-๎\s.]*(?:\d+\s*|[IVXL]+\s+)',
         '',
         _strip_toc_page_number(text),
         flags=re.I,
@@ -389,11 +389,35 @@ def canonical_title_status(actual_title, chapter_no, option):
     return 'wrong', compared, expected
 
 
+def _roman_to_int(text):
+    """แปลงเลขโรมัน (I–XLIX) เป็นจำนวนเต็ม คืน None ถ้าไม่ใช่/เกินช่วงเลขบท
+
+    บางเล่มใช้เลขโรมันในหัวบท/สารบัญ (CHAPTER II) แทนเลขอารบิก (CHAPTER 2)
+    ทั้งสองแบบถูกต้องตามรูปแบบของบัณฑิตวิทยาลัย
+    """
+    values = {'I': 1, 'V': 5, 'X': 10, 'L': 50}
+    s = text.upper()
+    if not s or any(ch not in values for ch in s):
+        return None
+    total, prev = 0, 0
+    for ch in reversed(s):
+        v = values[ch]
+        total += -v if v < prev else v
+        prev = v
+    return total if 1 <= total <= 49 else None
+
+
 def _chapter_match(line):
-    """Return chapter number if the (normalized) line is 'CHAPTER n' / 'บทที่ n'."""
+    """Return chapter number if the (normalized) line is 'CHAPTER n' / 'บทที่ n'.
+
+    รองรับทั้งเลขอารบิก (CHAPTER 2) และเลขโรมัน (CHAPTER II)
+    """
     nl = norm(line)
-    m = re.fullmatch(r'(CHAPTER|บทท)(\d{1,2})', nl)
-    return int(m.group(2)) if m else None
+    m = re.fullmatch(r'(CHAPTER|บทท)([IVXL]+|\d{1,2})', nl)
+    if not m:
+        return None
+    num = m.group(2)
+    return int(num) if num.isdigit() else _roman_to_int(num)
 
 
 def resolve_option(body_ch, approved, chapters_mode):
@@ -675,14 +699,26 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         nl = norm(raw)
         m_ch = re.match(r'^(CHAPTER|บทท)(\d{1,2})', nl)
         if m_ch:
+            chap_no = int(m_ch.group(2))
             title_n = nl[m_ch.end():]
             if m_pg:
                 title_n = re.sub(r'\d+$', '', title_n)
-            if not title_n:
+        else:
+            # เลขโรมัน (เช่น "CHAPTER II LITERATURE REVIEWS") — norm ตัดช่องว่างทำให้
+            # เลขบทติดกับชื่อบท (II+INTRODUCTION) จึงต้องอ่านจากบรรทัดดิบที่ยังมี
+            # ช่องว่างคั่นเลขบทกับชื่อบท
+            head = raw[:m_pg.start()] if m_pg else raw
+            m_r = re.match(r'^\s*(?:CHAPTER|บทท[ีิ่\s]*)\s*([IVXL]+)\s+(.+)$',
+                           head, re.I)
+            chap_no = _roman_to_int(m_r.group(1)) if m_r else None
+            if chap_no is None:
                 continue
-            toc_ch.append((int(m_ch.group(2)), title_n,
-                           int(m_pg.group(1)) if m_pg else None, raw,
-                           source_page_idx))
+            title_n = norm(m_r.group(2))
+        if not title_n:
+            continue
+        toc_ch.append((chap_no, title_n,
+                       int(m_pg.group(1)) if m_pg else None, raw,
+                       source_page_idx))
 
     body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no)
     for i, t in enumerate(pages):
@@ -1283,8 +1319,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
         if A.get("exam_date"):
             signature_location = ", ".join(page_ref(idx) for idx in sig_pages) or "หน้าไม่ระบุเลข"
-            exam_found = norm(re.sub(r'\b0([1-9])', r'\1', A["exam_date"])) in \
-                norm(re.sub(r'\b0([1-9])', r'\1', sig_text))
+            # หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุ
+            # ศักราชคั่นระหว่างเดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569"
+            # จึงตัด พ.ศ./ค.ศ./B.E./A.D. ออกจากทั้งสองฝั่งก่อนเทียบ ไม่งั้นฟ้องผิด
+            def _date_key(text):
+                text = re.sub(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?',
+                              ' ', text, flags=re.I)
+                return norm(re.sub(r'\b0([1-9])', r'\1', text))
+            exam_found = _date_key(A["exam_date"]) in _date_key(sig_text)
             rep.add_verification("วันที่สอบผ่าน", f"หน้าลงนาม ({signature_location})",
                                  "pass" if exam_found else "fail")
             if not exam_found:
