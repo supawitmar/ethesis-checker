@@ -157,25 +157,6 @@ def _best_cover_match(expected, cover_text):
     return best_snippet, best_ratio
 
 
-def _cover_word_diff(found, expected):
-    """สรุปว่าเล่มพิมพ์ต่างจากข้อความบังคับตรงคำไหนบ้าง (เฉพาะข้อความอังกฤษ)
-
-    คืนสตริงเช่น  "REQUIREMENT" → "REQUIREMENTS"  หรือ '' ถ้าเทียบเป็นคำไม่ได้
-    """
-    if not re.search(r'[A-Za-z]', expected):
-        return ''
-    fw, ew = found.split(), expected.split()
-    matcher = difflib.SequenceMatcher(None, [w.upper() for w in fw], [w.upper() for w in ew])
-    parts = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == 'equal':
-            continue
-        got = ' '.join(fw[i1:i2]) or '(ไม่มี)'
-        want = ' '.join(ew[j1:j2]) or '(ตัดออก)'
-        parts.append(f'"{got}" → "{want}"')
-    return "; ".join(parts)
-
-
 def exact_reference_status(page_text, expected):
     """Compare approved text at one required location without hiding case changes.
 
@@ -268,14 +249,63 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
     return compared
 
 
-def mismatch_detail(label, compared):
-    """Make small differences visible instead of silently accepting fuzzy matches."""
+def describe_diff(found, expected):
+    """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
+
+    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น "REQUIREMENT" → "REQUIREMENTS")
+    - ไทย/คำเดียว: เทียบระดับตัวอักษร (เช่น ขาด "อ")
+    คืน '' ถ้าต่างกันมากจนการชี้จุดไม่ช่วย (ให้ผู้ใช้ดูข้อความเต็มที่ให้ไว้แทน)
+    """
+    found_s, expected_s = soft(found), soft(expected)
+    if not found_s or not expected_s or norm(found_s) == norm(expected_s):
+        return ''
+
+    def _diff(a, b, keyfn, join):
+        matcher = difflib.SequenceMatcher(None, keyfn(a), keyfn(b))
+        if matcher.ratio() < 0.5:
+            return ''
+        parts = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                continue
+            got, want = join(a[i1:i2]), join(b[j1:j2])
+            if not want:
+                parts.append(f'"{got}" เกินมา (ควรตัดออก)')
+            elif not got:
+                parts.append(f'ขาด "{want}"')
+            else:
+                parts.append(f'"{got}" → "{want}"')
+        return "; ".join(parts)
+
+    # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
+    # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
+    if re.search(r'[A-Za-z]', expected_s) and ' ' in expected_s.strip():
+        by_word = _diff(found_s.split(), expected_s.split(),
+                        lambda xs: [x.upper() for x in xs], ' '.join)
+        if by_word:
+            return by_word
+    return _diff(list(found_s), list(expected_s), lambda xs: xs, ''.join)
+
+
+def mismatch_detail(label, compared, expected=''):
+    """Make small differences visible instead of silently accepting fuzzy matches.
+
+    ถ้าส่ง expected มาด้วย จะต่อท้ายว่า "ต่างที่ ..." ชี้ตำแหน่ง/วิธีที่ผิด
+    """
     if compared['status'] == 'case':
-        return f'{label}ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง: "{compared["actual"]}"'
-    if compared['status'] == 'typo':
-        return (f'{label}พิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง {compared["score"]:.2f}): '
-                f'"{compared["actual"]}"')
-    return f'{label}ข้อความไม่ตรง: "{compared["actual"]}"'
+        detail = f'{label}ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง: "{compared["actual"]}"'
+    elif compared['status'] == 'typo':
+        detail = (f'{label}พิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง {compared["score"]:.2f}): '
+                  f'"{compared["actual"]}"')
+    else:
+        detail = f'{label}ข้อความไม่ตรง: "{compared["actual"]}"'
+    # ชี้จุดต่างเฉพาะเมื่อใกล้เคียงกัน (typo/ตัวพิมพ์) — ถ้าเป็นคนละข้อความ
+    # (mismatch) การไล่ทีละตัวอักษรจะรกและสับสน ให้ดูข้อความที่ถูกต้องแทน
+    if expected and compared['status'] in ('typo', 'case'):
+        diff = describe_diff(compared['actual'], expected)
+        if diff:
+            detail += f' — ต่างที่ {diff}'
+    return detail
 
 
 def _is_bold_font(fontname):
@@ -788,10 +818,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 nb = norm(title)
                 if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb:
                     body_toc_flagged.add(cn)
-                    compared = compare_values(title, _toc_chapter_title(t_raw), 'toc_heading')
+                    toc_title = _toc_chapter_title(t_raw)
+                    compared = compare_values(title, toc_title, 'toc_heading')
                     rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
-                            mismatch_detail("ชื่อบทในเนื้อหา", compared),
-                            "ชื่อบทส่วนหัวต้องสะกดตรงกับชื่อบทในสารบัญ",
+                            mismatch_detail("ชื่อบทในเนื้อหา", compared, toc_title),
+                            f'ต้องสะกดตรงกับชื่อบทในสารบัญ: "{toc_title}"',
                             "แก้ชื่อบทในเนื้อหาหรือสารบัญให้ตรงกัน", "FRONT.TOC")
                 if BODY_RULES['check_toc_page_numbers'] and t_pno is None:
                     rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
@@ -848,7 +879,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             compared = compare_values(visible, expected, 'toc_heading')
             if compared['status'] != 'exact':
                 rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)})",
-                        mismatch_detail("หัวข้อสารบัญ", compared),
+                        mismatch_detail("หัวข้อสารบัญ", compared, expected),
                         f"ควรเป็น \"{expected}\"", "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
 
     if chapters_mode == 'strict':
@@ -866,7 +897,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                             "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
                 elif kind == 'wrong':
                     rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {chapter_no}",
-                            mismatch_detail("ชื่อบทในสารบัญ", compared),
+                            mismatch_detail("ชื่อบทในสารบัญ", compared, expected_title),
                             f"ควรเป็น \"{expected_title}\"", "แก้การสะกดชื่อบทในสารบัญ",
                             "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
 
@@ -898,7 +929,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
             else:
                 rep.add("RED", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})",
-                        mismatch_detail("ชื่อบทในเนื้อหา", compared),
+                        mismatch_detail("ชื่อบทในเนื้อหา", compared, expected_title),
                         f"ตามประกาศ 2569 ควรเป็น \"{expected_title}\"", "แก้ชื่อบทให้ตรงประกาศ",
                         "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
 
@@ -1075,7 +1106,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             # เกณฑ์ 0.8: ข้อความพิมพ์ผิดเล็กน้อย (ตก S/สลับคำ) จะได้คะแนนสูงกว่านี้
             # ส่วนการบังเอิญไปตรง substring คนละบรรทัด (โดยเฉพาะไทย) จะต่ำกว่า
             if ratio >= 0.8 and snippet:
-                diff = _cover_word_diff(snippet, expected_text)
+                diff = describe_diff(snippet, expected_text)
                 found_msg = f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})"
                 if diff:
                     found_msg += f" — ต่างที่ {diff}"
@@ -1152,7 +1183,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อเรื่อง", compared),
+                            mismatch_detail("ชื่อเรื่อง", compared, main_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{main_title}\"",
                             "แก้ข้อความและตัวพิมพ์เล็ก-ใหญ่ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
         if alt_title:
@@ -1165,7 +1196,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
-                            mismatch_detail("ชื่อเรื่องอีกภาษา", compared),
+                            mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
                             "แก้ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
             else:
@@ -1227,8 +1258,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อนักศึกษา", compared),
-                            "ชื่อนักศึกษาต้องสะกดตรงข้อมูลอนุมัติในทุกหน้าที่กำหนด",
+                            mismatch_detail("ชื่อนักศึกษา", compared, primary_student_name),
+                            f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{primary_student_name}\"",
                             "แก้การสะกดชื่อ", "FORM.APPROVED_MATCH")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
@@ -1258,8 +1289,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",
-                        mismatch_detail(f"{nlbl}", compared),
-                        f"{nlbl}ของนักศึกษาต้องปรากฏในหน้า{albl} สะกดตรงข้อมูลอนุมัติ",
+                        mismatch_detail(f"{nlbl}", compared, nm3),
+                        f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{nm3}\"",
                         "ตรวจการสะกด", "FORM.APPROVED_MATCH")
             else:
                 first_tok = nm3.split()[0]
@@ -1332,7 +1363,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                             "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
                 else:
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อปริญญา", compared),
+                            mismatch_detail("ชื่อปริญญา", compared, expected_degree),
                             f"ต้องเป็น \"{expected_degree}\"",
                             "แก้ชื่อปริญญาให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
@@ -1363,7 +1394,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             else:
                 rep.add_verification("ชื่อปริญญา", abbr_location, "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
-                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared),
+                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared, degree_abbr),
                         f"ต้องเป็น \"{degree_abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
