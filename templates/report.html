@@ -114,10 +114,19 @@
   .note-view b { color:var(--navy); }
 
   .vf-group { border:1px solid #e2e8f0; border-radius:10px; margin-bottom:10px; overflow:hidden; }
-  .vf-topic { background:#f0f4fa; font-weight:700; font-size:.88rem; color:var(--navy);
-              padding:9px 16px; }
+  .vf-topic { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
+              background:#f0f4fa; font-weight:700; font-size:.88rem; color:var(--navy);
+              padding:11px 16px; list-style:none; user-select:none; }
+  .vf-topic::-webkit-details-marker { display:none; }
+  .vf-topic:hover { background:#e8eef7; }
+  .vf-topic.fail { background:var(--red-bg); }
+  .vf-topic.pending { background:var(--orange-bg); }
+  .vf-topic-name { flex:1; min-width:150px; }
+  .vf-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
+  details[open] > .vf-topic .vf-arrow { transform:rotate(90deg); }
+  .vf-count { font-size:.72rem; font-weight:600; color:#8091a6; }
   .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
-            padding:7px 16px; border-top:1px solid #eef1f5; font-size:.85rem; }
+            padding:7px 16px 7px 34px; border-top:1px solid #eef1f5; font-size:.85rem; }
   .vf-loc { min-width:220px; color:#3d4c5e; }
   .vf-badge { font-size:.75rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
   .vf-badge.pass { background:var(--green-bg); color:var(--green); }
@@ -137,6 +146,8 @@
     body { background:#fff; padding:0; }
     .body { box-shadow:none; }
     .actions, .cmt-btn, .note-editor, .langbtn, .logout-form { display:none !important; }
+    .vf-arrow { display:none; }
+    .vf-topic { cursor:default; }
   }
   @media (max-width:640px) {
     .head, .verdict-bar, .body { padding-left:18px; padding-right:18px; }
@@ -178,8 +189,21 @@
     {% if report.verification %}
     <h2 class="sec" style="margin-top:0;"><span data-th="📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" data-en="📋 Approved-data verification by location">📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง</span></h2>
     {% for group in report.verification %}
-    <div class="vf-group">
-      <div class="vf-topic tr-dyn">{{ group.topic }}</div>
+    {% set statuses = group.checks | map(attribute='status') | list %}
+    {% set gstatus = 'fail' if 'fail' in statuses else ('pending' if 'pending' in statuses else 'pass') %}
+    <details class="vf-group"{% if gstatus != 'pass' %} open{% endif %}>
+      <summary class="vf-topic {{ gstatus }}">
+        <span class="vf-arrow">▸</span>
+        <span class="vf-topic-name tr-dyn">{{ group.topic }}</span>
+        {% if gstatus == 'pass' %}
+        <span class="vf-badge pass" data-th="✓ ตรงทุกหน้า" data-en="✓ All match">✓ ตรงทุกหน้า</span>
+        {% elif gstatus == 'fail' %}
+        <span class="vf-badge fail" data-th="✗ พบไม่ตรง" data-en="✗ Mismatch found">✗ พบไม่ตรง</span>
+        {% else %}
+        <span class="vf-badge pending" data-th="❓ รอยืนยัน" data-en="❓ To confirm">❓ รอยืนยัน</span>
+        {% endif %}
+        <span class="vf-count">{{ group.checks | length }} <span data-th="ตำแหน่ง" data-en="locations">ตำแหน่ง</span></span>
+      </summary>
       {% for c in group.checks %}
       <div class="vf-row">
         <span class="vf-loc tr-dyn">{{ c.location }}</span>
@@ -193,7 +217,7 @@
         {% if c.detail %}<span class="vf-detail tr-dyn">{{ c.detail }}</span>{% endif %}
       </div>
       {% endfor %}
-    </div>
+    </details>
     {% endfor %}
     {% endif %}
 
@@ -211,10 +235,6 @@
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
           {% if it.llm_opinion %}<div class="ai-note">{{ it.llm_opinion }}</div>{% endif %}
-          <div class="rule-source">
-            <b>{{ it.rule_id }} — {{ it.rule_title }}</b> ({{ it.rule_basis }})
-            <ul>{% for ref in it.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
-          </div>
           {% if zone in ['ORANGE', 'YELLOW'] %}
           <div class="issue-decide">
             <span class="lbl" data-th="ผลพิจารณาของเจ้าหน้าที่:" data-en="Staff decision:">ผลพิจารณาของเจ้าหน้าที่:</span>
@@ -249,10 +269,7 @@
     {% for hc in report.human_checklist %}
     <div class="hc">
       <div class="row1">
-        <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div>
-          <div class="rule-source"><b>{{ hc.rule_id }} — {{ hc.rule_title }}</b>
-            <ul>{% for ref in hc.rule_references %}<li>{{ ref }}</li>{% endfor %}</ul>
-          </div></div>
+        <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div></div>
         <div class="btns">
           <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
           <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
@@ -490,6 +507,20 @@ function applyLang(){
   document.documentElement.lang = LANG;
 }
 function toggleLang(){ LANG = (LANG === 'th') ? 'en' : 'th'; applyLang(); }
+
+// เปิด dropdown ทุกหัวข้อตอนพิมพ์/บันทึก PDF แล้วคืนค่าเดิมหลังพิมพ์เสร็จ
+var _vfPrintState = [];
+window.addEventListener('beforeprint', function(){
+  _vfPrintState = [];
+  document.querySelectorAll('details.vf-group').forEach(function(d){
+    _vfPrintState.push(d.open); d.open = true;
+  });
+});
+window.addEventListener('afterprint', function(){
+  document.querySelectorAll('details.vf-group').forEach(function(d, i){
+    if (i < _vfPrintState.length) d.open = _vfPrintState[i];
+  });
+});
 
 function setPF(btn, state){
   const card = btn.closest('.hc, .issue');
