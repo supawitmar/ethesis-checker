@@ -30,7 +30,11 @@
   .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
        font-size:.82rem; border-radius:6px; margin-top:6px; }
   .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:8px; padding:14px; }
-  .import-box textarea { min-height:130px; margin-top:6px; }
+  .import-box textarea { min-height:110px; margin-top:6px; }
+  .import-pdf-row { display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+  .import-pdf-row input[type=file] { flex:1; min-width:200px; }
+  .import-pdf-row .secondary { margin-top:0; white-space:nowrap; }
+  .import-or { text-align:center; color:#8091a6; font-size:.8rem; margin:12px 0 2px; }
   .secondary { background:#fff; color:var(--navy); border:1px solid var(--navy); border-radius:7px;
        padding:9px 14px; cursor:pointer; margin-top:10px; }
   .import-status { font-size:.82rem; margin:8px 0 0; color:#43566a; }
@@ -51,10 +55,16 @@
   <form id="f" action="/check" method="post" enctype="multipart/form-data">
     <h2>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
     <div class="import-box">
-      <label for="ethesis-source">คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่ครั้งเดียว</label>
-      <textarea id="ethesis-source" rows="6" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
-      <button type="button" class="secondary" id="parse-ethesis">อ่านข้อมูลและเติมแบบฟอร์ม</button>
-      <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม</p>
+      <label for="ethesis-pdf">วิธีที่ 1 (แนะนำ): แนบไฟล์ PDF หน้าข้อมูล eThesis แล้วให้ระบบอ่านให้</label>
+      <div class="import-pdf-row">
+        <input type="file" id="ethesis-pdf" accept=".pdf">
+        <button type="button" class="secondary" id="parse-ethesis-pdf">📄 อ่านจากไฟล์ eThesis PDF</button>
+      </div>
+      <div class="import-or">— หรือ —</div>
+      <label for="ethesis-source">วิธีที่ 2: คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่</label>
+      <textarea id="ethesis-source" rows="5" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
+      <button type="button" class="secondary" id="parse-ethesis">อ่านข้อความและเติมแบบฟอร์ม</button>
+      <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม (ตัวเลือก "รูปแบบ" ที่เป็นช่องติ๊กในไฟล์อาจอ่านอัตโนมัติไม่ได้)</p>
     </div>
 
     <h2>0. ไฟล์เล่ม</h2>
@@ -320,25 +330,17 @@ document.getElementById('ethesis-source').addEventListener('paste', function(eve
   ethSourcePlainText = (event.clipboardData?.getData('text/plain') || '').trim();
 });
 
-document.getElementById('parse-ethesis').addEventListener('click', function(){
-  const source = document.getElementById('ethesis-source').value.trim();
-  const status = document.getElementById('import-status');
-  if (!source) {
-    status.textContent = 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน';
-    return;
-  }
+const IMPORT_LABELS = {
+  doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
+  title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
+  student_name_th:'ชื่อภาษาไทย', student_id:'รหัสนักศึกษา', degree_source:'ชื่อปริญญาต้นฉบับ (อังกฤษ)',
+  degree_th:'ชื่อปริญญาภาษาไทย', degree:'ชื่อปริญญา Sentence case', degree_abbr:'ชื่อปริญญาแบบย่อในบทคัดย่อ',
+  exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก'
+};
 
+// เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
+function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
-  const matchingHtml = source === ethSourcePlainText ? ethSourceHtml : '';
-  const parsed = parseEthesisText(source, matchingHtml);
-  const hasFormatSection = source.includes('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
-  const labels = {
-    doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
-    title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
-    student_name_th:'ชื่อภาษาไทย', student_id:'รหัสนักศึกษา', degree_source:'ชื่อปริญญาต้นฉบับ (อังกฤษ)',
-    degree_th:'ชื่อปริญญาภาษาไทย', degree:'ชื่อปริญญา Sentence case', degree_abbr:'ชื่อปริญญาแบบย่อในบทคัดย่อ',
-    exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก'
-  };
   const filled = [];
   Object.entries(parsed).forEach(([name, value]) => {
     const field = name === 'degree_source'
@@ -348,9 +350,22 @@ document.getElementById('parse-ethesis').addEventListener('click', function(){
     field.value = value;
     field.classList.add('autofilled');
     field.dispatchEvent(new Event('change', {bubbles:true}));
-    filled.push(labels[name] || name);
+    filled.push(IMPORT_LABELS[name] || name);
   });
+  return filled;
+}
 
+document.getElementById('parse-ethesis').addEventListener('click', function(){
+  const source = document.getElementById('ethesis-source').value.trim();
+  const status = document.getElementById('import-status');
+  if (!source) {
+    status.textContent = 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน';
+    return;
+  }
+  const matchingHtml = source === ethSourcePlainText ? ethSourceHtml : '';
+  const parsed = parseEthesisText(source, matchingHtml);
+  const hasFormatSection = source.includes('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
+  const filled = applyParsed(parsed);
   if (filled.length) {
     const formatNotice = hasFormatSection && !parsed.format
       ? ' ไม่พบเครื่องหมายเลือกในแถว “ล่าสุด” จึงยังไม่เลือกรูปแบบ กรุณาเลือกเอง'
@@ -358,6 +373,34 @@ document.getElementById('parse-ethesis').addEventListener('click', function(){
     status.textContent = `เติมให้แล้ว ${filled.length} ช่อง: ${filled.join(', ')} — ช่องสีเขียวคือค่าที่ระบบอ่านพบ กรุณาตรวจทานก่อนใช้งาน${formatNotice}`;
   } else {
     status.textContent = 'ยังอ่านข้อมูลจากข้อความนี้ไม่ได้ กรุณาตรวจว่าคัดลอกส่วนรายละเอียดนักศึกษาและหัวข้อวิทยานิพนธ์มาครบ';
+  }
+});
+
+document.getElementById('parse-ethesis-pdf').addEventListener('click', async function(){
+  const status = document.getElementById('import-status');
+  const file = document.getElementById('ethesis-pdf').files[0];
+  if (!file) { status.textContent = 'กรุณาเลือกไฟล์ eThesis PDF ก่อน'; return; }
+  status.textContent = 'กำลังอ่านไฟล์ eThesis PDF...';
+  try {
+    const body = new FormData();
+    body.append('pdf', file);
+    const resp = await fetch('/parse-ethesis', {method:'POST', body});
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || ('อ่านไฟล์ไม่สำเร็จ (' + resp.status + ')'));
+    }
+    const {data} = await resp.json();
+    const filled = applyParsed(data);
+    if (filled.length) {
+      const formatNotice = !data.format
+        ? ' — ไม่พบเครื่องหมายติ๊กรูปแบบในไฟล์ (ติ๊กอาจเป็นภาพ) กรุณาเลือกรูปแบบเอง'
+        : '';
+      status.textContent = `เติมจากไฟล์ eThesis แล้ว ${filled.length} ช่อง: ${filled.join(', ')} — ช่องสีเขียวคือค่าที่อ่านพบ กรุณาตรวจทานก่อนใช้งาน${formatNotice}`;
+    } else {
+      status.textContent = 'อ่านไฟล์แล้วแต่ยังดึงข้อมูลไม่ได้ กรุณาตรวจว่าเป็นหน้าข้อมูลนักศึกษาจาก eThesis';
+    }
+  } catch(err) {
+    status.textContent = 'เกิดข้อผิดพลาด: ' + err.message;
   }
 });
 

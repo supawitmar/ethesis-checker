@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 import llm_assist
 from checker import run_check
+from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
 BASE = Path(__file__).parent
@@ -203,6 +204,41 @@ def logout():
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context={})
+
+
+@app.post("/parse-ethesis")
+async def parse_ethesis(pdf: UploadFile = File(...)):
+    """อ่านไฟล์ eThesis PDF แล้วคืนค่าที่ดึงได้เพื่อเติมแบบฟอร์ม (ตัวช่วยเท่านั้น)
+
+    ค่าที่คืนไม่ถูกนำไปตรวจโดยตรง — เจ้าหน้าที่ต้องตรวจทานทุกช่องก่อนกดตรวจเล่ม
+    """
+    tmp_path = None
+    try:
+        total, header = 0, b""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_path = tmp.name
+            while chunk := await pdf.read(UPLOAD_CHUNK_BYTES):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"ไฟล์มีขนาดเกิน {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+                    )
+                if len(header) < 1024:
+                    header += chunk[:1024 - len(header)]
+                tmp.write(chunk)
+        if total == 0:
+            raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่มีข้อมูล")
+        if b"%PDF-" not in header:
+            raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
+        try:
+            data = await asyncio.to_thread(parse_ethesis_pdf, tmp_path)
+        except Exception:
+            raise HTTPException(status_code=422, detail="อ่านไฟล์ eThesis PDF ไม่สำเร็จ")
+        return JSONResponse({"data": data})
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 @app.post("/check")
