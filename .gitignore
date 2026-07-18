@@ -1,5 +1,19 @@
+# ---- ความลับ / ตัวแปรสภาพแวดล้อมเฉพาะเครื่อง (ห้าม commit) ----
 .env
 .env.*
+!.env.example
+
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
+.venv/
+venv/
+env/
+
+# ---- ไฟล์ระบบ/เอดิเตอร์ ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
