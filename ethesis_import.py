@@ -39,9 +39,6 @@ DEGREE_ABBR = {
 MINOR_WORDS = {'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from',
                'in', 'of', 'on', 'or', 'the', 'to', 'with'}
 
-# สัญลักษณ์ติ๊กที่พบได้ในข้อความ PDF (ถ้าติ๊กเป็นภาพจะไม่มีตัวใดเลย)
-TICK = r'(?:☑|☒|✓|✔|●|◉|◾|■|\[x\]|\(x\))'
-
 
 # ฟอนต์ไทย Angsana/Cordia ใน eThesis PDF เก็บวรรณยุกต์/การันต์ไว้ใน
 # Private Use Area (U+F705-F70E) แยก 2 ชุด (ตำแหน่งปกติ/ตำแหน่งยกเหนือสระบน)
@@ -63,18 +60,20 @@ def _fix_thai_pua(text):
     return _PUA_LEFTOVER.sub('', text)
 
 
-def _lines(pdf_path):
-    parts = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            parts.append(page.extract_text() or '')
-    text = _fix_thai_pua(chr(10).join(parts)).replace(chr(13), '').replace('**', '').replace(chr(0xa0), ' ')
+def _lines_from_pages(pages):
+    parts = [page.extract_text() or '' for page in pages]
+    text = _fix_thai_pua('\n'.join(parts)).replace('\r', '').replace('**', '').replace(' ', ' ')
     out = []
     for raw in text.split('\n'):
         line = re.sub(r'[\t ]+', ' ', raw).strip()
         if line:
             out.append(line)
     return out
+
+
+def _lines(pdf_path):
+    with pdfplumber.open(pdf_path) as pdf:
+        return _lines_from_pages(pdf.pages)
 
 
 def _find(lines, label):
@@ -142,22 +141,47 @@ def _exam_date(value, use_english):
     return f'{int(m.group(1))} {THAI_MONTHS[m.group(2)]} {year}'
 
 
-def _detect_format(lines):
-    """หาเลขรูปแบบที่ถูกติ๊กในแถว 'ล่าสุด' — คืน '' ถ้าติ๊กเป็นภาพ (อ่านไม่ได้)"""
-    for line in lines:
-        if 'ล่าสุด' not in line:
+def _detect_format(pdf):
+    """หารูปแบบที่ถูกเลือกในแถว 'ล่าสุด'
+
+    ในหน้า eThesis ตัวเลือกรูปแบบเป็น radio button วาดด้วยเส้นโค้ง (วงกลม)
+    ตัวที่ถูกเลือกจะมี "จุดทึบเล็ก" (curve เติมสีขนาด ~4-8px) อยู่กลางวง
+    ส่วนวงนอกมีทั้งสองตัว จึงใช้จุดทึบเล็กเป็นตัวชี้ว่าเลือกอันไหน
+    คืน '' ถ้าอ่านไม่ได้ (ให้เจ้าหน้าที่เลือกเอง)
+    """
+    for page in pdf.pages:
+        words = [dict(w, text=_fix_thai_pua(w['text'])) for w in page.extract_words()]
+        latest = next((w for w in words if w['text'].strip() == 'ล่าสุด'), None)
+        if not latest:
             continue
-        marked = re.search(TICK + r'\s*รูปแบบที่\s*([12])', line, re.I)
-        if marked:
-            return marked.group(1)
-        # ถ้าไม่มีสัญลักษณ์ติ๊กเลย และเห็นทั้ง 1 และ 2 = อ่านไม่ได้
+        row_top = latest['top']
+        options = []
+        for word in words:
+            if abs(word['top'] - row_top) <= 10:
+                m = re.search(r'รูปแบบที่\s*([12])', word['text'])
+                if m:
+                    options.append((int(m.group(1)), word['x0']))
+        if len(options) < 2:
+            continue
+        dots = [c for c in page.curves
+                if abs(c['top'] - row_top) <= 10 and c.get('fill') and 3 <= c['width'] <= 8]
+        counts = {}
+        for dot in dots:
+            option = min(options, key=lambda o: abs(o[1] - dot['x0']))
+            counts[option[0]] = counts.get(option[0], 0) + 1
+        if counts:
+            return str(max(counts, key=counts.get))
     return ''
 
 
 def parse_ethesis_pdf(pdf_path):
     """คืน dict ของค่าที่ดึงได้ (เฉพาะช่องที่พบ) สำหรับเติมแบบฟอร์ม"""
-    lines = _lines(pdf_path)
+    with pdfplumber.open(pdf_path) as pdf:
+        lines = _lines_from_pages(pdf.pages)
+        fmt = _detect_format(pdf)
     data = {}
+    if fmt:
+        data['format'] = fmt
 
     id_value, id_index = _find(lines, 'รหัสนักศึกษา')
     id_match = re.search(r'\b\d{7}\b', id_value + ' ' + _next(lines, id_index))
@@ -215,17 +239,18 @@ def parse_ethesis_pdf(pdf_path):
             year = int(year_match.group(1))
             data['year'] = str(year - 543) if (use_english and year > 2400) else str(year)
 
-    plans = [line[len('แผนการศึกษา'):].strip()
-             for line in lines if line.startswith('แผนการศึกษา ')]
+    # "แผนการศึกษา" ในหน้า eThesis มักอยู่คนละบรรทัดกับค่า จึงเก็บค่าจากทุก
+    # ตำแหน่ง (ท้ายบรรทัดเดียวกันหรือบรรทัดถัดไป) — ค่าที่ต้องการคือ "วิทยานิพนธ์"
+    plans = []
+    for i, line in enumerate(lines):
+        if line.startswith('แผนการศึกษา'):
+            value = re.sub(r'^\s*[:：]?\s*', '', line[len('แผนการศึกษา'):]).strip()
+            plans.append(value or _next(lines, i))
     if any(plan == 'วิทยานิพนธ์' for plan in plans):
         data['doc_type'] = 'THESIS'
     elif any(plan == 'สารนิพนธ์' for plan in plans):
         data['doc_type'] = 'THEMATIC PAPER'
     elif any(plan == 'การค้นคว้าอิสระ' for plan in plans):
         data['doc_type'] = 'INDEPENDENT STUDY'
-
-    fmt = _detect_format(lines)
-    if fmt:
-        data['format'] = fmt
 
     return {key: value for key, value in data.items() if value}
