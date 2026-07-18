@@ -134,6 +134,48 @@ def cover_required_items(doc_type, program_language):
     )
 
 
+def _best_cover_match(expected, cover_text):
+    """หา 'ข้อความบนหน้าปกที่ใกล้เคียงที่สุด' กับข้อความบังคับ
+
+    คืน (ข้อความช่วงที่พบจริงบนหน้าปก, คะแนนความใกล้เคียง 0-1) เพื่อชี้ให้เห็นว่า
+    เล่มพิมพ์อะไรมา ต่างจากข้อความบังคับตรงไหน (เช่น ตก S ท้ายคำ) ไม่ใช่แค่บอกว่า
+    "ไม่พบ" ลอย ๆ  หน้าปกมักตัดข้อความขึ้นหลายบรรทัด จึงเทียบแบบรวมบรรทัดเป็นคำ
+    """
+    flat = re.sub(r'\s+', ' ', cover_text).strip()
+    expected_norm = norm(expected)
+    if not flat or not expected_norm:
+        return '', 0.0
+    words = flat.split(' ')
+    target_len = len(expected.split())
+    best_ratio, best_snippet = 0.0, ''
+    for size in range(max(1, target_len - 3), target_len + 4):
+        for i in range(0, len(words) - size + 1):
+            window = ' '.join(words[i:i + size])
+            ratio = difflib.SequenceMatcher(None, norm(window), expected_norm).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_snippet = ratio, window
+    return best_snippet, best_ratio
+
+
+def _cover_word_diff(found, expected):
+    """สรุปว่าเล่มพิมพ์ต่างจากข้อความบังคับตรงคำไหนบ้าง (เฉพาะข้อความอังกฤษ)
+
+    คืนสตริงเช่น  "REQUIREMENT" → "REQUIREMENTS"  หรือ '' ถ้าเทียบเป็นคำไม่ได้
+    """
+    if not re.search(r'[A-Za-z]', expected):
+        return ''
+    fw, ew = found.split(), expected.split()
+    matcher = difflib.SequenceMatcher(None, [w.upper() for w in fw], [w.upper() for w in ew])
+    parts = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            continue
+        got = ' '.join(fw[i1:i2]) or '(ไม่มี)'
+        want = ' '.join(ew[j1:j2]) or '(ตัดออก)'
+        parts.append(f'"{got}" → "{want}"')
+    return "; ".join(parts)
+
+
 def exact_reference_status(page_text, expected):
     """Compare approved text at one required location without hiding case changes.
 
@@ -1028,14 +1070,22 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             for label, expected_text in cover_required_items(A.get("doc_type", ""), program_language)
             if expected_text and norm(expected_text) not in norm(cover_text)
         ]
-        if missing_cover_items:
-            missing_labels = ", ".join(label for label, _text in missing_cover_items)
-            required_text = "; ".join(text for _label, text in missing_cover_items)
+        for label, expected_text in missing_cover_items:
+            snippet, ratio = _best_cover_match(expected_text, cover_text)
+            # เกณฑ์ 0.8: ข้อความพิมพ์ผิดเล็กน้อย (ตก S/สลับคำ) จะได้คะแนนสูงกว่านี้
+            # ส่วนการบังเอิญไปตรง substring คนละบรรทัด (โดยเฉพาะไทย) จะต่ำกว่า
+            if ratio >= 0.8 and snippet:
+                diff = _cover_word_diff(snippet, expected_text)
+                found_msg = f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})"
+                if diff:
+                    found_msg += f" — ต่างที่ {diff}"
+            else:
+                found_msg = f"ไม่พบข้อความบังคับ ({label}) บนหน้าปก"
             rep.add(
                 "RED", "front_matter", "หน้าปก",
-                f"ไม่พบข้อความบังคับ: {missing_labels}",
-                f"หน้าปกต้องมีข้อความตามประเภทและภาษาของเล่ม: {required_text}",
-                "เพิ่มหรือแก้ข้อความบังคับบนหน้าปกให้ตรง template ทางการ",
+                found_msg,
+                f"ข้อความที่ถูกต้อง: \"{expected_text}\"",
+                "แก้ข้อความบนหน้าปกให้ตรง template ทางการทุกตัวอักษร",
                 "FRONT.COVER_REQUIRED",
             )
         if A.get("doc_type") and doc_type and A["doc_type"] != doc_type:
