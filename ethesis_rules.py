@@ -51,11 +51,6 @@ RULE_CATALOG = {
         "basis": "ข้อกำหนดทางการ",
         "references": ("ประกาศฯ ข้อ 5.1 หน้า 7",),
     },
-    "PAGE.A4": {
-        "title": "ขนาดหน้ากระดาษและระยะขอบ",
-        "basis": "คู่มือการจัดรูปแบบ",
-        "references": ("คู่มือ หน้า 6, 23, 42, 59, 82 และ 98",),
-    },
     "PAGE.NUMBERING": {
         "title": "การลำดับเลขหน้าและความต่อเนื่อง",
         "basis": "ประกาศฯ และคู่มือ",
@@ -250,7 +245,7 @@ FRONT_MATTER_RULES = {
         ),
         "thai": (
             "title_en", "title_th", "student_name", "student_name_th",
-            "student_id", "degree", "degree_abbr", "exam_date", "year",
+            "student_id", "degree", "degree_th", "degree_abbr", "exam_date", "year",
         ),
         "thai_english": (
             "title_en", "title_th", "student_name", "student_name_th",
@@ -266,6 +261,7 @@ FORM_FIELD_LABELS = {
     "student_name_th": "ชื่อนักศึกษาภาษาไทย",
     "student_id": "รหัสนักศึกษา",
     "degree": "ชื่อปริญญาเต็ม",
+    "degree_th": "ชื่อปริญญาภาษาไทย",
     "degree_abbr": "ชื่อปริญญาแบบย่อสำหรับบทคัดย่อ",
     "exam_date": "วันที่สอบผ่าน",
     "year": "ปีบนหน้าปก",
@@ -280,7 +276,10 @@ BODY_RULES = {
     "check_toc_page_numbers": True,
     "check_body_chapter_count": True,
     "check_toc_title_against_body": True,
-    "check_body_title_against_canonical": False,
+    # เปิดตรวจชื่อบทในเนื้อหากับประกาศด้วย — จับกรณีสารบัญและเนื้อหาสะกดผิด
+    # "ตรงกัน" ซึ่งการเทียบ body↔TOC มองไม่เห็น (นโยบายเจ้าหน้าที่: สะกดผิด
+    # จนไม่ตรงประกาศ = แดงทุกตำแหน่ง ยกเว้นคำที่คู่มือรองรับ = ส้ม)
+    "check_body_title_against_canonical": True,
 }
 
 CANONICAL_OPTION_1 = [
@@ -291,6 +290,14 @@ CANONICAL_OPTION_1 = [
     ("การอภิปรายผล", "DISCUSSION"),
     ("บทสรุปและข้อเสนอแนะ", "CONCLUSION AND RECOMMENDATIONS"),
 ]
+
+# คำสะกดที่คู่มือ (อำนาจรองจากประกาศ) แสดงต่างจากประกาศ — นโยบายเจ้าหน้าที่:
+# เจอแบบนี้ให้เป็น "ส้ม" รอเจ้าหน้าที่ยืนยัน (ไม่ใช่แดง เพราะมีเอกสารทางการรองรับ)
+# ทุกการสะกดผิดแบบอื่นของชื่อบทถือว่า "ชื่อบทผิด" = แดง ทั้งในสารบัญและเนื้อหา
+# key คือ (option, chapter_no)
+CANONICAL_ACCEPTED_VARIANTS = {
+    (1, 2): ("LITERATURE REVIEWS",),
+}
 
 CANONICAL_OPTION_2 = [
     ("บทสรุป", "SUMMARY"),
@@ -312,7 +319,7 @@ TYPE_MARKERS = {
 }
 
 NOT_CHECKED = (
-    "ระยะขอบ ระยะบรรทัด ชนิดและขนาดฟอนต์",
+    "ขนาดกระดาษ ระยะขอบ ระยะบรรทัด ชนิดและขนาดฟอนต์",
     "Plagiarism หรือเปอร์เซ็นต์ความซ้ำซ้อน",
     "มาตรฐาน PDF/A, embedded fonts และความคมชัดของภาพ",
     "รายชื่อ/บทบาทกรรมการ ตำแหน่งลายเซ็น และข้อความมุมล่างขวาของหน้าลงนาม",

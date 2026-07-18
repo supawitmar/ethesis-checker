@@ -4,11 +4,14 @@ from checker import (
     NOT_CHECKED,
     Report,
     _extract_page_label,
+    _is_abstract_heading,
     _is_toc_major_heading,
     _is_blank_page_text,
     _toc_page_label,
     _toc_section_kind,
     _toc_chapter_title,
+    canonical_title_status,
+    compare_canonical_title,
     compare_values,
     cover_required_items,
     exact_reference_status,
@@ -20,6 +23,7 @@ from checker import (
 )
 from ethesis_rules import (
     BODY_RULES,
+    CANONICAL_OPTION_1,
     FORM_FIELD_LABELS,
     FRONT_MATTER_RULES,
     MATCH_RULES,
@@ -83,7 +87,7 @@ class ExactReferenceTests(unittest.TestCase):
         self.assertTrue(BODY_RULES["check_toc_page_numbers"])
         self.assertTrue(BODY_RULES["check_body_chapter_count"])
         self.assertTrue(BODY_RULES["check_toc_title_against_body"])
-        self.assertFalse(BODY_RULES["check_body_title_against_canonical"])
+        self.assertTrue(BODY_RULES["check_body_title_against_canonical"])
 
     def test_toc_title_comparison_ignores_chapter_and_page_numbers(self):
         self.assertEqual(
@@ -136,6 +140,17 @@ class ExactReferenceTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_verification_entries_are_grouped_by_topic(self):
+        report = Report()
+        report.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", "หน้าปก", "pass")
+        report.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", "หน้าลงนาม 1 (หน้า i)", "fail", "TITLE X")
+        report.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "pending", "หาหน้าไม่เจอ")
+        self.assertEqual(len(report.verification), 2)
+        title_group = report.verification[0]
+        self.assertEqual(title_group["topic"], "ชื่อเรื่อง (ตาม บฑ.1)")
+        self.assertEqual([c["status"] for c in title_group["checks"]], ["pass", "fail"])
+        self.assertEqual(report.verification[1]["checks"][0]["status"], "pending")
+
     def test_red_takes_precedence(self):
         report = Report()
         report.add("ORANGE", "-", "x", "x", "x")
@@ -180,6 +195,81 @@ class OptionResolutionTests(unittest.TestCase):
     def test_strict_mode_defaults_to_traditional_option(self):
         body = [(1, "INTRODUCTION", 0, 1)]
         self.assertEqual(resolve_option(body, {"format": "2"}, "strict"), 1)
+
+
+class ThaiBookRegressionTests(unittest.TestCase):
+    """กันบั๊กชุดที่พบจากการตรวจเล่มภาษาไทยจริง (report ก.ค. 2569)"""
+
+    def test_thai_chapter_title_is_compared_against_thai_canonical(self):
+        compared, expected = compare_canonical_title("บทนำ", ("บทนำ", "INTRODUCTION"))
+        self.assertEqual(compared["status"], "exact")
+
+    def test_wrong_thai_title_reports_thai_expected_not_english(self):
+        compared, expected = compare_canonical_title(
+            "ทบทวนวรรณกรรม", ("วรรณกรรมและงานวิจัยที่เกี่ยวข้อง", "LITERATURE REVIEW"))
+        self.assertNotEqual(compared["status"], "exact")
+        self.assertEqual(expected, "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง")
+
+    def test_english_chapter_title_still_matches_english_canonical(self):
+        compared, expected = compare_canonical_title(
+            "INTRODUCTION", ("บทนำ", "INTRODUCTION"))
+        self.assertEqual(compared["status"], "exact")
+        self.assertEqual(expected, "INTRODUCTION")
+
+    def test_thai_toc_lists_english_abstract_in_thai_wording(self):
+        # template เล่มไทยใช้หัวข้อ "บทคัดย่อภาษาไทย" / "บทคัดย่อภาษาอังกฤษ"
+        self.assertEqual(_toc_section_kind("บทคัดย่อภาษาไทย ง"), "abstract_th")
+        self.assertEqual(_toc_section_kind("บทคัดย่อภาษาอังกฤษ จ"), "abstract_en")
+        self.assertEqual(_toc_section_kind("สารบัญรูปภาพ ซ"), "list_figures")
+
+    def test_thai_abstract_entries_are_major_headings(self):
+        self.assertTrue(_is_toc_major_heading("บทคัดย่อภาษาไทย ง"))
+        self.assertTrue(_is_toc_major_heading("บทคัดย่อภาษาอังกฤษ จ"))
+
+    def test_abstract_heading_bold_is_expected_by_template(self):
+        self.assertTrue(_is_abstract_heading("บทคัดย่อ"))
+        self.assertTrue(_is_abstract_heading("ABSTRACT"))
+        self.assertTrue(_is_abstract_heading("ABSTRACT (ENGLISH)"))
+        self.assertFalse(_is_abstract_heading("Keywords: Resilience, Aging"))
+        self.assertFalse(_is_abstract_heading("FACTORS RELATED TO RESILIENCE"))
+
+    def test_image_only_page_counts_as_unextractable(self):
+        self.assertTrue(_is_blank_page_text(""))
+        self.assertTrue(_is_blank_page_text("   \n  "))
+
+    def test_thai_final_summary_chapter_does_not_flip_option_to_published(self):
+        # เล่มดั้งเดิม 6 บทจบด้วย "บทสรุปและข้อเสนอแนะ" ต้องยังเป็นรูปแบบ 1
+        body = [(1, "บทนำ", 7, 1), (2, "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง", 8, 2),
+                (3, "วิธีการดำเนินการวิจัย", 9, 3), (4, "ผลการวิจัย", 10, 4),
+                (5, "การอภิปรายผล", 11, 5), (6, "บทสรุปและข้อเสนอแนะ", 12, 6)]
+        self.assertEqual(resolve_option(body, {"format": "1"}, "strict"), 1)
+
+    def test_thai_published_option_is_inferred_from_first_chapter(self):
+        body = [(1, "บทสรุป", 7, 1), (2, "ผลงานตีพิมพ์", 8, 2)]
+        self.assertEqual(resolve_option(body, {"format": "2"}, "strict"), 2)
+
+    def test_scrambled_thai_chapter_prefix_is_stripped(self):
+        # PDF ไทยดึง "บทที่ 1" เป็น "บทท ี่ 1" — ต้องตัด prefix ได้และชื่อบทเทียบตรง
+        self.assertEqual(_toc_chapter_title("บทท ี่ 1 บทน า 1"), "บทน า")
+        compared, _ = compare_canonical_title(
+            _toc_chapter_title("บทท ี่ 1 บทน า 1"), ("บทนำ", "INTRODUCTION"))
+        self.assertEqual(compared["status"], "exact")
+
+    def test_symbol_abbreviation_list_heading_is_recognized(self):
+        self.assertEqual(_toc_section_kind("คำอธิบายสัญลักษณ์/คำย่อ ฎ"), "list_abbreviations")
+
+    def test_chapter_title_policy_variant_vs_wrong(self):
+        # นโยบายเจ้าหน้าที่: REVIEW/REVIEWS (ประกาศ vs คู่มือ) = ส้ม (variant)
+        # สะกดผิดจนไม่ใช่คำ เช่น METHODLOGY/RECOMMENDATONS = แดง (wrong) ทุกตำแหน่ง
+        kind, _, _ = canonical_title_status("LITERATURE REVIEW", 2, 1)
+        self.assertEqual(kind, "exact")
+        kind, _, _ = canonical_title_status("LITERATURE REVIEWS", 2, 1)
+        self.assertEqual(kind, "variant")
+        kind, _, expected = canonical_title_status("RESEARCH METHODLOGY", 3, 1)
+        self.assertEqual(kind, "wrong")
+        self.assertEqual(expected, "RESEARCH METHODOLOGY")
+        kind, _, _ = canonical_title_status("CONCLUSION AND RECOMMENDATONS", 6, 1)
+        self.assertEqual(kind, "wrong")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import pdfplumber
 
 from ethesis_rules import (
     BODY_RULES,
+    CANONICAL_ACCEPTED_VARIANTS,
     CANONICAL_OPTION_1,
     CANONICAL_OPTION_2,
     DEFAULT_RULE_BY_PART,
@@ -134,7 +135,13 @@ def cover_required_items(doc_type, program_language):
 
 
 def exact_reference_status(page_text, expected):
-    """Compare approved text at one required location without hiding case changes."""
+    """Compare approved text at one required location without hiding case changes.
+
+    ชื่อเรื่องยาวบนหน้าปก/หน้าลงนามมักถูกตัดขึ้นหลายบรรทัด และการดึงข้อความ PDF
+    อาจไม่ใส่ช่องว่างตรงรอยตัด (เช่น "FINE\nPARTICULATE" -> "FINEPARTICULATE")
+    ทำให้ substring แบบตรงตัวพลาดทั้งที่ข้อความครบ จึงเทียบแบบตัดช่องว่างทิ้ง
+    โดยยังคงตรวจตัวพิมพ์เล็ก-ใหญ่ได้
+    """
     expected = soft(expected)
     page_flat = soft(page_text)
     if not expected:
@@ -143,6 +150,13 @@ def exact_reference_status(page_text, expected):
         return norm(expected) in norm(page_text), "text"
     if expected in page_flat:
         return True, "exact"
+    nows = lambda s: re.sub(r'\s+', '', s)
+    expected_nows, page_nows = nows(expected), nows(page_flat)
+    if expected_nows in page_nows:
+        # ต่างเฉพาะการตัดบรรทัด/ช่องว่าง ถือว่าข้อความถูกต้อง
+        return True, "exact"
+    if expected_nows.casefold() in page_nows.casefold():
+        return False, "case"
     if expected.casefold() in page_flat.casefold():
         return False, "case"
     return False, "text"
@@ -160,7 +174,14 @@ def closest_text_line(page_text, expected):
 def closest_degree_line(page_text, expected):
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     markers = ('DEGREE', 'MASTER', 'DOCTOR', 'BACHELOR', 'MENG', 'MSC', 'PHD')
-    candidates = [line for line in lines if any(marker in norm(line) for marker in markers)]
+    candidates = []
+    for k, line in enumerate(lines):
+        if not any(marker in norm(line) for marker in markers):
+            continue
+        candidates.append(line)
+        # ชื่อปริญญาบนหน้าปกมักถูกตัดขึ้นบรรทัดใหม่ตรงวงเล็บสาขา — รวมบรรทัดถัดไปด้วย
+        if '(' not in line and k + 1 < len(lines) and '(' in lines[k + 1]:
+            candidates.append(line + ' ' + lines[k + 1])
     if not candidates:
         return closest_text_line(page_text, expected)
     parenthesized = [line for line in candidates if '(' in line and ')' in line]
@@ -179,6 +200,10 @@ def compare_values(actual, expected, rule_name):
             return {'status': 'exact', 'actual': actual, 'score': 1.0}
         if actual.casefold() == expected.casefold():
             return {'status': 'case', 'actual': actual, 'score': 1.0}
+        # ภาษาไทยไม่มีตัวพิมพ์เล็ก-ใหญ่ และการดึงข้อความ PDF ทำสระ/วรรณยุกต์
+        # เรียงเพี้ยนได้ จึงเทียบแบบ normalize เช่นเดียวกับ exact_reference_status
+        if re.search(r'[ก-๙]', expected) and norm(actual) == norm(expected):
+            return {'status': 'exact', 'actual': actual, 'score': 1.0}
     elif norm(actual) == norm(expected):
         return {'status': 'exact', 'actual': actual, 'score': 1.0}
     score = difflib.SequenceMatcher(None, norm(expected), norm(actual)).ratio()
@@ -252,6 +277,7 @@ def _is_toc_major_heading(text):
     normalized = norm(base)
     return (
         normalized in N_ACK + N_TOC + N_LISTS + N_BIO + [N_ABSTRACT_TH, 'ABSTRACT']
+        or normalized.startswith(N_ABSTRACT_TH)
         or normalized.startswith('ABSTRACT')
         or normalized.startswith('LISTOF')
         or any(normalized.startswith(term) for term in N_REF)
@@ -277,6 +303,8 @@ def _toc_section_kind(text):
     normalized = norm(_strip_toc_page_number(text))
     if normalized in N_ACK:
         return "ack"
+    if normalized.startswith(norm("บทคัดย่อภาษาอังกฤษ")):
+        return "abstract_en"
     if normalized == N_ABSTRACT_TH or normalized.startswith(norm("บทคัดย่อภาษาไทย")):
         return "abstract_th"
     if normalized.startswith("ABSTRACTTHAI"):
@@ -298,10 +326,22 @@ def _toc_section_kind(text):
     return ""
 
 
+def _is_abstract_heading(text):
+    """หัวเรื่อง 'บทคัดย่อ'/'ABSTRACT' เป็นตัวหนาตาม template อยู่แล้ว ไม่ใช่ข้อสังเกต"""
+    nl = norm(_strip_toc_page_number(text))
+    return (nl in ('ABSTRACT', 'ABSTRACTTHAI', 'ABSTRACTENGLISH')
+            or nl == N_ABSTRACT_TH
+            or nl.startswith(norm('บทคัดย่อภาษา')))
+
+
 def _toc_chapter_title(text):
-    """Return only the visible chapter title, without chapter/page numbers."""
+    """Return only the visible chapter title, without chapter/page numbers.
+
+    PDF ภาษาไทยมักดึง "บทที่ 1" ออกมาเป็น "บทท ี่ 1" (สระ/วรรณยุกต์หลุดจากตำแหน่ง)
+    จึงยอมรับ combining mark และช่องว่างแทรกระหว่างคำนำหน้ากับเลขบท
+    """
     return re.sub(
-        r'^(?:CHAPTER|บทที่)\s*\d+\s*',
+        r'^(?:CHAPTER|บทท)[ั-๎\s.]*\d+\s*',
         '',
         _strip_toc_page_number(text),
         flags=re.I,
@@ -312,7 +352,8 @@ def _toc_chapter_title(text):
 N_ABSTRACT_TH = norm('บทคัดย่อ')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
 N_TOC = [norm('สารบัญ'), 'TABLEOFCONTENTS', 'CONTENTS']
-N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญรูป'), norm('สารบัญภาพ'), norm('คำย่อ'),
+N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญรูป'), norm('สารบัญรูปภาพ'), norm('สารบัญภาพ'),
+           norm('คำย่อ'), norm('คำอธิบายสัญลักษณ์/คำย่อ'),
            'LISTOFTABLES', 'LISTOFFIGURES', 'LISTOFABBREVIATIONS', 'LISTOFILLUSTRATIONS']
 N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
@@ -323,6 +364,31 @@ CANONICAL_OPT1 = CANONICAL_OPTION_1
 CANONICAL_OPT2 = CANONICAL_OPTION_2
 
 
+def compare_canonical_title(actual_title, canonical_pair):
+    """เทียบชื่อบทกับชื่อมาตรฐานทั้ง 2 ภาษา แล้วรายงานด้วยภาษาที่ใกล้ที่สุด
+
+    ชื่อบทมาตรฐานเป็นคู่ (ไทย, อังกฤษ) — เล่มไทยต้องเทียบชื่อไทย เล่มอังกฤษ
+    เทียบชื่ออังกฤษ การเทียบข้างเดียวทำให้เล่มไทยถูกฟ้องว่า "ควรเป็น INTRODUCTION"
+    """
+    return max(
+        ((compare_values(actual_title, candidate, 'toc_heading'), candidate)
+         for candidate in canonical_pair),
+        key=lambda pair: (pair[0]['status'] == 'exact', pair[0]['score']),
+    )
+
+
+def canonical_title_status(actual_title, chapter_no, option):
+    """จัดชั้นชื่อบทเทียบประกาศ: exact | variant (ตามคู่มือ = ส้ม) | wrong (= แดง)"""
+    canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
+    compared, expected = compare_canonical_title(actual_title, canon[chapter_no - 1])
+    if compared['status'] == 'exact':
+        return 'exact', compared, expected
+    for variant in CANONICAL_ACCEPTED_VARIANTS.get((option, chapter_no), ()):
+        if norm(actual_title) == norm(variant):
+            return 'variant', compared, expected
+    return 'wrong', compared, expected
+
+
 def _chapter_match(line):
     """Return chapter number if the (normalized) line is 'CHAPTER n' / 'บทที่ n'."""
     nl = norm(line)
@@ -331,11 +397,16 @@ def _chapter_match(line):
 
 
 def resolve_option(body_ch, approved, chapters_mode):
-    """Resolve document option without forcing canonical titles in free mode."""
-    inferred = 2 if any(
-        norm(chapter[1]).startswith(norm(CANONICAL_OPT2[0][0]))
-        or norm(chapter[1]).startswith(norm(CANONICAL_OPT2[0][1]))
-        for chapter in body_ch
+    """Resolve document option without forcing canonical titles in free mode.
+
+    รูปแบบตีพิมพ์ (option 2) ขึ้นต้นเล่มด้วยบท "บทสรุป/SUMMARY" — ต้องดูเฉพาะ
+    บทที่ 1 เท่านั้น เพราะเล่มรูปแบบดั้งเดิมจบด้วย "บทสรุปและข้อเสนอแนะ"
+    ซึ่งขึ้นต้นเหมือนกัน หากกวาดทุกบทจะเดาเล่มไทยที่ถูกต้องเป็นรูปแบบ 2
+    """
+    first_chapter = next((c for c in body_ch if c[0] == 1), None)
+    inferred = 2 if first_chapter is not None and (
+        norm(first_chapter[1]).startswith(norm(CANONICAL_OPT2[0][0]))
+        or norm(first_chapter[1]).startswith(norm(CANONICAL_OPT2[0][1]))
     ) else 1
     selected = str((approved or {}).get("format", ""))
     if chapters_mode == "free" and selected in {"1", "2"}:
@@ -390,6 +461,16 @@ class Report:
         self.zones = {"RED": [], "ORANGE": [], "YELLOW": []}
         self.info = []
         self.human_checklist = []
+        self.verification = []
+
+    def add_verification(self, topic, location, status, detail=""):
+        """บันทึกผลเทียบข้อมูลอนุมัติรายตำแหน่ง — status: pass | fail | pending"""
+        group = next((g for g in self.verification if g["topic"] == topic), None)
+        if group is None:
+            group = {"topic": topic, "checks": []}
+            self.verification.append(group)
+        group["checks"].append({"location": location, "status": status,
+                                "detail": soft(detail)})
 
     def add(self, zone, part, loc, found, expected, fix="", rule_id=None):
         rule_id = rule_id or DEFAULT_RULE_BY_PART.get(part, "FORM.REQUIRED")
@@ -430,6 +511,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         rep.add("ORANGE", "-", Path(pdf_path).name, "ไม่ใช่ไฟล์ PDF", "ระบบตรวจ PDF เท่านั้น", "ส่งไฟล์ PDF")
         return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
                 "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
+                "verification": rep.verification,
                 "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {}}
 
     _p("เปิดไฟล์ PDF")
@@ -441,8 +523,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     "ต้องเป็น PDF ที่มีเนื้อหาอย่างน้อย 1 หน้า", "สร้างไฟล์ PDF ใหม่แล้วลองอีกครั้ง")
             return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
                     "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
+                    "verification": rep.verification,
                     "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {"n_pages": 0}}
-        _w, _h = _pdf.pages[0].width, _pdf.pages[0].height
         for _i, _pg in enumerate(_pdf.pages):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
@@ -451,11 +533,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 _pg.flush_cache()
             except Exception:
                 pass
-
-    W_, H_ = _w / 72 * 2.54, _h / 72 * 2.54
-    if not (20.5 <= W_ <= 21.5 and 29.2 <= H_ <= 30.2):
-        rep.add("YELLOW", "-", "ทั้งเล่ม", f"ขนาดกระดาษ {W_:.1f}x{H_:.1f} ซม.",
-                "A4 (21.0x29.7)", "", "PAGE.A4")
 
     all_norm = norm("\n".join(pages))
     doc_type = next((t for t, ms in TYPE_MARKERS.items()
@@ -471,7 +548,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         if any(x in N_ENTITLED for x in nls):
             sig_pages.append(i)
             continue
-        for j, nl in enumerate(nls[:8]):
+        # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
+        # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
+        for j, nl in enumerate(nls[:12]):
             if nl == N_ABSTRACT_TH:
                 abs_th_pages.append(i); break
             if nl == 'ABSTRACT' or re.match(r'^ABSTRACT\(', nl):
@@ -518,18 +597,31 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # หน้าว่าง: ถ้ายืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ เป็นเพียงข้อสังเกต
     # หากไม่มีเลขหน้าที่อ่านได้ ให้เจ้าหน้าที่ตรวจสอบแทนการฟันธง
+    # หน้าที่ไม่มีข้อความให้ดึงเลยมักเป็นหน้ารูปภาพ/สแกน (เช่น ภาคผนวก)
+    # จึงรวมหน้าติดกันเป็นรายการเดียว ไม่ฟ้องแยกทีละหน้า
+    blank_runs = []
     for blank_idx, page_text in enumerate(pages):
         if not _is_blank_page_text(page_text):
             continue
-        if blank_idx in printed and arabic_sequence_ok:
-            rep.add(BLANK_PAGE_ZONE, "body/end", page_ref(blank_idx),
-                    f"พบหน้าว่าง มีเลขหน้า {printed[blank_idx]} และเลขหน้าเรียงต่อเนื่อง",
-                    "หน้าว่างที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
-                    "ตรวจว่าหน้าว่างตั้งใจเว้นไว้", "PAGE.BLANK")
+        if blank_runs and blank_runs[-1][-1] == blank_idx - 1:
+            blank_runs[-1].append(blank_idx)
         else:
-            rep.add(UNCERTAIN_ZONE, "-", page_ref(blank_idx),
-                    "พบหน้าว่าง แต่ระบบยืนยันลำดับเลขหน้าของหน้านี้ไม่ได้",
-                    "เจ้าหน้าที่ตรวจสอบเลขหน้าและเหตุผลของการเว้นหน้าว่าง",
+            blank_runs.append([blank_idx])
+    for run in blank_runs:
+        run_ref = page_ref(run[0]) if len(run) == 1 else \
+            f"{page_ref(run[0])}–{page_ref(run[-1])} ({len(run)} หน้า)"
+        image_like = any(not (pages[i] or '').strip() for i in run)
+        kind = ("ไม่มีข้อความให้ดึงเลย อาจเป็นหน้ารูปภาพ/สแกน เช่น ภาคผนวก"
+                if image_like else "มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น")
+        if all(i in printed for i in run) and arabic_sequence_ok:
+            rep.add(BLANK_PAGE_ZONE, "body/end", run_ref,
+                    f"พบหน้าที่ระบบดึงข้อความไม่ได้ ({kind}) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง",
+                    "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
+                    "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "PAGE.BLANK")
+        else:
+            rep.add(UNCERTAIN_ZONE, "-", run_ref,
+                    f"พบหน้าที่ระบบดึงข้อความไม่ได้ ({kind}) และยืนยันลำดับเลขหน้าไม่ได้",
+                    "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
                     "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
@@ -550,7 +642,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
-    toc_page_indices = sorted(set(toc_pages + [p + 1 for p in toc_pages if p + 1 < n]))
+    # สารบัญอาจยาวหลายหน้า — สแกนตั้งแต่หน้าแรกของสารบัญไปจนถึง section ถัดไป
+    # ของส่วนนำ (เช่น LIST OF TABLES) ไม่ใช่แค่หน้าเดียวถัดจากหน้าสารบัญ
+    if toc_pages:
+        toc_start = toc_pages[0]
+        front_boundaries = sorted(set(
+            sig_pages + abs_th_pages + abs_en_pages + ack_pages + list_pages))
+        after_toc = [b for b in front_boundaries if b > toc_start]
+        toc_stop = min(after_toc) if after_toc else toc_start + 3
+        toc_page_indices = list(range(toc_start, min(toc_stop, toc_start + 4, n)))
+    else:
+        toc_page_indices = []
     toc_lines = [(page_idx, line) for page_idx in toc_page_indices
                  for line in pages[page_idx].split('\n')]
     toc_text = "\n".join(line for _page_idx, line in toc_lines)
@@ -595,6 +697,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
+    body_toc_flagged = set()
     if toc_ch:
         if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
             rep.add("RED", "body", "สารบัญ vs เนื้อหา",
@@ -606,6 +709,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
                 if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb:
+                    body_toc_flagged.add(cn)
                     compared = compare_values(title, _toc_chapter_title(t_raw), 'toc_heading')
                     rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
                             mismatch_detail("ชื่อบทในเนื้อหา", compared),
@@ -630,7 +734,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 "เพิ่มหรืออัปเดตสารบัญให้ครบ", "FRONT.TOC_CONTENT")
 
     # หัวข้อระดับหลักในสารบัญต้องเป็นตัวหนา (ไม่บังคับหัวข้อย่อย 1.1, 1.2, ...)
-    toc_scan_pages = sorted(set(toc_pages + [p + 1 for p in toc_pages if p + 1 < n]))
+    toc_scan_pages = toc_page_indices
     if toc_scan_pages:
         try:
             with pdfplumber.open(pdf_path) as _pl:
@@ -674,9 +778,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         for chapter_no, _title_norm, _page_no, raw, toc_page_idx in toc_ch:
             if 1 <= chapter_no <= len(toc_canon):
                 actual_title = _toc_chapter_title(raw)
-                expected_title = toc_canon[chapter_no - 1][1]
-                compared = compare_values(actual_title, expected_title, 'toc_heading')
-                if compared['status'] != 'exact':
+                kind, compared, expected_title = canonical_title_status(
+                    actual_title, chapter_no, option)
+                if kind == 'variant':
+                    rep.add("ORANGE", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {chapter_no}",
+                            f'ชื่อบทสะกดตามคู่มือ: "{actual_title}"',
+                            f"ประกาศใช้ \"{expected_title}\" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้",
+                            "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ",
+                            "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
+                elif kind == 'wrong':
                     rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {chapter_no}",
                             mismatch_detail("ชื่อบทในสารบัญ", compared),
                             f"ควรเป็น \"{expected_title}\"", "แก้การสะกดชื่อบทในสารบัญ",
@@ -692,14 +802,27 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_title_against_canonical']:
         canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
-        for idx0, (cn, title, body_page_idx, _) in enumerate(body_ch):
-            if idx0 < len(canon):
-                th, en = canon[idx0]
-                nb = norm(title)
-                if nb not in (norm(th), norm(en)) and not norm(en).startswith(nb[:20]):
-                    rep.add("RED", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})", f"ชื่อบท \"{title}\"",
-                            f"ตามประกาศ 2569 บทที่ {idx0+1} = \"{th}\" / \"{en}\"", "แก้ตามประกาศ",
-                            "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
+        for cn, title, body_page_idx, _ in body_ch:
+            if not (1 <= cn <= len(canon)) or cn in body_toc_flagged:
+                continue  # body↔สารบัญ ฟ้องบทนี้ไปแล้ว ไม่ฟ้องซ้ำ
+            kind, compared, expected_title = canonical_title_status(title, cn, option)
+            if kind == 'exact':
+                continue
+            # หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่ — ยอมรับกรณีชื่อมาตรฐานขึ้นต้นด้วยข้อความที่พบ
+            nb = norm(title)
+            if len(nb) >= 8 and any(norm(cand).startswith(nb) for cand in canon[cn - 1]):
+                continue
+            if kind == 'variant':
+                rep.add("ORANGE", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})",
+                        f'ชื่อบทในเนื้อหาสะกดตามคู่มือ: "{title}"',
+                        f"ประกาศใช้ \"{expected_title}\" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้",
+                        "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ",
+                        "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
+            else:
+                rep.add("RED", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})",
+                        mismatch_detail("ชื่อบทในเนื้อหา", compared),
+                        f"ตามประกาศ 2569 ควรเป็น \"{expected_title}\"", "แก้ชื่อบทให้ตรงประกาศ",
+                        "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
 
     # ---------- ส่วนท้ายเล่ม ----------
     _p("ตรวจส่วนท้ายเล่ม (อ้างอิง/ภาคผนวก/ประวัติ)")
@@ -793,10 +916,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
                     "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
         elif last_arabic is not None and int(m2.group(1)) != last_arabic:
-            rep.add("RED", "front_matter", lbl,
-                    f"ระบุจำนวนหน้า {m2.group(1)} แต่เลขหน้าสุดท้ายของเล่มคือ {last_arabic}",
-                    f"จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้าย ({last_arabic})",
-                    "แก้ตัวเลขให้ตรงเลขหน้าสุดท้าย", "FRONT.ABSTRACT")
+            stated_pages = int(m2.group(1))
+            # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
+            # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
+            count_zone = "ORANGE" if abs(stated_pages - last_arabic) <= 2 else "RED"
+            rep.add(count_zone, "front_matter", lbl,
+                    f"ระบุจำนวนหน้า {stated_pages} แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}",
+                    f"จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
+                    "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรง",
+                    "FRONT.ABSTRACT")
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
@@ -823,6 +951,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         bold_lines = [
                             line['text'] for line in _font_lines(_pl.pages[abs_page_idx])
                             if line['bold_ratio'] > 0 and len(norm(line['text'])) >= 2
+                            and not _is_abstract_heading(line['text'])
                         ]
                         if bold_lines:
                             examples = ", ".join(f'"{line}"' for line in bold_lines[:5])
@@ -932,6 +1061,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 spots.append((f"บทคัดย่อ ({page_ref(main_abs)})", pages[main_abs]))
             for spot_name, spot_text in spots:
                 compared = compare_reference_text(spot_text, main_title, 'title')
+                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", spot_name,
+                                     "pass" if compared['status'] == 'exact' else "fail",
+                                     "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อเรื่อง", compared),
@@ -942,12 +1074,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             alt_lbl = "บทคัดย่อภาษาอังกฤษ" if thai_book else "บทคัดย่อภาษาไทย"
             if alt_abs is not None:
                 compared = compare_reference_text(pages[alt_abs], alt_title, 'title')
+                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(alt_abs)})",
+                                     "pass" if compared['status'] == 'exact' else "fail",
+                                     "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
                             mismatch_detail("ชื่อเรื่องอีกภาษา", compared),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
                             "แก้ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
             else:
+                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
+                                     "ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ")
                 rep.add(FRONT_FAILURE_ZONE, "front_matter", alt_lbl, "ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ",
                         f"ชื่อเรื่อง \"{alt_title[:40]}...\" ต้องปรากฏในบทคัดย่อภาษานั้น",
                         "ตรวจด้วยตา", "FORM.APPROVED_MATCH")
@@ -999,6 +1136,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             ]
             for spot_name, spot_idx in name_spots:
                 compared = compare_reference_text(pages[spot_idx], primary_student_name, 'student_name')
+                rep.add_verification("ชื่อนักศึกษา", spot_name,
+                                     "pass" if compared['status'] == 'exact' else "fail",
+                                     "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อนักศึกษา", compared),
@@ -1022,11 +1162,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                             "กรอกฟอร์มให้ครบแล้วตรวจใหม่", "FORM.REQUIRED")
                 continue
             if aidx is None:
+                rep.add_verification("ชื่อนักศึกษา", albl, "pending",
+                                     f"ระบบหาหน้า{albl}ไม่เจอ")
                 rep.add(FRONT_FAILURE_ZONE, "front_matter", albl, f"ระบบหาหน้า{albl}ไม่เจอ จึงเทียบ{nlbl}ไม่ได้",
                         f"{nlbl} \"{nm3}\" ต้องปรากฏในหน้า{albl}", "ตรวจด้วยตา", "FORM.APPROVED_MATCH")
                 continue
             compared = compare_reference_text(pages[aidx], nm3, 'student_name')
             if compared['status'] != 'exact':
+                rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
+                                     "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",
                         mismatch_detail(f"{nlbl}", compared),
                         f"{nlbl}ของนักศึกษาต้องปรากฏในหน้า{albl} สะกดตรงข้อมูลอนุมัติ",
@@ -1035,35 +1179,72 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 first_tok = nm3.split()[0]
                 if re.search(PREFIX_RE + r"\s*" + re.escape(norm(first_tok))[:12], norm(pages[aidx]), re.I) and \
                    re.search(PREFIX_RE, pages[aidx], re.I):
+                    rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
+                                         "pending", "พบคำนำหน้านามหน้าชื่อ")
                     rep.add(FRONT_FAILURE_ZONE, "front_matter", f"{albl} ({page_ref(aidx)})",
                             f"พบคำนำหน้านามหน้า{nlbl} (เช่น นาย/นางสาว/Mr./Miss)",
                             "ชื่อนักศึกษาต้องไม่มีคำนำหน้านาม",
                             "ลบคำนำหน้านามออก แล้วให้เจ้าหน้าที่ยืนยัน", "FORM.APPROVED_MATCH")
+                else:
+                    rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})", "pass")
 
         student_id = re.sub(r'\D', '', A.get("student_id", ""))
         if student_id:
             cover_digits = re.sub(r'[^\d]', '', pages[0] if pages else "")
             if student_id in cover_digits:
+                rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "fail",
+                                     "พบรหัสบนหน้าปก")
                 rep.add("RED", "front_matter", "หน้าปก",
                         f"พบรหัสนักศึกษา {student_id} ต่อท้าย/อยู่ใกล้ชื่อนักศึกษา",
                         "หน้าปกต้องแสดงเฉพาะชื่อ-นามสกุล โดยไม่มีรหัสนักศึกษา",
                         "ลบรหัสนักศึกษาออกจากหน้าปก", "FORM.APPROVED_MATCH")
+            else:
+                rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "pass")
             if abs_en_idx is not None:
                 abstract_digits = re.sub(r'[^\d]', '', pages[abs_en_idx])
                 if student_id not in abstract_digits:
+                    rep.add_verification("รหัสนักศึกษา",
+                                         f"บทคัดย่อ ({page_ref(abs_en_idx)})", "fail",
+                                         f"ไม่พบรหัส {student_id}")
                     rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
                             f"ไม่พบรหัสนักศึกษา {student_id}",
                             "รหัสนักศึกษาต้องปรากฏในบรรทัดชื่อนักศึกษาของบทคัดย่อ",
                             "เพิ่มรหัสนักศึกษา", "FORM.APPROVED_MATCH")
+                else:
+                    rep.add_verification("รหัสนักศึกษา",
+                                         f"บทคัดย่อ ({page_ref(abs_en_idx)})", "pass")
+            else:
+                rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "pending",
+                                     "ระบบหาหน้าบทคัดย่อภาษาอังกฤษไม่เจอ")
 
-        degree = soft(A.get("degree", ""))
+        # เล่มหลักสูตรไทย: ปก/หน้าลงนามเป็นชื่อปริญญาภาษาไทย จึงใช้ชื่อปริญญาไทย
+        # (degree_th) ถ้ากรอกมา ส่วนเล่มอังกฤษใช้ชื่ออังกฤษเหมือนเดิม
+        degree_th = soft(A.get("degree_th", ""))
+        degree_en = soft(A.get("degree", ""))
+        degree = degree_th if (thai_book and degree_th) else degree_en
         if degree:
-            degree_spots = [("หน้าปก", pages[0] if pages else "", degree.upper())]
+            cover_degree = degree if thai_book else degree.upper()
+            degree_spots = [("หน้าปก", pages[0] if pages else "", cover_degree)]
             degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], degree)
                                 for k, idx in enumerate(sig_pages))
             for spot_name, spot_text, expected_degree in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
-                if compared['status'] != 'exact':
+                if compared['status'] == 'exact':
+                    rep.add_verification("ชื่อปริญญา", spot_name, "pass")
+                    continue
+                if norm(expected_degree) in norm(spot_text):
+                    rep.add_verification("ชื่อปริญญา", spot_name, "pending",
+                                         "ต่างเฉพาะวรรคตอน/ช่องว่าง")
+                else:
+                    rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
+                if norm(expected_degree) in norm(spot_text):
+                    # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
+                    # (เช่น comma ในวงเล็บสาขา) — ส้มให้เจ้าหน้าที่ยืนยัน
+                    rep.add("ORANGE", "front_matter", spot_name,
+                            f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
+                            f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
+                            "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                else:
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อปริญญา", compared),
                             f"ต้องเป็น \"{expected_degree}\"",
@@ -1072,20 +1253,49 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         degree_abbr = soft(A.get("degree_abbr", ""))
         if degree_abbr and abs_en_idx is not None:
             compared = compare_reference_text(pages[abs_en_idx], degree_abbr, 'degree', degree_line=True)
-            if compared['status'] != 'exact':
+            abbr_location = f"ชื่อย่อในบทคัดย่อ ({page_ref(abs_en_idx)})"
+            if compared['status'] == 'exact':
+                # ชื่อย่อพบครบ แต่บรรทัดนั้นต้องไม่มีคำอื่นเกิน เช่น "DEGREE M.Sc. (...)"
+                abbr_lines = [soft(line) for line in pages[abs_en_idx].splitlines()
+                              if degree_abbr in soft(line)]
+                if abbr_lines and not any(norm(line) == norm(degree_abbr) for line in abbr_lines):
+                    rep.add_verification("ชื่อปริญญา", abbr_location, "fail",
+                                         f"มีข้อความเกิน: {abbr_lines[0]}")
+                    rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
+                            f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{abbr_lines[0]}"',
+                            f"บรรทัดนี้ต้องเป็น \"{degree_abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
+                else:
+                    rep.add_verification("ชื่อปริญญา", abbr_location, "pass")
+            elif norm(degree_abbr) in norm(pages[abs_en_idx]):
+                rep.add_verification("ชื่อปริญญา", abbr_location, "pending",
+                                     "ต่างเฉพาะวรรคตอน/ช่องว่าง")
+                rep.add("ORANGE", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
+                        f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
+                        f"ข้อมูลอนุมัติ: \"{degree_abbr}\"",
+                        "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+            else:
+                rep.add_verification("ชื่อปริญญา", abbr_location, "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
                         mismatch_detail("ชื่อปริญญาแบบย่อ", compared),
                         f"ต้องเป็น \"{degree_abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
-        if A.get("exam_date") and norm(re.sub(r'\b0([1-9])', r'\1', A["exam_date"])) not in \
-                norm(re.sub(r'\b0([1-9])', r'\1', sig_text)):
+        if A.get("exam_date"):
             signature_location = ", ".join(page_ref(idx) for idx in sig_pages) or "หน้าไม่ระบุเลข"
-            rep.add("RED", "front_matter", f"หน้าลงนาม ({signature_location})", f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
-                    "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
-        if A.get("year") and str(A["year"]) not in (pages[0] if pages else ""):
-            rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {A['year']} บนหน้าปก",
-                    "ปี = ปีที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+            exam_found = norm(re.sub(r'\b0([1-9])', r'\1', A["exam_date"])) in \
+                norm(re.sub(r'\b0([1-9])', r'\1', sig_text))
+            rep.add_verification("วันที่สอบผ่าน", f"หน้าลงนาม ({signature_location})",
+                                 "pass" if exam_found else "fail")
+            if not exam_found:
+                rep.add("RED", "front_matter", f"หน้าลงนาม ({signature_location})", f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
+                        "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+        if A.get("year"):
+            year_found = str(A["year"]) in (pages[0] if pages else "")
+            rep.add_verification("ปีบนหน้าปก", "หน้าปก", "pass" if year_found else "fail")
+            if not year_found:
+                rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {A['year']} บนหน้าปก",
+                        "ปี = ปีที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
 
         # human checklist (หน้าลงนาม — เจ้าหน้าที่ตรวจเอง)
         rep.add_human("รายชื่อกรรมการ ตำแหน่งวิชาการ และคุณวุฒิ บนหน้าลงนามทั้ง 2 หน้า",
@@ -1198,4 +1408,5 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         "info": rep.info,
         "human_checklist": rep.human_checklist,
         "not_checked": NOT_CHECKED,
+        "verification": rep.verification,
     }

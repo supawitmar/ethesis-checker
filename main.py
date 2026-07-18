@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
+import llm_assist
 from checker import run_check
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
@@ -129,6 +130,19 @@ def _run_job(job_id, tmp_path, approved, chapters_mode):
 
     try:
         report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress)
+        report["context"]["ai_assist"] = llm_assist.enabled()
+        if llm_assist.enabled():
+            # ชั้นเสริมเท่านั้น — ถ้า AI ล้มเหลว รายงานจากกฎเดิมต้องออกครบตามปกติ
+            try:
+                progress("AI ช่วยกลั่นกรองรายการก้ำกึ่ง")
+                llm_assist.review_borderline(report)
+            except Exception:
+                print(f"job {job_id}: llm review failed\n{traceback.format_exc()}", flush=True)
+            try:
+                progress("AI สรุปคำแนะนำสำหรับนักศึกษา")
+                report["student_summary"] = llm_assist.student_summary(report, approved)
+            except Exception:
+                print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
         _update_job(job_id, report=report, stage="เสร็จสิ้น")
     except Exception:
         tb = traceback.format_exc()
@@ -203,6 +217,7 @@ async def check(
     student_name_th: str = Form(""),
     student_id: str = Form(""),
     degree: str = Form(""),
+    degree_th: str = Form(""),
     degree_abbr: str = Form(""),
     exam_date: str = Form(""),
     year: str = Form(""),
@@ -221,7 +236,8 @@ async def check(
     form_values = {
         "title_en": title_en.strip(), "title_th": title_th.strip(),
         "student_name": student_name.strip(), "student_name_th": student_name_th.strip(),
-        "student_id": student_id.strip(), "degree": degree.strip(), "degree_abbr": degree_abbr.strip(),
+        "student_id": student_id.strip(), "degree": degree.strip(), "degree_th": degree_th.strip(),
+        "degree_abbr": degree_abbr.strip(),
         "exam_date": exam_date.strip(), "year": year.strip(),
     }
     required_fields = FRONT_MATTER_RULES["required_form_fields"][program_language]
