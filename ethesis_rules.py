@@ -245,11 +245,12 @@ FRONT_MATTER_RULES = {
         ),
         "thai": (
             "title_en", "title_th", "student_name", "student_name_th",
-            "student_id", "degree", "degree_th", "degree_abbr", "exam_date", "year",
+            "student_id", "degree", "degree_th", "degree_abbr", "degree_abbr_th",
+            "exam_date", "year",
         ),
         "thai_english": (
             "title_en", "title_th", "student_name", "student_name_th",
-            "student_id", "degree", "degree_abbr", "exam_date", "year",
+            "student_id", "degree", "degree_abbr", "degree_abbr_th", "exam_date", "year",
         ),
     },
 }
@@ -262,7 +263,8 @@ FORM_FIELD_LABELS = {
     "student_id": "รหัสนักศึกษา",
     "degree": "ชื่อปริญญาเต็ม",
     "degree_th": "ชื่อปริญญาภาษาไทย",
-    "degree_abbr": "ชื่อปริญญาแบบย่อสำหรับบทคัดย่อ",
+    "degree_abbr": "ชื่อปริญญาแบบย่อในบทคัดย่ออังกฤษ",
+    "degree_abbr_th": "ชื่อปริญญาแบบย่อในบทคัดย่อไทย",
     "exam_date": "วันที่สอบผ่าน",
     "year": "ปีบนหน้าปก",
 }

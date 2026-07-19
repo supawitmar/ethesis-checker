@@ -1349,54 +1349,58 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
-                if norm(expected_degree) in norm(spot_text):
-                    rep.add_verification("ชื่อปริญญา", spot_name, "pending",
-                                         "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                else:
-                    rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
+                rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
                 if norm(expected_degree) in norm(spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
-                    # (เช่น comma ในวงเล็บสาขา) — ส้มให้เจ้าหน้าที่ยืนยัน
-                    rep.add("ORANGE", "front_matter", spot_name,
-                            f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
-                            f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
-                            "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                    # (เช่น comma ในวงเล็บสาขา) — ต้องตรงทั้งหมด จึงเป็นสีแดง
+                    rep.add("RED", "front_matter", spot_name,
+                            f'ชื่อปริญญาต่างเฉพาะเครื่องหมายวรรคตอน/ช่องว่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
+                            f"ต้องตรงข้อมูลอนุมัติทั้งหมด รวมเครื่องหมายวรรคตอน/ช่องว่าง: \"{expected_degree}\"",
+                            "แก้เครื่องหมายวรรคตอน/ช่องว่างให้ตรงข้อมูลอนุมัติทุกตัว", "FORM.APPROVED_MATCH")
                 else:
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อปริญญา", compared, expected_degree),
                             f"ต้องเป็น \"{expected_degree}\"",
                             "แก้ชื่อปริญญาให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
-        degree_abbr = soft(A.get("degree_abbr", ""))
-        if degree_abbr and abs_en_idx is not None:
-            compared = compare_reference_text(pages[abs_en_idx], degree_abbr, 'degree', degree_line=True)
-            abbr_location = f"ชื่อย่อในบทคัดย่อ ({page_ref(abs_en_idx)})"
+        # ตรวจชื่อปริญญาแบบย่อในบทคัดย่อ — เล่มหลักสูตรไทย/ไทย-อังกฤษ ต้องตรวจทั้ง
+        # บทคัดย่ออังกฤษ (M.Sc./Ph.D.) และบทคัดย่อไทย (วท.ม./ปร.ด.) จึงทำเป็น helper
+        def _check_degree_abbr(abbr, abstract_idx, lang):
+            if not abbr or abstract_idx is None:
+                return
+            abstract_text = pages[abstract_idx]
+            compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True)
+            vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
+            box = f"{lang} ({page_ref(abstract_idx)})"
             if compared['status'] == 'exact':
                 # ชื่อย่อพบครบ แต่บรรทัดนั้นต้องไม่มีคำอื่นเกิน เช่น "DEGREE M.Sc. (...)"
-                abbr_lines = [soft(line) for line in pages[abs_en_idx].splitlines()
-                              if degree_abbr in soft(line)]
-                if abbr_lines and not any(norm(line) == norm(degree_abbr) for line in abbr_lines):
-                    rep.add_verification("ชื่อปริญญา", abbr_location, "fail",
+                abbr_lines = [soft(line) for line in abstract_text.splitlines()
+                              if abbr in soft(line)]
+                if abbr_lines and not any(norm(line) == norm(abbr) for line in abbr_lines):
+                    rep.add_verification("ชื่อปริญญา", vloc, "fail",
                                          f"มีข้อความเกิน: {abbr_lines[0]}")
-                    rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
+                    rep.add("RED", "front_matter", box,
                             f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{abbr_lines[0]}"',
-                            f"บรรทัดนี้ต้องเป็น \"{degree_abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
                             "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
                 else:
-                    rep.add_verification("ชื่อปริญญา", abbr_location, "pass")
-            elif norm(degree_abbr) in norm(pages[abs_en_idx]):
-                rep.add_verification("ชื่อปริญญา", abbr_location, "pending",
-                                     "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                rep.add("ORANGE", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
-                        f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
-                        f"ข้อมูลอนุมัติ: \"{degree_abbr}\"",
-                        "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                    rep.add_verification("ชื่อปริญญา", vloc, "pass")
+            elif norm(abbr) in norm(abstract_text):
+                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง — ต้องตรงทั้งหมด จึงเป็นสีแดง
+                rep.add_verification("ชื่อปริญญา", vloc, "fail", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
+                rep.add("RED", "front_matter", box,
+                        f'ชื่อปริญญาแบบย่อต่างเฉพาะเครื่องหมายวรรคตอน/ช่องว่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
+                        f"ต้องตรงข้อมูลอนุมัติทั้งหมด รวมเครื่องหมายวรรคตอน/ช่องว่าง: \"{abbr}\"",
+                        "แก้เครื่องหมายวรรคตอน/ช่องว่างให้ตรงข้อมูลอนุมัติทุกตัว", "FORM.APPROVED_MATCH")
             else:
-                rep.add_verification("ชื่อปริญญา", abbr_location, "fail", compared['actual'])
-                rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
-                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared, degree_abbr),
-                        f"ต้องเป็น \"{degree_abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
+                rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
+                rep.add("RED", "front_matter", box,
+                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared, abbr),
+                        f"ต้องเป็น \"{abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+
+        _check_degree_abbr(soft(A.get("degree_abbr", "")), abs_en_idx, "บทคัดย่ออังกฤษ")
+        _check_degree_abbr(soft(A.get("degree_abbr_th", "")), abs_th_idx, "บทคัดย่อไทย")
 
         if A.get("exam_date"):
             signature_location = ", ".join(page_ref(idx) for idx in sig_pages) or "หน้าไม่ระบุเลข"

@@ -39,6 +39,26 @@ DEGREE_ABBR = {
 MINOR_WORDS = {'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from',
                'in', 'of', 'on', 'or', 'the', 'to', 'with'}
 
+# ตัวย่อชื่อปริญญาไทย = อักษรย่อของสาขา + ระดับ (.ม. = มหาบัณฑิต, .ด. = ดุษฎีบัณฑิต)
+# เช่น วิทยาศาสตรมหาบัณฑิต → วท.ม. / ปรัชญาดุษฎีบัณฑิต → ปร.ด.
+# eThesis ไม่มีตัวย่อไทยให้ดึง จึงเดาจากชื่อปริญญาไทย (เจ้าหน้าที่แก้ได้)
+DEGREE_ABBR_TH_STEM = {
+    'ปรัชญา': 'ปร',
+    'วิทยาศาสตร': 'วท',
+    'ศิลปศาสตร': 'ศศ',
+    'วิศวกรรมศาสตร': 'วศ',
+    'พยาบาลศาสตร': 'พย',
+    'สาธารณสุขศาสตร': 'ส',
+    'บริหารธุรกิจ': 'บธ',
+    'ศึกษาศาสตร': 'ศษ',
+    'รัฐประศาสนศาสตร': 'รป',
+    'เภสัชศาสตร': 'ภ',
+    'สังคมศาสตร': 'สค',
+    'อักษรศาสตร': 'อ',
+    'นิเทศศาสตร': 'นศ',
+    'เทคโนโลยีสารสนเทศ': 'ทส',
+}
+
 
 # ฟอนต์ไทย Angsana/Cordia ใน eThesis PDF เก็บวรรณยุกต์/การันต์ไว้ใน
 # Private Use Area (U+F700-F70F): F700-F704 สระบน, F705-F709 วรรณยุกต์ตำแหน่งปกติ,
@@ -174,6 +194,23 @@ def _degree_abbr(value):
     return f'{abbr} ({field})' if field else abbr
 
 
+def _degree_abbr_th(value):
+    """เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
+
+    คืน '' ถ้าเดาไม่ได้ (สาขาไม่อยู่ในตาราง) ให้เจ้าหน้าที่กรอกเอง
+    """
+    v = re.sub(r'\s+', '', value or '')
+    m = re.match(r'^(.+?)(ดุษฎีบัณฑิต|มหาบัณฑิต)\(?(.*?)\)?$', v)
+    if not m:
+        return ''
+    stem, level, field = m.group(1), m.group(2), m.group(3).strip()
+    abbr = DEGREE_ABBR_TH_STEM.get(stem)
+    if not abbr:
+        return ''
+    base = f"{abbr}.{'ด' if level == 'ดุษฎีบัณฑิต' else 'ม'}."
+    return f'{base} ({field})' if field else base
+
+
 def _exam_date(value, use_english):
     v = re.sub(r'\s+', ' ', value).strip()
     m = re.match(r'^(\d{1,2})\s+(\S+)\s+(25\d{2}|20\d{2})$', v)
@@ -231,7 +268,11 @@ def parse_ethesis_pdf(pdf_path):
         data['format'] = fmt
 
     id_value, id_index = _find(lines, 'รหัสนักศึกษา')
-    id_match = re.search(r'\b\d{7}\b', id_value + ' ' + _next(lines, id_index))
+    # รหัส นศ. = เลข 7 หลัก ตามด้วยรหัสหลักสูตร เช่น "6838141 SHSS/M" หรือติดกัน
+    # "6838141SHSS/M" — ใช้ lookaround กันเลขอื่น แต่ยอมให้ตัวอักษรติดท้ายได้
+    # และค้นครอบคลุมบรรทัดถัดไป 2 บรรทัด เผื่อค่าตกบรรทัด
+    id_scope = ' '.join([id_value, _next(lines, id_index), _next(lines, id_index, 2)])
+    id_match = re.search(r'(?<!\d)\d{7}(?!\d)', id_scope)
     if id_match:
         data['student_id'] = id_match.group(0)
 
@@ -276,6 +317,9 @@ def parse_ethesis_pdf(pdf_path):
                 data['degree_abbr'] = abbr
         if thai:
             data['degree_th'] = thai
+            abbr_th = _degree_abbr_th(thai)
+            if abbr_th:
+                data['degree_abbr_th'] = abbr_th
 
     exam_value = _find(lines, 'วันที่สอบผ่าน')[0]
     use_english = data.get('program_language') != 'thai'

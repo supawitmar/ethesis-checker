@@ -122,7 +122,10 @@
     </div>
     <div class="row">
       <div><label>ชื่อปริญญาที่ใช้ตรวจ (Sentence case — เล่มอังกฤษ)</label><input name="degree" placeholder="Master of Engineering (Civil Engineering)" required></div>
-      <div><label>ชื่อปริญญาแบบย่อในบทคัดย่อ</label><input name="degree_abbr" placeholder="M.Eng. (CIVIL ENGINEERING)" required></div>
+      <div><label>ชื่อปริญญาแบบย่อในบทคัดย่ออังกฤษ</label><input name="degree_abbr" placeholder="M.Eng. (CIVIL ENGINEERING)" required></div>
+    </div>
+    <div class="row">
+      <div><label>ชื่อปริญญาแบบย่อในบทคัดย่อไทย (เล่มหลักสูตรไทย)</label><input name="degree_abbr_th" id="degree-abbr-th" placeholder="วศ.ม. (วิศวกรรมอุตสาหการสมาร์ต)"></div>
     </div>
     <div class="note">ℹ️ ช่องที่ระบบเติมจาก eThesis แก้ไขได้ทุกช่อง กรุณาตรวจทานก่อนตรวจเล่ม — เล่มหลักสูตรไทยระบบใช้ "ชื่อปริญญาภาษาไทย" ตรวจปกและหน้าลงนาม</div>
     <div class="row">
@@ -221,6 +224,24 @@ function formatDegreeAbbreviation(value) {
   return field ? `${abbreviation} (${field})` : abbreviation;
 }
 
+// เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
+function formatDegreeAbbreviationTh(value) {
+  const stems = {
+    'ปรัชญา':'ปร', 'วิทยาศาสตร':'วท', 'ศิลปศาสตร':'ศศ', 'วิศวกรรมศาสตร':'วศ',
+    'พยาบาลศาสตร':'พย', 'สาธารณสุขศาสตร':'ส', 'บริหารธุรกิจ':'บธ', 'ศึกษาศาสตร':'ศษ',
+    'รัฐประศาสนศาสตร':'รป', 'เภสัชศาสตร':'ภ', 'สังคมศาสตร':'สค', 'อักษรศาสตร':'อ',
+    'นิเทศศาสตร':'นศ', 'เทคโนโลยีสารสนเทศ':'ทส'
+  };
+  const v = (value || '').replace(/\s+/g, '');
+  const match = v.match(/^(.+?)(ดุษฎีบัณฑิต|มหาบัณฑิต)\(?(.*?)\)?$/);
+  if (!match) return '';
+  const abbr = stems[match[1]];
+  if (!abbr) return '';
+  const base = `${abbr}.${match[2] === 'ดุษฎีบัณฑิต' ? 'ด' : 'ม'}.`;
+  const field = match[3].trim();
+  return field ? `${base} (${field})` : base;
+}
+
 function formatExamDate(value, useEnglish) {
   const months = {
     'มกราคม':'January', 'กุมภาพันธ์':'February', 'มีนาคม':'March',
@@ -294,7 +315,11 @@ function parseEthesisText(source, sourceHtml='') {
     const thaiDegree = candidates.find(value => /[ก-๙]/.test(value));
     // ชื่อปริญญาต้นฉบับ (อังกฤษ) เก็บไว้อ้างอิง, ชื่อไทยไว้ตรวจเล่มหลักสูตรไทย
     if (englishDegree) data.degree_source = englishDegree;
-    if (thaiDegree) data.degree_th = thaiDegree;
+    if (thaiDegree) {
+      data.degree_th = thaiDegree;
+      const abbrTh = formatDegreeAbbreviationTh(thaiDegree);
+      if (abbrTh) data.degree_abbr_th = abbrTh;
+    }
     // ช่อง "ที่ใช้ตรวจ" เป็น sentence-case อังกฤษเสมอ (ใช้กับเล่มอังกฤษ)
     data.degree = englishDegree ? formatDegreeName(englishDegree) : '';
     if (englishDegree) data.degree_abbr = formatDegreeAbbreviation(englishDegree);
@@ -334,7 +359,8 @@ const IMPORT_LABELS = {
   doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
   title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
   student_name_th:'ชื่อภาษาไทย', student_id:'รหัสนักศึกษา', degree_source:'ชื่อปริญญาต้นฉบับ (อังกฤษ)',
-  degree_th:'ชื่อปริญญาภาษาไทย', degree:'ชื่อปริญญา Sentence case', degree_abbr:'ชื่อปริญญาแบบย่อในบทคัดย่อ',
+  degree_th:'ชื่อปริญญาภาษาไทย', degree:'ชื่อปริญญา Sentence case', degree_abbr:'ชื่อปริญญาแบบย่อในบทคัดย่ออังกฤษ',
+  degree_abbr_th:'ชื่อปริญญาแบบย่อในบทคัดย่อไทย',
   exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก'
 };
 
@@ -411,6 +437,8 @@ function updateConditionalRequirements() {
   document.querySelector('[name="student_name_th"]').required = requiresThai;
   // เล่มหลักสูตรไทย ปก/หน้าลงนามเป็นภาษาไทย จึงต้องมีชื่อปริญญาภาษาไทย
   document.querySelector('[name="degree_th"]').required = (program === 'thai');
+  // เล่มไทย/ไทย-อังกฤษ มีบทคัดย่อไทย ต้องมีตัวย่อไทยไว้ตรวจ
+  document.querySelector('[name="degree_abbr_th"]').required = requiresThai;
 }
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);

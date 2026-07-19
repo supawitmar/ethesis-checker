@@ -255,6 +255,7 @@ async def check(
     degree: str = Form(""),
     degree_th: str = Form(""),
     degree_abbr: str = Form(""),
+    degree_abbr_th: str = Form(""),
     exam_date: str = Form(""),
     year: str = Form(""),
     chapters_mode: str = Form("strict"),
@@ -273,7 +274,7 @@ async def check(
         "title_en": title_en.strip(), "title_th": title_th.strip(),
         "student_name": student_name.strip(), "student_name_th": student_name_th.strip(),
         "student_id": student_id.strip(), "degree": degree.strip(), "degree_th": degree_th.strip(),
-        "degree_abbr": degree_abbr.strip(),
+        "degree_abbr": degree_abbr.strip(), "degree_abbr_th": degree_abbr_th.strip(),
         "exam_date": exam_date.strip(), "year": year.strip(),
     }
     required_fields = FRONT_MATTER_RULES["required_form_fields"][program_language]
