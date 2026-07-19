@@ -314,6 +314,7 @@ async def check(
         if b"%PDF-" not in header:
             raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
 
+        # โพรบว่าอ่านข้อความได้ไหม (สุ่มไม่กี่หน้า เร็วแม้ไฟล์ใหญ่) แล้วปฏิเสธทันที
         readability_issue = await asyncio.to_thread(_pdf_readability_issue, tmp_path)
         if readability_issue:
             raise HTTPException(status_code=422, detail=readability_issue)

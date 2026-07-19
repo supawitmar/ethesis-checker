@@ -41,10 +41,14 @@ uvicorn main:app --env-file .env --host 0.0.0.0 --port 8000
 ## 5. Deploy บนคลาวด์ (เช่น Render)
 1. ชี้ Root/Build ไปที่โฟลเดอร์ `code/`
 2. Build: `pip install -r requirements.txt`
-3. Start: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+3. Start: `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`
    (แพลตฟอร์มกำหนดพอร์ตผ่าน `$PORT` เอง)
 4. ตั้ง Environment Variable `APP_PASSWORD` (และ `ANTHROPIC_API_KEY` ถ้าจะใช้ AI)
    ในหน้าตั้งค่าของแพลตฟอร์มโดยตรง — ไม่ต้องใช้ไฟล์ `.env`
+
+> ⚠️ **ต้องรัน worker เดียว (`--workers 1`)** สถานะงานตรวจเก็บในหน่วยความจำ
+> ของโปรเซส ถ้ามีหลาย worker/instance คำขอเช็คสถานะ (`/progress`) อาจไปตกคน
+> ละโปรเซสที่ไม่มีงานนั้น ทำให้ขึ้น "ขาดการเชื่อมต่อกับระบบตรวจ" ทั้งที่ตรวจอยู่
 
 ## 6. หมายเหตุด้านความปลอดภัย
 - คุกกี้ session ตั้ง flag `secure` เมื่อรันบน Render (ตรวจจาก env `RENDER`)

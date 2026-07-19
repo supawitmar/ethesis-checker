@@ -457,24 +457,31 @@ document.getElementById('f').addEventListener('submit', async function(e){
       throw new Error(errorBody.detail || ('อัปโหลดไม่สำเร็จ (' + resp.status + ')'));
     }
     const {job_id} = await resp.json();
+    // เล่มหนา ๆ ตรวจนานและอาจทำให้ /progress ตอบช้าชั่วคราว จึงทนต่อการตอบไม่ได้
+    // ติดต่อกันหลายครั้ง (~1 นาที) ก่อนจะแจ้งว่าขาดการเชื่อมต่อ + ตั้ง timeout ต่อครั้ง
     let pollFailures = 0;
+    const MAX_POLL_FAILURES = 45;   // ~54 วินาทีที่ตอบไม่ได้ติดต่อกัน
     const timer = setInterval(async () => {
       try {
-        const r = await fetch('/progress/' + job_id);
-        if (!r.ok) throw new Error('poll failed');
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 8000);
+        let r;
+        try { r = await fetch('/progress/' + job_id, {signal: ctrl.signal}); }
+        finally { clearTimeout(to); }
+        if (!r.ok) throw new Error('poll failed ' + r.status);
         const p = await r.json();
         pollFailures = 0;
         stage.textContent = p.stage;
         if (p.done) { clearInterval(timer); window.location.href = '/result/' + job_id; }
       } catch(err) {
         pollFailures += 1;
-        if (pollFailures >= 5) {
+        if (pollFailures >= MAX_POLL_FAILURES) {
           clearInterval(timer);
           overlay.style.display = 'none';
-          alert('ขาดการเชื่อมต่อกับระบบตรวจ กรุณาลองใหม่');
+          alert('ขาดการเชื่อมต่อกับระบบตรวจ (ระบบไม่ตอบสนองนานเกินไป) กรุณาลองใหม่');
         }
       }
-    }, 700);
+    }, 1200);
   } catch(err) {
     overlay.style.display = 'none';
     alert('เกิดข้อผิดพลาด: ' + err.message);
