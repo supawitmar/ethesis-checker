@@ -52,6 +52,50 @@ def soft(s):
     return re.sub(r'\s+', ' ', (s or '')).strip()
 
 
+def _page_text(page):
+    """ดึงข้อความหน้า PDF โดยจัดลำดับสระบน/ล่างและวรรณยุกต์ไทยให้ถูกต้อง
+
+    pdfplumber.extract_text() เรียงอักขระตามพิกัด x ทำให้ combining mark ของไทย
+    (สระบน-ล่าง/วรรณยุกต์/การันต์) หลุดไปอยู่หลังพยัญชนะตัวถัดไป เช่น "วิจัย"→"วิจยั",
+    "อภิปราย"→"อภปิราย" ทำให้ข้อความที่แสดงในรายงานอ่านไม่ออก (แม้ผลตัดสินยังถูก
+    เพราะ norm() ตัดวรรณยุกต์ทิ้งก่อนเทียบ)
+
+    อาศัยข้อเท็จจริงว่า combining mark ถูกวาดต่อท้ายพยัญชนะฐานทันที จึงมี x0 ≈ x1
+    ของฐานเสมอ → ผูก mark กลับเข้ากับฐานที่ขอบขวา (x1) ใกล้ x0 ของ mark ที่สุด
+    แล้วประกอบใหม่เรียงตามพิกัด x  หน้าที่ไม่มี chars (หน้าภาพ/สแกน) คืน extract_text()
+    """
+    chars = getattr(page, 'chars', None)
+    if not chars:
+        return page.extract_text() or ''
+    rows = {}
+    for c in chars:
+        rows.setdefault(round(c['top'] / 3.0), []).append(c)
+    out_lines = []
+    for key in sorted(rows):
+        row = rows[key]
+        bases = sorted((c for c in row if not _TH_MARKS.match(c['text'])),
+                       key=lambda c: c['x0'])
+        if not bases:
+            continue
+        attached = {id(b): [] for b in bases}
+        for m in row:
+            if _TH_MARKS.match(m['text']):
+                base = min(bases, key=lambda b: abs(b['x1'] - m['x0']))
+                attached[id(base)].append(m)
+        parts, prev = [], None
+        for b in bases:
+            if prev is not None and (b['x0'] - prev['x1']) > 1.2:
+                parts.append(' ')
+            marks = ''.join(m['text'] for m in sorted(attached[id(b)],
+                                                      key=lambda m: (m['x0'], m['top'])))
+            parts.append(b['text'] + marks)
+            prev = b
+        line = re.sub(r' +', ' ', ''.join(parts)).replace('ํา', 'ำ').strip()
+        if line:
+            out_lines.append(line)
+    return '\n'.join(out_lines)
+
+
 def top_lines(page_text, k=10):
     return [l.strip() for l in page_text.split('\n') if l.strip()][:k]
 
@@ -624,7 +668,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         for _i, _pg in enumerate(_pdf.pages):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
-            pages.append(_pg.extract_text() or "")
+            pages.append(_page_text(_pg))
             try:
                 _pg.flush_cache()
             except Exception:
