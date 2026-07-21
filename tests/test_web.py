@@ -17,9 +17,10 @@ FORM = {
     "chapters_mode": "strict",
     "title_en": "TEST TITLE",
     "student_name": "TEST STUDENT",
-    "student_id": "6000000",
-    "degree": "Master of Engineering",
-    "degree_abbr": "M.Eng.",
+    "student_id": "6000000 TEST/M",
+    "degree_cover_en": "MASTER OF ENGINEERING",
+    "degree_sig_en": "Master of Engineering",
+    "degree_abbr_en": "M.Eng.",
     "exam_date": "17 July 2026",
     "year": "2026",
 }
@@ -107,7 +108,7 @@ class WebSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_missing_strict_reference_field(self):
-        form = {**FORM, "degree": ""}
+        form = {**FORM, "degree_sig_en": ""}
         response = self.client.post(
             "/check",
             data=form,

@@ -116,10 +116,17 @@ class ExactReferenceTests(unittest.TestCase):
     def test_front_matter_is_strict_and_missing_values_are_red(self):
         self.assertTrue(FRONT_MATTER_RULES["strict"])
         self.assertEqual(FRONT_MATTER_RULES["failure_zone"], "RED")
-        self.assertIn("degree", FRONT_MATTER_RULES["required_form_fields"]["international"])
+        international = FRONT_MATTER_RULES["required_form_fields"]["international"]
+        self.assertIn("degree_cover_en", international)
+        self.assertIn("degree_sig_en", international)
+        self.assertIn("degree_abbr_en", international)
         self.assertIn("student_name_th", FRONT_MATTER_RULES["required_form_fields"]["thai"])
-        self.assertIn("degree_abbr", FRONT_MATTER_RULES["required_form_fields"]["international"])
-        self.assertEqual(FORM_FIELD_LABELS["degree"], "ชื่อปริญญาเต็ม")
+        # เล่มไทยล้วนใช้ชุดภาษาไทยตรวจปก/หน้าลงนาม
+        thai = FRONT_MATTER_RULES["required_form_fields"]["thai"]
+        self.assertIn("degree_cover_th", thai)
+        self.assertIn("degree_sig_th", thai)
+        self.assertIn("ใช้ตรวจหน้าปก", FORM_FIELD_LABELS["degree_cover_en"])
+        self.assertIn("หน้าลงนาม", FORM_FIELD_LABELS["degree_sig_en"])
 
     def test_official_announcement_has_highest_source_precedence(self):
         self.assertEqual(SOURCE_PRECEDENCE[0], "announcement_2569")

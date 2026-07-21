@@ -272,9 +272,15 @@ def parse_ethesis_pdf(pdf_path):
     # "6838141SHSS/M" — ใช้ lookaround กันเลขอื่น แต่ยอมให้ตัวอักษรติดท้ายได้
     # และค้นครอบคลุมบรรทัดถัดไป 2 บรรทัด เผื่อค่าตกบรรทัด
     id_scope = ' '.join([id_value, _next(lines, id_index), _next(lines, id_index, 2)])
-    id_match = re.search(r'(?<!\d)\d{7}(?!\d)', id_scope)
-    if id_match:
-        data['student_id'] = id_match.group(0)
+    # รหัสเต็มคือเลข 7 หลัก + รหัสหลักสูตร เช่น "6838141 SHSS/M" — ต้องใช้ทั้งชุด
+    # เพราะบทคัดย่อพิมพ์ครบทั้งสองส่วน ถ้าหารหัสหลักสูตรไม่เจอค่อยใช้เลข 7 หลักอย่างเดียว
+    full = re.search(r'(?<!\d)(\d{7})\s*([A-Z]{2,8}/[A-Z])', id_scope)
+    if full:
+        data['student_id'] = f'{full.group(1)} {full.group(2)}'
+    else:
+        id_match = re.search(r'(?<!\d)\d{7}(?!\d)', id_scope)
+        if id_match:
+            data['student_id'] = id_match.group(0)
 
     name_value, name_index = _find(lines, 'ชื่อ-สกุล')
     if name_value:
@@ -309,14 +315,17 @@ def parse_ethesis_pdf(pdf_path):
         english = next((c for c in candidates
                         if re.search(r'[A-Za-z]', c) and not re.search(r'[ก-๙]', c)), '')
         thai = next((c for c in candidates if re.search(r'[ก-๙]', c)), '')
+        # แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis ตรง ๆ, หน้าลงนาม = Sentence
+        # case สำหรับอังกฤษ (ไทยคงเดิม), บทคัดย่อ = ตัวย่อ
         if english:
-            data['degree_source'] = english
-            data['degree'] = _degree_name(english)
+            data['degree_cover_en'] = english
+            data['degree_sig_en'] = _degree_name(english)
             abbr = _degree_abbr(english)
             if abbr:
-                data['degree_abbr'] = abbr
+                data['degree_abbr_en'] = abbr
         if thai:
-            data['degree_th'] = thai
+            data['degree_cover_th'] = thai
+            data['degree_sig_th'] = thai
             abbr_th = _degree_abbr_th(thai)
             if abbr_th:
                 data['degree_abbr_th'] = abbr_th
