@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 import llm_assist
-from checker import run_check
+from checker import plain_summary, run_check
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
@@ -348,6 +348,33 @@ def progress(job_id: str):
             "error": bool(job["error"])}
 
 
+@app.post("/summary/{job_id}")
+async def rebuild_summary(job_id: str, request: Request):
+    """สร้างข้อความสรุปใหม่ตามผลพิจารณาของเจ้าหน้าที่
+
+    ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน" จะถูกรวมเข้าไปเป็นรายการที่ต้องแก้ด้วย
+    ขอข้อความที่ AI เรียบเรียงเมื่อส่ง ai=true เท่านั้น (คุมจำนวนครั้งที่เรียก AI)
+    """
+    job = _get_job(job_id)
+    if not job or not job.get("report"):
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    failed = [str(k) for k in (payload.get("failed") or [])][:200]
+    report = job["report"]
+    plain = plain_summary(report, failed)
+    result = {"plain": plain}
+    if payload.get("ai") and llm_assist.enabled():
+        try:
+            result["ai"] = await asyncio.to_thread(
+                llm_assist.student_summary, {**report, "plain_summary": plain})
+        except Exception:
+            print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
+    return result
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result(request: Request, job_id: str):
     job = _get_job(job_id)
@@ -362,7 +389,7 @@ def result(request: Request, job_id: str):
             f"<p>รหัสงาน: <code>{job_id}</code></p>"
             "<a href='/'>&larr; กลับไปตรวจใหม่</a>", status_code=500)
     return templates.TemplateResponse(request=request, name="report.html", context={
-        "report": job["report"], "zone_label": ZONE_LABEL,
+        "report": job["report"], "zone_label": ZONE_LABEL, "job_id": job_id,
         "pdf_name": job["pdf_name"], "student": job.get("approved") or {},
     })
 

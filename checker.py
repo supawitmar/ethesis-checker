@@ -280,28 +280,48 @@ def summary_section(issue):
     return best or "อื่น ๆ"
 
 
-def plain_summary(report):
-    """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)"""
-    zones = [("RED", "ต้องแก้ไข"), ("ORANGE", "รอเจ้าหน้าที่ยืนยัน"), ("YELLOW", "ข้อสังเกต")]
+def issues_to_fix(report, failed=None):
+    """รายการที่ต้องแก้ = สีแดงทั้งหมด + ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน"
+
+    failed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
+    ส้ม/เหลืองที่ยังไม่ตัดสิน หรือกดผ่านแล้ว จะไม่เข้าสรุป (ไม่ต้องให้นักศึกษาแก้)
+    """
+    failed = set(failed or ())
+    items = list(report["issues_by_zone"].get("RED") or [])
+    for zone in ("ORANGE", "YELLOW"):
+        for index, issue in enumerate(report["issues_by_zone"].get(zone) or []):
+            if f"{zone}:{index}" in failed:
+                items.append(issue)
+    return items
+
+
+def plain_summary(report, failed=None):
+    """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
+
+    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด
+    """
+    items = issues_to_fix(report, failed)
     lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
-    for zone, zone_label in zones:
-        items = report["issues_by_zone"].get(zone) or []
-        if not items:
+    if not items:
+        lines.append("\nไม่พบจุดที่ต้องแก้ไข")
+        return "\n".join(lines).strip()
+
+    lines.append(f"\nกรุณาแก้ไขตามรายการต่อไปนี้ ({len(items)} จุด)")
+    grouped = {}
+    for issue in items:
+        grouped.setdefault(summary_section(issue), []).append(issue)
+    for section in SUMMARY_SECTION_ORDER:
+        section_items = grouped.get(section)
+        if not section_items:
             continue
-        lines.append(f"\n===== {zone_label} ({len(items)}) =====")
-        grouped = {}
-        for issue in items:
-            grouped.setdefault(summary_section(issue), []).append(issue)
-        for section in SUMMARY_SECTION_ORDER:
-            for issue in grouped.get(section, []):
-                if grouped.get(section) and issue is grouped[section][0]:
-                    lines.append(f"\n[{section}]")
-                lines.append(f"- {summary_tidy(issue.get('location'))}: "
-                             f"{summary_tidy(issue.get('found'))}")
-                fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
-                fix = _SUMMARY_LEAD.sub("", fix)
-                if fix:
-                    lines.append(f"  → แก้เป็น: {fix}")
+        lines.append(f"\n[{section}]")
+        for issue in section_items:
+            lines.append(f"- {summary_tidy(issue.get('location'))}: "
+                         f"{summary_tidy(issue.get('found'))}")
+            fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+            fix = _SUMMARY_LEAD.sub("", fix)
+            if fix:
+                lines.append(f"  → แก้เป็น: {fix}")
     return "\n".join(lines).strip()
 
 

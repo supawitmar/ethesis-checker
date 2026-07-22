@@ -221,7 +221,7 @@
     {% if report.student_summary %}
     <script id="ai-summary-data" type="application/json">{{ report.student_summary | tojson }}</script>
     {% endif %}
-    <details class="copybox" open data-verdict="{{ report.verdict }}">
+    <details class="copybox" open data-verdict="{{ report.verdict }}" data-job="{{ job_id }}">
       <summary class="copy-sum">📋 <span data-th="สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)" data-en="Summary of fixes (copyable)">สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)</span>
         <button type="button" class="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
       </summary>
@@ -290,7 +290,7 @@
           <span class="cat-n">{{ items | length }} <span data-th="รายการ" data-en="items">รายการ</span></span>
         </summary>
       {% for it in items %}
-      <div class="issue {{ zone }}">
+      <div class="issue {{ zone }}" data-zone="{{ zone }}" data-idx="{{ report.issues_by_zone[zone].index(it) }}">
         <div class="bar"></div>
         <div class="in">
           <div class="loc"><span class="part">{{ it.part }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
@@ -594,8 +594,10 @@ function aiSummaryText(){
   try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
 }
 var SUMMARY_MODE = aiSummaryText() ? 'ai' : 'raw';
+var PLAIN_TEXT = buildSummaryText();
+var AI_TEXT = aiSummaryText();
 function currentSummaryText(){
-  return SUMMARY_MODE === 'ai' ? (aiSummaryText() || buildSummaryText()) : buildSummaryText();
+  return SUMMARY_MODE === 'ai' ? (AI_TEXT || PLAIN_TEXT) : PLAIN_TEXT;
 }
 function renderSummary(){
   const ta = document.querySelector('.copy-text');
@@ -608,7 +610,49 @@ function renderSummary(){
     b.classList.toggle('on', b.getAttribute('data-mode') === SUMMARY_MODE);
   });
 }
-function setSummaryMode(mode){ SUMMARY_MODE = mode; renderSummary(); }
+function setSummaryMode(mode){
+  SUMMARY_MODE = mode;
+  renderSummary();
+  // เพิ่งสลับมาโหมด AI แต่ยังไม่มีข้อความตามผลพิจารณาล่าสุด — ขอใหม่
+  if (mode === 'ai' && !AI_TEXT) refreshSummary();
+}
+
+// ---- รวมรายการที่เจ้าหน้าที่กด "ไม่ผ่าน" เข้าไปในสรุป ----
+// ส้ม/เหลืองที่ถูกกดไม่ผ่าน ถือเป็นสิ่งที่นักศึกษาต้องแก้ จึงต้องอยู่ในสรุปด้วย
+function collectFailed(){
+  return Array.from(document.querySelectorAll('.issue.state-fail[data-zone]'))
+    .map(el => el.getAttribute('data-zone') + ':' + el.getAttribute('data-idx'))
+    .filter(k => k.indexOf('RED:') !== 0);   // สีแดงอยู่ในสรุปอยู่แล้ว
+}
+var _summaryTimer = null;
+function setSummaryBusy(on){
+  const box = document.querySelector('.copybox .copy-btn');
+  if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
+}
+function refreshSummary(){
+  const box = document.querySelector('.copybox');
+  const job = box && box.getAttribute('data-job');
+  if (!job) return;
+  const wantAi = (SUMMARY_MODE === 'ai');
+  setSummaryBusy(true);
+  fetch('/summary/' + job, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({failed: collectFailed(), ai: wantAi}),
+  }).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+    .then(function(data){
+      if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
+      if (typeof data.ai === 'string' && data.ai) AI_TEXT = data.ai;
+      renderSummary();
+    })
+    .catch(function(){ /* สรุปเดิมยังใช้ได้ ไม่ต้องรบกวนผู้ใช้ */ })
+    .finally(function(){ setSummaryBusy(false); });
+}
+function scheduleSummaryRefresh(){
+  AI_TEXT = '';                    // ผลพิจารณาเปลี่ยน ข้อความ AI เดิมใช้ไม่ได้แล้ว
+  clearTimeout(_summaryTimer);
+  _summaryTimer = setTimeout(refreshSummary, 900);
+}
 
 function copySummary(ev, btn){
   ev.preventDefault();  // กันไม่ให้ปุ่มไปสลับการเปิด/ปิด <details>
@@ -636,6 +680,8 @@ function setPF(btn, state){
     btn.classList.add('on');
     card.classList.add('state-' + state);
   }
+  // ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป (ส้ม/เหลืองที่ไม่ผ่าน = ต้องแก้)
+  if (card.classList.contains('issue')) scheduleSummaryRefresh();
 }
 function toggleNote(btn){
   const box = btn.parentElement.querySelector('.note-editor');
