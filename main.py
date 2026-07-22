@@ -252,9 +252,12 @@ async def check(
     student_name: str = Form(""),
     student_name_th: str = Form(""),
     student_id: str = Form(""),
-    degree: str = Form(""),
-    degree_th: str = Form(""),
-    degree_abbr: str = Form(""),
+    degree_cover_en: str = Form(""),
+    degree_cover_th: str = Form(""),
+    degree_sig_en: str = Form(""),
+    degree_sig_th: str = Form(""),
+    degree_abbr_en: str = Form(""),
+    degree_abbr_th: str = Form(""),
     exam_date: str = Form(""),
     year: str = Form(""),
     chapters_mode: str = Form("strict"),
@@ -272,8 +275,10 @@ async def check(
     form_values = {
         "title_en": title_en.strip(), "title_th": title_th.strip(),
         "student_name": student_name.strip(), "student_name_th": student_name_th.strip(),
-        "student_id": student_id.strip(), "degree": degree.strip(), "degree_th": degree_th.strip(),
-        "degree_abbr": degree_abbr.strip(),
+        "student_id": student_id.strip(),
+        "degree_cover_en": degree_cover_en.strip(), "degree_cover_th": degree_cover_th.strip(),
+        "degree_sig_en": degree_sig_en.strip(), "degree_sig_th": degree_sig_th.strip(),
+        "degree_abbr_en": degree_abbr_en.strip(), "degree_abbr_th": degree_abbr_th.strip(),
         "exam_date": exam_date.strip(), "year": year.strip(),
     }
     required_fields = FRONT_MATTER_RULES["required_form_fields"][program_language]
@@ -313,6 +318,7 @@ async def check(
         if b"%PDF-" not in header:
             raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
 
+        # โพรบว่าอ่านข้อความได้ไหม (สุ่มไม่กี่หน้า เร็วแม้ไฟล์ใหญ่) แล้วปฏิเสธทันที
         readability_issue = await asyncio.to_thread(_pdf_readability_issue, tmp_path)
         if readability_issue:
             raise HTTPException(status_code=422, detail=readability_issue)

@@ -11,6 +11,7 @@ from checker import (
     _toc_section_kind,
     _toc_chapter_title,
     canonical_title_status,
+    closest_degree_line,
     compare_canonical_title,
     compare_values,
     cover_required_items,
@@ -23,7 +24,9 @@ from checker import (
 )
 from ethesis_rules import (
     BODY_RULES,
+    CANONICAL_ENFORCED_COUNT,
     CANONICAL_OPTION_1,
+    CANONICAL_OPTION_2,
     FORM_FIELD_LABELS,
     FRONT_MATTER_RULES,
     MATCH_RULES,
@@ -116,10 +119,17 @@ class ExactReferenceTests(unittest.TestCase):
     def test_front_matter_is_strict_and_missing_values_are_red(self):
         self.assertTrue(FRONT_MATTER_RULES["strict"])
         self.assertEqual(FRONT_MATTER_RULES["failure_zone"], "RED")
-        self.assertIn("degree", FRONT_MATTER_RULES["required_form_fields"]["international"])
+        international = FRONT_MATTER_RULES["required_form_fields"]["international"]
+        self.assertIn("degree_cover_en", international)
+        self.assertIn("degree_sig_en", international)
+        self.assertIn("degree_abbr_en", international)
         self.assertIn("student_name_th", FRONT_MATTER_RULES["required_form_fields"]["thai"])
-        self.assertIn("degree_abbr", FRONT_MATTER_RULES["required_form_fields"]["international"])
-        self.assertEqual(FORM_FIELD_LABELS["degree"], "ชื่อปริญญาเต็ม")
+        # เล่มไทยล้วนใช้ชุดภาษาไทยตรวจปก/หน้าลงนาม
+        thai = FRONT_MATTER_RULES["required_form_fields"]["thai"]
+        self.assertIn("degree_cover_th", thai)
+        self.assertIn("degree_sig_th", thai)
+        self.assertIn("ใช้ตรวจหน้าปก", FORM_FIELD_LABELS["degree_cover_en"])
+        self.assertIn("หน้าลงนาม", FORM_FIELD_LABELS["degree_sig_en"])
 
     def test_official_announcement_has_highest_source_precedence(self):
         self.assertEqual(SOURCE_PRECEDENCE[0], "announcement_2569")
@@ -270,6 +280,119 @@ class ThaiBookRegressionTests(unittest.TestCase):
         self.assertEqual(expected, "RESEARCH METHODOLOGY")
         kind, _, _ = canonical_title_status("CONCLUSION AND RECOMMENDATONS", 6, 1)
         self.assertEqual(kind, "wrong")
+
+
+class DegreeFieldsByLocationTests(unittest.TestCase):
+    """ชื่อปริญญาแยก 3 คู่ ผูกกับตำแหน่งที่ใช้ตรวจ (ปก / หน้าลงนาม / บทคัดย่อ)"""
+
+    def test_international_uses_english_set_only(self):
+        fields = FRONT_MATTER_RULES["required_form_fields"]["international"]
+        self.assertIn("degree_cover_en", fields)
+        self.assertIn("degree_sig_en", fields)
+        self.assertIn("degree_abbr_en", fields)
+        # นานาชาติไม่มีบทคัดย่อไทยและปก/ลงนามไม่ใช่ภาษาไทย
+        self.assertNotIn("degree_cover_th", fields)
+        self.assertNotIn("degree_abbr_th", fields)
+
+    def test_thai_book_uses_thai_set_for_cover_and_signature(self):
+        fields = FRONT_MATTER_RULES["required_form_fields"]["thai"]
+        self.assertIn("degree_cover_th", fields)
+        self.assertIn("degree_sig_th", fields)
+        # เล่มไทยยังมีบทคัดย่ออังกฤษด้วย จึงต้องมีตัวย่อทั้งสองภาษา
+        self.assertIn("degree_abbr_en", fields)
+        self.assertIn("degree_abbr_th", fields)
+
+    def test_thai_english_book_uses_english_cover_but_needs_thai_abstract(self):
+        fields = FRONT_MATTER_RULES["required_form_fields"]["thai_english"]
+        self.assertIn("degree_cover_en", fields)
+        self.assertIn("degree_sig_en", fields)
+        self.assertIn("degree_abbr_th", fields)
+        self.assertNotIn("degree_cover_th", fields)
+
+    def test_labels_name_the_location_each_field_checks(self):
+        self.assertIn("หน้าปก", FORM_FIELD_LABELS["degree_cover_en"])
+        self.assertIn("หน้าปก", FORM_FIELD_LABELS["degree_cover_th"])
+        self.assertIn("หน้าลงนาม", FORM_FIELD_LABELS["degree_sig_en"])
+        self.assertIn("บทคัดย่อ", FORM_FIELD_LABELS["degree_abbr_en"])
+
+
+class DegreeMismatchSeverityTests(unittest.TestCase):
+    """นโยบาย: ต่างเฉพาะวรรคตอน/ช่องว่าง = ส้ม, สะกดผิด = แดง
+
+    ตัวตัดสินคือ norm(ข้อมูลอนุมัติ) ยังอยู่ในหน้านั้นหรือไม่ (ตัวอักษรครบ = ส้ม)
+    """
+
+    APPROVED = "M.Sc. (INFORMATION TECHNOLOGY MANAGEMENT)"
+
+    def test_punctuation_only_difference_keeps_every_letter(self):
+        page = "M.Sc (INFORMATION TECHNOLOGY MANAGEMENT)"   # ตกจุดท้าย Sc
+        self.assertFalse(exact_reference_status(page, self.APPROVED)[0])
+        self.assertIn(norm(self.APPROVED), norm(page))       # -> เข้าเงื่อนไขสีส้ม
+
+    def test_misspelled_degree_loses_letters(self):
+        page = "M.Sd. (INFORMATION TECHNOLOGY MANAGEMENT)"   # สะกดผิด c -> d
+        self.assertFalse(exact_reference_status(page, self.APPROVED)[0])
+        self.assertNotIn(norm(self.APPROVED), norm(page))     # -> เข้าเงื่อนไขสีแดง
+
+    def test_line_wrap_only_still_counts_as_exact(self):
+        # ต่างเฉพาะการตัดบรรทัด ไม่ถือว่าผิด
+        page = "M.Sc.\n(INFORMATION TECHNOLOGY MANAGEMENT)"
+        self.assertIn(norm(self.APPROVED), norm(page))
+
+
+class CoverDegreeLineTests(unittest.TestCase):
+    """ชื่อปริญญาบนหน้าปกมักถูกตัดหลายบรรทัด ต้องรวมก่อนเทียบ"""
+
+    def test_degree_split_at_parenthesis_is_joined(self):
+        page = ("A THESIS SUBMITTED IN PARTIAL FULFILLMENT\n"
+                "MASTER OF SCIENCE\n"
+                "(INFORMATION TECHNOLOGY MANAGEMENT)\n"
+                "FACULTY OF GRADUATE STUDIES")
+        line = closest_degree_line(page, "MASTER OF SCIENCE(INFORMATION TECHNOLOGY MANAGEMENT)")
+        self.assertIn("MASTER OF SCIENCE", line)
+        self.assertIn("INFORMATION TECHNOLOGY MANAGEMENT", line)
+
+    def test_degree_split_mid_parenthesis_is_joined(self):
+        # วงเล็บเปิดค้างท้ายบรรทัด — เคสที่ตรรกะเดิมพลาด
+        page = ("COVER\n"
+                "MASTER OF SCIENCE (WELL-BEING AND\n"
+                "SUSTAINABILITY)\n"
+                "MAHIDOL UNIVERSITY")
+        line = closest_degree_line(page, "MASTER OF SCIENCE (WELL-BEING AND SUSTAINABILITY)")
+        self.assertIn("WELL-BEING", line)
+        self.assertIn("SUSTAINABILITY)", line)
+
+    def test_thai_cover_degree_is_found_and_joined(self):
+        # เดิมไม่มีคำบ่งชี้ภาษาไทยเลย เล่มไทยจึงรวมบรรทัดไม่ได้
+        page = ("ชื่อเรื่องภาษาไทย\n"
+                "ปริญญาศิลปศาสตรมหาบัณฑิต\n"
+                "(สังคมศาสตร์สิ่งแวดล้อม)\n"
+                "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
+        line = closest_degree_line(page, "ศิลปศาสตรมหาบัณฑิต(สังคมศาสตร์สิ่งแวดล้อม)")
+        self.assertIn("ศิลปศาสตรมหาบัณฑิต", line)
+        self.assertIn("สังคมศาสตร์สิ่งแวดล้อม", line)
+
+
+class ChapterScopeByFormatTests(unittest.TestCase):
+    """รูปแบบ 1 บังคับชื่อครบ 6 บท, รูปแบบ 2 บังคับเฉพาะบท 1-2"""
+
+    def test_format1_enforces_every_chapter(self):
+        self.assertEqual(CANONICAL_ENFORCED_COUNT[1], len(CANONICAL_OPTION_1))
+
+    def test_format2_enforces_only_summary_and_publication(self):
+        self.assertEqual(CANONICAL_ENFORCED_COUNT[2], 2)
+        self.assertEqual(CANONICAL_OPTION_2[0][1], "SUMMARY")
+        self.assertEqual(CANONICAL_OPTION_2[1][1], "PUBLICATION")
+
+    def test_format2_third_chapter_is_optional_and_unnamed(self):
+        # บทที่ 3 มีชื่อในทะเบียนไว้อ้างอิง แต่อยู่นอกช่วงที่บังคับ
+        self.assertGreater(len(CANONICAL_OPTION_2), CANONICAL_ENFORCED_COUNT[2])
+
+    def test_chapter_titles_are_cross_checked_three_ways(self):
+        # ประกาศ ↔ สารบัญ ↔ เนื้อหา ต้องเปิดตรวจครบทั้งสามด้าน
+        self.assertTrue(BODY_RULES["check_toc_title_against_body"])
+        self.assertTrue(BODY_RULES["check_body_title_against_canonical"])
+        self.assertTrue(BODY_RULES["check_toc_chapter_presence"])
 
 
 if __name__ == "__main__":

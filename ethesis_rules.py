@@ -240,16 +240,21 @@ FRONT_MATTER_RULES = {
     "strict": True,
     "failure_zone": "RED",
     "required_form_fields": {
+        # ชื่อปริญญาแยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis, หน้าลงนาม =
+        # Sentence case (อังกฤษ) / ไทยคงเดิม, บทคัดย่อ = ตัวย่อ
         "international": (
-            "title_en", "student_name", "student_id", "degree", "degree_abbr", "exam_date", "year",
+            "title_en", "student_name", "student_id",
+            "degree_cover_en", "degree_sig_en", "degree_abbr_en", "exam_date", "year",
         ),
         "thai": (
-            "title_en", "title_th", "student_name", "student_name_th",
-            "student_id", "degree", "degree_th", "degree_abbr", "exam_date", "year",
+            "title_en", "title_th", "student_name", "student_name_th", "student_id",
+            "degree_cover_th", "degree_sig_th", "degree_abbr_en", "degree_abbr_th",
+            "exam_date", "year",
         ),
         "thai_english": (
-            "title_en", "title_th", "student_name", "student_name_th",
-            "student_id", "degree", "degree_abbr", "exam_date", "year",
+            "title_en", "title_th", "student_name", "student_name_th", "student_id",
+            "degree_cover_en", "degree_sig_en", "degree_abbr_en", "degree_abbr_th",
+            "exam_date", "year",
         ),
     },
 }
@@ -260,9 +265,12 @@ FORM_FIELD_LABELS = {
     "student_name": "ชื่อนักศึกษาภาษาอังกฤษ",
     "student_name_th": "ชื่อนักศึกษาภาษาไทย",
     "student_id": "รหัสนักศึกษา",
-    "degree": "ชื่อปริญญาเต็ม",
-    "degree_th": "ชื่อปริญญาภาษาไทย",
-    "degree_abbr": "ชื่อปริญญาแบบย่อสำหรับบทคัดย่อ",
+    "degree_cover_en": "ชื่อปริญญาต้นฉบับจาก eThesis (อังกฤษ) — ใช้ตรวจหน้าปก",
+    "degree_cover_th": "ชื่อปริญญาต้นฉบับจาก eThesis (ไทย) — ใช้ตรวจหน้าปก",
+    "degree_sig_en": "ชื่อปริญญาที่ใช้ตรวจหน้าลงนาม (อังกฤษ)",
+    "degree_sig_th": "ชื่อปริญญาที่ใช้ตรวจหน้าลงนาม (ไทย)",
+    "degree_abbr_en": "ชื่อปริญญาแบบย่อในบทคัดย่อ (อังกฤษ)",
+    "degree_abbr_th": "ชื่อปริญญาแบบย่อในบทคัดย่อ (ไทย)",
     "exam_date": "วันที่สอบผ่าน",
     "year": "ปีบนหน้าปก",
 }
@@ -304,6 +312,12 @@ CANONICAL_OPTION_2 = [
     ("ผลงานตีพิมพ์", "PUBLICATION"),
     ("เนื้อหาเพิ่มเติม", "ADDITIONAL CONTEXT"),
 ]
+
+# จำนวนบทที่ "ประกาศบังคับชื่อ" ของแต่ละรูปแบบ
+#   รูปแบบ 1 = ครบทั้ง 6 บท
+#   รูปแบบ 2 = เฉพาะบทที่ 1 (บทสรุป) และบทที่ 2 (ผลงานตีพิมพ์)
+#              บทที่ 3 มีได้แต่ไม่บังคับชื่อ — ตรวจแค่สารบัญตรงกับเนื้อหา
+CANONICAL_ENFORCED_COUNT = {1: 6, 2: 2}
 
 TOC_ALLOWED_LIST_HEADINGS = (
     "LIST OF TABLES",

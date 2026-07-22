@@ -15,6 +15,7 @@ import pdfplumber
 from ethesis_rules import (
     BODY_RULES,
     CANONICAL_ACCEPTED_VARIANTS,
+    CANONICAL_ENFORCED_COUNT,
     CANONICAL_OPTION_1,
     CANONICAL_OPTION_2,
     DEFAULT_RULE_BY_PART,
@@ -50,6 +51,50 @@ def norm(s):
 
 def soft(s):
     return re.sub(r'\s+', ' ', (s or '')).strip()
+
+
+def _page_text(page):
+    """ดึงข้อความหน้า PDF โดยจัดลำดับสระบน/ล่างและวรรณยุกต์ไทยให้ถูกต้อง
+
+    pdfplumber.extract_text() เรียงอักขระตามพิกัด x ทำให้ combining mark ของไทย
+    (สระบน-ล่าง/วรรณยุกต์/การันต์) หลุดไปอยู่หลังพยัญชนะตัวถัดไป เช่น "วิจัย"→"วิจยั",
+    "อภิปราย"→"อภปิราย" ทำให้ข้อความที่แสดงในรายงานอ่านไม่ออก (แม้ผลตัดสินยังถูก
+    เพราะ norm() ตัดวรรณยุกต์ทิ้งก่อนเทียบ)
+
+    อาศัยข้อเท็จจริงว่า combining mark ถูกวาดต่อท้ายพยัญชนะฐานทันที จึงมี x0 ≈ x1
+    ของฐานเสมอ → ผูก mark กลับเข้ากับฐานที่ขอบขวา (x1) ใกล้ x0 ของ mark ที่สุด
+    แล้วประกอบใหม่เรียงตามพิกัด x  หน้าที่ไม่มี chars (หน้าภาพ/สแกน) คืน extract_text()
+    """
+    chars = getattr(page, 'chars', None)
+    if not chars:
+        return page.extract_text() or ''
+    rows = {}
+    for c in chars:
+        rows.setdefault(round(c['top'] / 3.0), []).append(c)
+    out_lines = []
+    for key in sorted(rows):
+        row = rows[key]
+        bases = sorted((c for c in row if not _TH_MARKS.match(c['text'])),
+                       key=lambda c: c['x0'])
+        if not bases:
+            continue
+        attached = {id(b): [] for b in bases}
+        for m in row:
+            if _TH_MARKS.match(m['text']):
+                base = min(bases, key=lambda b: abs(b['x1'] - m['x0']))
+                attached[id(base)].append(m)
+        parts, prev = [], None
+        for b in bases:
+            if prev is not None and (b['x0'] - prev['x1']) > 1.2:
+                parts.append(' ')
+            marks = ''.join(m['text'] for m in sorted(attached[id(b)],
+                                                      key=lambda m: (m['x0'], m['top'])))
+            parts.append(b['text'] + marks)
+            prev = b
+        line = re.sub(r' +', ' ', ''.join(parts)).replace('ํา', 'ำ').strip()
+        if line:
+            out_lines.append(line)
+    return '\n'.join(out_lines)
 
 
 def top_lines(page_text, k=10):
@@ -195,21 +240,30 @@ def closest_text_line(page_text, expected):
 
 
 def closest_degree_line(page_text, expected):
+    """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
+
+    ชื่อปริญญาบนหน้าปกมักถูกตัดเป็น 2-3 บรรทัด ได้หลายแบบ เช่น
+      "MASTER OF SCIENCE" / "(INFORMATION TECHNOLOGY MANAGEMENT)"   (ขึ้นบรรทัดตรงวงเล็บ)
+      "MASTER OF SCIENCE (WELL-BEING AND" / "SUSTAINABILITY)"        (วงเล็บเปิดค้าง)
+    จึงสร้างตัวเลือกจาก "หน้าต่างบรรทัดต่อเนื่อง 1-3 บรรทัด" รอบบรรทัดที่มีคำบ่งชี้
+    แล้วเลือกอันที่ใกล้เคียงข้อมูลอนุมัติที่สุด (เล่มไทยต้องมีคำบ่งชี้ไทยด้วย)
+    """
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
-    markers = ('DEGREE', 'MASTER', 'DOCTOR', 'BACHELOR', 'MENG', 'MSC', 'PHD')
+    markers = ('DEGREE', 'MASTER', 'DOCTOR', 'BACHELOR', 'MENG', 'MSC', 'PHD',
+               norm('ปริญญา'), norm('มหาบัณฑิต'), norm('ดุษฎีบัณฑิต'))
     candidates = []
     for k, line in enumerate(lines):
         if not any(marker in norm(line) for marker in markers):
             continue
-        candidates.append(line)
-        # ชื่อปริญญาบนหน้าปกมักถูกตัดขึ้นบรรทัดใหม่ตรงวงเล็บสาขา — รวมบรรทัดถัดไปด้วย
-        if '(' not in line and k + 1 < len(lines) and '(' in lines[k + 1]:
-            candidates.append(line + ' ' + lines[k + 1])
+        for span in (1, 2, 3):
+            if k + span <= len(lines):
+                candidates.append(' '.join(lines[k:k + span]))
     if not candidates:
         return closest_text_line(page_text, expected)
-    parenthesized = [line for line in candidates if '(' in line and ')' in line]
-    if parenthesized:
-        candidates = parenthesized
+    # ชื่อปริญญามีสาขาในวงเล็บเสมอ — ถ้ามีตัวเลือกที่วงเล็บครบให้ใช้ชุดนั้นก่อน
+    balanced = [line for line in candidates if '(' in line and ')' in line]
+    if balanced:
+        candidates = balanced
     target = norm(expected)
     return max(candidates, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
 
@@ -624,7 +678,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         for _i, _pg in enumerate(_pdf.pages):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
-            pages.append(_pg.extract_text() or "")
+            pages.append(_page_text(_pg))
             try:
                 _pg.flush_cache()
             except Exception:
@@ -805,7 +859,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
-    body_toc_flagged = set()
     if toc_ch:
         if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
             rep.add("RED", "body", "สารบัญ vs เนื้อหา",
@@ -817,7 +870,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
                 if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb:
-                    body_toc_flagged.add(cn)
                     toc_title = _toc_chapter_title(t_raw)
                     compared = compare_values(title, toc_title, 'toc_heading')
                     rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
@@ -882,10 +934,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         mismatch_detail("หัวข้อสารบัญ", compared, expected),
                         f"ควรเป็น \"{expected}\"", "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
 
+    # ประกาศบังคับชื่อบทเท่าที่กำหนดไว้: รูปแบบ 1 ครบ 6 บท, รูปแบบ 2 เฉพาะบท 1-2
+    # (บทที่ 3 ของรูปแบบ 2 ไม่บังคับชื่อ — ตรวจแค่สารบัญตรงกับเนื้อหา)
+    enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
+
     if chapters_mode == 'strict':
-        toc_canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
         for chapter_no, _title_norm, _page_no, raw, toc_page_idx in toc_ch:
-            if 1 <= chapter_no <= len(toc_canon):
+            if 1 <= chapter_no <= enforced_chapters:
                 actual_title = _toc_chapter_title(raw)
                 kind, compared, expected_title = canonical_title_status(
                     actual_title, chapter_no, option)
@@ -909,11 +964,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             rep.add("RED", "body", "ทั้งเล่ม", f"พบ {len(body_ch)} บท",
                     "รูปแบบตีพิมพ์ต้องมี 2-3 บท", "", "BODY.OPTION2")
 
+    # ชื่อบทต้องตรงกันทั้ง 3 ทาง: ประกาศ ↔ สารบัญ ↔ เนื้อหา โดยยึดประกาศเป็นหลัก
+    # จึงเทียบเนื้อหากับประกาศเสมอ แม้สารบัญกับเนื้อหาจะต่างกันไปแล้ว (เดิมข้ามไป
+    # ทำให้ไม่รู้ว่าฝั่งไหนผิดจากประกาศ)
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_title_against_canonical']:
         canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
         for cn, title, body_page_idx, _ in body_ch:
-            if not (1 <= cn <= len(canon)) or cn in body_toc_flagged:
-                continue  # body↔สารบัญ ฟ้องบทนี้ไปแล้ว ไม่ฟ้องซ้ำ
+            if not (1 <= cn <= enforced_chapters):
+                continue
             kind, compared, expected_title = canonical_title_status(title, cn, option)
             if kind == 'exact':
                 continue
@@ -1305,10 +1363,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 else:
                     rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})", "pass")
 
-        student_id = re.sub(r'\D', '', A.get("student_id", ""))
+        # รหัสนักศึกษา = เลข 7 หลัก + รหัสหลักสูตร (เช่น "6838141 SHSS/M") ต้องตรวจทั้งชุด
+        # และต้องปรากฏในบทคัดย่อ "ทุกภาษาที่เล่มมี" (นานาชาติมีเฉพาะอังกฤษ)
+        student_id = soft(A.get("student_id", ""))
         if student_id:
+            digits_only = re.sub(r'\D', '', student_id)
             cover_digits = re.sub(r'[^\d]', '', pages[0] if pages else "")
-            if student_id in cover_digits:
+            if digits_only and digits_only in cover_digits:
                 rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "fail",
                                      "พบรหัสบนหน้าปก")
                 rep.add("RED", "front_matter", "หน้าปก",
@@ -1317,86 +1378,99 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         "ลบรหัสนักศึกษาออกจากหน้าปก", "FORM.APPROVED_MATCH")
             else:
                 rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "pass")
-            if abs_en_idx is not None:
-                abstract_digits = re.sub(r'[^\d]', '', pages[abs_en_idx])
-                if student_id not in abstract_digits:
-                    rep.add_verification("รหัสนักศึกษา",
-                                         f"บทคัดย่อ ({page_ref(abs_en_idx)})", "fail",
-                                         f"ไม่พบรหัส {student_id}")
-                    rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
-                            f"ไม่พบรหัสนักศึกษา {student_id}",
-                            "รหัสนักศึกษาต้องปรากฏในบรรทัดชื่อนักศึกษาของบทคัดย่อ",
-                            "เพิ่มรหัสนักศึกษา", "FORM.APPROVED_MATCH")
-                else:
-                    rep.add_verification("รหัสนักศึกษา",
-                                         f"บทคัดย่อ ({page_ref(abs_en_idx)})", "pass")
-            else:
-                rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "pending",
-                                     "ระบบหาหน้าบทคัดย่อภาษาอังกฤษไม่เจอ")
 
-        # เล่มหลักสูตรไทย: ปก/หน้าลงนามเป็นชื่อปริญญาภาษาไทย จึงใช้ชื่อปริญญาไทย
-        # (degree_th) ถ้ากรอกมา ส่วนเล่มอังกฤษใช้ชื่ออังกฤษเหมือนเดิม
-        degree_th = soft(A.get("degree_th", ""))
-        degree_en = soft(A.get("degree", ""))
-        degree = degree_th if (thai_book and degree_th) else degree_en
-        if degree:
-            cover_degree = degree if thai_book else degree.upper()
-            degree_spots = [("หน้าปก", pages[0] if pages else "", cover_degree)]
-            degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], degree)
-                                for k, idx in enumerate(sig_pages))
+            abstract_spots = [(abs_en_idx, "บทคัดย่ออังกฤษ"), (abs_th_idx, "บทคัดย่อไทย")]
+            if not any(idx is not None for idx, _ in abstract_spots):
+                rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "pending",
+                                     "ระบบหาหน้าบทคัดย่อไม่เจอ")
+            for abs_idx, abs_label in abstract_spots:
+                if abs_idx is None:
+                    continue
+                loc = f"{abs_label} ({page_ref(abs_idx)})"
+                if norm(student_id) in norm(pages[abs_idx]):
+                    rep.add_verification("รหัสนักศึกษา", loc, "pass")
+                else:
+                    rep.add_verification("รหัสนักศึกษา", loc, "fail",
+                                         f"ไม่พบรหัส {student_id}")
+                    rep.add("RED", "front_matter", loc,
+                            f"ไม่พบรหัสนักศึกษา \"{student_id}\" (ต้องมีทั้งตัวเลขและรหัสหลักสูตร)",
+                            f"บรรทัดชื่อนักศึกษาใน{abs_label}ต้องมีรหัส \"{student_id}\"",
+                            "เพิ่ม/แก้รหัสนักศึกษาให้ครบทั้งตัวเลขและรหัสหลักสูตร",
+                            "FORM.APPROVED_MATCH")
+
+        # ชื่อปริญญาแยกตามตำแหน่งที่ใช้ตรวจ (ตามข้อมูลอนุมัติจาก eThesis):
+        #   หน้าปก      = ต้นฉบับ eThesis ตรง ๆ (อังกฤษเป็นตัวพิมพ์ใหญ่)
+        #   หน้าลงนาม   = Sentence case สำหรับเล่มอังกฤษ / ภาษาไทยคงเดิม
+        #   บทคัดย่อ    = ตัวย่อ (ดู _check_degree_abbr ด้านล่าง)
+        # เล่มหลักสูตรไทย ปก/หน้าลงนามเป็นภาษาไทย นอกนั้นใช้ชุดภาษาอังกฤษ
+        cover_degree = soft(A.get("degree_cover_th" if thai_book else "degree_cover_en", ""))
+        sig_degree = soft(A.get("degree_sig_th" if thai_book else "degree_sig_en", ""))
+        if cover_degree or sig_degree:
+            degree_spots = []
+            if cover_degree:
+                degree_spots.append(("หน้าปก", pages[0] if pages else "", cover_degree))
+            if sig_degree:
+                degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], sig_degree)
+                                    for k, idx in enumerate(sig_pages))
             for spot_name, spot_text, expected_degree in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
                 if norm(expected_degree) in norm(spot_text):
-                    rep.add_verification("ชื่อปริญญา", spot_name, "pending",
-                                         "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                else:
-                    rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
-                if norm(expected_degree) in norm(spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
                     # (เช่น comma ในวงเล็บสาขา) — ส้มให้เจ้าหน้าที่ยืนยัน
+                    rep.add_verification("ชื่อปริญญา", spot_name, "pending",
+                                         "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                     rep.add("ORANGE", "front_matter", spot_name,
                             f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                             f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
                             "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
                 else:
+                    rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อปริญญา", compared, expected_degree),
                             f"ต้องเป็น \"{expected_degree}\"",
                             "แก้ชื่อปริญญาให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
-        degree_abbr = soft(A.get("degree_abbr", ""))
-        if degree_abbr and abs_en_idx is not None:
-            compared = compare_reference_text(pages[abs_en_idx], degree_abbr, 'degree', degree_line=True)
-            abbr_location = f"ชื่อย่อในบทคัดย่อ ({page_ref(abs_en_idx)})"
+        # ตรวจชื่อปริญญาแบบย่อในบทคัดย่อ — เล่มหลักสูตรไทย/ไทย-อังกฤษ ต้องตรวจทั้ง
+        # บทคัดย่ออังกฤษ (M.Sc./Ph.D.) และบทคัดย่อไทย (วท.ม./ปร.ด.) จึงทำเป็น helper
+        def _check_degree_abbr(abbr, abstract_idx, lang):
+            if not abbr or abstract_idx is None:
+                return
+            abstract_text = pages[abstract_idx]
+            compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True)
+            vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
+            box = f"{lang} ({page_ref(abstract_idx)})"
             if compared['status'] == 'exact':
                 # ชื่อย่อพบครบ แต่บรรทัดนั้นต้องไม่มีคำอื่นเกิน เช่น "DEGREE M.Sc. (...)"
-                abbr_lines = [soft(line) for line in pages[abs_en_idx].splitlines()
-                              if degree_abbr in soft(line)]
-                if abbr_lines and not any(norm(line) == norm(degree_abbr) for line in abbr_lines):
-                    rep.add_verification("ชื่อปริญญา", abbr_location, "fail",
+                abbr_lines = [soft(line) for line in abstract_text.splitlines()
+                              if abbr in soft(line)]
+                if abbr_lines and not any(norm(line) == norm(abbr) for line in abbr_lines):
+                    rep.add_verification("ชื่อปริญญา", vloc, "fail",
                                          f"มีข้อความเกิน: {abbr_lines[0]}")
-                    rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
+                    rep.add("RED", "front_matter", box,
                             f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{abbr_lines[0]}"',
-                            f"บรรทัดนี้ต้องเป็น \"{degree_abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
                             "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
                 else:
-                    rep.add_verification("ชื่อปริญญา", abbr_location, "pass")
-            elif norm(degree_abbr) in norm(pages[abs_en_idx]):
-                rep.add_verification("ชื่อปริญญา", abbr_location, "pending",
-                                     "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                rep.add("ORANGE", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
+                    rep.add_verification("ชื่อปริญญา", vloc, "pass")
+            elif norm(abbr) in norm(abstract_text):
+                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง — ส้มให้เจ้าหน้าที่ยืนยัน
+                rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
+                rep.add("ORANGE", "front_matter", box,
                         f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
-                        f"ข้อมูลอนุมัติ: \"{degree_abbr}\"",
+                        f"ข้อมูลอนุมัติ: \"{abbr}\"",
                         "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
             else:
-                rep.add_verification("ชื่อปริญญา", abbr_location, "fail", compared['actual'])
-                rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(abs_en_idx)})",
-                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared, degree_abbr),
-                        f"ต้องเป็น \"{degree_abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
+                rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
+                rep.add("RED", "front_matter", box,
+                        mismatch_detail("ชื่อปริญญาแบบย่อ", compared, abbr),
+                        f"ต้องเป็น \"{abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+
+        _check_degree_abbr(soft(A.get("degree_abbr_en", "")), abs_en_idx, "บทคัดย่ออังกฤษ")
+        _check_degree_abbr(soft(A.get("degree_abbr_th", "")), abs_th_idx, "บทคัดย่อไทย")
 
         if A.get("exam_date"):
             signature_location = ", ".join(page_ref(idx) for idx in sig_pages) or "หน้าไม่ระบุเลข"
