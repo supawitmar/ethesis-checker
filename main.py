@@ -133,15 +133,11 @@ def _run_job(job_id, tmp_path, approved, chapters_mode):
         report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress)
         report["context"]["ai_assist"] = llm_assist.enabled()
         if llm_assist.enabled():
-            # ชั้นเสริมเท่านั้น — ถ้า AI ล้มเหลว รายงานจากกฎเดิมต้องออกครบตามปกติ
+            # AI มีหน้าที่เดียว: เรียบเรียง "ข้อความสรุป" ให้อ่านง่าย
+            # ห้ามแตะผลตรวจหรือรายละเอียดในรายงาน — ถ้าล้มเหลวรายงานยังออกครบตามปกติ
             try:
-                progress("AI ช่วยกลั่นกรองรายการก้ำกึ่ง")
-                llm_assist.review_borderline(report)
-            except Exception:
-                print(f"job {job_id}: llm review failed\n{traceback.format_exc()}", flush=True)
-            try:
-                progress("AI สรุปคำแนะนำสำหรับนักศึกษา")
-                report["student_summary"] = llm_assist.student_summary(report, approved)
+                progress("AI เรียบเรียงข้อความสรุป")
+                report["student_summary"] = llm_assist.student_summary(report)
             except Exception:
                 print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
         _update_job(job_id, report=report, stage="เสร็จสิ้น")

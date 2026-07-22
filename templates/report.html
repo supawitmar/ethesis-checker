@@ -158,6 +158,11 @@
   .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee;
                padding:12px 16px; font:0.82rem/1.5 ui-monospace,Consolas,monospace; resize:vertical;
                min-height:120px; background:#fbfdff; color:#22303f; white-space:pre; }
+  .copy-text.plain { font:0.88rem/1.7 'Segoe UI','Sarabun',Tahoma,sans-serif; white-space:pre-wrap; }
+  .copy-modes { display:flex; gap:6px; padding:10px 16px 0; border-top:1px solid #dbe4ee; }
+  .copy-modes .mode { border:1px solid #cfd8e3; background:#fff; color:#5b6b7d; cursor:pointer;
+               border-radius:99px; padding:4px 14px; font-size:.78rem; font-weight:700; }
+  .copy-modes .mode.on { background:var(--navy); border-color:var(--navy); color:#fff; }
 
   .infobox { background:#f0f4fa; border-radius:10px; padding:10px 16px; font-size:.82rem;
              margin-bottom:8px; color:#3d4c5e; }
@@ -212,12 +217,29 @@
 
   <div class="body">
     {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW %}
-    <script id="issues-data" type="application/json">{{ report.issues_by_zone | tojson }}</script>
+    <script id="plain-summary-data" type="application/json">{{ report.plain_summary | tojson }}</script>
+    {% if report.student_summary %}
+    <script id="ai-summary-data" type="application/json">{{ report.student_summary | tojson }}</script>
+    {% endif %}
     <details class="copybox" open data-verdict="{{ report.verdict }}">
       <summary class="copy-sum">📋 <span data-th="สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)" data-en="Summary of fixes (copyable)">สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)</span>
         <button type="button" class="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
       </summary>
+      {% if report.student_summary %}
+      <div class="copy-modes">
+        <button type="button" class="mode on" data-mode="ai" onclick="setSummaryMode('ai')"
+                data-th="✨ ภาษาเข้าใจง่าย" data-en="✨ Plain language">✨ ภาษาเข้าใจง่าย</button>
+        <button type="button" class="mode" data-mode="raw" onclick="setSummaryMode('raw')"
+                data-th="📋 ตรงตัวจากระบบ" data-en="📋 Exact (system)">📋 ตรงตัวจากระบบ</button>
+      </div>
+      {% endif %}
       <textarea class="copy-text" readonly></textarea>
+      {% if report.student_summary %}
+      <div class="ai-summary-caveat" id="ai-caveat"
+           data-th="ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
+           data-en="Drafted by AI from the findings above — please review before sending to the student.">
+        ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา</div>
+      {% endif %}
     </details>
     {% endif %}
     {% if report.verification %}
@@ -225,7 +247,7 @@
     {% for group in report.verification %}
     {% set statuses = group.checks | map(attribute='status') | list %}
     {% set gstatus = 'fail' if 'fail' in statuses else ('pending' if 'pending' in statuses else 'pass') %}
-    <details class="vf-group"{% if gstatus != 'pass' %} open{% endif %}>
+    <details class="vf-group">
       <summary class="vf-topic {{ gstatus }}">
         <span class="vf-arrow">▸</span>
         <span class="vf-topic-name tr-dyn">{{ group.topic }}</span>
@@ -261,7 +283,7 @@
       <span class="count"><b>{{ report.issues_by_zone[zone] | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% if report.issues_by_zone[zone] %}
       {% for cat, items in report.issues_by_zone[zone] | groupby('category') %}
-      <details class="cat-group {{ zone }}"{% if items | length < 2 %} open{% endif %}>
+      <details class="cat-group {{ zone }}">
         <summary class="cat-sum">
           <span class="cat-arrow">▸</span>
           <span class="cat-name tr-cat">{{ cat }}</span>
@@ -275,7 +297,6 @@
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
-          {% if it.llm_opinion %}<div class="ai-note">{{ it.llm_opinion }}</div>{% endif %}
           {% if zone in ['ORANGE', 'YELLOW'] %}
           <div class="issue-decide">
             <span class="lbl" data-th="ผลพิจารณาของเจ้าหน้าที่:" data-en="Staff decision:">ผลพิจารณาของเจ้าหน้าที่:</span>
@@ -297,14 +318,6 @@
     {% endif %}
     {% endfor %}
 
-    {% if report.student_summary %}
-    <h2 class="sec"><span data-th="🤖 สรุปสำหรับส่งต่อนักศึกษา (ร่างโดย AI)" data-en="🤖 Student-facing summary (AI draft)">🤖 สรุปสำหรับส่งต่อนักศึกษา (ร่างโดย AI)</span></h2>
-    <div class="ai-summary">{{ report.student_summary }}</div>
-    <div class="ai-summary-caveat"
-         data-th="ข้อความนี้ AI ร่างจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
-         data-en="Drafted by AI from the findings above — staff should review before sending to the student.">
-      ข้อความนี้ AI ร่างจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา</div>
-    {% endif %}
 
     {% if report.human_checklist %}
     <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
@@ -566,39 +579,40 @@ window.addEventListener('afterprint', function(){
   });
 });
 
-// สรุปจุดที่ต้องแก้ + วิธีแก้ แบบข้อความล้วน (จัดกลุ่มตามหมวด) ไว้คัดลอก
+// ข้อความสรุปสร้างจากฝั่ง server (checker.plain_summary) เพื่อให้ข้อความที่
+// เจ้าหน้าที่คัดลอก กับข้อความที่ส่งให้ AI เรียบเรียง เป็นชุดเดียวกันเสมอ
 function buildSummaryText(){
-  const el = document.getElementById('issues-data');
+  const el = document.getElementById('plain-summary-data');
   if (!el) return '';
-  const data = JSON.parse(el.textContent || '{}');
-  const box = document.querySelector('.copybox');
-  const verdict = box ? box.getAttribute('data-verdict') : '';
-  const zones = [['RED','ต้องแก้ไข'],['ORANGE','รอเจ้าหน้าที่ยืนยัน'],['YELLOW','ข้อสังเกต']];
-  let out = 'ผลการตรวจ: ' + verdict + '\n';
-  zones.forEach(function(z){
-    const items = data[z[0]] || [];
-    if (!items.length) return;
-    out += '\n== ' + z[1] + ' (' + items.length + ') ==\n';
-    const byCat = {};
-    items.forEach(function(it){
-      const c = it.category || 'อื่นๆ';
-      (byCat[c] = byCat[c] || []).push(it);
-    });
-    Object.keys(byCat).forEach(function(cat){
-      out += '\n[' + cat + ']\n';
-      byCat[cat].forEach(function(it){
-        let line = '- (' + (it.location || '') + ') ' + (it.found || '');
-        if (it.expected) line += '\n  ที่ถูก: ' + it.expected;
-        if (it.fix) line += '\n  แก้: ' + it.fix;
-        out += line + '\n';
-      });
-    });
-  });
-  return out.trim();
+  try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
 }
+// สรุปมี 2 แบบ: AI เรียบเรียงให้อ่านง่าย กับข้อความตรงตัวจากระบบ
+// ถ้า AI ไม่ทำงาน (ไม่ได้ตั้งคีย์/ล้มเหลว) จะเหลือแบบตรงตัวอย่างเดียวโดยอัตโนมัติ
+function aiSummaryText(){
+  const el = document.getElementById('ai-summary-data');
+  if (!el) return '';
+  try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
+}
+var SUMMARY_MODE = aiSummaryText() ? 'ai' : 'raw';
+function currentSummaryText(){
+  return SUMMARY_MODE === 'ai' ? (aiSummaryText() || buildSummaryText()) : buildSummaryText();
+}
+function renderSummary(){
+  const ta = document.querySelector('.copy-text');
+  if (!ta) return;
+  ta.value = currentSummaryText();
+  ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
+  const caveat = document.getElementById('ai-caveat');
+  if (caveat) caveat.style.display = (SUMMARY_MODE === 'ai') ? '' : 'none';
+  document.querySelectorAll('.copy-modes .mode').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-mode') === SUMMARY_MODE);
+  });
+}
+function setSummaryMode(mode){ SUMMARY_MODE = mode; renderSummary(); }
+
 function copySummary(ev, btn){
   ev.preventDefault();  // กันไม่ให้ปุ่มไปสลับการเปิด/ปิด <details>
-  const text = buildSummaryText();
+  const text = currentSummaryText();
   const done = function(){
     const th = LANG === 'en'; btn.textContent = th ? '✓ Copied' : '✓ คัดลอกแล้ว';
     setTimeout(function(){ btn.textContent = th ? '⧉ Copy' : '⧉ คัดลอก'; }, 1500);
@@ -611,10 +625,7 @@ function fallbackCopy(text){
   const ta = document.querySelector('.copy-text');
   if (ta){ ta.focus(); ta.select(); try { document.execCommand('copy'); } catch(e){} }
 }
-document.addEventListener('DOMContentLoaded', function(){
-  const ta = document.querySelector('.copy-text');
-  if (ta) ta.value = buildSummaryText();
-});
+document.addEventListener('DOMContentLoaded', renderSummary);
 
 function setPF(btn, state){
   const card = btn.closest('.hc, .issue');

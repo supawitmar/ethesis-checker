@@ -1,77 +1,44 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LLM assist layer (optional) — ทำงานเสริมจาก rule engine ใน checker.py เท่านั้น
+LLM assist layer (optional) — มีหน้าที่เดียวเท่านั้น
 
-หลักการ:
-- rule engine เป็นผู้ตัดสินหลัก (deterministic, ตรวจซ้ำได้ผลเดิม)
-- LLM มี 2 บทบาทเสริม:
-  1) review_borderline: กลั่นกรองผลเทียบข้อความที่ก้ำกึ่ง (typo/case/mismatch)
-     ว่าน่าจะผิดจริง หรือเป็น artifact จากการดึงข้อความ PDF ภาษาไทย
-     (สระ/วรรณยุกต์เรียงเพี้ยน) — LLM ไม่มีสิทธิ์ทำให้เล่ม "ผ่าน" เอง
-     ทำได้อย่างมากคือย้าย 🔴 → 🟠 (รอเจ้าหน้าที่ยืนยัน) พร้อมเหตุผล
-  2) student_summary: สรุปรายงานเป็นภาษาเข้าใจง่ายสำหรับส่งต่อนักศึกษา
+AI **ไม่มีสิทธิ์ตัดสินหรือแก้ผลตรวจ** ผลตรวจและรายละเอียดทุกข้อในรายงาน
+มาจาก rule engine ใน checker.py ล้วน ๆ (deterministic ตรวจซ้ำได้ผลเดิม)
+
+หน้าที่เดียวของ AI คือ อ่าน "ข้อความสรุป" ที่ระบบสร้างไว้แล้ว
+(``report["plain_summary"]`` จาก ``checker.plain_summary``) แล้วเรียบเรียงใหม่
+ให้อ่านลื่นขึ้นสำหรับส่งต่อนักศึกษา โดยห้ามเพิ่ม ลด หรือเปลี่ยนข้อเท็จจริง
 
 เปิดใช้เมื่อมี ANTHROPIC_API_KEY และไม่ได้ตั้ง LLM_ASSIST=off
 ถ้า LLM ล้มเหลวไม่ว่ากรณีใด รายงานจากกฎเดิมต้องออกครบเหมือนไม่มี LLM
 """
-import json
 import os
 
 MODEL = os.getenv("LLM_ASSIST_MODEL", "claude-opus-4-8")
 
-_TYPO_MARK = "พิมพ์ผิดเล็กน้อย"
-_CASE_MARK = "ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง"
-_MISMATCH_MARK = "ข้อความไม่ตรง:"
+_SUMMARY_SYSTEM = """คุณคือเจ้าหน้าที่บัณฑิตวิทยาลัยที่เรียบเรียงข้อความสรุปผลตรวจรูปเล่ม
+วิทยานิพนธ์ส่งให้นักศึกษา
 
-_REVIEW_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "verdicts": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "integer"},
-                    "judgment": {
-                        "type": "string",
-                        "enum": ["artifact", "real_error", "uncertain"],
-                    },
-                    "reason": {"type": "string"},
-                },
-                "required": ["id", "judgment", "reason"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["verdicts"],
-    "additionalProperties": False,
-}
+ผู้ใช้จะส่ง "ข้อความสรุปที่ระบบสร้างไว้แล้ว" มาให้ หน้าที่ของคุณคือ **เรียบเรียงข้อความนั้น
+ใหม่ให้อ่านรู้เรื่องและเป็นธรรมชาติ** เท่านั้น
 
-_REVIEW_SYSTEM = """คุณเป็นผู้ช่วยกลั่นกรองผลตรวจรูปเล่มวิทยานิพนธ์ของบัณฑิตวิทยาลัย
-ระบบตรวจอัตโนมัติเทียบข้อความในไฟล์ PDF กับข้อมูลอนุมัติ แต่การดึงข้อความจาก PDF ภาษาไทย
-มักได้อักขระเพี้ยน: สระบน-ล่างและวรรณยุกต์เรียงสลับ (เช่น "บทคัดย่อ" กลายเป็น "บทคดัยอ่"),
-สระอำแตกเป็น อ+า, ช่องว่างแทรกกลางคำ, หรือดึงข้อความมาจากบรรทัดใกล้เคียงแทนบรรทัดจริง
+สิ่งที่ต้องทำ
+- เขียนเป็นภาษาไทยที่สุภาพ เป็นกันเอง อ่านแล้วเข้าใจว่าต้องไปแก้ตรงไหนและแก้เป็นอะไร
+- คงลำดับเดิมไว้: จัดกลุ่มตามส่วนของเล่มตามที่ให้มา (หน้าปก ก่อน หน้าลงนาม ก่อน
+  บทคัดย่อ ก่อน สารบัญ ก่อน เนื้อหา ก่อน ส่วนท้ายเล่ม)
+- แยกให้ชัดว่าอะไร "ต้องแก้" อะไร "รอเจ้าหน้าที่ยืนยัน" (ยังไม่ต้องแก้) และอะไรเป็น
+  "ข้อสังเกต" (ไม่บังคับแก้)
+- ขึ้นต้นด้วยสรุปภาพรวมสั้น ๆ 1-2 ประโยคว่าผลเป็นอย่างไรและมีกี่จุดที่ต้องแก้
 
-หน้าที่ของคุณ: ตัดสินแต่ละรายการว่าความต่างระหว่าง "ข้อความที่พบ" กับ "ข้อความที่ควรเป็น"
-- "artifact"   = รูปแบบความต่างเข้าลักษณะการดึงข้อความ PDF เพี้ยน ข้อความจริงในเล่มน่าจะถูกต้อง
-- "real_error" = น่าจะเป็นการพิมพ์ผิด/สะกดผิด/ใช้ข้อความผิดจริงในเล่ม
-- "uncertain"  = ข้อมูลไม่พอจะตัดสิน
+ข้อห้ามเด็ดขาด
+- ห้ามเพิ่ม ลด หรือรวบรายการ — มีกี่ข้อในต้นฉบับ ต้องมีครบเท่านั้นในผลลัพธ์
+- ห้ามเปลี่ยนตัวเลขหน้า ชื่อบท ชื่อปริญญา หรือข้อความในเครื่องหมายคำพูด
+  ให้คัดลอกมาตรงตัวทุกตัวอักษร (นักศึกษาจะใช้ค่านี้ไปแก้เล่มจริง)
+- ห้ามเดาสาเหตุ ห้ามให้ความเห็นว่าอะไรน่าจะถูกหรือผิด ห้ามอ้างเลขข้อประกาศเอง
+- ห้ามใช้ศัพท์ภายในระบบ และห้ามใช้ตาราง
 
-ระวัง: ถ้าความต่างเป็นตัวอักษรพยัญชนะต่างตัว คำหาย คำเกิน หรือคำสลับ ให้ถือว่า real_error
-อย่าเดาเข้าข้าง artifact เพียงเพราะเป็นภาษาไทย ให้เหตุผลสั้นๆ เป็นภาษาไทยเสมอ"""
-
-_SUMMARY_SYSTEM = """คุณเป็นเจ้าหน้าที่บัณฑิตวิทยาลัยที่สรุปผลตรวจรูปเล่มวิทยานิพนธ์ให้นักศึกษาอ่าน
-เขียนเป็นภาษาไทยที่สุภาพ อ่านง่าย ตรงประเด็น สำหรับนักศึกษาที่ไม่คุ้นกับศัพท์ระบบตรวจ
-
-โครงสร้างที่ต้องใช้ (ข้ามหัวข้อที่ไม่มีรายการได้):
-1. สรุปภาพรวม 1-2 ประโยค (ผลการตรวจเป็นอย่างไร มีกี่จุดที่ต้องแก้)
-2. "สิ่งที่ต้องแก้ไข" — เรียงตามลำดับหน้าในเล่ม แต่ละข้อบอก: อยู่ตรงไหน ผิดอย่างไร แก้อย่างไร
-3. "รายการที่เจ้าหน้าที่จะตรวจยืนยันเพิ่มเติม" — บอกนักศึกษาว่าไม่ต้องแก้ทันที รอผลยืนยัน
-4. "ข้อสังเกต" — ไม่บังคับแก้
-
-ข้อห้าม: ห้ามแต่งข้อผิดพลาดเพิ่มจากข้อมูลที่ให้ ห้ามอ้างเลขข้อประกาศเอง
-ห้ามใช้ศัพท์ภายในระบบ (เช่น zone, RED, rule_id) เขียนเป็นข้อความล้วน ใช้เลขข้อและขึ้นบรรทัดใหม่ได้"""
+ตอบกลับเป็นข้อความล้วนที่พร้อมคัดลอกส่งต่อได้ทันที"""
 
 
 def enabled():
@@ -95,103 +62,14 @@ def _first_text(response):
     return next((b.text for b in response.content if b.type == "text"), "")
 
 
-def _borderline_issues(report):
-    """เลือกเฉพาะรายการเทียบข้อความที่ก้ำกึ่งพอจะให้ LLM ช่วยดู"""
-    selected = []
-    for zone in ("RED", "ORANGE"):
-        for issue in report["issues_by_zone"][zone]:
-            found = issue.get("found", "")
-            if _TYPO_MARK in found or _CASE_MARK in found or _MISMATCH_MARK in found:
-                selected.append((zone, issue))
-    return selected
+def student_summary(report):
+    """เรียบเรียงข้อความสรุปของระบบให้อ่านง่าย คืนค่าเป็นข้อความล้วน
 
-
-def review_borderline(report):
-    """ให้ LLM ตัดสินเคสก้ำกึ่ง แล้วผนวกความเห็นลงในรายงาน (in-place)
-
-    นโยบาย: ย้ายรายการจาก 🔴 ไป 🟠 ได้เฉพาะกรณี typo ที่ LLM มั่นใจว่าเป็น
-    artifact จากการดึงข้อความ PDF — ทุกกรณีอื่นแค่แนบความเห็นประกอบ
+    อ่านจาก report["plain_summary"] เท่านั้น ไม่แตะผลตรวจหรือรายละเอียดข้ออื่น
     """
-    selected = _borderline_issues(report)
-    if not selected:
-        return report
-
-    items = []
-    for idx, (_zone, issue) in enumerate(selected):
-        items.append({
-            "id": idx,
-            "location": issue.get("location", ""),
-            "found": issue.get("found", ""),
-            "expected": issue.get("expected", ""),
-        })
-
-    response = _client().messages.create(
-        model=MODEL,
-        max_tokens=16000,
-        thinking={"type": "adaptive"},
-        system=_REVIEW_SYSTEM,
-        output_config={"format": {"type": "json_schema", "schema": _REVIEW_SCHEMA}},
-        messages=[{
-            "role": "user",
-            "content": "ตัดสินรายการต่อไปนี้ทีละรายการ:\n"
-                       + json.dumps(items, ensure_ascii=False, indent=1),
-        }],
-    )
-    verdicts = {
-        v["id"]: v
-        for v in json.loads(_first_text(response)).get("verdicts", [])
-        if isinstance(v.get("id"), int)
-    }
-
-    demote = []
-    for idx, (zone, issue) in enumerate(selected):
-        verdict = verdicts.get(idx)
-        if not verdict:
-            continue
-        judgment, reason = verdict["judgment"], verdict["reason"]
-        if judgment == "artifact":
-            issue["llm_opinion"] = ("AI ประเมิน: น่าจะเป็นผลจากการดึงข้อความ PDF เพี้ยน "
-                                    f"ไม่ใช่ข้อผิดพลาดจริงในเล่ม — {reason}")
-            if zone == "RED" and _TYPO_MARK in issue.get("found", ""):
-                demote.append(issue)
-        elif judgment == "real_error":
-            issue["llm_opinion"] = f"AI ประเมิน: น่าจะผิดจริงในเล่ม — {reason}"
-        else:
-            issue["llm_opinion"] = f"AI ประเมิน: ยังตัดสินไม่ได้ ให้เจ้าหน้าที่ดูจากไฟล์จริง — {reason}"
-
-    for issue in demote:
-        report["issues_by_zone"]["RED"].remove(issue)
-        issue["fix"] = (issue.get("fix", "") + " (AI ประเมินว่าน่าจะเป็น artifact "
-                        "จากการดึงข้อความ — เจ้าหน้าที่ยืนยันจากไฟล์จริง)").strip()
-        report["issues_by_zone"]["ORANGE"].append(issue)
-
-    zones = report["issues_by_zone"]
-    report["summary"] = {z.lower(): len(v) for z, v in zones.items()}
-    report["verdict"] = ("ไม่ผ่าน" if zones["RED"]
-                         else "รอยืนยัน" if zones["ORANGE"] else "ผ่าน")
-    return report
-
-
-def student_summary(report, approved):
-    """สรุปรายงานเป็นภาษาเข้าใจง่ายสำหรับส่งต่อนักศึกษา คืนค่าเป็นข้อความล้วน"""
-    payload = {
-        "verdict": report.get("verdict"),
-        "student_name": (approved or {}).get("student_name", ""),
-        "must_fix": [
-            {"location": i.get("location"), "found": i.get("found"),
-             "expected": i.get("expected"), "fix": i.get("fix")}
-            for i in report["issues_by_zone"]["RED"]
-        ],
-        "pending_confirmation": [
-            {"location": i.get("location"), "found": i.get("found"),
-             "expected": i.get("expected")}
-            for i in report["issues_by_zone"]["ORANGE"]
-        ],
-        "notices": [
-            {"location": i.get("location"), "found": i.get("found")}
-            for i in report["issues_by_zone"]["YELLOW"]
-        ],
-    }
+    source = (report.get("plain_summary") or "").strip()
+    if not source:
+        return ""
     response = _client().messages.create(
         model=MODEL,
         max_tokens=16000,
@@ -199,8 +77,8 @@ def student_summary(report, approved):
         system=_SUMMARY_SYSTEM,
         messages=[{
             "role": "user",
-            "content": "สรุปผลตรวจนี้ให้นักศึกษาอ่าน:\n"
-                       + json.dumps(payload, ensure_ascii=False, indent=1),
+            "content": "เรียบเรียงข้อความสรุปนี้ให้อ่านรู้เรื่องขึ้น "
+                       "โดยคงข้อเท็จจริง จำนวนข้อ และลำดับเดิมไว้ทั้งหมด:\n\n" + source,
         }],
     )
     return _first_text(response).strip()
