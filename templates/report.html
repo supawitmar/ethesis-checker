@@ -217,7 +217,7 @@
 
   <div class="body">
     {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW %}
-    <script id="issues-data" type="application/json">{{ report.issues_by_zone | tojson }}</script>
+    <script id="plain-summary-data" type="application/json">{{ report.plain_summary | tojson }}</script>
     {% if report.student_summary %}
     <script id="ai-summary-data" type="application/json">{{ report.student_summary | tojson }}</script>
     {% endif %}
@@ -297,7 +297,6 @@
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
-          {% if it.llm_opinion %}<div class="ai-note">{{ it.llm_opinion }}</div>{% endif %}
           {% if zone in ['ORANGE', 'YELLOW'] %}
           <div class="issue-decide">
             <span class="lbl" data-th="ผลพิจารณาของเจ้าหน้าที่:" data-en="Staff decision:">ผลพิจารณาของเจ้าหน้าที่:</span>
@@ -580,70 +579,12 @@ window.addEventListener('afterprint', function(){
   });
 });
 
-// สรุปจุดที่ต้องแก้ + วิธีแก้ แบบข้อความล้วน (จัดกลุ่มตามหมวด) ไว้คัดลอก
-// เรียงตามลำดับส่วนประกอบของเล่ม เพื่อให้เจ้าหน้าที่ไล่แก้จากหน้าแรกไปหน้าสุดท้าย
-var BOOK_SECTIONS = [
-  ['หน้าปก',          /หน้าปก/],
-  ['หน้าลงนาม',       /หน้าลงนาม/],
-  ['กิตติกรรมประกาศ', /กิตติกรรม/],
-  ['บทคัดย่อ',        /บทคัดย่อ/],
-  ['สารบัญ',          /สารบัญ/],
-  ['เนื้อหา (บท)',     /บทที่|เนื้อหา|ทั้งเล่ม/],
-  ['ส่วนท้ายเล่ม',     /บรรณานุกรม|อ้างอิง|ภาคผนวก|ประวัติ/],
-];
-// ใช้ส่วนที่ถูกเอ่ยถึง "ก่อน" ในตำแหน่ง เพราะนั่นคือจุดที่ต้องไปแก้จริง
-// เช่น "สารบัญ (หน้า viii) ↔ บทคัดย่อภาษาไทย" ต้องไปแก้ที่สารบัญ ไม่ใช่บทคัดย่อ
-function sectionOf(issue){
-  const text = (issue.location || '') + ' ' + (issue.part || '');
-  let best = null, bestAt = Infinity;
-  for (const [name, re] of BOOK_SECTIONS) {
-    const m = text.match(re);
-    if (m && m.index < bestAt) { best = name; bestAt = m.index; }
-  }
-  return best || 'อื่น ๆ';
-}
-// ตัดข้อความเชิงเทคนิค/ข้อความต่อรองออก เหลือเฉพาะ "ผิดตรงไหน ผิดอย่างไร แก้อย่างไร"
-function tidy(text){
-  return (text || '')
-    .replace(/\s*\(\s*typo[^)]*\)/gi, '')
-    .replace(/\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]\s*เจ้าหน้าที่ยืนยันได้/g, '')
-    .replace(/\s*[—-]\s*เจ้าหน้าที่ยืนยันได้/g, '')
-    .replace(/\s+([:：])/g, '$1')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
+// ข้อความสรุปสร้างจากฝั่ง server (checker.plain_summary) เพื่อให้ข้อความที่
+// เจ้าหน้าที่คัดลอก กับข้อความที่ส่งให้ AI เรียบเรียง เป็นชุดเดียวกันเสมอ
 function buildSummaryText(){
-  const el = document.getElementById('issues-data');
+  const el = document.getElementById('plain-summary-data');
   if (!el) return '';
-  const data = JSON.parse(el.textContent || '{}');
-  const box = document.querySelector('.copybox');
-  const verdict = box ? box.getAttribute('data-verdict') : '';
-  const zones = [['RED','ต้องแก้ไข'],['ORANGE','รอเจ้าหน้าที่ยืนยัน'],['YELLOW','ข้อสังเกต']];
-  const order = BOOK_SECTIONS.map(s => s[0]).concat(['อื่น ๆ']);
-  let out = 'ผลการตรวจ: ' + verdict + '\n';
-  zones.forEach(function(z){
-    const items = data[z[0]] || [];
-    if (!items.length) return;
-    out += '\n===== ' + z[1] + ' (' + items.length + ') =====\n';
-    const bySection = {};
-    items.forEach(function(it){
-      const s = sectionOf(it);
-      (bySection[s] = bySection[s] || []).push(it);
-    });
-    order.forEach(function(section){
-      const list = bySection[section];
-      if (!list || !list.length) return;
-      out += '\n[' + section + ']\n';
-      list.forEach(function(it){
-        out += '- ' + tidy(it.location) + ': ' + tidy(it.found) + '\n';
-        // ตัดคำนำซ้ำ ("ควรเป็น:", "ข้อความที่ถูกต้อง:") ไม่ให้กลายเป็น "แก้เป็น: ควรเป็น ..."
-        const fix = (tidy(it.expected) || tidy(it.fix))
-          .replace(/^(ข้อความที่ถูกต้อง|ควรเป็น|ต้องเป็น|ที่ถูก)\s*[:：]?\s*/, '');
-        if (fix) out += '  → แก้เป็น: ' + fix + '\n';
-      });
-    });
-  });
-  return out.trim();
+  try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
 }
 // สรุปมี 2 แบบ: AI เรียบเรียงให้อ่านง่าย กับข้อความตรงตัวจากระบบ
 // ถ้า AI ไม่ทำงาน (ไม่ได้ตั้งคีย์/ล้มเหลว) จะเหลือแบบตรงตัวอย่างเดียวโดยอัตโนมัติ

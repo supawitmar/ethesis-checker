@@ -239,6 +239,72 @@ def closest_text_line(page_text, expected):
     return max(lines, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
 
 
+# ---------- ข้อความสรุปสำหรับคัดลอก ----------
+# ส่วนประกอบของเล่มเรียงตามลำดับที่ปรากฏจริง เพื่อให้เจ้าหน้าที่ไล่แก้จากหน้าแรกไปหน้าสุดท้าย
+SUMMARY_SECTIONS = [
+    ("หน้าปก", "หน้าปก"),
+    ("หน้าลงนาม", "หน้าลงนาม"),
+    ("กิตติกรรมประกาศ", "กิตติกรรม"),
+    ("บทคัดย่อ", "บทคัดย่อ"),
+    ("สารบัญ", "สารบัญ"),
+    ("เนื้อหา (บท)", r"บทที่|เนื้อหา|ทั้งเล่ม"),
+    ("ส่วนท้ายเล่ม", r"บรรณานุกรม|อ้างอิง|ภาคผนวก|ประวัติ"),
+]
+SUMMARY_SECTION_ORDER = [name for name, _ in SUMMARY_SECTIONS] + ["อื่น ๆ"]
+
+# ตัดข้อความเชิงเทคนิค/คำต่อรองออกจากข้อความสรุป (รายละเอียดในรายงานยังคงเดิมทุกตัวอักษร)
+_SUMMARY_NOISE = re.compile(
+    r"\s*\(\s*typo[^)]*\)"
+    r"|\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]\s*เจ้าหน้าที่ยืนยันได้"
+    r"|\s*[—-]\s*เจ้าหน้าที่ยืนยันได้", re.I)
+_SUMMARY_LEAD = re.compile(r"^(ข้อความที่ถูกต้อง|ควรเป็น|ต้องเป็น|ที่ถูก)\s*[:：]?\s*")
+
+
+def summary_tidy(text):
+    text = _SUMMARY_NOISE.sub("", text or "")
+    text = re.sub(r"\s+([:：])", r"\1", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def summary_section(issue):
+    """ส่วนของเล่มที่ต้องไปแก้ — ใช้ส่วนที่ถูกเอ่ยถึงก่อนในตำแหน่ง
+
+    เช่น "สารบัญ (หน้า viii) ↔ บทคัดย่อภาษาไทย" ต้องไปแก้ที่สารบัญ ไม่ใช่บทคัดย่อ
+    """
+    text = f"{issue.get('location', '')} {issue.get('part', '')}"
+    best, best_at = None, len(text) + 1
+    for name, pattern in SUMMARY_SECTIONS:
+        found = re.search(pattern, text)
+        if found and found.start() < best_at:
+            best, best_at = name, found.start()
+    return best or "อื่น ๆ"
+
+
+def plain_summary(report):
+    """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)"""
+    zones = [("RED", "ต้องแก้ไข"), ("ORANGE", "รอเจ้าหน้าที่ยืนยัน"), ("YELLOW", "ข้อสังเกต")]
+    lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
+    for zone, zone_label in zones:
+        items = report["issues_by_zone"].get(zone) or []
+        if not items:
+            continue
+        lines.append(f"\n===== {zone_label} ({len(items)}) =====")
+        grouped = {}
+        for issue in items:
+            grouped.setdefault(summary_section(issue), []).append(issue)
+        for section in SUMMARY_SECTION_ORDER:
+            for issue in grouped.get(section, []):
+                if grouped.get(section) and issue is grouped[section][0]:
+                    lines.append(f"\n[{section}]")
+                lines.append(f"- {summary_tidy(issue.get('location'))}: "
+                             f"{summary_tidy(issue.get('found'))}")
+                fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+                fix = _SUMMARY_LEAD.sub("", fix)
+                if fix:
+                    lines.append(f"  → แก้เป็น: {fix}")
+    return "\n".join(lines).strip()
+
+
 def toc_page_mismatch_zone(section_kind, toc_label, appendix_labels):
     """ระดับสีเมื่อเลขหน้าของหัวข้อหลักในสารบัญไม่ตรงหน้าจริง
 
@@ -1635,7 +1701,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         for it in rep.zones[z]:
             it["category"] = classify(it)
 
-    return {
+    result = {
         "context": {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
                     "n_pages": n, "approved_data": bool(approved)},
         "verdict": rep.verdict(),
@@ -1646,3 +1712,5 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         "not_checked": NOT_CHECKED,
         "verification": rep.verification,
     }
+    result["plain_summary"] = plain_summary(result)
+    return result
