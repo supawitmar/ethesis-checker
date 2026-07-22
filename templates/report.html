@@ -672,7 +672,11 @@ function refreshSummary(wantAi){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({failed: collectFailed(), ai: !!wantAi}),
-  }).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+  }).then(function(r){
+      // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
+      if (r.status === 401) return Promise.reject(new Error('login'));
+      return r.ok ? r.json() : Promise.reject(new Error(r.status));
+    })
     .then(function(data){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
       if (wantAi) {
@@ -687,7 +691,13 @@ function regenerateAi(){
   const btn = document.querySelector('.ai-redo');
   if (btn) btn.disabled = true;
   refreshSummary(true)
-    .catch(function(){
+    .catch(function(err){
+      if (err && err.message === 'login'){
+        renderStaleBar(LANG === 'en'
+          ? 'Session expired — please log in again in another tab, then press this button once more.'
+          : 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดปุ่มนี้ซ้ำ (ผลตรวจในหน้านี้ยังอยู่ครบ)');
+        return;
+      }
       renderStaleBar(LANG === 'en'
         ? 'Could not re-run AI. The exact system text below is up to date — try again or use it as is.'
         : 'เรียบเรียงด้วย AI ไม่สำเร็จ ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว กดลองใหม่หรือใช้ข้อความนี้ได้เลย');

@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import time
 import unittest
@@ -78,6 +80,43 @@ class WebSmokeTests(unittest.TestCase):
         response = anonymous.get("/", follow_redirects=False)
         self.assertEqual(response.status_code, 303)
         self.assertTrue(response.headers["location"].startswith("/login"))
+
+    def test_expired_session_returns_json_not_login_html(self):
+        """เซสชันหมดอายุระหว่างกรอกฟอร์ม ต้องได้ 401 JSON ไม่ใช่หน้า login
+
+        ถ้าตอบเป็น redirect 303 fetch จะตามไปได้ HTML กลับมา แล้ว resp.json()
+        พังเป็น "Unexpected token '<', \"<!doctype \"... is not valid JSON"
+        ซึ่งเจ้าหน้าที่อ่านไม่รู้เรื่องและดูเหมือนระบบตรวจเล่มไม่ได้
+        """
+        anonymous = TestClient(main.app)
+        for path in ("/check", "/parse-ethesis", "/summary/anything"):
+            with self.subTest(path=path):
+                response = anonymous.post(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 401)
+                self.assertTrue(response.json()["login_required"])
+                self.assertIn("เข้าสู่ระบบ", response.json()["detail"])
+
+    def test_page_navigation_still_redirects_to_login(self):
+        # การเปิดหน้าเว็บตรง ๆ ต้องยังพาไปหน้า login เหมือนเดิม ไม่ใช่โชว์ JSON
+        anonymous = TestClient(main.app)
+        for path in ("/", "/result/anything"):
+            with self.subTest(path=path):
+                response = anonymous.get(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 303)
+                self.assertTrue(response.headers["location"].startswith("/login"))
+
+    def test_session_survives_process_restart(self):
+        """คุกกี้ต้องยังใช้ได้หลัง Render cold start ไม่งั้นฟอร์มที่กรอกค้างไว้จะสูญ
+
+        token ผูกกับ APP_PASSWORD จึงคำนวณได้เท่าเดิมทุกครั้งที่ process เริ่มใหม่
+        """
+        token = main.SESSION_TOKEN
+        restarted = hmac.new(main.APP_PASSWORD.encode("utf-8"),
+                             b"ethesis-session-v1", hashlib.sha256).hexdigest()
+        self.assertEqual(token, restarted)
+        # เปลี่ยนรหัสผ่าน = เตะทุกเซสชันออก
+        other = hmac.new(b"another-password", b"ethesis-session-v1", hashlib.sha256).hexdigest()
+        self.assertNotEqual(token, other)
 
     def test_wrong_password_is_rejected(self):
         anonymous = TestClient(main.app)
