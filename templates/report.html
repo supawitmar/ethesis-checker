@@ -225,7 +225,7 @@
     {% for group in report.verification %}
     {% set statuses = group.checks | map(attribute='status') | list %}
     {% set gstatus = 'fail' if 'fail' in statuses else ('pending' if 'pending' in statuses else 'pass') %}
-    <details class="vf-group"{% if gstatus != 'pass' %} open{% endif %}>
+    <details class="vf-group">
       <summary class="vf-topic {{ gstatus }}">
         <span class="vf-arrow">▸</span>
         <span class="vf-topic-name tr-dyn">{{ group.topic }}</span>
@@ -261,7 +261,7 @@
       <span class="count"><b>{{ report.issues_by_zone[zone] | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% if report.issues_by_zone[zone] %}
       {% for cat, items in report.issues_by_zone[zone] | groupby('category') %}
-      <details class="cat-group {{ zone }}"{% if items | length < 2 %} open{% endif %}>
+      <details class="cat-group {{ zone }}">
         <summary class="cat-sum">
           <span class="cat-arrow">▸</span>
           <span class="cat-name tr-cat">{{ cat }}</span>
@@ -567,6 +567,37 @@ window.addEventListener('afterprint', function(){
 });
 
 // สรุปจุดที่ต้องแก้ + วิธีแก้ แบบข้อความล้วน (จัดกลุ่มตามหมวด) ไว้คัดลอก
+// เรียงตามลำดับส่วนประกอบของเล่ม เพื่อให้เจ้าหน้าที่ไล่แก้จากหน้าแรกไปหน้าสุดท้าย
+var BOOK_SECTIONS = [
+  ['หน้าปก',          /หน้าปก/],
+  ['หน้าลงนาม',       /หน้าลงนาม/],
+  ['กิตติกรรมประกาศ', /กิตติกรรม/],
+  ['บทคัดย่อ',        /บทคัดย่อ/],
+  ['สารบัญ',          /สารบัญ/],
+  ['เนื้อหา (บท)',     /บทที่|เนื้อหา|ทั้งเล่ม/],
+  ['ส่วนท้ายเล่ม',     /บรรณานุกรม|อ้างอิง|ภาคผนวก|ประวัติ/],
+];
+// ใช้ส่วนที่ถูกเอ่ยถึง "ก่อน" ในตำแหน่ง เพราะนั่นคือจุดที่ต้องไปแก้จริง
+// เช่น "สารบัญ (หน้า viii) ↔ บทคัดย่อภาษาไทย" ต้องไปแก้ที่สารบัญ ไม่ใช่บทคัดย่อ
+function sectionOf(issue){
+  const text = (issue.location || '') + ' ' + (issue.part || '');
+  let best = null, bestAt = Infinity;
+  for (const [name, re] of BOOK_SECTIONS) {
+    const m = text.match(re);
+    if (m && m.index < bestAt) { best = name; bestAt = m.index; }
+  }
+  return best || 'อื่น ๆ';
+}
+// ตัดข้อความเชิงเทคนิค/ข้อความต่อรองออก เหลือเฉพาะ "ผิดตรงไหน ผิดอย่างไร แก้อย่างไร"
+function tidy(text){
+  return (text || '')
+    .replace(/\s*\(\s*typo[^)]*\)/gi, '')
+    .replace(/\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]\s*เจ้าหน้าที่ยืนยันได้/g, '')
+    .replace(/\s*[—-]\s*เจ้าหน้าที่ยืนยันได้/g, '')
+    .replace(/\s+([:：])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 function buildSummaryText(){
   const el = document.getElementById('issues-data');
   if (!el) return '';
@@ -574,23 +605,27 @@ function buildSummaryText(){
   const box = document.querySelector('.copybox');
   const verdict = box ? box.getAttribute('data-verdict') : '';
   const zones = [['RED','ต้องแก้ไข'],['ORANGE','รอเจ้าหน้าที่ยืนยัน'],['YELLOW','ข้อสังเกต']];
+  const order = BOOK_SECTIONS.map(s => s[0]).concat(['อื่น ๆ']);
   let out = 'ผลการตรวจ: ' + verdict + '\n';
   zones.forEach(function(z){
     const items = data[z[0]] || [];
     if (!items.length) return;
-    out += '\n== ' + z[1] + ' (' + items.length + ') ==\n';
-    const byCat = {};
+    out += '\n===== ' + z[1] + ' (' + items.length + ') =====\n';
+    const bySection = {};
     items.forEach(function(it){
-      const c = it.category || 'อื่นๆ';
-      (byCat[c] = byCat[c] || []).push(it);
+      const s = sectionOf(it);
+      (bySection[s] = bySection[s] || []).push(it);
     });
-    Object.keys(byCat).forEach(function(cat){
-      out += '\n[' + cat + ']\n';
-      byCat[cat].forEach(function(it){
-        let line = '- (' + (it.location || '') + ') ' + (it.found || '');
-        if (it.expected) line += '\n  ที่ถูก: ' + it.expected;
-        if (it.fix) line += '\n  แก้: ' + it.fix;
-        out += line + '\n';
+    order.forEach(function(section){
+      const list = bySection[section];
+      if (!list || !list.length) return;
+      out += '\n[' + section + ']\n';
+      list.forEach(function(it){
+        out += '- ' + tidy(it.location) + ': ' + tidy(it.found) + '\n';
+        // ตัดคำนำซ้ำ ("ควรเป็น:", "ข้อความที่ถูกต้อง:") ไม่ให้กลายเป็น "แก้เป็น: ควรเป็น ..."
+        const fix = (tidy(it.expected) || tidy(it.fix))
+          .replace(/^(ข้อความที่ถูกต้อง|ควรเป็น|ต้องเป็น|ที่ถูก)\s*[:：]?\s*/, '');
+        if (fix) out += '  → แก้เป็น: ' + fix + '\n';
       });
     });
   });
