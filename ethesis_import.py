@@ -255,6 +255,20 @@ def _detect_format(pdf):
     return ''
 
 
+def _student_id(text):
+    """ดึงรหัสนักศึกษาเต็มจากข้อความ
+
+    รหัสเต็ม = เลข 7 หลัก + รหัสหลักสูตร เช่น "6838141 SHSS/M" ต้องใช้ทั้งชุด
+    เพราะบทคัดย่อพิมพ์ครบทั้งสองส่วน  ถ้าหารหัสหลักสูตรไม่เจอจึงใช้เลข 7 หลักอย่างเดียว
+    (lookaround กันไปตรงกับเลขชุดอื่น แต่ยอมให้ตัวอักษรติดท้ายได้ เช่น "6838141SHSS/M")
+    """
+    full = re.search(r'(?<!\d)(\d{7})\s*([A-Z]{2,8}/[A-Z])', text or '')
+    if full:
+        return f'{full.group(1)} {full.group(2)}'
+    digits = re.search(r'(?<!\d)\d{7}(?!\d)', text or '')
+    return digits.group(0) if digits else ''
+
+
 def parse_ethesis_pdf(pdf_path):
     """คืน dict ของค่าที่ดึงได้ (เฉพาะช่องที่พบ) สำหรับเติมแบบฟอร์ม"""
     with pdfplumber.open(pdf_path) as pdf:
@@ -271,16 +285,11 @@ def parse_ethesis_pdf(pdf_path):
     # รหัส นศ. = เลข 7 หลัก ตามด้วยรหัสหลักสูตร เช่น "6838141 SHSS/M" หรือติดกัน
     # "6838141SHSS/M" — ใช้ lookaround กันเลขอื่น แต่ยอมให้ตัวอักษรติดท้ายได้
     # และค้นครอบคลุมบรรทัดถัดไป 2 บรรทัด เผื่อค่าตกบรรทัด
+    # ค้นครอบคลุมบรรทัดถัดไป 2 บรรทัด เผื่อค่าตกบรรทัด
     id_scope = ' '.join([id_value, _next(lines, id_index), _next(lines, id_index, 2)])
-    # รหัสเต็มคือเลข 7 หลัก + รหัสหลักสูตร เช่น "6838141 SHSS/M" — ต้องใช้ทั้งชุด
-    # เพราะบทคัดย่อพิมพ์ครบทั้งสองส่วน ถ้าหารหัสหลักสูตรไม่เจอค่อยใช้เลข 7 หลักอย่างเดียว
-    full = re.search(r'(?<!\d)(\d{7})\s*([A-Z]{2,8}/[A-Z])', id_scope)
-    if full:
-        data['student_id'] = f'{full.group(1)} {full.group(2)}'
-    else:
-        id_match = re.search(r'(?<!\d)\d{7}(?!\d)', id_scope)
-        if id_match:
-            data['student_id'] = id_match.group(0)
+    student_id = _student_id(id_scope)
+    if student_id:
+        data['student_id'] = student_id
 
     name_value, name_index = _find(lines, 'ชื่อ-สกุล')
     if name_value:
