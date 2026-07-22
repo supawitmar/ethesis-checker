@@ -29,17 +29,44 @@
        padding:12px 22px; font-size:.95rem; cursor:pointer; }
   .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
        font-size:.82rem; border-radius:6px; margin-top:6px; }
-  .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:8px; padding:14px; }
-  .import-box textarea { min-height:110px; margin-top:6px; }
-  .import-pdf-row { display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap; }
-  .import-pdf-row input[type=file] { flex:1; min-width:200px; }
-  .import-pdf-row .secondary { margin-top:0; white-space:nowrap; }
-  .import-or { text-align:center; color:#8091a6; font-size:.8rem; margin:12px 0 2px; }
+  .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:10px; padding:0;
+       overflow:hidden; }
+  .import-box textarea { min-height:110px; }
   .secondary { background:#fff; color:var(--navy); border:1px solid var(--navy); border-radius:7px;
-       padding:9px 14px; cursor:pointer; margin-top:10px; }
-  .import-status { font-size:.82rem; margin:8px 0 0; color:#43566a; }
+       padding:9px 14px; cursor:pointer; margin-top:10px; font-weight:600; font-size:.86rem; }
+  .secondary:hover:not(:disabled) { background:var(--navy); color:#fff; }
+  .secondary:disabled { opacity:.55; cursor:progress; }
   .autofilled { background:#eef9f1; border-color:#79a987; }
-  input[type=file] { padding:8px; background:#fafafe; }
+
+  /* แท็บเลือกวิธีนำเข้า — แสดงทีละวิธี ไม่ให้หน้ายาวเกินจำเป็น */
+  .tabs { display:flex; gap:0; background:#e7eef6; border-bottom:1px solid #cbd9e6; }
+  .tab { flex:1; border:none; background:transparent; padding:11px 12px; cursor:pointer;
+       font-size:.86rem; font-weight:700; color:#5b6b7d; border-bottom:3px solid transparent; }
+  .tab:hover { background:#dee8f2; }
+  .tab.on { background:#f4f8fc; color:var(--navy); border-bottom-color:var(--gold); }
+  .tab-panel { display:none; padding:14px; } .tab-panel.on { display:block; }
+
+  /* กล่องลากวางไฟล์ — คลิกหรือลากไฟล์มาวางก็ได้ */
+  .drop { position:relative; display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+       border:2px dashed #b9cade; background:#fbfdff; border-radius:10px; padding:14px 16px;
+       cursor:pointer; transition:border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color:var(--navy); background:#eef4fb; }
+  .drop.has-file { border-style:solid; border-color:#79a987; background:#f2fbf5; }
+  .drop:focus-within { outline:2px solid var(--navy); outline-offset:2px; }
+  .drop-ico { font-size:1.5rem; line-height:1; }
+  .drop-main { font-weight:700; font-size:.88rem; color:var(--navy); }
+  .drop-sub { font-size:.78rem; color:#6b7a8b; margin-top:2px; word-break:break-all; }
+  /* ซ่อนช่องไฟล์แต่ต้องยัง "โฟกัสได้" — ถ้าใช้ display:none เบราว์เซอร์จะเตือน
+     required ไม่ได้ (not focusable) กดตรวจเล่มแล้วจะเงียบโดยไม่มีข้อความอะไรเลย */
+  .drop input[type=file] { position:absolute; left:16px; bottom:6px;
+       opacity:0; width:1px; height:1px; pointer-events:none; }
+
+  .import-status { font-size:.82rem; margin:10px 0 0; color:#43566a; padding:9px 12px;
+       border-radius:7px; background:#eef2f7; border-left:4px solid #b9cade; }
+  .import-status.ok { background:#eef9f1; border-left-color:#4c9a63; color:#245c37; }
+  .import-status.warn { background:#fff8e6; border-left-color:var(--gold); color:#7a5c00; }
+  .import-status.err { background:#fdeeee; border-left-color:#d16a6a; color:#8c2f2f; }
+  .filled-list { margin:6px 0 0; font-size:.78rem; opacity:.85; }
   .logout { position:absolute; top:18px; right:24px; margin:0; }
   .logout button { background:#fff; color:#596575; border:1px solid #ccd3dc;
     border-radius:7px; padding:6px 10px; cursor:pointer; }
@@ -55,21 +82,47 @@
   <form id="f" action="/check" method="post" enctype="multipart/form-data">
     <h2>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
     <div class="import-box">
-      <label for="ethesis-pdf">วิธีที่ 1 (แนะนำ): แนบไฟล์ PDF หน้าข้อมูล eThesis แล้วให้ระบบอ่านให้</label>
-      <div class="import-pdf-row">
-        <input type="file" id="ethesis-pdf" accept=".pdf">
-        <button type="button" class="secondary" id="parse-ethesis-pdf">📄 อ่านจากไฟล์ eThesis PDF</button>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab on" id="tab-file" role="tab" aria-selected="true"
+                aria-controls="panel-file">📄 แนบไฟล์ PDF <span style="font-weight:400">(แนะนำ)</span></button>
+        <button type="button" class="tab" id="tab-text" role="tab" aria-selected="false"
+                aria-controls="panel-text">📋 วางข้อความ</button>
       </div>
-      <div class="import-or">— หรือ —</div>
-      <label for="ethesis-source">วิธีที่ 2: คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่</label>
-      <textarea id="ethesis-source" rows="5" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
-      <button type="button" class="secondary" id="parse-ethesis">อ่านข้อความและเติมแบบฟอร์ม</button>
-      <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม (ตัวเลือก "รูปแบบ" ที่เป็นช่องติ๊กในไฟล์อาจอ่านอัตโนมัติไม่ได้)</p>
+
+      <div class="tab-panel on" id="panel-file" role="tabpanel" aria-labelledby="tab-file">
+        <label class="drop" id="drop-ethesis">
+          <span class="drop-ico">📄</span>
+          <span>
+            <span class="drop-main">คลิกเพื่อเลือก หรือลากไฟล์ eThesis PDF มาวาง</span>
+            <span class="drop-sub" id="drop-ethesis-name">หน้าข้อมูลนักศึกษาที่พิมพ์จากระบบ eThesis</span>
+          </span>
+          <input type="file" id="ethesis-pdf" accept=".pdf">
+        </label>
+        <button type="button" class="secondary" id="parse-ethesis-pdf">อ่านค่าและเติมแบบฟอร์ม</button>
+        <div class="drop-sub" style="margin-top:8px">✓ วิธีนี้อ่าน "รูปแบบเล่ม 1/2" ที่เป็นช่องติ๊กได้ด้วย</div>
+      </div>
+
+      <div class="tab-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text">
+        <label for="ethesis-source" style="margin-top:0">คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่</label>
+        <textarea id="ethesis-source" rows="5" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
+        <button type="button" class="secondary" id="parse-ethesis">อ่านข้อความและเติมแบบฟอร์ม</button>
+        <div class="drop-sub" style="margin-top:8px">⚠️ วิธีนี้มักอ่าน "รูปแบบเล่ม" ไม่ได้ ต้องเลือกเอง</div>
+      </div>
+
+      <div style="padding:0 14px 14px">
+        <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม</p>
+      </div>
     </div>
 
     <h2>0. ไฟล์เล่ม</h2>
-    <label>ไฟล์ PDF</label>
-    <input type="file" name="pdf" accept=".pdf" required>
+    <label class="drop" id="drop-book">
+      <span class="drop-ico">📕</span>
+      <span>
+        <span class="drop-main">คลิกเพื่อเลือก หรือลากไฟล์เล่มวิทยานิพนธ์ (PDF) มาวาง</span>
+        <span class="drop-sub" id="drop-book-name">ยังไม่ได้เลือกไฟล์</span>
+      </span>
+      <input type="file" id="book-pdf" name="pdf" accept=".pdf" required>
+    </label>
     <div class="note">รองรับไฟล์ PDF ขนาดไม่เกิน 25 MB และต้องเป็นไฟล์ที่ระบบดึงข้อความได้ ไม่รองรับไฟล์ที่มีรหัสผ่านหรือเป็นภาพสแกนทั้งเล่ม</div>
 
     <h2>1. ประเภทและรูปแบบเล่ม</h2>
@@ -226,6 +279,15 @@ function formatDegreeAbbreviation(value) {
   return field ? `${abbreviation} (${field})` : abbreviation;
 }
 
+// ชื่อปริญญาในฟอร์มเว้นวรรค 1 เคาะก่อนวงเล็บสาขาเสมอ (eThesis พิมพ์ติดกัน)
+function spacedDegree(value) {
+  return (value || '')
+    .replace(/\s*\(\s*/g, ' (')
+    .replace(/\s*\)\s*/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
 function formatDegreeAbbreviationTh(value) {
   const stems = {
@@ -318,14 +380,14 @@ function parseEthesisText(source, sourceHtml='') {
     // แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ, ลงนาม = Sentence case (ไทยคงเดิม),
     // บทคัดย่อ = ตัวย่อ
     if (englishDegree) {
-      data.degree_cover_en = englishDegree;
+      data.degree_cover_en = spacedDegree(englishDegree);
       data.degree_sig_en = formatDegreeName(englishDegree);
       const abbrEn = formatDegreeAbbreviation(englishDegree);
       if (abbrEn) data.degree_abbr_en = abbrEn;
     }
     if (thaiDegree) {
-      data.degree_cover_th = thaiDegree;
-      data.degree_sig_th = thaiDegree;
+      data.degree_cover_th = spacedDegree(thaiDegree);
+      data.degree_sig_th = spacedDegree(thaiDegree);
       const abbrTh = formatDegreeAbbreviationTh(thaiDegree);
       if (abbrTh) data.degree_abbr_th = abbrTh;
     }
@@ -386,53 +448,117 @@ function applyParsed(parsed) {
   return filled;
 }
 
+// ---- แท็บเลือกวิธีนำเข้า ----
+[['tab-file','panel-file'], ['tab-text','panel-text']].forEach(function(pair, idx, all){
+  document.getElementById(pair[0]).addEventListener('click', function(){
+    all.forEach(function(p){
+      const tab = document.getElementById(p[0]), panel = document.getElementById(p[1]);
+      const on = (p[0] === pair[0]);
+      tab.classList.toggle('on', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+      panel.classList.toggle('on', on);
+    });
+  });
+});
+
+// ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----
+function humanSize(bytes){
+  return bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB'
+                         : Math.max(1, Math.round(bytes/1024)) + ' KB';
+}
+function wireDrop(dropId, inputId, nameId, emptyText){
+  const drop = document.getElementById(dropId);
+  const input = document.getElementById(inputId);
+  const nameEl = document.getElementById(nameId);
+  function show(){
+    const f = input.files[0];
+    drop.classList.toggle('has-file', !!f);
+    nameEl.textContent = f ? `✓ ${f.name} (${humanSize(f.size)})` : emptyText;
+  }
+  input.addEventListener('change', show);
+  ['dragenter','dragover'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); });
+  });
+  drop.addEventListener('drop', function(e){
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (!f) return;
+    if (!/\.pdf$/i.test(f.name)) { setStatus('err', 'รองรับเฉพาะไฟล์ PDF'); return; }
+    const dt = new DataTransfer(); dt.items.add(f); input.files = dt.files;
+    show();
+  });
+}
+wireDrop('drop-ethesis', 'ethesis-pdf', 'drop-ethesis-name',
+         'หน้าข้อมูลนักศึกษาที่พิมพ์จากระบบ eThesis');
+wireDrop('drop-book', 'book-pdf', 'drop-book-name', 'ยังไม่ได้เลือกไฟล์');
+
+// ---- แถบสถานะการนำเข้า ----
+function setStatus(kind, text, filled){
+  const el = document.getElementById('import-status');
+  el.className = 'import-status' + (kind ? ' ' + kind : '');
+  const icon = {ok:'✓ ', warn:'⚠️ ', err:'✕ '}[kind] || '';
+  el.textContent = icon + text;
+  if (filled && filled.length){
+    const list = document.createElement('div');
+    list.className = 'filled-list';
+    list.textContent = 'ช่องที่เติม: ' + filled.join(', ');
+    el.appendChild(list);
+  }
+}
+async function withBusy(btn, label, fn){
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = label;
+  try { await fn(); } finally { btn.disabled = false; btn.textContent = original; }
+}
+
 document.getElementById('parse-ethesis').addEventListener('click', function(){
   const source = document.getElementById('ethesis-source').value.trim();
-  const status = document.getElementById('import-status');
-  if (!source) {
-    status.textContent = 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน';
-    return;
-  }
+  if (!source) { setStatus('err', 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน'); return; }
   const matchingHtml = source === ethSourcePlainText ? ethSourceHtml : '';
   const parsed = parseEthesisText(source, matchingHtml);
   const hasFormatSection = source.includes('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
   const filled = applyParsed(parsed);
-  if (filled.length) {
-    const formatNotice = hasFormatSection && !parsed.format
-      ? ' ไม่พบเครื่องหมายเลือกในแถว “ล่าสุด” จึงยังไม่เลือกรูปแบบ กรุณาเลือกเอง'
-      : '';
-    status.textContent = `เติมให้แล้ว ${filled.length} ช่อง: ${filled.join(', ')} — ช่องสีเขียวคือค่าที่ระบบอ่านพบ กรุณาตรวจทานก่อนใช้งาน${formatNotice}`;
-  } else {
-    status.textContent = 'ยังอ่านข้อมูลจากข้อความนี้ไม่ได้ กรุณาตรวจว่าคัดลอกส่วนรายละเอียดนักศึกษาและหัวข้อวิทยานิพนธ์มาครบ';
+  if (!filled.length) {
+    setStatus('err', 'ยังอ่านข้อมูลจากข้อความนี้ไม่ได้ กรุณาตรวจว่าคัดลอกส่วนรายละเอียดนักศึกษาและหัวข้อวิทยานิพนธ์มาครบ');
+    return;
   }
+  const needFormat = hasFormatSection && !parsed.format;
+  setStatus(needFormat ? 'warn' : 'ok',
+    `เติมให้แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานก่อนตรวจเล่ม` +
+    (needFormat ? ' — ไม่พบเครื่องหมายเลือกในแถว “ล่าสุด” กรุณาเลือกรูปแบบเอง' : ''),
+    filled);
 });
 
-document.getElementById('parse-ethesis-pdf').addEventListener('click', async function(){
-  const status = document.getElementById('import-status');
+document.getElementById('parse-ethesis-pdf').addEventListener('click', function(){
+  const btn = this;
   const file = document.getElementById('ethesis-pdf').files[0];
-  if (!file) { status.textContent = 'กรุณาเลือกไฟล์ eThesis PDF ก่อน'; return; }
-  status.textContent = 'กำลังอ่านไฟล์ eThesis PDF...';
-  try {
-    const body = new FormData();
-    body.append('pdf', file);
-    const resp = await fetch('/parse-ethesis', {method:'POST', body});
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || ('อ่านไฟล์ไม่สำเร็จ (' + resp.status + ')'));
+  if (!file) { setStatus('err', 'กรุณาเลือกไฟล์ eThesis PDF ก่อน'); return; }
+  withBusy(btn, 'กำลังอ่านไฟล์...', async function(){
+    setStatus('', 'กำลังอ่านไฟล์ eThesis PDF...');
+    try {
+      const body = new FormData();
+      body.append('pdf', file);
+      const resp = await fetch('/parse-ethesis', {method:'POST', body});
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || ('อ่านไฟล์ไม่สำเร็จ (' + resp.status + ')'));
+      }
+      const {data} = await resp.json();
+      const filled = applyParsed(data);
+      if (!filled.length) {
+        setStatus('err', 'อ่านไฟล์แล้วแต่ยังดึงข้อมูลไม่ได้ กรุณาตรวจว่าเป็นหน้าข้อมูลนักศึกษาจาก eThesis');
+        return;
+      }
+      setStatus(data.format ? 'ok' : 'warn',
+        `เติมจากไฟล์ eThesis แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานก่อนตรวจเล่ม` +
+        (data.format ? '' : ' — ไม่พบเครื่องหมายติ๊กรูปแบบในไฟล์ กรุณาเลือกรูปแบบเอง'),
+        filled);
+    } catch(err) {
+      setStatus('err', 'เกิดข้อผิดพลาด: ' + err.message);
     }
-    const {data} = await resp.json();
-    const filled = applyParsed(data);
-    if (filled.length) {
-      const formatNotice = !data.format
-        ? ' — ไม่พบเครื่องหมายติ๊กรูปแบบในไฟล์ (ติ๊กอาจเป็นภาพ) กรุณาเลือกรูปแบบเอง'
-        : '';
-      status.textContent = `เติมจากไฟล์ eThesis แล้ว ${filled.length} ช่อง: ${filled.join(', ')} — ช่องสีเขียวคือค่าที่อ่านพบ กรุณาตรวจทานก่อนใช้งาน${formatNotice}`;
-    } else {
-      status.textContent = 'อ่านไฟล์แล้วแต่ยังดึงข้อมูลไม่ได้ กรุณาตรวจว่าเป็นหน้าข้อมูลนักศึกษาจาก eThesis';
-    }
-  } catch(err) {
-    status.textContent = 'เกิดข้อผิดพลาด: ' + err.message;
-  }
+  });
 });
 
 function updateConditionalRequirements() {

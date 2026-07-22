@@ -239,6 +239,18 @@ def closest_text_line(page_text, expected):
     return max(lines, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
 
 
+def toc_page_mismatch_zone(section_kind, toc_label, appendix_labels):
+    """ระดับสีเมื่อเลขหน้าของหัวข้อหลักในสารบัญไม่ตรงหน้าจริง
+
+    หัวข้อหลักต้องตรงหน้าจริงเสมอ = แดง  ยกเว้นภาคผนวกที่มักมีหลายชุด
+    (APPENDIX A/B/C...) ถ้าเลขหน้าที่สารบัญระบุเป็นหน้าเริ่มของภาคผนวกชุดอื่น
+    ที่มีอยู่จริงในเล่ม ถือเป็นกรณีก้ำกึ่ง = ส้ม ให้เจ้าหน้าที่ตัดสิน
+    """
+    if section_kind == "appendix" and toc_label in appendix_labels:
+        return "ORANGE"
+    return "RED"
+
+
 def closest_degree_line(page_text, expected):
     """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
 
@@ -998,7 +1010,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     last_major = None
     has_appendix_body = False
     appendix_page = None
+    appendix_pages = []
+    # ส่วนท้ายเล่มอยู่ "หลังเนื้อหา" เสมอ จึงต้องไม่สแกนส่วนนำ/สารบัญ มิฉะนั้นบรรทัด
+    # ในสารบัญ เช่น "APPENDIX D 90" จะถูกนับเป็นหัวบทภาคผนวกจริง ทำให้หน้าเริ่มของ
+    # ภาคผนวกกลายเป็นหน้าส่วนนำ (เช่น "x") แล้วฟ้องเลขหน้าผิดทั้งที่เล่มถูก
+    end_scan_start = min((c[2] for c in body_ch), default=0)
     for i, t in enumerate(pages):
+        if i < end_scan_start:
+            continue
         for l in top_lines(t, 3):
             nl = norm(l)
             ref_groups = [
@@ -1014,6 +1033,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 last_major = ("BIO", i)
             if any(nl.startswith(w) for w in N_APPENDIX):
                 has_appendix_body = True
+                appendix_pages.append(i)
                 appendix_page = i if appendix_page is None else appendix_page
                 last_major = ("APP", i)
     if ref_head:
@@ -1547,6 +1567,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             for entry in toc_entries:
                 toc_entries_by_kind.setdefault(entry["kind"], []).append(entry)
 
+            # เลขหน้าเริ่มของภาคผนวกทุกชุดที่มีอยู่จริงในเล่ม (ใช้แยกกรณีก้ำกึ่ง)
+            appendix_labels = {page_labels.get(i, "") for i in appendix_pages}
+            appendix_labels.discard("")
+
             for section_kind, (section_label, actual_page_idx) in actual_toc_sections.items():
                 candidates = toc_entries_by_kind.get(section_kind, [])
                 if not candidates:
@@ -1570,13 +1594,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     continue
                 actual_label = page_labels.get(actual_page_idx, "")
                 if actual_label and entry["page_label"] != actual_label:
-                    rep.add(
-                        "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ {section_label} ({page_ref(actual_page_idx)})",
-                        f"สารบัญระบุหน้า {entry['page_label']} แต่หัวข้อเริ่มจริงหน้า {actual_label}",
-                        f"เลขหน้า {section_label} ในสารบัญต้องเป็น {actual_label}",
-                        f"แก้เลขหน้าในสารบัญจาก {entry['page_label']} เป็น {actual_label}",
-                        "FRONT.TOC_CONTENT",
-                    )
+                    location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ "
+                                f"{section_label} ({page_ref(actual_page_idx)})")
+                    if toc_page_mismatch_zone(section_kind, entry["page_label"],
+                                              appendix_labels) == "ORANGE":
+                        # หัวข้อร่ม "APPENDIX" ชี้ไปหน้าเริ่มของภาคผนวกชุดอื่นแทนชุดแรก
+                        # เลขหน้ายังมีอยู่จริงในเล่ม จึงให้เจ้าหน้าที่ตัดสิน
+                        rep.add(
+                            "ORANGE", "front_matter", location,
+                            f"สารบัญระบุหน้า {entry['page_label']} ซึ่งเป็นหน้าเริ่มของภาคผนวกอีกชุดหนึ่ง "
+                            f"(ภาคผนวกชุดแรกอยู่หน้า {actual_label})",
+                            f"โดยทั่วไปหัวข้อ {section_label} ควรชี้หน้าเริ่มของภาคผนวกชุดแรก คือหน้า {actual_label}",
+                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เป็นหน้าแรกของภาคผนวก",
+                            "FRONT.TOC_CONTENT",
+                        )
+                    else:
+                        rep.add(
+                            "RED", "front_matter", location,
+                            f"สารบัญระบุหน้า {entry['page_label']} แต่หัวข้อเริ่มจริงหน้า {actual_label}",
+                            f"เลขหน้า {section_label} ในสารบัญต้องเป็น {actual_label}",
+                            f"แก้เลขหน้าในสารบัญจาก {entry['page_label']} เป็น {actual_label}",
+                            "FRONT.TOC_CONTENT",
+                        )
 
             for optional_kind in ("list_tables", "list_figures", "list_abbreviations"):
                 if optional_kind in toc_entries_by_kind and optional_kind not in actual_toc_sections:

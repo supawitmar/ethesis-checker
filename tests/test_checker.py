@@ -2,7 +2,9 @@ import unittest
 
 from checker import (
     NOT_CHECKED,
+    N_APPENDIX,
     Report,
+    toc_page_mismatch_zone,
     _extract_page_label,
     _is_abstract_heading,
     _is_toc_major_heading,
@@ -371,6 +373,32 @@ class CoverDegreeLineTests(unittest.TestCase):
         line = closest_degree_line(page, "ศิลปศาสตรมหาบัณฑิต(สังคมศาสตร์สิ่งแวดล้อม)")
         self.assertIn("ศิลปศาสตรมหาบัณฑิต", line)
         self.assertIn("สังคมศาสตร์สิ่งแวดล้อม", line)
+
+
+class TocSectionPageTests(unittest.TestCase):
+    """เลขหน้าหัวข้อหลักในสารบัญต้องตรงหน้าจริง ยกเว้นภาคผนวกหลายชุดที่ก้ำกึ่ง"""
+
+    APPENDIX_PAGES = {"85", "87", "88", "90"}
+
+    def test_main_section_page_must_match_exactly(self):
+        for kind in ("references", "biography", "abstract_en", "list_tables"):
+            self.assertEqual(
+                toc_page_mismatch_zone(kind, "79", self.APPENDIX_PAGES), "RED")
+
+    def test_appendix_pointing_at_another_appendix_is_pending(self):
+        # สารบัญเขียน "APPENDIX 87" แต่ภาคผนวกชุดแรกอยู่หน้า 85 — 87 เป็นหน้าเริ่ม
+        # ของ APPENDIX B ที่มีจริง จึงให้เจ้าหน้าที่พิจารณา
+        self.assertEqual(
+            toc_page_mismatch_zone("appendix", "87", self.APPENDIX_PAGES), "ORANGE")
+
+    def test_appendix_pointing_at_a_page_with_no_appendix_is_red(self):
+        self.assertEqual(
+            toc_page_mismatch_zone("appendix", "999", self.APPENDIX_PAGES), "RED")
+
+    def test_toc_entry_line_would_match_the_appendix_heading_rule(self):
+        # เหตุผลที่ต้องกันไม่ให้สแกนหน้าสารบัญเป็นส่วนท้ายเล่ม: บรรทัดในสารบัญ
+        # อย่าง "APPENDIX D 90" เข้าเงื่อนไขหัวบทภาคผนวก (startswith) ได้
+        self.assertTrue(any(norm("APPENDIX D 90").startswith(w) for w in N_APPENDIX))
 
 
 class ChapterScopeByFormatTests(unittest.TestCase):
