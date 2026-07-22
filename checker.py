@@ -23,6 +23,8 @@ from ethesis_rules import (
     MATCH_RULES,
     FRONT_MATTER_RULES,
     NOT_CHECKED,
+    SIGNATURE_TEMPLATE_EN,
+    SIGNATURE_TEMPLATE_TH,
     TOC_ALLOWED_LIST_HEADINGS,
     TYPE_MARKERS,
     rule_reference,
@@ -1511,6 +1513,22 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         # เล่มหลักสูตรไทย ปก/หน้าลงนามเป็นภาษาไทย นอกนั้นใช้ชุดภาษาอังกฤษ
         cover_degree = soft(A.get("degree_cover_th" if thai_book else "degree_cover_en", ""))
         sig_degree = soft(A.get("degree_sig_th" if thai_book else "degree_sig_en", ""))
+
+        # ประโยคตายตัวของ template หน้าลงนาม ต้องอยู่ครบ ไม่ใช่แค่ชื่อปริญญาถูก
+        # เล่มไทยหน้าอาจารย์ที่ปรึกษาใช้ "นับเป็นส่วนหนึ่ง..." ส่วนหน้ากรรมการสอบ
+        # ขึ้นต้น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." จึงเช็คท่อนร่วมท่อนเดียว
+        sig_template = (SIGNATURE_TEMPLATE_TH if thai_book else SIGNATURE_TEMPLATE_EN)
+        for k, idx in enumerate(sig_pages):
+            spot = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
+            if norm(sig_template) in norm(pages[idx]):
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
+            else:
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail",
+                                     "ไม่พบข้อความตาม template")
+                rep.add("RED", "front_matter", spot,
+                        f'ไม่พบข้อความตาม template: "{sig_template}"',
+                        f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
+                        "ใส่ข้อความตาม template ให้ครบ", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:

@@ -236,6 +236,15 @@ MATCH_RULES = {
     },
 }
 
+# ประโยคตายตัวใน template หน้าลงนาม (นำหน้าชื่อปริญญา) ต้องปรากฏครบ
+# เล่มไทยมี 2 หน้าที่ใช้สำนวนต่างกันเล็กน้อย:
+#   หน้าอาจารย์ที่ปรึกษา = "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+#   หน้ากรรมการสอบ      = "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+# จึงเก็บเฉพาะท่อนร่วมที่อยู่ในทั้งสองหน้า
+SIGNATURE_TEMPLATE_TH = "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+SIGNATURE_TEMPLATE_EN = ("was submitted to the Faculty of Graduate Studies, "
+                         "Mahidol University for the degree of")
+
 FRONT_MATTER_RULES = {
     "strict": True,
     "failure_zone": "RED",

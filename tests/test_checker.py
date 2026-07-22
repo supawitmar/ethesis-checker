@@ -33,6 +33,8 @@ from ethesis_rules import (
     FRONT_MATTER_RULES,
     MATCH_RULES,
     RULE_CATALOG,
+    SIGNATURE_TEMPLATE_EN,
+    SIGNATURE_TEMPLATE_TH,
     SOURCE_PRECEDENCE,
     rule_zone,
 )
@@ -421,6 +423,43 @@ class ChapterScopeByFormatTests(unittest.TestCase):
         self.assertTrue(BODY_RULES["check_toc_title_against_body"])
         self.assertTrue(BODY_RULES["check_body_title_against_canonical"])
         self.assertTrue(BODY_RULES["check_toc_chapter_presence"])
+
+
+class SignatureTemplateSentenceTests(unittest.TestCase):
+    """หน้าลงนามต้องมีประโยคตายตัวของ template ไม่ใช่แค่ชื่อปริญญาถูก
+
+    เทียบด้วย norm() เหมือนในตัวตรวจจริง (ตัดเว้นวรรค/คอมมา/ตัวพิมพ์)
+    """
+
+    # ข้อความจริงที่ดึงได้จากเล่มตัวอย่าง (หน้าอาจารย์ที่ปรึกษา/หน้ากรรมการสอบ)
+    EN_PAGE = ("was submitted to the Faculty of Graduate Studies, Mahidol University\n"
+               "for the degree of Doctor of Philosophy (Tropical Medicine)\n"
+               "on 25 June 2026")
+    TH_ADVISORY = ("นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n"
+                   "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+    TH_EXAM = ("ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n"
+               "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+
+    def test_english_template_found_across_line_break(self):
+        # template ขึ้นบรรทัดใหม่กลางประโยค — norm() ตัดช่องว่างจึงยังเจอ
+        self.assertIn(norm(SIGNATURE_TEMPLATE_EN), norm(self.EN_PAGE))
+
+    def test_english_template_is_case_and_comma_insensitive(self):
+        self.assertIn(norm(SIGNATURE_TEMPLATE_EN),
+                      norm("WAS SUBMITTED TO THE FACULTY OF GRADUATE STUDIES "
+                           "MAHIDOL UNIVERSITY FOR THE DEGREE OF"))
+
+    def test_thai_template_covers_both_signature_pages(self):
+        # ท่อนที่เก็บไว้ต้องอยู่ในทั้งหน้าที่ปรึกษาและหน้ากรรมการสอบ
+        self.assertIn(norm(SIGNATURE_TEMPLATE_TH), norm(self.TH_ADVISORY))
+        self.assertIn(norm(SIGNATURE_TEMPLATE_TH), norm(self.TH_EXAM))
+
+    def test_missing_template_sentence_is_detected(self):
+        # เล่มที่มีชื่อปริญญาถูกแต่ตัดประโยค template ออก ต้องไม่ผ่าน
+        self.assertNotIn(norm(SIGNATURE_TEMPLATE_EN),
+                         norm("Doctor of Philosophy (Tropical Medicine)\non 25 June 2026"))
+        self.assertNotIn(norm(SIGNATURE_TEMPLATE_TH),
+                         norm("ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
 
 
 if __name__ == "__main__":
