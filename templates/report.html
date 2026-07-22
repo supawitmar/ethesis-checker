@@ -72,6 +72,16 @@
   .ai-summary { background:#f3f7fd; border:1px solid #d6e3f5; border-radius:12px;
         padding:16px 20px; font-size:.9rem; color:#2c3e50; white-space:pre-wrap; line-height:1.65; }
   .ai-summary-caveat { font-size:.75rem; color:#8894a0; margin-top:8px; }
+  /* แถบเตือนว่าเจ้าหน้าที่เพิ่งเปลี่ยนผลพิจารณา ข้อความ AI เดิมจึงยังไม่รวมรายการใหม่
+     ระหว่างนี้กล่องข้างล่างจะแสดง "ตรงตัวจากระบบ" ซึ่งอัปเดตแล้วเสมอ กันคัดลอกของเก่าไปส่ง */
+  .ai-stale { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0 0;
+        background:#fff7e6; border:1px solid #f0d9a8; border-radius:9px;
+        padding:9px 12px; font-size:.8rem; color:#7a5b1a; }
+  .ai-stale.err { background:#fdeeee; border-color:#f0bdbd; color:#9c3232; }
+  .ai-redo { margin-left:auto; border:1px solid var(--navy); background:var(--navy); color:#fff;
+        border-radius:7px; padding:5px 12px; font-size:.8rem; cursor:pointer; font-family:inherit; }
+  .ai-redo:hover { filter:brightness(1.12); }
+  .ai-redo[disabled] { opacity:.55; cursor:progress; }
   .rule-source { font-size:.76rem; color:#617184; margin-top:7px; padding-top:7px;
         border-top:1px dashed rgba(60,80,100,.18); }
   .rule-source b { color:var(--navy); }
@@ -231,6 +241,14 @@
                 data-th="✨ ภาษาเข้าใจง่าย" data-en="✨ Plain language">✨ ภาษาเข้าใจง่าย</button>
         <button type="button" class="mode" data-mode="raw" onclick="setSummaryMode('raw')"
                 data-th="📋 ตรงตัวจากระบบ" data-en="📋 Exact (system)">📋 ตรงตัวจากระบบ</button>
+      </div>
+      {% endif %}
+      {% if report.student_summary %}
+      <div class="ai-stale" id="ai-stale" hidden>
+        <span id="ai-stale-msg" data-th="ผลพิจารณาของเจ้าหน้าที่เปลี่ยนไป ข้อความด้านล่างจึงแสดงแบบตรงตัวจากระบบไว้ก่อน"
+              data-en="Staff decisions changed — showing the exact system text until AI is re-run.">ผลพิจารณาของเจ้าหน้าที่เปลี่ยนไป ข้อความด้านล่างจึงแสดงแบบตรงตัวจากระบบไว้ก่อน</span>
+        <button type="button" class="ai-redo" onclick="regenerateAi()"
+                data-th="✨ ให้ AI เรียบเรียงใหม่" data-en="✨ Re-run AI">✨ ให้ AI เรียบเรียงใหม่</button>
       </div>
       {% endif %}
       <textarea class="copy-text" readonly></textarea>
@@ -596,8 +614,11 @@ function aiSummaryText(){
 var SUMMARY_MODE = aiSummaryText() ? 'ai' : 'raw';
 var PLAIN_TEXT = buildSummaryText();
 var AI_TEXT = aiSummaryText();
+// AI_STALE = เจ้าหน้าที่กดผ่าน/ไม่ผ่านเพิ่มหลังจาก AI เรียบเรียงครั้งล่าสุด
+// ระหว่างที่ค้างอยู่จะไม่โชว์ข้อความ AI เก่า (กันคัดลอกสรุปที่ตกรายการไปส่งนักศึกษา)
+var AI_STALE = false;
 function currentSummaryText(){
-  return SUMMARY_MODE === 'ai' ? (AI_TEXT || PLAIN_TEXT) : PLAIN_TEXT;
+  return (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE) ? AI_TEXT : PLAIN_TEXT;
 }
 function renderSummary(){
   const ta = document.querySelector('.copy-text');
@@ -605,16 +626,27 @@ function renderSummary(){
   ta.value = currentSummaryText();
   ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
   const caveat = document.getElementById('ai-caveat');
-  if (caveat) caveat.style.display = (SUMMARY_MODE === 'ai') ? '' : 'none';
+  const showAi = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE);
+  if (caveat) caveat.style.display = showAi ? '' : 'none';
   document.querySelectorAll('.copy-modes .mode').forEach(function(b){
     b.classList.toggle('on', b.getAttribute('data-mode') === SUMMARY_MODE);
   });
+  renderStaleBar();
+}
+// แถบ "ให้ AI เรียบเรียงใหม่" โผล่เฉพาะตอนอยู่โหมด AI แล้วข้อความยังไม่ตรงผลพิจารณาล่าสุด
+function renderStaleBar(err){
+  const bar = document.getElementById('ai-stale');
+  if (!bar) return;
+  const need = (SUMMARY_MODE === 'ai') && (AI_STALE || !AI_TEXT);
+  bar.hidden = !need;
+  bar.classList.toggle('err', !!err);
+  const msg = document.getElementById('ai-stale-msg');
+  if (msg && err) msg.textContent = err;
+  else if (msg && need) msg.textContent = msg.getAttribute(LANG === 'en' ? 'data-en' : 'data-th');
 }
 function setSummaryMode(mode){
   SUMMARY_MODE = mode;
   renderSummary();
-  // เพิ่งสลับมาโหมด AI แต่ยังไม่มีข้อความตามผลพิจารณาล่าสุด — ขอใหม่
-  if (mode === 'ai' && !AI_TEXT) refreshSummary();
 }
 
 // ---- รวมรายการที่เจ้าหน้าที่กด "ไม่ผ่าน" เข้าไปในสรุป ----
@@ -629,29 +661,44 @@ function setSummaryBusy(on){
   const box = document.querySelector('.copybox .copy-btn');
   if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
 }
-function refreshSummary(){
+// wantAi = true เฉพาะตอนเจ้าหน้าที่กดปุ่มเรียบเรียงใหม่เท่านั้น การกดผ่าน/ไม่ผ่าน
+// แต่ละครั้งจะอัปเดตเฉพาะข้อความตรงตัว (ฟรีและทันที) ไม่เรียก AI รัวๆ
+function refreshSummary(wantAi){
   const box = document.querySelector('.copybox');
   const job = box && box.getAttribute('data-job');
-  if (!job) return;
-  const wantAi = (SUMMARY_MODE === 'ai');
+  if (!job) return Promise.resolve();
   setSummaryBusy(true);
-  fetch('/summary/' + job, {
+  return fetch('/summary/' + job, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({failed: collectFailed(), ai: wantAi}),
+    body: JSON.stringify({failed: collectFailed(), ai: !!wantAi}),
   }).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
     .then(function(data){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
-      if (typeof data.ai === 'string' && data.ai) AI_TEXT = data.ai;
+      if (wantAi) {
+        if (typeof data.ai === 'string' && data.ai) { AI_TEXT = data.ai; AI_STALE = false; }
+        else throw new Error('empty');
+      }
       renderSummary();
     })
-    .catch(function(){ /* สรุปเดิมยังใช้ได้ ไม่ต้องรบกวนผู้ใช้ */ })
     .finally(function(){ setSummaryBusy(false); });
 }
+function regenerateAi(){
+  const btn = document.querySelector('.ai-redo');
+  if (btn) btn.disabled = true;
+  refreshSummary(true)
+    .catch(function(){
+      renderStaleBar(LANG === 'en'
+        ? 'Could not re-run AI. The exact system text below is up to date — try again or use it as is.'
+        : 'เรียบเรียงด้วย AI ไม่สำเร็จ ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว กดลองใหม่หรือใช้ข้อความนี้ได้เลย');
+    })
+    .finally(function(){ if (btn) btn.disabled = false; });
+}
 function scheduleSummaryRefresh(){
-  AI_TEXT = '';                    // ผลพิจารณาเปลี่ยน ข้อความ AI เดิมใช้ไม่ได้แล้ว
+  AI_STALE = true;                 // ผลพิจารณาเปลี่ยน ข้อความ AI เดิมยังไม่รวมรายการใหม่
+  renderSummary();                 // สลับไปโชว์ข้อความตรงตัวทันที พร้อมปุ่มเรียบเรียงใหม่
   clearTimeout(_summaryTimer);
-  _summaryTimer = setTimeout(refreshSummary, 900);
+  _summaryTimer = setTimeout(function(){ refreshSummary(false).catch(function(){}); }, 600);
 }
 
 function copySummary(ev, btn){
