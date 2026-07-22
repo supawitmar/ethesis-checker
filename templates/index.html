@@ -226,6 +226,15 @@ function formatDegreeAbbreviation(value) {
   return field ? `${abbreviation} (${field})` : abbreviation;
 }
 
+// ชื่อปริญญาในฟอร์มเว้นวรรค 1 เคาะก่อนวงเล็บสาขาเสมอ (eThesis พิมพ์ติดกัน)
+function spacedDegree(value) {
+  return (value || '')
+    .replace(/\s*\(\s*/g, ' (')
+    .replace(/\s*\)\s*/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
 function formatDegreeAbbreviationTh(value) {
   const stems = {
@@ -318,14 +327,14 @@ function parseEthesisText(source, sourceHtml='') {
     // แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ, ลงนาม = Sentence case (ไทยคงเดิม),
     // บทคัดย่อ = ตัวย่อ
     if (englishDegree) {
-      data.degree_cover_en = englishDegree;
+      data.degree_cover_en = spacedDegree(englishDegree);
       data.degree_sig_en = formatDegreeName(englishDegree);
       const abbrEn = formatDegreeAbbreviation(englishDegree);
       if (abbrEn) data.degree_abbr_en = abbrEn;
     }
     if (thaiDegree) {
-      data.degree_cover_th = thaiDegree;
-      data.degree_sig_th = thaiDegree;
+      data.degree_cover_th = spacedDegree(thaiDegree);
+      data.degree_sig_th = spacedDegree(thaiDegree);
       const abbrTh = formatDegreeAbbreviationTh(thaiDegree);
       if (abbrTh) data.degree_abbr_th = abbrTh;
     }

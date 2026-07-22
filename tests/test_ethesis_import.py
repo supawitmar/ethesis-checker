@@ -5,6 +5,7 @@ from ethesis_import import (
     _degree_abbr_th,
     _degree_name,
     _fix_thai_pua,
+    _spaced_degree,
     _student_id,
 )
 
@@ -61,6 +62,20 @@ class DegreeConversionTests(unittest.TestCase):
 
     def test_unknown_thai_degree_is_not_guessed(self):
         self.assertEqual(_degree_abbr_th("สาขาที่ไม่มีในตารางมหาบัณฑิต(อะไรสักอย่าง)"), "")
+
+    def test_degree_always_has_one_space_before_the_field(self):
+        # eThesis พิมพ์ติดวงเล็บ — ค่าที่เติมในฟอร์มต้องเว้นวรรค 1 เคาะเสมอ
+        self.assertEqual(
+            _spaced_degree("MASTER OF SCIENCE(INFORMATION TECHNOLOGY MANAGEMENT)"),
+            "MASTER OF SCIENCE (INFORMATION TECHNOLOGY MANAGEMENT)")
+        self.assertEqual(
+            _spaced_degree("ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)"),
+            "ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)")
+
+    def test_degree_spacing_collapses_extra_whitespace(self):
+        self.assertEqual(
+            _spaced_degree("  MASTER OF ARTS   (  ENVIRONMENTAL  ) "),
+            "MASTER OF ARTS (ENVIRONMENTAL)")
 
 
 class ThaiPuaTests(unittest.TestCase):

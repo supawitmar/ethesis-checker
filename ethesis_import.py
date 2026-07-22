@@ -194,6 +194,18 @@ def _degree_abbr(value):
     return f'{abbr} ({field})' if field else abbr
 
 
+def _spaced_degree(value):
+    """จัดชื่อปริญญาให้เว้นวรรค 1 เคาะก่อนวงเล็บสาขาเสมอ
+
+    eThesis พิมพ์ติดกัน เช่น "MASTER OF SCIENCE(INFORMATION TECHNOLOGY MANAGEMENT)"
+    ทำให้ค่าที่เติมในฟอร์มอ่านยาก จึงเว้นวรรคให้เป็นมาตรฐานเดียวกันทุกช่อง
+    (การเทียบกับเล่มไม่สนใจช่องว่างอยู่แล้ว จึงไม่กระทบผลตรวจ)
+    """
+    v = re.sub(r'\s*\(\s*', ' (', value or '')
+    v = re.sub(r'\s*\)\s*', ')', v)
+    return re.sub(r'\s+', ' ', v).strip()
+
+
 def _degree_abbr_th(value):
     """เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
 
@@ -327,14 +339,14 @@ def parse_ethesis_pdf(pdf_path):
         # แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis ตรง ๆ, หน้าลงนาม = Sentence
         # case สำหรับอังกฤษ (ไทยคงเดิม), บทคัดย่อ = ตัวย่อ
         if english:
-            data['degree_cover_en'] = english
+            data['degree_cover_en'] = _spaced_degree(english)
             data['degree_sig_en'] = _degree_name(english)
             abbr = _degree_abbr(english)
             if abbr:
                 data['degree_abbr_en'] = abbr
         if thai:
-            data['degree_cover_th'] = thai
-            data['degree_sig_th'] = thai
+            data['degree_cover_th'] = _spaced_degree(thai)
+            data['degree_sig_th'] = _spaced_degree(thai)
             abbr_th = _degree_abbr_th(thai)
             if abbr_th:
                 data['degree_abbr_th'] = abbr_th
