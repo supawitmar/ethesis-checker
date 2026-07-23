@@ -15,12 +15,16 @@ from checker import (
     _strip_toc_page_number,
     canonical_title_status,
     closest_degree_line,
+    closest_text_line,
+    compare_reference_text,
+    mismatch_detail,
     compare_canonical_title,
     compare_values,
     cover_required_items,
     exact_reference_status,
     fuzzy_contains,
     norm,
+    plain_summary,
     person_name_sentence_case,
     resolve_option,
     strip_name_prefix,
@@ -494,6 +498,98 @@ class SignatureTemplateSentenceTests(unittest.TestCase):
                          norm("Doctor of Philosophy (Tropical Medicine)\non 25 June 2026"))
         self.assertNotIn(norm(SIGNATURE_TEMPLATE_TH),
                          norm("ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
+
+
+class MultiLineTitleTests(unittest.TestCase):
+    """ชื่อเรื่องบนหน้าลงนามที่ตัดขึ้นหลายบรรทัด ต้องดึงมาครบ ไม่ฟ้อง "ขาด" ผิด ๆ"""
+
+    SIG_PAGE = (
+        "Thematic paper\nentitled\n"
+        "An evaluation of officer identification card issuance and management system using\n"
+        "ISO/IEC 25010 software quality model\n"
+        "was submitted to the Faculty of Graduate Studies, Mahidol University for the\n"
+        "degree of Master of Science (Biomedical and Health Informatics)\non 26 June 2026"
+    )
+    APPROVED = ("AN EVALUATION OF OFFICER IDENTIFICATION CARD ISSUANCE AND MANAGEMENT "
+                "SYSTEM USING ISO/IEC 25010 SOFTWARE QUALITY MODEL")
+
+    def test_wrapped_title_is_extracted_in_full(self):
+        found = closest_text_line(self.SIG_PAGE, self.APPROVED)
+        self.assertIn("system using", found)
+        self.assertIn("ISO/IEC 25010 software quality model", found)
+
+    def test_wrapped_title_reported_as_case_only_not_missing(self):
+        # ต่างแค่ตัวพิมพ์เล็ก-ใหญ่ (เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่)
+        compared = compare_reference_text(self.SIG_PAGE, self.APPROVED, "title")
+        self.assertEqual(compared["status"], "case")
+        detail = mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
+        self.assertNotIn("ขาด", detail)          # ต้องไม่ฟ้องว่าข้อความหาย
+        self.assertIn("ISO/IEC 25010", compared["actual"])
+
+    def test_exact_full_title_still_matches(self):
+        page = "entitled\n" + self.APPROVED + "\nwas submitted"
+        compared = compare_reference_text(page, self.APPROVED, "title")
+        self.assertEqual(compared["status"], "exact")
+
+
+class PlainSummaryProseTests(unittest.TestCase):
+    """สรุปคัดลอกได้ต้องเป็นประโยคภาษาคน ไล่เลขทุกจุด ไม่มี '-'/'→' และรวมรายการซ้ำ"""
+
+    def _report(self, red):
+        return {"verdict": "ไม่ผ่าน", "issues_by_zone": {"RED": red}}
+
+    def test_summary_is_numbered_prose_without_symbols(self):
+        report = self._report([{
+            "part": "front_matter", "location": "สารบัญ (หน้า viii) บทที่ 3",
+            "found": 'ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.97): '
+                     '"RESEARCH METHODLOGY" — ต่างที่ "METHODLOGY" → "METHODOLOGY"',
+            "expected": 'ควรเป็น "RESEARCH METHODOLOGY"', "fix": "แก้การสะกด",
+        }])
+        text = plain_summary(report)
+        self.assertIn("1. ในสารบัญ (หน้า viii) บทที่ 3:", text)
+        self.assertIn('แตกต่างที่ "METHODLOGY"', text)
+        self.assertIn('ให้แก้ไขเป็น: "RESEARCH METHODOLOGY"', text)
+        # ห้ามมีเครื่องหมายนำรายการหรือลูกศร และไม่หลงเหลือ (typo, ...)
+        self.assertNotIn("- ", text)
+        self.assertNotIn("→", text)
+        self.assertNotIn("typo", text)
+        self.assertNotIn("[", text)
+
+    def test_same_fix_reported_twice_is_merged(self):
+        # ชื่อบทเดียวกันในเนื้อหา ถูกรายงานทั้งตอนเทียบสารบัญและเทียบประกาศ = จุดเดียว
+        dup = [{
+            "part": "body", "location": "บทที่ 2 (หน้า 6)",
+            "found": 'ชื่อบทในเนื้อหาพิมพ์ผิดเล็กน้อย: "LITTERATURE REVIEW" '
+                     '— ต่างที่ "LITTERATURE" → "LITERATURE"',
+            "expected": 'ต้องสะกดตรงกับชื่อบทในสารบัญ: "LITERATURE REVIEW"', "fix": "",
+        }, {
+            "part": "body", "location": "บทที่ 2 (หน้า 6)",
+            "found": 'ชื่อบทในเนื้อหาพิมพ์ผิดเล็กน้อย: "LITTERATURE REVIEW" '
+                     '— ต่างที่ "LITTERATURE" → "LITERATURE"',
+            "expected": 'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"', "fix": "",
+        }]
+        text = plain_summary(self._report(dup))
+        self.assertIn("ทั้งหมด 1 จุด", text)
+        self.assertEqual(text.count("ในบทที่ 2 (หน้า 6)"), 1)
+
+    def test_same_typo_in_toc_and_body_stays_two_points(self):
+        # ตำแหน่งต่างกัน (สารบัญ vs เนื้อหา) แม้ค่าที่ต้องแก้เหมือนกัน = สองจุดจริง
+        items = [{
+            "part": "front_matter", "location": "สารบัญ (หน้า viii) บทที่ 3",
+            "found": 'ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย: "RESEARCH METHODLOGY"',
+            "expected": 'ควรเป็น "RESEARCH METHODOLOGY"', "fix": "",
+        }, {
+            "part": "body", "location": "บทที่ 3 (หน้า 23)",
+            "found": 'ชื่อบทในเนื้อหาพิมพ์ผิดเล็กน้อย: "RESEARCH METHODLOGY"',
+            "expected": 'ตามประกาศ 2569 ควรเป็น "RESEARCH METHODOLOGY"', "fix": "",
+        }]
+        text = plain_summary(self._report(items))
+        self.assertIn("ทั้งหมด 2 จุด", text)
+        self.assertIn("2.", text)
+
+    def test_no_issues_message(self):
+        text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
 
 if __name__ == "__main__":

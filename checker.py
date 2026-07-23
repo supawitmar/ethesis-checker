@@ -233,12 +233,28 @@ def exact_reference_status(page_text, expected):
 
 
 def closest_text_line(page_text, expected):
-    """Return a short, human-readable line closest to the approved value."""
+    """Return the run of text closest to the approved value (may span lines).
+
+    ชื่อเรื่องบนหน้าลงนาม/หน้าปกมักถูกตัดขึ้น 2-4 บรรทัด เช่น
+      "An evaluation ... system using" / "ISO/IEC 25010 software quality model"
+    ถ้าคืนแค่บรรทัดเดียวที่ใกล้ที่สุด ข้อความ "ที่พบ" ในรายงานจะไม่ครบ และ
+    describe_diff จะฟ้องว่า "ขาด ..." ทั้งที่ข้อความอยู่ครบแค่คนละบรรทัด จึงลองรวม
+    บรรทัดต่อเนื่อง 1-4 บรรทัดแล้วเลือกช่วงที่ใกล้เคียงข้อมูลอนุมัติที่สุด
+    """
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     if not lines:
         return "(ไม่พบข้อความ)"
     target = norm(expected)
-    return max(lines, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
+    best, best_ratio = lines[0], -1.0
+    for start in range(len(lines)):
+        for span in range(1, 5):
+            if start + span > len(lines):
+                break
+            window = ' '.join(lines[start:start + span])
+            ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = window, ratio
+    return best
 
 
 # ---------- ข้อความสรุปสำหรับคัดลอก ----------
@@ -297,33 +313,100 @@ def issues_to_fix(report, failed=None):
     return items
 
 
+def _corrected_value(issue):
+    """ค่าที่ควรเป็น (ข้อความในเครื่องหมายคำพูดท้าย expected/fix) ถ้ามี
+
+    ใช้ทั้งจัดประโยคให้กระชับ และเป็นกุญแจรวมรายการซ้ำ — ตำแหน่งเดียวกันและค่าที่
+    ต้องแก้เหมือนกัน ถือเป็น "จุดเดียว" (การครอสเช็ค 3 ทางอาจรายงานชื่อบทเดียวกัน
+    ทั้งตอนเทียบสารบัญและเทียบประกาศ ซึ่งสำหรับนักศึกษาคือการแก้จุดเดียว)
+    """
+    raw = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+    raw = _SUMMARY_LEAD.sub("", raw)
+    match = re.search(r'"([^"]+)"\s*$', raw)
+    return match.group(1) if match else ""
+
+
+def _prose_found(found):
+    """แปลงข้อความ "ที่พบ" ให้เป็นสำนวนคน ไม่ใช้ลูกศร
+
+    describe_diff ต่อท้ายว่า '— ต่างที่ "A" → "B"' ซึ่งมีเครื่องหมายลูกศร จึงตัดค่า
+    ที่ถูกต้อง (→ "B") ออก เพราะจะบอกครบอีกทีในท่อน "ให้แก้ไขเป็น" และเปลี่ยน
+    "— ต่างที่" เป็นคำเชื่อม "แตกต่างที่"
+    """
+    found = summary_tidy(found)
+    found = re.sub(r'\s*→\s*"[^"]*"', '', found)
+    found = re.sub(r'\s*→\s*\S+', '', found)
+    found = re.sub(r'\s*[—–-]\s*ต่างที่', ' แตกต่างที่', found)
+    return re.sub(r'\s{2,}', ' ', found).strip()
+
+
+def _prose_location(location):
+    """ทำตำแหน่งให้เป็นสำนวนคน ไม่ให้มีสัญลักษณ์ตกค้าง (↔ → ใช้คำเชื่อมแทน)"""
+    loc = summary_tidy(location)
+    loc = loc.replace("↔", "เทียบกับ").replace("→", "ถึง")
+    return re.sub(r"\s{2,}", " ", loc).strip()
+
+
+def _summary_sentence(issue):
+    """ประโยคเดียวต่อหนึ่งจุด: "ใน<ตำแหน่ง>: <ที่พบ> ให้แก้ไขเป็น: <ค่าที่ควรเป็น>" """
+    loc = _prose_location(issue.get("location"))
+    found = _prose_found(issue.get("found"))
+    if loc and found:
+        sentence = f"ใน{loc}: {found}"
+    else:
+        sentence = f"ใน{loc}" if loc else found
+    value = _corrected_value(issue)
+    if value:
+        return f'{sentence} ให้แก้ไขเป็น: "{value}"'.strip()
+    directive = _SUMMARY_LEAD.sub(
+        "", summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix")))
+    return f"{sentence} {directive}".strip() if directive else sentence.strip()
+
+
+def _dedupe_issues(items):
+    """รวมรายการที่เป็นจุดเดียวกัน (ตำแหน่ง + ค่าที่ต้องแก้ ตรงกัน) ให้เหลือรายการเดียว
+
+    เก็บรายการแรกที่พบ ยกเว้นถ้ารายการหลังอ้าง "ประกาศ" (แหล่งอำนาจสูงสุด) ให้ใช้แทน
+    """
+    kept = {}
+    order = []
+    for issue in items:
+        value = _corrected_value(issue) or _prose_found(issue.get("found"))
+        key = (summary_tidy(issue.get("location")), value)
+        if key not in kept:
+            kept[key] = issue
+            order.append(key)
+        elif "ประกาศ" in (issue.get("expected") or "") \
+                and "ประกาศ" not in (kept[key].get("expected") or ""):
+            kept[key] = issue
+    return [kept[key] for key in order]
+
+
 def plain_summary(report, failed=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
+    เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
     ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด
     """
-    items = issues_to_fix(report, failed)
+    items = _dedupe_issues(issues_to_fix(report, failed))
     lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
     if not items:
         lines.append("\nไม่พบจุดที่ต้องแก้ไข")
         return "\n".join(lines).strip()
 
-    lines.append(f"\nกรุณาแก้ไขตามรายการต่อไปนี้ ({len(items)} จุด)")
+    lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
     grouped = {}
     for issue in items:
         grouped.setdefault(summary_section(issue), []).append(issue)
+    number = 0
     for section in SUMMARY_SECTION_ORDER:
         section_items = grouped.get(section)
         if not section_items:
             continue
-        lines.append(f"\n[{section}]")
+        lines.append(f"\n{section}")
         for issue in section_items:
-            lines.append(f"- {summary_tidy(issue.get('location'))}: "
-                         f"{summary_tidy(issue.get('found'))}")
-            fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
-            fix = _SUMMARY_LEAD.sub("", fix)
-            if fix:
-                lines.append(f"  → แก้เป็น: {fix}")
+            number += 1
+            lines.append(f"{number}. {_summary_sentence(issue)}")
     return "\n".join(lines).strip()
 
 
@@ -849,7 +932,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         for k in range(1, len(seq)):
             a, b = seq[k-1][1], seq[k][1]
             if b != a + 1:
-                rep.add("RED", "body/end", f"ช่วงเลขหน้า {a}→{b}", f"เลขหน้ากระโดดจาก {a} ไป {b}",
+                rep.add("RED", "body/end", f"ช่วงเลขหน้า {a} ถึง {b}", f"เลขหน้ากระโดดจาก {a} ไป {b}",
                         "เลขหน้าต้องต่อเนื่อง ไม่ซ้ำ ไม่ข้าม", "", "PAGE.NUMBERING")
     last_arabic = max(printed.values()) if printed else None
 
