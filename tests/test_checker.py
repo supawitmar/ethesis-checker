@@ -4,7 +4,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
-    toc_page_mismatch_zone,
+    toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
     _is_abstract_heading,
     _is_toc_major_heading,
@@ -407,24 +407,29 @@ class CoverDegreeLineTests(unittest.TestCase):
 
 
 class TocSectionPageTests(unittest.TestCase):
-    """เลขหน้าหัวข้อหลักในสารบัญต้องตรงหน้าจริง ยกเว้นภาคผนวกหลายชุดที่ก้ำกึ่ง"""
+    """เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี (นโยบายใหม่)
+
+    helper คืนแค่ว่าเป็นกรณีภาคผนวกหลายชุดหรือไม่ ใช้เลือกข้อความอธิบาย ไม่ใช่สี
+    """
 
     APPENDIX_PAGES = {"85", "87", "88", "90"}
 
-    def test_main_section_page_must_match_exactly(self):
+    def test_generic_main_section_mismatch_is_not_appendix_alt(self):
+        # หัวข้อหลักทั่วไปที่เลขไม่ตรง ไม่ใช่กรณีภาคผนวกหลายชุด → ข้อความ mismatch ปกติ
         for kind in ("references", "biography", "abstract_en", "list_tables"):
-            self.assertEqual(
-                toc_page_mismatch_zone(kind, "79", self.APPENDIX_PAGES), "RED")
+            self.assertFalse(
+                toc_page_mismatch_is_appendix_alt(kind, "79", self.APPENDIX_PAGES))
 
-    def test_appendix_pointing_at_another_appendix_is_pending(self):
+    def test_appendix_pointing_at_another_appendix_uses_alt_message(self):
         # สารบัญเขียน "APPENDIX 87" แต่ภาคผนวกชุดแรกอยู่หน้า 85 — 87 เป็นหน้าเริ่ม
-        # ของ APPENDIX B ที่มีจริง จึงให้เจ้าหน้าที่พิจารณา
-        self.assertEqual(
-            toc_page_mismatch_zone("appendix", "87", self.APPENDIX_PAGES), "ORANGE")
+        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นส้ม)
+        self.assertTrue(
+            toc_page_mismatch_is_appendix_alt("appendix", "87", self.APPENDIX_PAGES))
 
-    def test_appendix_pointing_at_a_page_with_no_appendix_is_red(self):
-        self.assertEqual(
-            toc_page_mismatch_zone("appendix", "999", self.APPENDIX_PAGES), "RED")
+    def test_appendix_pointing_at_a_page_with_no_appendix_is_generic(self):
+        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นส้ม
+        self.assertFalse(
+            toc_page_mismatch_is_appendix_alt("appendix", "999", self.APPENDIX_PAGES))
 
     def test_toc_entry_line_would_match_the_appendix_heading_rule(self):
         # เหตุผลที่ต้องกันไม่ให้สแกนหน้าสารบัญเป็นส่วนท้ายเล่ม: บรรทัดในสารบัญ
