@@ -391,8 +391,9 @@ async def rebuild_summary(job_id: str, request: Request):
     except Exception:
         payload = {}
     failed = [str(k) for k in (payload.get("failed") or [])][:200]
+    passed = [str(k) for k in (payload.get("passed") or [])][:200]
     report = job["report"]
-    plain = plain_summary(report, failed)
+    plain = plain_summary(report, failed, passed)
     result = {"plain": plain}
     if payload.get("ai") and llm_assist.enabled():
         try:

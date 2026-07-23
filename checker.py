@@ -298,18 +298,25 @@ def summary_section(issue):
     return best or "อื่น ๆ"
 
 
-def issues_to_fix(report, failed=None):
-    """รายการที่ต้องแก้ = สีแดงทั้งหมด + ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน"
+def issues_to_fix(report, failed=None, passed=None):
+    """รายการที่ต้องแก้ในสรุป
 
-    failed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
-    ส้ม/เหลืองที่ยังไม่ตัดสิน หรือกดผ่านแล้ว จะไม่เข้าสรุป (ไม่ต้องให้นักศึกษาแก้)
+    - สีแดง: เข้าสรุปเสมอ
+    - สีส้ม (รอยืนยัน): เข้าสรุป**โดยปริยาย** เพราะเป็นจุดที่ต่างจากข้อมูลอนุมัติ
+      นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
+    - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
+
+    failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
     """
     failed = set(failed or ())
+    passed = set(passed or ())
     items = list(report["issues_by_zone"].get("RED") or [])
-    for zone in ("ORANGE", "YELLOW"):
-        for index, issue in enumerate(report["issues_by_zone"].get(zone) or []):
-            if f"{zone}:{index}" in failed:
-                items.append(issue)
+    for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
+        if f"ORANGE:{index}" not in passed:
+            items.append(issue)
+    for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
+        if f"YELLOW:{index}" in failed:
+            items.append(issue)
     return items
 
 
@@ -382,13 +389,13 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
-def plain_summary(report, failed=None):
+def plain_summary(report, failed=None, passed=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
-    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด
+    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
-    items = _dedupe_issues(issues_to_fix(report, failed))
+    items = _dedupe_issues(issues_to_fix(report, failed, passed))
     lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
     if not items:
         lines.append("\nไม่พบจุดที่ต้องแก้ไข")
@@ -537,6 +544,21 @@ def mismatch_detail(label, compared, expected=''):
         detail = f'{label}ข้อความไม่ตรง: "{compared["actual"]}"'
     # ชี้จุดต่างเฉพาะเมื่อใกล้เคียงกัน (typo/ตัวพิมพ์) — ถ้าเป็นคนละข้อความ
     # (mismatch) การไล่ทีละตัวอักษรจะรกและสับสน ให้ดูข้อความที่ถูกต้องแทน
+    if expected and compared['status'] in ('typo', 'case'):
+        diff = describe_diff(compared['actual'], expected)
+        if diff:
+            detail += f' — ต่างที่ {diff}'
+    return detail
+
+
+def title_mismatch_detail(label, compared, expected=''):
+    """ข้อความชื่อเรื่องที่ไม่ตรงข้อมูลในระบบ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
+
+    ชื่อเรื่องที่เก็บใน eThesis เป็นตัวพิมพ์ใหญ่ทั้งหมด แต่ในเล่มอาจใช้ Sentence case
+    ซึ่งไม่ควรตีความว่าเป็น "ตัวพิมพ์เล็ก-ใหญ่ผิด" — ประเด็นคือข้อความไม่ตรงกับที่
+    อนุมัติในระบบเฉย ๆ จึงบอกกลาง ๆ แล้วชี้จุดต่างเฉพาะเมื่อใกล้เคียงกันพอ (typo)
+    """
+    detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
     if expected and compared['status'] in ('typo', 'case'):
         diff = describe_diff(compared['actual'], expected)
         if diff:
@@ -1442,9 +1464,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อเรื่อง", compared, main_title),
+                            title_mismatch_detail("ชื่อเรื่อง", compared, main_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{main_title}\"",
-                            "แก้ข้อความและตัวพิมพ์เล็ก-ใหญ่ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+                            "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
         if alt_title:
             alt_abs = abs_en_idx if thai_book else abs_th_idx
             alt_lbl = "บทคัดย่อภาษาอังกฤษ" if thai_book else "บทคัดย่อภาษาไทย"
@@ -1455,9 +1477,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
-                            mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
+                            title_mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
-                            "แก้ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+                            "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
             else:
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ")

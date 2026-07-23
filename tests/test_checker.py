@@ -18,6 +18,7 @@ from checker import (
     closest_text_line,
     compare_reference_text,
     mismatch_detail,
+    title_mismatch_detail,
     compare_canonical_title,
     compare_values,
     cover_required_items,
@@ -518,12 +519,15 @@ class MultiLineTitleTests(unittest.TestCase):
         self.assertIn("system using", found)
         self.assertIn("ISO/IEC 25010 software quality model", found)
 
-    def test_wrapped_title_reported_as_case_only_not_missing(self):
-        # ต่างแค่ตัวพิมพ์เล็ก-ใหญ่ (เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่)
+    def test_wrapped_title_reported_as_not_matching_system_not_missing(self):
+        # เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
+        # ไม่ใช่ "ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง" และต้องไม่ฟ้องว่าข้อความหาย
         compared = compare_reference_text(self.SIG_PAGE, self.APPROVED, "title")
         self.assertEqual(compared["status"], "case")
-        detail = mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
-        self.assertNotIn("ขาด", detail)          # ต้องไม่ฟ้องว่าข้อความหาย
+        detail = title_mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
+        self.assertIn("ไม่ตรงกับข้อมูลในระบบ", detail)
+        self.assertNotIn("ตัวพิมพ์เล็ก-ใหญ่", detail)
+        self.assertNotIn("ขาด", detail)
         self.assertIn("ISO/IEC 25010", compared["actual"])
 
     def test_exact_full_title_still_matches(self):
@@ -590,6 +594,37 @@ class PlainSummaryProseTests(unittest.TestCase):
     def test_no_issues_message(self):
         text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+
+    def test_orange_is_included_by_default(self):
+        # สีส้ม (รอยืนยัน) ต้องเข้าสรุปโดยปริยาย นับรวมเป็นจุดที่ต้องแก้
+        report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
+            "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
+            "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
+            "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
+        }], "YELLOW": []}}
+        text = plain_summary(report)
+        self.assertIn("ทั้งหมด 1 จุด", text)
+        self.assertIn("สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45", text)
+        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) ไม่มีหัวข้อแยกระดับความรุนแรง
+        self.assertIn("\nสารบัญ\n1.", text)
+        self.assertEqual(text.count("รอยืนยัน"), 1)   # โผล่แค่ในบรรทัดผลการตรวจ
+
+    def test_orange_dropped_when_staff_passes_it(self):
+        report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
+            "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
+            "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
+            "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
+        }], "YELLOW": []}}
+        text = plain_summary(report, passed=["ORANGE:0"])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+
+    def test_yellow_only_enters_when_staff_fails_it(self):
+        report = {"verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": [{
+            "part": "body/end", "location": "หน้า 40",
+            "found": "พบหน้าที่ระบบดึงข้อความไม่ได้", "expected": "", "fix": "ตรวจด้วยตา",
+        }]}}
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
+        self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
 
 
 if __name__ == "__main__":
