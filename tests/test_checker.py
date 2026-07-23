@@ -4,7 +4,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
-    toc_page_mismatch_zone,
+    toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
     _is_abstract_heading,
     _is_toc_major_heading,
@@ -12,6 +12,7 @@ from checker import (
     _toc_page_label,
     _toc_section_kind,
     _toc_chapter_title,
+    _strip_toc_page_number,
     canonical_title_status,
     closest_degree_line,
     compare_canonical_title,
@@ -33,6 +34,8 @@ from ethesis_rules import (
     FRONT_MATTER_RULES,
     MATCH_RULES,
     RULE_CATALOG,
+    SIGNATURE_TEMPLATE_EN,
+    SIGNATURE_TEMPLATE_TH,
     SOURCE_PRECEDENCE,
     rule_zone,
 )
@@ -99,6 +102,34 @@ class ExactReferenceTests(unittest.TestCase):
             _toc_chapter_title("CHAPTER 6 CONCLUSION AND RECOMMENDATIONS 41"),
             "CONCLUSION AND RECOMMENDATIONS",
         )
+
+    def test_dot_leaders_are_stripped_from_toc_entries(self):
+        """จุดไข่ปลา (dot leader) ที่ลากไปเลขหน้า ต้องไม่ถูกนับเป็นตัวสะกด
+
+        rule toc_heading เป็น case_sensitive จึงข้ามการเทียบแบบ norm() — ถ้าไม่ตัด
+        จุดออกก่อน compare_values จะมองว่าหัวข้อทุกบรรทัดสะกดผิด (regression จริง
+        จากเล่มที่หัวข้อสารบัญตามด้วยจุดยาว)
+        """
+        # จุด '.' ยาวปกติ + เลขหน้าโรมัน/อารบิก
+        self.assertEqual(
+            _strip_toc_page_number("LIST OF TABLES " + "." * 60 + " viii"),
+            "LIST OF TABLES",
+        )
+        self.assertEqual(
+            _toc_chapter_title("CHAPTER 1 INTRODUCTION " + "." * 40 + " 1"),
+            "INTRODUCTION",
+        )
+        # ellipsis ยูนิโค้ด (…) ผสมจุดเดี่ยว อย่างที่ pdfplumber ดึงบรรทัด ABSTRACT
+        self.assertEqual(
+            _strip_toc_page_number("ABSTRACT " + "…" * 20 + " . iv"),
+            "ABSTRACT",
+        )
+        # หัวข้อที่ไม่มีจุด/เลขหน้า ต้องไม่ถูกแตะ
+        self.assertEqual(_strip_toc_page_number("REFERENCES"), "REFERENCES")
+        # เมื่อมีจุดคั่น ต้องได้ exact ไม่ใช่ typo
+        stripped = _strip_toc_page_number("RESEARCH METHODOLOGY" + "." * 30 + " 17")
+        self.assertEqual(compare_values(stripped, "RESEARCH METHODOLOGY",
+                                        "toc_heading")["status"], "exact")
 
     def test_toc_major_sections_and_printed_labels_are_classified(self):
         self.assertEqual(_toc_section_kind("ACKNOWLEDGEMENTS iii"), "ack")
@@ -376,24 +407,29 @@ class CoverDegreeLineTests(unittest.TestCase):
 
 
 class TocSectionPageTests(unittest.TestCase):
-    """เลขหน้าหัวข้อหลักในสารบัญต้องตรงหน้าจริง ยกเว้นภาคผนวกหลายชุดที่ก้ำกึ่ง"""
+    """เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี (นโยบายใหม่)
+
+    helper คืนแค่ว่าเป็นกรณีภาคผนวกหลายชุดหรือไม่ ใช้เลือกข้อความอธิบาย ไม่ใช่สี
+    """
 
     APPENDIX_PAGES = {"85", "87", "88", "90"}
 
-    def test_main_section_page_must_match_exactly(self):
+    def test_generic_main_section_mismatch_is_not_appendix_alt(self):
+        # หัวข้อหลักทั่วไปที่เลขไม่ตรง ไม่ใช่กรณีภาคผนวกหลายชุด → ข้อความ mismatch ปกติ
         for kind in ("references", "biography", "abstract_en", "list_tables"):
-            self.assertEqual(
-                toc_page_mismatch_zone(kind, "79", self.APPENDIX_PAGES), "RED")
+            self.assertFalse(
+                toc_page_mismatch_is_appendix_alt(kind, "79", self.APPENDIX_PAGES))
 
-    def test_appendix_pointing_at_another_appendix_is_pending(self):
+    def test_appendix_pointing_at_another_appendix_uses_alt_message(self):
         # สารบัญเขียน "APPENDIX 87" แต่ภาคผนวกชุดแรกอยู่หน้า 85 — 87 เป็นหน้าเริ่ม
-        # ของ APPENDIX B ที่มีจริง จึงให้เจ้าหน้าที่พิจารณา
-        self.assertEqual(
-            toc_page_mismatch_zone("appendix", "87", self.APPENDIX_PAGES), "ORANGE")
+        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นส้ม)
+        self.assertTrue(
+            toc_page_mismatch_is_appendix_alt("appendix", "87", self.APPENDIX_PAGES))
 
-    def test_appendix_pointing_at_a_page_with_no_appendix_is_red(self):
-        self.assertEqual(
-            toc_page_mismatch_zone("appendix", "999", self.APPENDIX_PAGES), "RED")
+    def test_appendix_pointing_at_a_page_with_no_appendix_is_generic(self):
+        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นส้ม
+        self.assertFalse(
+            toc_page_mismatch_is_appendix_alt("appendix", "999", self.APPENDIX_PAGES))
 
     def test_toc_entry_line_would_match_the_appendix_heading_rule(self):
         # เหตุผลที่ต้องกันไม่ให้สแกนหน้าสารบัญเป็นส่วนท้ายเล่ม: บรรทัดในสารบัญ
@@ -421,6 +457,43 @@ class ChapterScopeByFormatTests(unittest.TestCase):
         self.assertTrue(BODY_RULES["check_toc_title_against_body"])
         self.assertTrue(BODY_RULES["check_body_title_against_canonical"])
         self.assertTrue(BODY_RULES["check_toc_chapter_presence"])
+
+
+class SignatureTemplateSentenceTests(unittest.TestCase):
+    """หน้าลงนามต้องมีประโยคตายตัวของ template ไม่ใช่แค่ชื่อปริญญาถูก
+
+    เทียบด้วย norm() เหมือนในตัวตรวจจริง (ตัดเว้นวรรค/คอมมา/ตัวพิมพ์)
+    """
+
+    # ข้อความจริงที่ดึงได้จากเล่มตัวอย่าง (หน้าอาจารย์ที่ปรึกษา/หน้ากรรมการสอบ)
+    EN_PAGE = ("was submitted to the Faculty of Graduate Studies, Mahidol University\n"
+               "for the degree of Doctor of Philosophy (Tropical Medicine)\n"
+               "on 25 June 2026")
+    TH_ADVISORY = ("นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n"
+                   "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+    TH_EXAM = ("ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n"
+               "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+
+    def test_english_template_found_across_line_break(self):
+        # template ขึ้นบรรทัดใหม่กลางประโยค — norm() ตัดช่องว่างจึงยังเจอ
+        self.assertIn(norm(SIGNATURE_TEMPLATE_EN), norm(self.EN_PAGE))
+
+    def test_english_template_is_case_and_comma_insensitive(self):
+        self.assertIn(norm(SIGNATURE_TEMPLATE_EN),
+                      norm("WAS SUBMITTED TO THE FACULTY OF GRADUATE STUDIES "
+                           "MAHIDOL UNIVERSITY FOR THE DEGREE OF"))
+
+    def test_thai_template_covers_both_signature_pages(self):
+        # ท่อนที่เก็บไว้ต้องอยู่ในทั้งหน้าที่ปรึกษาและหน้ากรรมการสอบ
+        self.assertIn(norm(SIGNATURE_TEMPLATE_TH), norm(self.TH_ADVISORY))
+        self.assertIn(norm(SIGNATURE_TEMPLATE_TH), norm(self.TH_EXAM))
+
+    def test_missing_template_sentence_is_detected(self):
+        # เล่มที่มีชื่อปริญญาถูกแต่ตัดประโยค template ออก ต้องไม่ผ่าน
+        self.assertNotIn(norm(SIGNATURE_TEMPLATE_EN),
+                         norm("Doctor of Philosophy (Tropical Medicine)\non 25 June 2026"))
+        self.assertNotIn(norm(SIGNATURE_TEMPLATE_TH),
+                         norm("ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
 
 
 if __name__ == "__main__":

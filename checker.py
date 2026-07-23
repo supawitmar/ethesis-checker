@@ -23,6 +23,8 @@ from ethesis_rules import (
     MATCH_RULES,
     FRONT_MATTER_RULES,
     NOT_CHECKED,
+    SIGNATURE_TEMPLATE_EN,
+    SIGNATURE_TEMPLATE_TH,
     TOC_ALLOWED_LIST_HEADINGS,
     TYPE_MARKERS,
     rule_reference,
@@ -280,41 +282,60 @@ def summary_section(issue):
     return best or "อื่น ๆ"
 
 
-def plain_summary(report):
-    """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)"""
-    zones = [("RED", "ต้องแก้ไข"), ("ORANGE", "รอเจ้าหน้าที่ยืนยัน"), ("YELLOW", "ข้อสังเกต")]
+def issues_to_fix(report, failed=None):
+    """รายการที่ต้องแก้ = สีแดงทั้งหมด + ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน"
+
+    failed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
+    ส้ม/เหลืองที่ยังไม่ตัดสิน หรือกดผ่านแล้ว จะไม่เข้าสรุป (ไม่ต้องให้นักศึกษาแก้)
+    """
+    failed = set(failed or ())
+    items = list(report["issues_by_zone"].get("RED") or [])
+    for zone in ("ORANGE", "YELLOW"):
+        for index, issue in enumerate(report["issues_by_zone"].get(zone) or []):
+            if f"{zone}:{index}" in failed:
+                items.append(issue)
+    return items
+
+
+def plain_summary(report, failed=None):
+    """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
+
+    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด
+    """
+    items = issues_to_fix(report, failed)
     lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
-    for zone, zone_label in zones:
-        items = report["issues_by_zone"].get(zone) or []
-        if not items:
+    if not items:
+        lines.append("\nไม่พบจุดที่ต้องแก้ไข")
+        return "\n".join(lines).strip()
+
+    lines.append(f"\nกรุณาแก้ไขตามรายการต่อไปนี้ ({len(items)} จุด)")
+    grouped = {}
+    for issue in items:
+        grouped.setdefault(summary_section(issue), []).append(issue)
+    for section in SUMMARY_SECTION_ORDER:
+        section_items = grouped.get(section)
+        if not section_items:
             continue
-        lines.append(f"\n===== {zone_label} ({len(items)}) =====")
-        grouped = {}
-        for issue in items:
-            grouped.setdefault(summary_section(issue), []).append(issue)
-        for section in SUMMARY_SECTION_ORDER:
-            for issue in grouped.get(section, []):
-                if grouped.get(section) and issue is grouped[section][0]:
-                    lines.append(f"\n[{section}]")
-                lines.append(f"- {summary_tidy(issue.get('location'))}: "
-                             f"{summary_tidy(issue.get('found'))}")
-                fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
-                fix = _SUMMARY_LEAD.sub("", fix)
-                if fix:
-                    lines.append(f"  → แก้เป็น: {fix}")
+        lines.append(f"\n[{section}]")
+        for issue in section_items:
+            lines.append(f"- {summary_tidy(issue.get('location'))}: "
+                         f"{summary_tidy(issue.get('found'))}")
+            fix = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+            fix = _SUMMARY_LEAD.sub("", fix)
+            if fix:
+                lines.append(f"  → แก้เป็น: {fix}")
     return "\n".join(lines).strip()
 
 
-def toc_page_mismatch_zone(section_kind, toc_label, appendix_labels):
-    """ระดับสีเมื่อเลขหน้าของหัวข้อหลักในสารบัญไม่ตรงหน้าจริง
+def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
+    """เลขหน้าภาคผนวกในสารบัญชี้ไปหน้าเริ่มของภาคผนวก 'อีกชุด' ที่มีอยู่จริงในเล่ม
 
-    หัวข้อหลักต้องตรงหน้าจริงเสมอ = แดง  ยกเว้นภาคผนวกที่มักมีหลายชุด
-    (APPENDIX A/B/C...) ถ้าเลขหน้าที่สารบัญระบุเป็นหน้าเริ่มของภาคผนวกชุดอื่น
-    ที่มีอยู่จริงในเล่ม ถือเป็นกรณีก้ำกึ่ง = ส้ม ให้เจ้าหน้าที่ตัดสิน
+    ใช้เลือก 'ข้อความอธิบาย' เท่านั้น ไม่ได้ใช้ตัดสินสี — นโยบายใหม่: เลขหน้าของ
+    หัวข้อหลักในสารบัญไม่ตรงหน้าจริง ให้เป็น 'ส้ม' (รอเจ้าหน้าที่ยืนยัน) ทุกกรณี
+    ถ้าไม่มีจุดผิดที่สำคัญกว่า เจ้าหน้าที่ให้ผ่านได้ กรณีภาคผนวกหลายชุดนี้แค่
+    ต้องอธิบายให้ชัดว่า 87 เป็นหน้าเริ่มของภาคผนวกอีกชุด ไม่ใช่เลขมั่ว
     """
-    if section_kind == "appendix" and toc_label in appendix_labels:
-        return "ORANGE"
-    return "RED"
+    return section_kind == "appendix" and toc_label in appendix_labels
 
 
 def closest_degree_line(page_text, expected):
@@ -490,7 +511,16 @@ def _is_toc_major_heading(text):
 
 
 def _strip_toc_page_number(text):
-    return re.sub(r'\s+(?:\d+|[ivxlcdm]+|[ก-ฮ])\s*$', '', soft(text), flags=re.I)
+    s = soft(text)
+    # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
+    s = re.sub(r'\s+(?:\d+|[ivxlcdm]+|[ก-ฮ])\s*$', '', s, flags=re.I)
+    # ตัด "จุดไข่ปลา" (dot leader) ที่ลากเชื่อมชื่อหัวข้อกับเลขหน้า เช่น
+    #   "LIST OF TABLES ......................" หรือ "ABSTRACT ………… ."
+    # มันคือเส้นประของ template ไม่ใช่การสะกด ถ้าไม่ตัดจะทำให้ compare_values
+    # (rule toc_heading เป็น case_sensitive จึงข้ามการเทียบแบบ norm) มองว่า
+    # หัวข้อสะกดผิดทุกบรรทัด ทั้งที่ถูกต้อง — ตัดชุดจุด/ellipsis ตั้งแต่ 2 ตัวขึ้นไป
+    s = re.sub(r'\s*(?:[.…]\s*){2,}$', '', s)
+    return s.strip()
 
 
 def _toc_page_label(text):
@@ -959,9 +989,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                             f"หัวข้อ \"{t_raw}\" ไม่มีเลขหน้า",
                             "หัวข้อบทในสารบัญต้องระบุเลขหน้า", "เพิ่มเลขหน้าให้ตรงกับบทจริง", "FRONT.TOC")
                 elif BODY_RULES['check_toc_page_numbers'] and pno is not None and t_pno != pno:
-                    rep.add("RED", "body", f"สารบัญ ({page_ref(toc_page_idx)}) ↔ บทที่ {cn} ({page_ref(ppage)})",
+                    # เลขหน้าบทในสารบัญไม่ตรงหน้าจริง = ส้ม ให้เจ้าหน้าที่ตัดสิน
+                    rep.add("ORANGE", "body", f"สารบัญ ({page_ref(toc_page_idx)}) ↔ บทที่ {cn} ({page_ref(ppage)})",
                             f"สารบัญระบุหน้า {t_pno} แต่บทอยู่จริงหน้า {pno}",
-                            "เลขหน้าในสารบัญต้องตรงตำแหน่งจริง", "อัปเดตสารบัญ", "FRONT.TOC")
+                            f"เลขหน้าบทในสารบัญควรเป็น {pno}",
+                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ", "FRONT.TOC")
             elif BODY_RULES['check_toc_chapter_presence']:
                 rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})", "ไม่อยู่ในสารบัญ",
                         "ทุกบทต้องปรากฏในสารบัญ", "", "FRONT.TOC")
@@ -1491,6 +1523,22 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         # เล่มหลักสูตรไทย ปก/หน้าลงนามเป็นภาษาไทย นอกนั้นใช้ชุดภาษาอังกฤษ
         cover_degree = soft(A.get("degree_cover_th" if thai_book else "degree_cover_en", ""))
         sig_degree = soft(A.get("degree_sig_th" if thai_book else "degree_sig_en", ""))
+
+        # ประโยคตายตัวของ template หน้าลงนาม ต้องอยู่ครบ ไม่ใช่แค่ชื่อปริญญาถูก
+        # เล่มไทยหน้าอาจารย์ที่ปรึกษาใช้ "นับเป็นส่วนหนึ่ง..." ส่วนหน้ากรรมการสอบ
+        # ขึ้นต้น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." จึงเช็คท่อนร่วมท่อนเดียว
+        sig_template = (SIGNATURE_TEMPLATE_TH if thai_book else SIGNATURE_TEMPLATE_EN)
+        for k, idx in enumerate(sig_pages):
+            spot = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
+            if norm(sig_template) in norm(pages[idx]):
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
+            else:
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail",
+                                     "ไม่พบข้อความตาม template")
+                rep.add("RED", "front_matter", spot,
+                        f'ไม่พบข้อความตาม template: "{sig_template}"',
+                        f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
+                        "ใส่ข้อความตาม template ให้ครบ", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
@@ -1662,10 +1710,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 if actual_label and entry["page_label"] != actual_label:
                     location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ "
                                 f"{section_label} ({page_ref(actual_page_idx)})")
-                    if toc_page_mismatch_zone(section_kind, entry["page_label"],
-                                              appendix_labels) == "ORANGE":
-                        # หัวข้อร่ม "APPENDIX" ชี้ไปหน้าเริ่มของภาคผนวกชุดอื่นแทนชุดแรก
-                        # เลขหน้ายังมีอยู่จริงในเล่ม จึงให้เจ้าหน้าที่ตัดสิน
+                    # เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี ให้เจ้าหน้าที่
+                    # ตัดสิน (ถ้าไม่มีจุดผิดสำคัญกว่าก็ผ่านได้) กรณีภาคผนวกหลายชุดแค่ใช้
+                    # ข้อความอธิบายต่างออกไปว่าเลขที่ระบุเป็นหน้าเริ่มของภาคผนวกอีกชุด
+                    if toc_page_mismatch_is_appendix_alt(section_kind, entry["page_label"],
+                                                         appendix_labels):
                         rep.add(
                             "ORANGE", "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} ซึ่งเป็นหน้าเริ่มของภาคผนวกอีกชุดหนึ่ง "
@@ -1676,10 +1725,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         )
                     else:
                         rep.add(
-                            "RED", "front_matter", location,
+                            "ORANGE", "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} แต่หัวข้อเริ่มจริงหน้า {actual_label}",
-                            f"เลขหน้า {section_label} ในสารบัญต้องเป็น {actual_label}",
-                            f"แก้เลขหน้าในสารบัญจาก {entry['page_label']} เป็น {actual_label}",
+                            f"เลขหน้า {section_label} ในสารบัญควรเป็น {actual_label}",
+                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ",
                             "FRONT.TOC_CONTENT",
                         )
 

@@ -11,6 +11,7 @@ import traceback
 import uuid
 import os
 import asyncio
+import hashlib
 import hmac
 import secrets
 from pathlib import Path
@@ -22,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 import llm_assist
-from checker import run_check
+from checker import plain_summary, run_check
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
@@ -36,7 +37,15 @@ templates = Jinja2Templates(directory=BASE / "templates")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 SESSION_COOKIE = "ethesis_session"
-SESSION_TOKEN = secrets.token_urlsafe(32)
+# ผูก token กับ APP_PASSWORD แทนการสุ่มใหม่ทุกครั้งที่ process เริ่ม เพราะบน Render
+# บริการจะ sleep แล้ว cold start ใหม่เมื่อไม่มีคนใช้สักพัก ถ้า token สุ่มใหม่ คุกกี้เดิม
+# ใช้ไม่ได้ทันที เจ้าหน้าที่ที่กรอกฟอร์มค้างไว้จะกด "ตรวจเล่ม" ไม่ได้โดยไม่รู้สาเหตุ
+# (การเดา token ยังต้องรู้ APP_PASSWORD อยู่ดี ซึ่งถ้ารู้ก็ล็อกอินตรงได้อยู่แล้ว
+#  และการเปลี่ยน APP_PASSWORD จะเตะทุกเซสชันออกทันทีตามที่ควรเป็น)
+SESSION_TOKEN = (
+    hmac.new(APP_PASSWORD.encode("utf-8"), b"ethesis-session-v1", hashlib.sha256).hexdigest()
+    if APP_PASSWORD else secrets.token_urlsafe(32)
+)
 SESSION_MAX_AGE = 8 * 60 * 60
 
 ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยืนยัน", "YELLOW": "🟡 ข้อสังเกต"}
@@ -69,6 +78,17 @@ def _safe_next(path):
     return path if path.startswith("/") and not path.startswith("//") else "/"
 
 
+# ปลายทางที่หน้าเว็บเรียกด้วย fetch เท่านั้น (ไม่ใช่การเปิดหน้าเว็บตรง ๆ)
+JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/")
+
+
+def _wants_json(request):
+    path = request.url.path
+    if any(path == p.rstrip("/") or path.startswith(p) for p in JSON_ENDPOINTS):
+        return True
+    return "application/json" in request.headers.get("accept", "")
+
+
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
@@ -81,6 +101,14 @@ async def require_login(request: Request, call_next):
             status_code=503,
         )
     if not _is_authenticated(request):
+        # คำขอที่หน้าเว็บยิงด้วย fetch (ตรวจเล่ม/อ่านไฟล์ eThesis/สรุปใหม่) ต้องได้ JSON
+        # ไม่ใช่ redirect ไปหน้า login เพราะ fetch จะตาม redirect แล้วได้ HTML กลับมา
+        # ทำให้ resp.json() พังเป็น "Unexpected token '<'" ซึ่งผู้ใช้อ่านไม่รู้เรื่อง
+        if _wants_json(request):
+            return JSONResponse(
+                {"detail": "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่", "login_required": True},
+                status_code=401,
+            )
         return RedirectResponse(url=f"/login?next={path}", status_code=303)
     return await call_next(request)
 
@@ -348,6 +376,33 @@ def progress(job_id: str):
             "error": bool(job["error"])}
 
 
+@app.post("/summary/{job_id}")
+async def rebuild_summary(job_id: str, request: Request):
+    """สร้างข้อความสรุปใหม่ตามผลพิจารณาของเจ้าหน้าที่
+
+    ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน" จะถูกรวมเข้าไปเป็นรายการที่ต้องแก้ด้วย
+    ขอข้อความที่ AI เรียบเรียงเมื่อส่ง ai=true เท่านั้น (คุมจำนวนครั้งที่เรียก AI)
+    """
+    job = _get_job(job_id)
+    if not job or not job.get("report"):
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    failed = [str(k) for k in (payload.get("failed") or [])][:200]
+    report = job["report"]
+    plain = plain_summary(report, failed)
+    result = {"plain": plain}
+    if payload.get("ai") and llm_assist.enabled():
+        try:
+            result["ai"] = await asyncio.to_thread(
+                llm_assist.student_summary, {**report, "plain_summary": plain})
+        except Exception:
+            print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
+    return result
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result(request: Request, job_id: str):
     job = _get_job(job_id)
@@ -362,7 +417,7 @@ def result(request: Request, job_id: str):
             f"<p>รหัสงาน: <code>{job_id}</code></p>"
             "<a href='/'>&larr; กลับไปตรวจใหม่</a>", status_code=500)
     return templates.TemplateResponse(request=request, name="report.html", context={
-        "report": job["report"], "zone_label": ZONE_LABEL,
+        "report": job["report"], "zone_label": ZONE_LABEL, "job_id": job_id,
         "pdf_name": job["pdf_name"], "student": job.get("approved") or {},
     })
 

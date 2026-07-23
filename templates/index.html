@@ -541,6 +541,7 @@ document.getElementById('parse-ethesis-pdf').addEventListener('click', function(
       const body = new FormData();
       body.append('pdf', file);
       const resp = await fetch('/parse-ethesis', {method:'POST', body});
+      if (loginExpired(resp)) return;
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.detail || ('อ่านไฟล์ไม่สำเร็จ (' + resp.status + ')'));
@@ -580,6 +581,15 @@ function updateConditionalRequirements() {
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
 updateConditionalRequirements();
 
+// เซสชันหมดอายุระหว่างกรอกฟอร์ม (ทิ้งหน้าไว้นาน / server restart) เซิร์ฟเวอร์จะตอบ
+// 401 JSON แทนหน้า login กันไม่ให้ resp.json() พังเป็น "Unexpected token '<'"
+function loginExpired(resp){
+  if (resp.status !== 401) return false;
+  alert('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่แล้วกรอกข้อมูลอีกครั้ง');
+  window.location.href = '/login?next=/';
+  return true;
+}
+
 document.getElementById('f').addEventListener('submit', async function(e){
   e.preventDefault();
   const overlay = document.getElementById('overlay');
@@ -588,6 +598,7 @@ document.getElementById('f').addEventListener('submit', async function(e){
   stage.textContent = 'กำลังอัปโหลดไฟล์...';
   try {
     const resp = await fetch('/check', {method:'POST', body:new FormData(this)});
+    if (loginExpired(resp)) return;
     if (!resp.ok) {
       const errorBody = await resp.json().catch(() => ({}));
       throw new Error(errorBody.detail || ('อัปโหลดไม่สำเร็จ (' + resp.status + ')'));
