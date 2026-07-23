@@ -595,6 +595,37 @@ class PlainSummaryProseTests(unittest.TestCase):
         text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
+    def test_orange_is_included_by_default(self):
+        # สีส้ม (รอยืนยัน) ต้องเข้าสรุปโดยปริยาย นับรวมเป็นจุดที่ต้องแก้
+        report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
+            "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
+            "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
+            "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
+        }], "YELLOW": []}}
+        text = plain_summary(report)
+        self.assertIn("ทั้งหมด 1 จุด", text)
+        self.assertIn("สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45", text)
+        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) ไม่มีหัวข้อแยกระดับความรุนแรง
+        self.assertIn("\nสารบัญ\n1.", text)
+        self.assertEqual(text.count("รอยืนยัน"), 1)   # โผล่แค่ในบรรทัดผลการตรวจ
+
+    def test_orange_dropped_when_staff_passes_it(self):
+        report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
+            "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
+            "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
+            "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
+        }], "YELLOW": []}}
+        text = plain_summary(report, passed=["ORANGE:0"])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+
+    def test_yellow_only_enters_when_staff_fails_it(self):
+        report = {"verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": [{
+            "part": "body/end", "location": "หน้า 40",
+            "found": "พบหน้าที่ระบบดึงข้อความไม่ได้", "expected": "", "fix": "ตรวจด้วยตา",
+        }]}}
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
+        self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
+
 
 if __name__ == "__main__":
     unittest.main()

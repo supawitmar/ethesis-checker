@@ -649,12 +649,17 @@ function setSummaryMode(mode){
   renderSummary();
 }
 
-// ---- รวมรายการที่เจ้าหน้าที่กด "ไม่ผ่าน" เข้าไปในสรุป ----
-// ส้ม/เหลืองที่ถูกกดไม่ผ่าน ถือเป็นสิ่งที่นักศึกษาต้องแก้ จึงต้องอยู่ในสรุปด้วย
+// ---- ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป ----
+// สีส้มอยู่ในสรุปโดยปริยาย (เป็นจุดที่ต่างจากข้อมูลอนุมัติ) — เหลืองเข้าเมื่อกด "ไม่ผ่าน"
 function collectFailed(){
   return Array.from(document.querySelectorAll('.issue.state-fail[data-zone]'))
     .map(el => el.getAttribute('data-zone') + ':' + el.getAttribute('data-idx'))
     .filter(k => k.indexOf('RED:') !== 0);   // สีแดงอยู่ในสรุปอยู่แล้ว
+}
+// สีส้มที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) ให้ตัดออกจากสรุป
+function collectPassed(){
+  return Array.from(document.querySelectorAll('.issue.state-pass[data-zone="ORANGE"]'))
+    .map(el => 'ORANGE:' + el.getAttribute('data-idx'));
 }
 var _summaryTimer = null;
 function setSummaryBusy(on){
@@ -671,7 +676,7 @@ function refreshSummary(wantAi){
   return fetch('/summary/' + job, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({failed: collectFailed(), ai: !!wantAi}),
+    body: JSON.stringify({failed: collectFailed(), passed: collectPassed(), ai: !!wantAi}),
   }).then(function(r){
       // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
       if (r.status === 401) return Promise.reject(new Error('login'));

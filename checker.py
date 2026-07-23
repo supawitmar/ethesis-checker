@@ -298,18 +298,25 @@ def summary_section(issue):
     return best or "อื่น ๆ"
 
 
-def issues_to_fix(report, failed=None):
-    """รายการที่ต้องแก้ = สีแดงทั้งหมด + ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน"
+def issues_to_fix(report, failed=None, passed=None):
+    """รายการที่ต้องแก้ในสรุป
 
-    failed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
-    ส้ม/เหลืองที่ยังไม่ตัดสิน หรือกดผ่านแล้ว จะไม่เข้าสรุป (ไม่ต้องให้นักศึกษาแก้)
+    - สีแดง: เข้าสรุปเสมอ
+    - สีส้ม (รอยืนยัน): เข้าสรุป**โดยปริยาย** เพราะเป็นจุดที่ต่างจากข้อมูลอนุมัติ
+      นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
+    - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
+
+    failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
     """
     failed = set(failed or ())
+    passed = set(passed or ())
     items = list(report["issues_by_zone"].get("RED") or [])
-    for zone in ("ORANGE", "YELLOW"):
-        for index, issue in enumerate(report["issues_by_zone"].get(zone) or []):
-            if f"{zone}:{index}" in failed:
-                items.append(issue)
+    for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
+        if f"ORANGE:{index}" not in passed:
+            items.append(issue)
+    for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
+        if f"YELLOW:{index}" in failed:
+            items.append(issue)
     return items
 
 
@@ -382,13 +389,13 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
-def plain_summary(report, failed=None):
+def plain_summary(report, failed=None, passed=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
-    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด
+    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
-    items = _dedupe_issues(issues_to_fix(report, failed))
+    items = _dedupe_issues(issues_to_fix(report, failed, passed))
     lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
     if not items:
         lines.append("\nไม่พบจุดที่ต้องแก้ไข")
