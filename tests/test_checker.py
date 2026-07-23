@@ -15,6 +15,9 @@ from checker import (
     _strip_toc_page_number,
     canonical_title_status,
     closest_degree_line,
+    closest_text_line,
+    compare_reference_text,
+    mismatch_detail,
     compare_canonical_title,
     compare_values,
     cover_required_items,
@@ -495,6 +498,38 @@ class SignatureTemplateSentenceTests(unittest.TestCase):
                          norm("Doctor of Philosophy (Tropical Medicine)\non 25 June 2026"))
         self.assertNotIn(norm(SIGNATURE_TEMPLATE_TH),
                          norm("ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
+
+
+class MultiLineTitleTests(unittest.TestCase):
+    """ชื่อเรื่องบนหน้าลงนามที่ตัดขึ้นหลายบรรทัด ต้องดึงมาครบ ไม่ฟ้อง "ขาด" ผิด ๆ"""
+
+    SIG_PAGE = (
+        "Thematic paper\nentitled\n"
+        "An evaluation of officer identification card issuance and management system using\n"
+        "ISO/IEC 25010 software quality model\n"
+        "was submitted to the Faculty of Graduate Studies, Mahidol University for the\n"
+        "degree of Master of Science (Biomedical and Health Informatics)\non 26 June 2026"
+    )
+    APPROVED = ("AN EVALUATION OF OFFICER IDENTIFICATION CARD ISSUANCE AND MANAGEMENT "
+                "SYSTEM USING ISO/IEC 25010 SOFTWARE QUALITY MODEL")
+
+    def test_wrapped_title_is_extracted_in_full(self):
+        found = closest_text_line(self.SIG_PAGE, self.APPROVED)
+        self.assertIn("system using", found)
+        self.assertIn("ISO/IEC 25010 software quality model", found)
+
+    def test_wrapped_title_reported_as_case_only_not_missing(self):
+        # ต่างแค่ตัวพิมพ์เล็ก-ใหญ่ (เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่)
+        compared = compare_reference_text(self.SIG_PAGE, self.APPROVED, "title")
+        self.assertEqual(compared["status"], "case")
+        detail = mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
+        self.assertNotIn("ขาด", detail)          # ต้องไม่ฟ้องว่าข้อความหาย
+        self.assertIn("ISO/IEC 25010", compared["actual"])
+
+    def test_exact_full_title_still_matches(self):
+        page = "entitled\n" + self.APPROVED + "\nwas submitted"
+        compared = compare_reference_text(page, self.APPROVED, "title")
+        self.assertEqual(compared["status"], "exact")
 
 
 class PlainSummaryProseTests(unittest.TestCase):

@@ -233,12 +233,28 @@ def exact_reference_status(page_text, expected):
 
 
 def closest_text_line(page_text, expected):
-    """Return a short, human-readable line closest to the approved value."""
+    """Return the run of text closest to the approved value (may span lines).
+
+    ชื่อเรื่องบนหน้าลงนาม/หน้าปกมักถูกตัดขึ้น 2-4 บรรทัด เช่น
+      "An evaluation ... system using" / "ISO/IEC 25010 software quality model"
+    ถ้าคืนแค่บรรทัดเดียวที่ใกล้ที่สุด ข้อความ "ที่พบ" ในรายงานจะไม่ครบ และ
+    describe_diff จะฟ้องว่า "ขาด ..." ทั้งที่ข้อความอยู่ครบแค่คนละบรรทัด จึงลองรวม
+    บรรทัดต่อเนื่อง 1-4 บรรทัดแล้วเลือกช่วงที่ใกล้เคียงข้อมูลอนุมัติที่สุด
+    """
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     if not lines:
         return "(ไม่พบข้อความ)"
     target = norm(expected)
-    return max(lines, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
+    best, best_ratio = lines[0], -1.0
+    for start in range(len(lines)):
+        for span in range(1, 5):
+            if start + span > len(lines):
+                break
+            window = ' '.join(lines[start:start + span])
+            ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = window, ratio
+    return best
 
 
 # ---------- ข้อความสรุปสำหรับคัดลอก ----------
