@@ -18,6 +18,7 @@ from checker import (
     closest_text_line,
     compare_reference_text,
     mismatch_detail,
+    title_mismatch_detail,
     compare_canonical_title,
     compare_values,
     cover_required_items,
@@ -518,12 +519,15 @@ class MultiLineTitleTests(unittest.TestCase):
         self.assertIn("system using", found)
         self.assertIn("ISO/IEC 25010 software quality model", found)
 
-    def test_wrapped_title_reported_as_case_only_not_missing(self):
-        # ต่างแค่ตัวพิมพ์เล็ก-ใหญ่ (เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่)
+    def test_wrapped_title_reported_as_not_matching_system_not_missing(self):
+        # เล่มใช้ Sentence case, อนุมัติเป็นตัวใหญ่ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
+        # ไม่ใช่ "ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง" และต้องไม่ฟ้องว่าข้อความหาย
         compared = compare_reference_text(self.SIG_PAGE, self.APPROVED, "title")
         self.assertEqual(compared["status"], "case")
-        detail = mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
-        self.assertNotIn("ขาด", detail)          # ต้องไม่ฟ้องว่าข้อความหาย
+        detail = title_mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
+        self.assertIn("ไม่ตรงกับข้อมูลในระบบ", detail)
+        self.assertNotIn("ตัวพิมพ์เล็ก-ใหญ่", detail)
+        self.assertNotIn("ขาด", detail)
         self.assertIn("ISO/IEC 25010", compared["actual"])
 
     def test_exact_full_title_still_matches(self):

@@ -544,6 +544,21 @@ def mismatch_detail(label, compared, expected=''):
     return detail
 
 
+def title_mismatch_detail(label, compared, expected=''):
+    """ข้อความชื่อเรื่องที่ไม่ตรงข้อมูลในระบบ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
+
+    ชื่อเรื่องที่เก็บใน eThesis เป็นตัวพิมพ์ใหญ่ทั้งหมด แต่ในเล่มอาจใช้ Sentence case
+    ซึ่งไม่ควรตีความว่าเป็น "ตัวพิมพ์เล็ก-ใหญ่ผิด" — ประเด็นคือข้อความไม่ตรงกับที่
+    อนุมัติในระบบเฉย ๆ จึงบอกกลาง ๆ แล้วชี้จุดต่างเฉพาะเมื่อใกล้เคียงกันพอ (typo)
+    """
+    detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
+    if expected and compared['status'] in ('typo', 'case'):
+        diff = describe_diff(compared['actual'], expected)
+        if diff:
+            detail += f' — ต่างที่ {diff}'
+    return detail
+
+
 def _is_bold_font(fontname):
     font = (fontname or '').upper()
     return any(marker in font for marker in ('BOLD', 'BLACK', 'SEMIBOLD', 'DEMI'))
@@ -1442,9 +1457,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อเรื่อง", compared, main_title),
+                            title_mismatch_detail("ชื่อเรื่อง", compared, main_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{main_title}\"",
-                            "แก้ข้อความและตัวพิมพ์เล็ก-ใหญ่ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+                            "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
         if alt_title:
             alt_abs = abs_en_idx if thai_book else abs_th_idx
             alt_lbl = "บทคัดย่อภาษาอังกฤษ" if thai_book else "บทคัดย่อภาษาไทย"
@@ -1455,9 +1470,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
-                            mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
+                            title_mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
-                            "แก้ให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
+                            "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
             else:
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "ระบบหาหน้าบทคัดย่อภาษานี้ไม่เจอ")
