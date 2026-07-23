@@ -12,6 +12,7 @@ from checker import (
     _toc_page_label,
     _toc_section_kind,
     _toc_chapter_title,
+    _strip_toc_page_number,
     canonical_title_status,
     closest_degree_line,
     compare_canonical_title,
@@ -101,6 +102,34 @@ class ExactReferenceTests(unittest.TestCase):
             _toc_chapter_title("CHAPTER 6 CONCLUSION AND RECOMMENDATIONS 41"),
             "CONCLUSION AND RECOMMENDATIONS",
         )
+
+    def test_dot_leaders_are_stripped_from_toc_entries(self):
+        """จุดไข่ปลา (dot leader) ที่ลากไปเลขหน้า ต้องไม่ถูกนับเป็นตัวสะกด
+
+        rule toc_heading เป็น case_sensitive จึงข้ามการเทียบแบบ norm() — ถ้าไม่ตัด
+        จุดออกก่อน compare_values จะมองว่าหัวข้อทุกบรรทัดสะกดผิด (regression จริง
+        จากเล่มที่หัวข้อสารบัญตามด้วยจุดยาว)
+        """
+        # จุด '.' ยาวปกติ + เลขหน้าโรมัน/อารบิก
+        self.assertEqual(
+            _strip_toc_page_number("LIST OF TABLES " + "." * 60 + " viii"),
+            "LIST OF TABLES",
+        )
+        self.assertEqual(
+            _toc_chapter_title("CHAPTER 1 INTRODUCTION " + "." * 40 + " 1"),
+            "INTRODUCTION",
+        )
+        # ellipsis ยูนิโค้ด (…) ผสมจุดเดี่ยว อย่างที่ pdfplumber ดึงบรรทัด ABSTRACT
+        self.assertEqual(
+            _strip_toc_page_number("ABSTRACT " + "…" * 20 + " . iv"),
+            "ABSTRACT",
+        )
+        # หัวข้อที่ไม่มีจุด/เลขหน้า ต้องไม่ถูกแตะ
+        self.assertEqual(_strip_toc_page_number("REFERENCES"), "REFERENCES")
+        # เมื่อมีจุดคั่น ต้องได้ exact ไม่ใช่ typo
+        stripped = _strip_toc_page_number("RESEARCH METHODOLOGY" + "." * 30 + " 17")
+        self.assertEqual(compare_values(stripped, "RESEARCH METHODOLOGY",
+                                        "toc_heading")["status"], "exact")
 
     def test_toc_major_sections_and_printed_labels_are_classified(self):
         self.assertEqual(_toc_section_kind("ACKNOWLEDGEMENTS iii"), "ack")

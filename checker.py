@@ -512,7 +512,16 @@ def _is_toc_major_heading(text):
 
 
 def _strip_toc_page_number(text):
-    return re.sub(r'\s+(?:\d+|[ivxlcdm]+|[ก-ฮ])\s*$', '', soft(text), flags=re.I)
+    s = soft(text)
+    # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
+    s = re.sub(r'\s+(?:\d+|[ivxlcdm]+|[ก-ฮ])\s*$', '', s, flags=re.I)
+    # ตัด "จุดไข่ปลา" (dot leader) ที่ลากเชื่อมชื่อหัวข้อกับเลขหน้า เช่น
+    #   "LIST OF TABLES ......................" หรือ "ABSTRACT ………… ."
+    # มันคือเส้นประของ template ไม่ใช่การสะกด ถ้าไม่ตัดจะทำให้ compare_values
+    # (rule toc_heading เป็น case_sensitive จึงข้ามการเทียบแบบ norm) มองว่า
+    # หัวข้อสะกดผิดทุกบรรทัด ทั้งที่ถูกต้อง — ตัดชุดจุด/ellipsis ตั้งแต่ 2 ตัวขึ้นไป
+    s = re.sub(r'\s*(?:[.…]\s*){2,}$', '', s)
+    return s.strip()
 
 
 def _toc_page_label(text):
