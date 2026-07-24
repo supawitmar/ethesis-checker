@@ -17,6 +17,7 @@ from checker import (
     closest_degree_line,
     closest_text_line,
     find_signature_date,
+    header_extra_text,
     compare_reference_text,
     mismatch_detail,
     title_mismatch_detail,
@@ -535,6 +536,40 @@ class MultiLineTitleTests(unittest.TestCase):
         page = "entitled\n" + self.APPROVED + "\nwas submitted"
         compared = compare_reference_text(page, self.APPROVED, "title")
         self.assertEqual(compared["status"], "exact")
+
+
+class HeaderOnlyPageNumberTests(unittest.TestCase):
+    """หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้า ไม่มี running head/ชื่อบท"""
+
+    class _Page:
+        def __init__(self, height, words):
+            self.height = height
+            self._words = words
+
+        def extract_words(self, *a, **k):
+            return self._words
+
+    def test_header_with_only_page_number_is_clean(self):
+        page = self._Page(841.9, [
+            {"text": "23", "top": 48.7},          # เลขหน้ามุมบนขวา
+            {"text": "CHAPTER", "top": 86.9},      # เนื้อความอยู่ต่ำกว่าแถบหัวกระดาษ
+        ])
+        self.assertEqual(header_extra_text(page), "")
+
+    def test_running_head_in_header_is_flagged(self):
+        page = self._Page(841.9, [
+            {"text": "Chapter", "top": 49}, {"text": "3", "top": 49},
+            {"text": "Methodology", "top": 49}, {"text": "42", "top": 49},
+            {"text": "bodytext", "top": 120},
+        ])
+        extra = header_extra_text(page)
+        self.assertIn("Chapter", extra)
+        self.assertIn("Methodology", extra)
+        self.assertNotIn("42", extra)   # เลขหน้าไม่นับเป็นข้อความเกิน
+
+    def test_body_text_below_header_band_is_ignored(self):
+        page = self._Page(841.9, [{"text": "Introduction", "top": 90}])
+        self.assertEqual(header_extra_text(page), "")
 
 
 class SignatureDateTests(unittest.TestCase):

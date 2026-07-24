@@ -126,6 +126,36 @@ def _extract_page_label(page_text):
     return ""
 
 
+def _is_page_number_token(token):
+    token = (token or '').strip()
+    return bool(re.fullmatch(r'\d{1,4}', token)
+                or re.fullmatch(r'[ivxlcdm]{1,10}', token, re.I)
+                or re.fullmatch(r'[ก-ฮ]', token))
+
+
+def header_extra_text(pdf_page):
+    """ข้อความในแถบหัวกระดาษ (บนสุดของหน้า) ที่ไม่ใช่เลขหน้า
+
+    หัวกระดาษของส่วนเนื้อหา/ส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น (ห้ามมี running head
+    หรือชื่อบท) เลขหน้าอยู่ในระยะขอบบน (~5-6% ของความสูง) ส่วนเนื้อความเริ่ม ~9%+
+    จึงตัดที่ 8% เพื่อดูเฉพาะแถบหัวกระดาษ คืน '' ถ้าหัวกระดาษมีแต่เลขหน้า/ว่าง
+    """
+    height = float(getattr(pdf_page, 'height', 0) or 0)
+    if not height:
+        return ""
+    cutoff = height * 0.08
+    extras = []
+    for word in (pdf_page.extract_words() or []):
+        if float(word.get('top', height)) >= cutoff:
+            continue
+        # ตัดอักขระ PUA ของฟอนต์ไทย (F700-F70F) ที่ดึงมาเป็นกล่องออกก่อน
+        raw = word.get('text', '') or ''
+        token = ''.join(c for c in raw if not (0xF700 <= ord(c) <= 0xF70F)).strip()
+        if token and not _is_page_number_token(token):
+            extras.append(token)
+    return ' '.join(extras).strip()
+
+
 def fuzzy_contains(haystack_norm, needle, threshold=FUZZY_NAME_THRESHOLD):
     n = norm(needle)
     if not n:
@@ -897,6 +927,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     _p("เปิดไฟล์ PDF")
     pages = []
+    header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้า)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -910,6 +941,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
             pages.append(_page_text(_pg))
+            try:
+                header_extras.append(header_extra_text(_pg))
+            except Exception:
+                header_extras.append("")
             try:
                 _pg.flush_cache()
             except Exception:
@@ -1236,6 +1271,23 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     # ในสารบัญ เช่น "APPENDIX D 90" จะถูกนับเป็นหัวบทภาคผนวกจริง ทำให้หน้าเริ่มของ
     # ภาคผนวกกลายเป็นหน้าส่วนนำ (เช่น "x") แล้วฟ้องเลขหน้าผิดทั้งที่เล่มถูก
     end_scan_start = min((c[2] for c in body_ch), default=0)
+
+    # หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าเท่านั้น (ไม่มี running head/ชื่อบท)
+    # รวมทุกหน้าที่พบข้อความอื่นในหัวกระดาษเป็นรายการเดียว ให้เจ้าหน้าที่ยืนยัน (ส้ม)
+    if body_ch:
+        header_bad = [i for i in range(end_scan_start, len(pages))
+                      if i < len(header_extras) and header_extras[i]]
+        if header_bad:
+            shown = ", ".join(page_ref(i) for i in header_bad[:5])
+            more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
+            sample = header_extras[header_bad[0]]
+            rep.add("ORANGE", "body/end", f"หัวกระดาษ ({shown}{more})",
+                    f'พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ {len(header_bad)} หน้า '
+                    f'เช่น "{sample[:60]}"',
+                    "หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น",
+                    "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า",
+                    "PAGE.HEADER")
+
     for i, t in enumerate(pages):
         if i < end_scan_start:
             continue
