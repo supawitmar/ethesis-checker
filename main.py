@@ -4,6 +4,7 @@
 E-Thesis Staff Checker — standalone web app (no Claude/LLM required).
 Run:  uvicorn main:app --host 0.0.0.0 --port 8000
 """
+import json
 import tempfile
 import threading
 import time
@@ -284,6 +285,8 @@ async def check(
     degree_abbr_th: str = Form(""),
     exam_date: str = Form(""),
     year: str = Form(""),
+    faculty: str = Form(""),
+    committees_json: str = Form(""),
     chapters_mode: str = Form("strict"),
 ):
     _prune_jobs()
@@ -319,6 +322,16 @@ async def check(
         "doc_type": doc_type, "format": format, "program_language": program_language,
         **form_values,
     }
+    if faculty.strip():
+        approved["faculty"] = faculty.strip()
+    # committees_json = ข้อมูลกรรมการที่ดึงจาก eThesis (แปลงเป็น JSON ในฟอร์ม) — กันพัง
+    if committees_json.strip():
+        try:
+            committees = json.loads(committees_json)
+            if isinstance(committees, dict) and (committees.get("advisory") or committees.get("exam")):
+                approved["committees"] = committees
+        except (ValueError, TypeError):
+            pass
 
     tmp_path = None
     try:

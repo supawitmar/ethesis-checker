@@ -19,6 +19,9 @@ from checker import (
     find_signature_date,
     header_extra_text,
     reference_terms,
+    signature_committee_slots,
+    _committee_page_kind,
+    _degree_subject,
     compare_reference_text,
     mismatch_detail,
     title_mismatch_detail,
@@ -559,6 +562,61 @@ class ReferenceHeadingTests(unittest.TestCase):
         toc = reference_terms("BIBLIOGRAPHY 118")
         page = reference_terms("REFERENCES")
         self.assertNotEqual(set(toc), set(page))
+
+
+class SignatureCommitteeTests(unittest.TestCase):
+    """อ่านตารางลายเซ็นตามกริดตายตัว: กรรมการเติมขวาบน→ล่าง(1–5) แล้วซ้ายล่าง→บน(6–9)"""
+
+    class _Page:
+        def __init__(self, height, width, words):
+            self.height = height
+            self.width = width
+            self._words = words
+
+        def extract_words(self, *a, **k):
+            return self._words
+
+    def _dot_then_names(self, rows):
+        """สร้าง words: แต่ละ row = บรรทัดเส้นประ + บรรทัดชื่อ (left, right)"""
+        words = []
+        top = 100
+        for left, right in rows:
+            words.append({"text": "………………", "top": top, "x0": 60})
+            words.append({"text": "………………", "top": top, "x0": 320})
+            for tok in left.split():
+                words.append({"text": tok, "top": top + 13, "x0": 60})
+            for tok in right.split():
+                words.append({"text": tok, "top": top + 13, "x0": 320})
+            top += 60
+        return words
+
+    def test_grid_maps_right_then_left(self):
+        rows = [
+            ("Candidate,", "Prof. A One,"),                 # r2: student | member1
+            ("ตำแหน่งทางวิชาการและชื่อ นามสกุล,", "Prof. B Two,"),   # r3: (m9 placeholder) | member2
+            ("Academic rank First Name Last name,", "Prof. C Three,"),  # r4 | member3
+            ("Academic rank First Name Last name,", "Academic rank First Name Last name,"),  # r5
+            ("Academic rank First Name Last name,", "Academic rank First Name Last name,"),  # r6
+            ("Dean", "Program Director"),                     # r7: dean | director
+        ]
+        page = self._Page(842, 595, self._dot_then_names(rows))
+        members, bl, br = signature_committee_slots(page)
+        self.assertEqual(members.get(1), "A One")
+        self.assertEqual(members.get(2), "B Two")
+        self.assertEqual(members.get(3), "C Three")
+        self.assertIsNone(members.get(4))       # ช่องว่าง/placeholder
+        self.assertIsNone(members.get(9))       # placeholder ซ้าย
+        self.assertIn("Program Director", br)
+
+    def test_page_kind_detection(self):
+        self.assertEqual(_committee_page_kind("Thesis Advisory Committees\nMajor Advisor"), "advisory")
+        self.assertEqual(_committee_page_kind("Thesis Examination Committees\nChair"), "exam")
+        self.assertEqual(_committee_page_kind("คณะกรรมการสอบวิทยานิพนธ์"), "exam")
+
+    def test_degree_subject_extracted(self):
+        self.assertEqual(_degree_subject("Doctor of Philosophy (Tropical Medicine)"), "Tropical Medicine")
+        self.assertEqual(_degree_subject("ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)"), "อายุรศาสตร์เขตร้อน")
+        self.assertEqual(_degree_subject("No Parens Here"), "")
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):

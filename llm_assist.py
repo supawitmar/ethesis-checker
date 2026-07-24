@@ -14,6 +14,7 @@ AI **ไม่มีสิทธิ์ตัดสินหรือแก้ผ
 ถ้า LLM ล้มเหลวไม่ว่ากรณีใด รายงานจากกฎเดิมต้องออกครบเหมือนไม่มี LLM
 """
 import os
+import re
 
 MODEL = os.getenv("LLM_ASSIST_MODEL", "claude-opus-4-8")
 
@@ -64,6 +65,46 @@ def _client():
 
 def _first_text(response):
     return next((b.text for b in response.content if b.type == "text"), "")
+
+
+_TRANSLATE_NAMES_SYSTEM = """คุณคือผู้ช่วยถอดชื่อบุคคลไทยเป็นตัวสะกดภาษาอังกฤษ
+
+ผู้ใช้จะส่ง JSON array ของชื่อ-นามสกุลบุคคลไทยมาให้ หน้าที่ของคุณคือคืน JSON array
+ของตัวสะกดภาษาอังกฤษ **เรียงลำดับตรงกันทีละตัว จำนวนเท่ากันเป๊ะ**
+
+กติกา
+- ถอดเป็นตัวสะกดอังกฤษที่บุคคลนั้นน่าจะใช้จริง (เช่นเดียวกับที่ปรากฏในงานตีพิมพ์)
+  ถ้าไม่แน่ใจให้ถอดเสียงตามระบบราชบัณฑิต (RTGS)
+- คืน **เฉพาะ JSON array ของสตริง** เท่านั้น ห้ามมีคำอธิบาย/ข้อความอื่น
+- ห้ามเพิ่ม ลด หรือสลับลำดับ — index ต้องตรงกับ input ทุกตัว
+- เป็นเพียงตัวช่วยเทียบเคียง ผลลัพธ์จะถูกเจ้าหน้าที่ตรวจยืนยันอีกครั้งเสมอ"""
+
+
+def translate_names(thai_names):
+    """ถอดชื่อบุคคลไทยเป็นตัวสะกดอังกฤษ (ตัวช่วยเทียบเคียงหน้าลงนามเล่มภาษาอังกฤษ)
+
+    คืน list ความยาวเท่ากับ input (index ตรงกัน) หรือ [] ถ้าปิด/ล้มเหลว
+    AI เป็นเพียงตัวช่วย — ผลชื่อกรรมการเล่มอังกฤษเป็น "ส้ม" ให้เจ้าหน้าที่ยืนยันเสมอ
+    """
+    import json
+    names = [str(n).strip() for n in (thai_names or []) if str(n).strip()]
+    if not names or not enabled():
+        return []
+    try:
+        response = _client().messages.create(
+            model=MODEL,
+            max_tokens=2000,
+            system=_TRANSLATE_NAMES_SYSTEM,
+            messages=[{"role": "user", "content": json.dumps(names, ensure_ascii=False)}],
+        )
+        text = _first_text(response).strip()
+        match = re.search(r'\[.*\]', text, re.S)
+        parsed = json.loads(match.group(0) if match else text)
+        if isinstance(parsed, list) and len(parsed) == len(names):
+            return [str(x).strip() for x in parsed]
+    except Exception:
+        pass
+    return []
 
 
 def student_summary(report):

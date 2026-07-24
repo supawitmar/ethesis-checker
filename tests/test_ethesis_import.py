@@ -1,13 +1,48 @@
 import unittest
 
 from ethesis_import import (
+    _committee_member,
     _degree_abbr,
     _degree_abbr_th,
     _degree_name,
     _fix_thai_pua,
     _spaced_degree,
     _student_id,
+    parse_committees,
 )
+
+
+class CommitteeParsingTests(unittest.TestCase):
+    """ดึงชื่อ-สกุลกรรมการจากหน้า eThesis (ตัดคำนำหน้าวิชาการ + บทบาทท้ายบรรทัด)"""
+
+    def test_committee_member_strips_title_and_role(self):
+        m = _committee_member("1 รองศาสตราจารย์ดร. นริศรา จันทราทิตย์ อาจารย์ที่ปรึกษาหลัก")
+        self.assertEqual(m["name"], "นริศรา จันทราทิตย์")
+        self.assertEqual(m["role"], "อาจารย์ที่ปรึกษาหลัก")
+
+    def test_committee_member_external_expert_suffix(self):
+        m = _committee_member("1 ผู้ช่วยศาสตราจารย์ ดร. อัญชลี ฐานวิสัย ประธานสอบ (ผู้ทรงคุณวุฒิภายนอก)")
+        self.assertEqual(m["name"], "อัญชลี ฐานวิสัย")
+        self.assertIn("ประธานสอบ", m["role"])
+
+    def test_committee_member_non_numbered_line_returns_none(self):
+        self.assertIsNone(_committee_member("คณะกรรมการสอบวิทยานิพนธ์/สารนิพนธ์"))
+
+    def test_parse_committees_two_lists_in_order(self):
+        lines = [
+            "คณะกรรมการที่ปรึกษาวิทยานิพนธ์/สารนิพนธ์",
+            "1 รองศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์ อาจารย์ที่ปรึกษาหลัก",
+            "2 ผู้ช่วยศาสตราจารย์ ดร. สุภาภรณ์ สงค์ประชา อาจารย์ที่ปรึกษาร่วม",
+            "อื่น ๆ",
+            "คณะกรรมการสอบวิทยานิพนธ์/สารนิพนธ์",
+            "1 ผู้ช่วยศาสตราจารย์ ดร. สวรรยา ธรรมอภิพล ประธานสอบ",
+            "2 รองศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์ กรรมการสอบ",
+        ]
+        result = parse_committees(lines)
+        self.assertEqual([m["name"] for m in result["advisory"]],
+                         ["คนางค์ คันธมธุรพจน์", "สุภาภรณ์ สงค์ประชา"])
+        self.assertEqual([m["name"] for m in result["exam"]],
+                         ["สวรรยา ธรรมอภิพล", "คนางค์ คันธมธุรพจน์"])
 
 
 class StudentIdTests(unittest.TestCase):

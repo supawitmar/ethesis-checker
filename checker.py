@@ -156,6 +156,210 @@ def header_extra_text(pdf_page):
     return ' '.join(extras).strip()
 
 
+# หน้าลงนามเป็นตารางตายตัวตาม template ส่วนนำ (2 คอลัมน์ × 6 แถวกรรมการ)
+#   r0(บนสุด): นักศึกษา(ซ้าย) | กรรมการ 1(ขวา)
+#   r1..r4   : กรรมการ 9,8,7,6(ซ้าย) | กรรมการ 2,3,4,5(ขวา)
+#   r5(ล่างสุด): คณบดี(ซ้าย) | ผู้อำนวยการหลักสูตร(ขวา)  [ช่องสถาบันคงที่]
+# กรรมการเติมขวาบน→ล่าง(1–5) แล้วซ้ายล่าง→บน(6–9); ช่องว่างทิ้ง placeholder
+_SIG_SKIP_MARKERS = (
+    norm('ตำแหน่งทางวิชาการและชื่อ'), norm('นามสกุล'), 'ACADEMICRANK',
+    'FIRSTNAME', 'LASTNAME', norm('คุณวุฒิ'), norm('ระบุสาขาวิชา'), 'DEGREESUBJECT',
+    norm('ผู้วิจัย'), 'CANDIDATE', norm('คณบดี'), 'DEAN',
+    norm('ประธานหลักสูตร'), 'PROGRAMDIRECTOR', 'DIRECTOR',
+)
+_SIG_TITLE_RE = re.compile(
+    r'^\s*(?:ศาสตราจารย์|รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|'
+    r'Assoc\.?\s*Prof\.?|Asst\.?\s*Prof\.?|Prof\.?|Lect\.?|ผศ\.?|รศ\.?|ศ\.?)?'
+    r'\s*(?:ดร\.?|Dr\.?)?\s*', re.I)
+
+
+def _sig_is_dotted(text):
+    t = (text or '').strip()
+    return len(t) >= 4 and sum(c in '….' for c in t) >= len(t) * 0.6
+
+
+def _sig_clean_name(text):
+    """ตัดคำนำหน้าวิชาการ/คอมมาท้าย เหลือชื่อ-สกุล; คืน None ถ้าเป็น placeholder/ช่องคงที่"""
+    n = norm(text)
+    if not n or any(m and m in n for m in _SIG_SKIP_MARKERS):
+        return None
+    cleaned = re.sub(r'\s*,\s*$', '', (text or '').strip())
+    cleaned = _SIG_TITLE_RE.sub('', cleaned).strip()
+    return cleaned or None
+
+
+def signature_committee_slots(pdf_page):
+    """อ่านตารางลายเซ็นตามกริดตายตัว
+
+    คืน (members, bottom_left, bottom_right):
+      members = dict{ลำดับกรรมการ 1..9 → ชื่อ (str) หรือ None ถ้าช่องว่าง/placeholder}
+      bottom_left/right = ข้อความรวมช่องล่างสุด (คณบดี / ผู้อำนวยการหลักสูตร) ไว้ตรวจคณะ/หลักสูตร
+    """
+    words = pdf_page.extract_words() or []
+    if not words:
+        return {}, '', ''
+    mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
+    lines = []
+    for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0']))):
+        top = float(w['top'])
+        if lines and abs(lines[-1]['top'] - top) <= 6:
+            lines[-1]['words'].append(w)
+        else:
+            lines.append({'top': top, 'words': [w]})
+    # แถวชื่อ = บรรทัดถัดจากบรรทัดเส้นประ
+    name_rows = [lines[i + 1] for i in range(len(lines) - 1)
+                 if _sig_is_dotted(' '.join(w['text'] for w in lines[i]['words']))]
+
+    def cell(row, left):
+        toks = [w['text'] for w in sorted(row['words'], key=lambda w: float(w['x0']))
+                if (float(w['x0']) < mid) == left]
+        return ' '.join(toks).strip()
+
+    members = {}
+    for idx, row in enumerate(name_rows[:5]):   # แถว 0..4 = ระดับกรรมการ
+        members[idx + 1] = _sig_clean_name(cell(row, left=False))   # ขวา → 1..5
+        if idx >= 1:
+            members[10 - idx] = _sig_clean_name(cell(row, left=True))  # ซ้าย → 9,8,7,6
+    # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย เรียงตามบรรทัด (บน→ล่าง, ซ้าย→ขวา)
+    # เพื่อไม่ให้ชื่อหลักสูตร/คณะที่อยู่คนละบรรทัดสลับกันจนเทียบไม่เจอ
+    floor = (name_rows[4]['top'] + 20) if len(name_rows) >= 5 else \
+            (name_rows[-1]['top'] if name_rows else 0)
+    ordered = sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0'])))
+    bl = ' '.join(w['text'] for w in ordered
+                  if float(w['top']) >= floor and float(w['x0']) < mid)
+    br = ' '.join(w['text'] for w in ordered
+                  if float(w['top']) >= floor and float(w['x0']) >= mid)
+    return members, bl.strip(), br.strip()
+
+
+def _committee_page_kind(page_text):
+    """หน้าลงนามนี้เป็นหน้าอาจารย์ที่ปรึกษา หรือหน้ากรรมการสอบ (คืน 'advisory'/'exam'/'')"""
+    nl = norm(page_text)
+    if "EXAMINATION" in nl or norm("กรรมการสอบ") in nl or "CHAIR" in nl:
+        return "exam"
+    if "ADVISORY" in nl or norm("ที่ปรึกษา") in nl or "MAJORADVISOR" in nl:
+        return "advisory"
+    return ""
+
+
+def _degree_subject(degree):
+    """ดึงชื่อสาขาในวงเล็บจากชื่อปริญญา เช่น 'Doctor of Philosophy (Tropical Medicine)'
+    → 'Tropical Medicine'"""
+    m = re.search(r'\(([^)]+)\)', degree or "")
+    return m.group(1).strip() if m else ""
+
+
+def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, program_language, A):
+    """ตรวจรายชื่อกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
+
+    เล่มไทย: เทียบชื่อไทยตรง (ไม่ตรง/ผิดตำแหน่ง = แดง)
+    เล่มอังกฤษ/นานาชาติ: AI แปลชื่อไทย→อังกฤษ เทียบหลวม → ส้ม (ให้เจ้าหน้าที่ยืนยัน)
+    คืน True ถ้าตรวจได้ (อ่านตารางเจอ) — ไม่งั้น False (ให้เจ้าหน้าที่ตรวจเอง)
+    """
+    english_book = program_language in ("international", "thai_english")
+
+    # อ่านตารางลายเซ็นของหน้าลงนามด้วย geometry (เปิดไฟล์เฉพาะ 2 หน้า)
+    slots = {}
+    try:
+        with pdfplumber.open(pdf_path) as _pl:
+            for idx in sig_pages[:2]:
+                if 0 <= idx < len(_pl.pages):
+                    slots[idx] = signature_committee_slots(_pl.pages[idx])
+    except Exception:
+        return False
+    if not slots:
+        return False
+
+    # แปลชื่อไทย→อังกฤษครั้งเดียว (เล่มอังกฤษ) เป็นตัวช่วยเทียบเคียง
+    name_en = {}
+    if english_book:
+        all_th = [m["name"] for key in ("advisory", "exam")
+                  for m in committees.get(key, [])]
+        try:
+            import llm_assist
+            translated = llm_assist.translate_names(all_th)
+        except Exception:
+            translated = []
+        if len(translated) == len(all_th):
+            name_en = dict(zip(all_th, translated))
+
+    def nkey(s):
+        return re.sub(r'[^a-z0-9ก-๙]', '', norm(s).lower())
+
+    handled_any = False
+    for idx in sig_pages[:2]:
+        if idx not in slots or idx >= len(pages):
+            continue
+        kind = _committee_page_kind(pages[idx])
+        expected = committees.get(kind, []) if kind else []
+        if not expected:
+            continue
+        handled_any = True
+        members, bottom_left, bottom_right = slots[idx]
+        page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
+        loc = f"{page_label} ({page_ref(idx)})"
+
+        found_count = sum(1 for k in range(1, 10) if members.get(k))
+        if found_count != len(expected):
+            rep.add("RED", "front_matter", loc,
+                    f"พบกรรมการที่มีชื่อ {found_count} คนบนหน้าลงนาม",
+                    f"ต้องมี {len(expected)} คนตามข้อมูลอนุมัติ",
+                    "ตรวจจำนวนและตำแหน่งกรรมการให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+
+        for k, member in enumerate(expected, start=1):
+            th_name = member["name"]
+            found = members.get(k)
+            if english_book:
+                target = name_en.get(th_name, "")
+                if not target:
+                    rep.add("ORANGE", "front_matter", loc,
+                            f'กรรมการคนที่ {k}: ระบบแปลชื่อ "{th_name}" เป็นอังกฤษไม่ได้',
+                            f'ตำแหน่งนี้ต้องเป็นกรรมการชื่อ "{th_name}" (ตามลำดับ บฑ.)',
+                            "โปรดตรวจชื่อกรรมการในตำแหน่งนี้ด้วยตา", "FRONT.COMMITTEE")
+                    continue
+                ratio = (difflib.SequenceMatcher(None, nkey(found), nkey(target)).ratio()
+                         if found else 0.0)
+                if ratio >= 0.7:
+                    rep.add("ORANGE", "front_matter", loc,
+                            f'กรรมการคนที่ {k}: ระบบเทียบเคียง "{th_name}" ≈ "{found}" ในตำแหน่งนี้',
+                            f'ควรเป็น "{target}" (ระบบแปลจาก "{th_name}")',
+                            "โปรดยืนยันว่าชื่อและตำแหน่งถูกต้อง", "FRONT.COMMITTEE")
+                else:
+                    detail = f'พบ "{found}"' if found else "ช่องว่าง/ไม่มีชื่อ"
+                    rep.add("ORANGE", "front_matter", loc,
+                            f'กรรมการคนที่ {k}: {detail} ไม่ตรงกับ "{target}" (แปลจาก "{th_name}") ในตำแหน่งนี้',
+                            f'ตำแหน่งนี้ควรเป็น "{target}"',
+                            "โปรดตรวจชื่อและตำแหน่งกรรมการด้วยตา", "FRONT.COMMITTEE")
+            else:
+                if found and norm(strip_name_prefix(found)) == norm(strip_name_prefix(th_name)):
+                    continue
+                detail = f'พบ "{found}"' if found else "ช่องว่าง/ไม่มีชื่อ"
+                rep.add("RED", "front_matter", loc,
+                        f'กรรมการคนที่ {k}: {detail} ในตำแหน่งนี้',
+                        f'ต้องเป็น "{th_name}" (ตามลำดับ บฑ.)',
+                        "แก้ชื่อหรือตำแหน่งกรรมการให้ตรงข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+
+        # ---------- ช่องคงที่: ตรวจเฉพาะชื่อหลักสูตร/คณะ (ไม่ตรวจชื่อ/คุณวุฒิบุคคล) ----------
+        # ผู้อำนวยการหลักสูตร (มุมล่างขวา): บรรทัดต้องมีชื่อสาขาของปริญญา
+        degree = A.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
+            or A.get("degree_cover_en", "")
+        subject = _degree_subject(degree)
+        if subject and norm(subject) not in norm(bottom_right):
+            rep.add("ORANGE", "front_matter", f"{page_label} — ผู้อำนวยการหลักสูตร ({page_ref(idx)})",
+                    f'ไม่พบชื่อสาขา "{subject}" ในช่องผู้อำนวยการหลักสูตร (มุมล่างขวา)',
+                    f'ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา "{subject}"',
+                    "โปรดตรวจชื่อหลักสูตรมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
+        # คณบดี (มุมล่างซ้าย): ตรวจชื่อคณะ — เล่มไทยเทียบตรง, เล่มอังกฤษให้เจ้าหน้าที่ยืนยัน
+        faculty = A.get("faculty", "")
+        if faculty and not english_book and norm(faculty) not in norm(bottom_left + " " + bottom_right):
+            rep.add("ORANGE", "front_matter", f"{page_label} — คณบดี ({page_ref(idx)})",
+                    f'ไม่พบชื่อคณะ "{faculty}" ในช่องคณบดี (มุมล่างซ้าย)',
+                    f'ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ "{faculty}"',
+                    "โปรดตรวจชื่อคณะมุมล่างซ้ายให้ถูกต้อง", "FRONT.COMMITTEE")
+
+    return handled_any
+
+
 def fuzzy_contains(haystack_norm, needle, threshold=FUZZY_NAME_THRESHOLD):
     n = norm(needle)
     if not n:
@@ -1843,15 +2047,25 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {A['year']} บนหน้าปก",
                         "ปี = ปีที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
 
-        # human checklist (หน้าลงนาม — เจ้าหน้าที่ตรวจเอง)
-        rep.add_human("รายชื่อกรรมการ ตำแหน่งวิชาการ และคุณวุฒิ บนหน้าลงนามทั้ง 2 หน้า",
-                      "เทียบกับ บฑ.1 (หน้า 1) และ บฑ.2 (หน้า 2) ทีละคน รวมการสะกด")
-        rep.add_human("ลำดับและตำแหน่งการวางชื่อในตารางลายเซ็น",
-                      "ชื่อที่ 1 (Major Advisor/Chair) แถวเดียวกับนักศึกษา คอลัมน์ขวา, ชื่อ 2-5 ไล่ลงขวา, ชื่อ 6 แถวเดียวกับชื่อ 5 ฝั่งซ้าย, 7-9 ไล่ขึ้น, ช่องที่เหลือถมขาว")
-        rep.add_human("หน้า 1 — ประธานหลักสูตร (ระบุชื่อหลักสูตรให้ถูกต้อง)",
-                      "ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นชื่อหลักสูตร เช่น ปรัชญาดุษฎีบัณฑิต สาขาวิชา...")
-        rep.add_human("หน้า 2 — คณบดี/ผู้อำนวยการ (ระบุหัวหน้าส่วนงานให้ถูกต้อง)",
-                      "ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นคณะ/ส่วนงานที่นักศึกษาสังกัด เช่น คณะวิศวกรรมศาสตร์")
+        # ---------- รายชื่อกรรมการบนหน้าลงนาม ----------
+        # ถ้ามีข้อมูลกรรมการจาก eThesis → ตรวจชื่อ+ตำแหน่งตามกริดตายตัวของ template
+        # (เล่มไทยเทียบตรง = แดง, เล่มอังกฤษ AI แปลชื่อ = ส้มให้เจ้าหน้าที่ยืนยัน)
+        committees = A.get("committees") or {}
+        checked_committee = False
+        if committees.get("advisory") or committees.get("exam"):
+            checked_committee = _check_committees(
+                rep, committees, sig_pages, pages, pdf_path, page_ref,
+                A.get("program_language", ""), A)
+
+        # ช่องคงที่/รายการที่ระบบยังตรวจไม่ได้ → ให้เจ้าหน้าที่ตรวจเอง
+        if not checked_committee:
+            rep.add_human("รายชื่อกรรมการ ตำแหน่งวิชาการ และคุณวุฒิ บนหน้าลงนามทั้ง 2 หน้า",
+                          "เทียบกับ บฑ.1 (หน้า 1) และ บฑ.2 (หน้า 2) ทีละคน รวมการสะกด")
+            rep.add_human("ลำดับและตำแหน่งการวางชื่อในตารางลายเซ็น",
+                          "ชื่อที่ 1 (Major Advisor/Chair) แถวเดียวกับนักศึกษา คอลัมน์ขวา, ชื่อ 2-5 ไล่ลงขวา, ชื่อ 6 แถวเดียวกับชื่อ 5 ฝั่งซ้าย, 7-9 ไล่ขึ้น, ช่องที่เหลือถมขาว")
+        # คุณวุฒิของกรรมการ (Degree/Subject ใต้ชื่อ) ยังให้เจ้าหน้าที่ตรวจ
+        rep.add_human("คุณวุฒิ (Degree/Subject) ใต้ชื่อกรรมการแต่ละคน",
+                      "เทียบกับ บฑ.1/บฑ.2 — ระบบตรวจเฉพาะชื่อ-สกุลและตำแหน่งการวาง")
 
         prog = A.get("program_language", "")
         if prog == "international":

@@ -29,6 +29,12 @@
        padding:12px 22px; font-size:.95rem; cursor:pointer; }
   .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
        font-size:.82rem; border-radius:6px; margin-top:6px; }
+  .committee-box { background:#f3f7fd; border:1px solid #d6e3f5; border-radius:9px;
+       padding:11px 14px; margin-top:10px; }
+  .committee-head { font-size:.82rem; color:#2c3e50; margin-bottom:7px; }
+  .committee-summary { display:flex; flex-wrap:wrap; gap:18px; }
+  .committee-list { font-size:.82rem; color:#3d5060; line-height:1.6; }
+  .committee-list b { color:var(--navy); }
   .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:10px; padding:0;
        overflow:hidden; }
   .import-box textarea { min-height:110px; }
@@ -188,8 +194,15 @@
       <div><label>ปีบนหน้าปก</label><input name="year" placeholder="2026 / 2569" required></div>
     </div>
 
+    <input type="hidden" name="faculty" id="faculty-field">
+    <input type="hidden" name="committees_json" id="committees-json">
+    <div id="committee-box" class="committee-box" style="display:none;">
+      <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจตำแหน่งบนหน้าลงนาม — แก้ไขไม่ได้ตรงนี้)</div>
+      <div id="committee-summary" class="committee-summary"></div>
+    </div>
+
     <div class="note">🔴 ตรวจอย่างเข้ม: ข้อมูลจากแบบฟอร์มต้องตรงทุกตำแหน่งที่กำหนดตั้งแต่หน้าปกถึงบทคัดย่อ หากผิด ขาด หรือสะกดต่างแม้เล็กน้อย ระบบจะแสดงเป็นสีแดง</div>
-    <div class="note">ℹ️ หน้าลงนาม: ระบบตรวจให้เฉพาะ<b>ชื่อเรื่อง</b>และ<b>เลขหน้า (i/ii หรือ ก/ข)</b> — รายชื่อกรรมการ ตำแหน่งวางลายเซ็น และข้อความมุมล่างขวา เจ้าหน้าที่ตรวจเองตาม checklist ที่แนบท้ายรายงานผล</div>
+    <div class="note">ℹ️ หน้าลงนาม: ระบบตรวจ<b>ชื่อเรื่อง</b>, <b>เลขหน้า (i/ii หรือ ก/ข)</b> และ<b>รายชื่อ+ตำแหน่งกรรมการ</b> (เมื่อดึงข้อมูลจาก eThesis ได้) — เล่มไทยเทียบชื่อตรง, เล่มอังกฤษ AI แปลชื่อแล้วให้เจ้าหน้าที่ยืนยัน; คุณวุฒิใต้ชื่อยังตรวจด้วยตา</div>
 
     <div class="actions">
       <button type="submit" class="primary">🔍 ตรวจเล่ม</button>
@@ -434,10 +447,31 @@ const IMPORT_LABELS = {
 };
 
 // เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
+function renderCommitteeSummary(committees) {
+  const box = document.getElementById('committee-box');
+  const out = document.getElementById('committee-summary');
+  if (!box || !out) return;
+  function list(title, arr) {
+    if (!arr || !arr.length) return '';
+    const items = arr.map((m, i) => `${i + 1}. ${m.name}${m.role ? ' — ' + m.role : ''}`).join('<br>');
+    return `<div class="committee-list"><b>${title}</b><br>${items}</div>`;
+  }
+  out.innerHTML = list('อาจารย์ที่ปรึกษา', committees.advisory) + list('กรรมการสอบ', committees.exam);
+  box.style.display = '';
+}
+
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
   const filled = [];
+  // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงสรุปให้เจ้าหน้าที่เห็น
+  if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
+    const cj = document.getElementById('committees-json');
+    if (cj) cj.value = JSON.stringify(parsed.committees);
+    renderCommitteeSummary(parsed.committees);
+    filled.push('รายชื่อกรรมการ');
+  }
   Object.entries(parsed).forEach(([name, value]) => {
+    if (name === 'committees' || typeof value === 'object') return;
     const field = document.querySelector(`[name="${name}"]`);
     if (!field) return;
     field.value = value;

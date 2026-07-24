@@ -234,6 +234,59 @@ def _exam_date(value, use_english):
     return f'{int(m.group(1))} {THAI_MONTHS[m.group(2)]} {year}'
 
 
+# บทบาทกรรมการ (อยู่ท้ายบรรทัด) และคำนำหน้าวิชาการ (อยู่ต้นบรรทัด) ในหน้า eThesis
+# บรรทัดกรรมการรูปแบบ: "<เลข> <คำนำหน้า+ชื่อ-สกุล> <บทบาท> [(ผู้ทรงคุณวุฒิภายนอก)]"
+_COMMITTEE_ROLE_RE = re.compile(
+    r'\s*((?:อาจารย์ที่ปรึกษา|ประธาน|กรรมการ|ผู้ทรงคุณวุฒิ)\S*'
+    r'(?:\s*\([^)]*\))?)\s*$')
+_ACADEMIC_TITLE_RE = re.compile(
+    r'^\s*(?:ศาสตราจารย์|รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|ผศ\.?|รศ\.?|ศ\.?)?'
+    r'\s*(?:ดร\.?)?\s*')
+
+
+def _committee_member(line):
+    """แยกบรรทัด "<เลข> <คำนำหน้า+ชื่อ> <บทบาท>" → {'name','role'} หรือ None
+
+    ตัดเลขลำดับหน้า, บทบาทท้ายบรรทัด, และคำนำหน้าวิชาการต้นบรรทัด เหลือเฉพาะชื่อ-สกุล
+    (eThesis เลขลำดับมีช่องว่างได้ เช่น 1,2,4,5 — จึงยึด "ลำดับที่ปรากฏ" ไม่ยึดเลข)
+    """
+    m = re.match(r'^\s*\d+\s+(.*\S)\s*$', line)
+    if not m:
+        return None
+    rest = m.group(1)
+    role = ''
+    role_m = _COMMITTEE_ROLE_RE.search(rest)
+    if role_m:
+        role = re.sub(r'\s+', ' ', role_m.group(1)).strip()
+        rest = rest[:role_m.start()].strip()
+    name = _ACADEMIC_TITLE_RE.sub('', rest).strip()
+    return {'name': name, 'role': role} if name else None
+
+
+def parse_committees(lines):
+    """ดึงคณะกรรมการที่ปรึกษาและกรรมการสอบจากหน้า eThesis เรียงตามที่ปรากฏ
+
+    คืน {'advisory': [{'name','role'}...], 'exam': [...]}
+    """
+    result = {'advisory': [], 'exam': []}
+    target = None
+    for line in lines:
+        if line.startswith('คณะกรรมการที่ปรึกษา'):
+            target = 'advisory'
+            continue
+        if line.startswith('คณะกรรมการสอบ'):
+            target = 'exam'
+            continue
+        if target is None:
+            continue
+        member = _committee_member(line)
+        if member:
+            result[target].append(member)
+        elif not re.match(r'^\s*\d+\s', line) and result[target]:
+            target = None   # จบลิสต์เมื่อพ้นบรรทัดที่ขึ้นต้นด้วยเลข
+    return result
+
+
 def _detect_format(pdf):
     """หารูปแบบที่ถูกเลือกในแถว 'ล่าสุด'
 
@@ -319,6 +372,15 @@ def parse_ethesis_pdf(pdf_path):
 
     course = _find(lines, 'หลักสูตร')[0]
     writing = _find(lines, 'ภาษาที่เขียน')[0]
+    if course:
+        # ตัดรหัสหลักสูตรท้าย เช่น " [4801D02G]" ออก เหลือชื่อหลักสูตร
+        data['program'] = re.sub(r'\s*\[[^\]]*\]\s*$', '', course).strip()
+    faculty = _find(lines, 'คณะ')[0]   # _find กันชนกับ "คณะกรรมการ..." ด้วย guard อยู่แล้ว
+    if faculty and not faculty.startswith('กรรมการ'):
+        data['faculty'] = faculty.strip()
+    committees = parse_committees(lines)
+    if committees['advisory'] or committees['exam']:
+        data['committees'] = committees
     if re.search(r'นานาชาติ', course):
         data['program_language'] = 'international'
     elif re.search(r'อังกฤษ|english', writing, re.I):
