@@ -249,14 +249,39 @@ def _degree_subject(degree):
     return m.group(1).strip() if m else ""
 
 
+# คำนำหน้า/ตำแหน่งวิชาการที่ต้อง "ปล่อยผ่าน" — เทียบเฉพาะชื่อ-สกุล ไม่เทียบคำนำหน้า
+_COMMITTEE_TITLE_PREFIX = re.compile(
+    r'^[\s,]*(?:'
+    r'ศาสตราจารย์เกียรติคุณ|ศาสตราจารย์คลินิก|ศาสตราจารย์|'
+    r'รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|'
+    r'ว่าที่ร้อยตรี|นางสาว|นาง|นาย|'
+    r'ผศ\.|รศ\.|ศ\.|ดร\.|'
+    r'Clinical\s+Professor|Emeritus\s+Professor|'
+    r'Associate\s+Professor|Assistant\s+Professor|Professor|'
+    r'Assoc\.?\s*Prof\.?|Asst\.?\s*Prof\.?|Prof\.?|'
+    r'Lecturer|Lect\.?|Dr\.?|Mr\.?|Mrs\.?|Miss|Ms\.?'
+    r')[\s. ]*', re.I)
+
+
+def _strip_committee_title(name):
+    """ตัดคำนำหน้า/ตำแหน่งวิชาการทั้งหมดออก เหลือเฉพาะชื่อ-สกุล (วนจนไม่เหลือคำนำหน้า)"""
+    s = (name or "").strip()
+    prev = None
+    while s and s != prev:
+        prev = s
+        s = _COMMITTEE_TITLE_PREFIX.sub('', s, count=1).strip()
+    return s
+
+
 def _committee_keyname(name, fuzzy=False):
-    """คีย์เทียบชื่อกรรมการ
-    fuzzy=False (เล่มไทย): ตัดคำนำหน้า + normalize เทียบตรง
+    """คีย์เทียบชื่อกรรมการ — ตัดคำนำหน้า/ตำแหน่งวิชาการก่อนเสมอ (เทียบเฉพาะชื่อ-สกุล)
+    fuzzy=False (เล่มไทย): normalize เทียบตรง
     fuzzy=True (เล่มอังกฤษ, เทียบชื่อแปล): เก็บเฉพาะตัวอักษร/เลข เทียบด้วย ratio
     """
+    base = _strip_committee_title(name)
     if fuzzy:
-        return re.sub(r'[^a-z0-9ก-๙]', '', norm(name or "").lower())
-    return norm(strip_name_prefix(name or ""))
+        return re.sub(r'[^a-z0-9ก-๙]', '', norm(base).lower())
+    return norm(base)
 
 
 def _assign_committee_slots(exp_keys, found_keys, fuzzy):

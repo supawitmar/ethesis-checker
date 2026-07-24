@@ -678,6 +678,26 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
         self.assertEqual(_committee_keyname("ดร. คนางค์  ก"),
                          _committee_keyname("คนางค์ ก"))
 
+    def test_academic_rank_prefix_is_ignored(self):
+        # ตรวจเฉพาะชื่อ — คำนำหน้าตำแหน่งวิชาการต่างกันไม่นับว่าผิด
+        clean = _committee_keyname("คนางค์ คันธมธุรพจน์")
+        for titled in ("รองศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์",
+                       "ศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์",
+                       "ผู้ช่วยศาสตราจารย์คนางค์ คันธมธุรพจน์",
+                       "อาจารย์ คนางค์ คันธมธุรพจน์"):
+            self.assertEqual(_committee_keyname(titled), clean, titled)
+
+    def test_rank_change_between_ethesis_and_book_still_matches(self):
+        # eThesis เป็น รศ. แต่เล่มพิมพ์ ศ. (เลื่อนตำแหน่ง) → ชื่อเดียวกัน ต้องผ่าน
+        rep = self._run(["รองศาสตราจารย์ ดร. คนางค์ ก"],
+                        {1: "ศาสตราจารย์ ดร. คนางค์ ก"})
+        self.assertEqual(self._reds(rep), [])
+
+    def test_thai_name_starting_with_title_letter_is_not_eaten(self):
+        # ชื่อจริงขึ้นต้นด้วย ศ (เช่น ศศิธร) ต้องไม่ถูกตัดเพราะเข้าใจผิดว่าเป็น 'ศ.'
+        self.assertEqual(_committee_keyname("ศศิธร ก"), _committee_keyname("ศศิธร ก"))
+        self.assertIn("ศศ", _committee_keyname("ศศิธร ก"))
+
 
 class EnglishCommitteeFuzzyTests(unittest.TestCase):
     """เล่มอังกฤษที่แปลชื่อสำเร็จ: เทียบตามลำดับเหมือนเล่มไทย (เทียบหลวมจากชื่อแปล) = สีแดง"""
@@ -710,6 +730,13 @@ class EnglishCommitteeFuzzyTests(unittest.TestCase):
                          {1: "Alice Adams", 2: "Bob Brown", 3: "Zebra Zulu"})
         self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r and "Zebra" in r
                             for r in reds))
+
+    def test_full_word_english_title_is_ignored(self):
+        # เล่มพิมพ์คำนำหน้าเต็ม 'Associate Professor Dr.' → ตรวจเฉพาะชื่อ ต้องผ่าน
+        reds = self._run(["Alice Adams", "Bob Brown"],
+                         {1: "Associate Professor Dr. Alice Adams",
+                          2: "Assistant Professor Bob Brown"})
+        self.assertEqual(reds, [])
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
