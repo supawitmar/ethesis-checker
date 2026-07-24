@@ -16,6 +16,7 @@ from checker import (
     canonical_title_status,
     closest_degree_line,
     closest_text_line,
+    find_signature_date,
     compare_reference_text,
     mismatch_detail,
     title_mismatch_detail,
@@ -534,6 +535,23 @@ class MultiLineTitleTests(unittest.TestCase):
         page = "entitled\n" + self.APPROVED + "\nwas submitted"
         compared = compare_reference_text(page, self.APPROVED, "title")
         self.assertEqual(compared["status"], "exact")
+
+
+class SignatureDateTests(unittest.TestCase):
+    """วันที่สอบบนหน้าลงนามที่ไม่ตรงระบบ ต้องแยกจาก "ไม่พบวันที่" และบอกวันที่ถูก"""
+
+    def test_extracts_english_date(self):
+        self.assertEqual(
+            find_signature_date("was submitted ...\non 26 June 2026\nCommittees"),
+            "26 June 2026")
+
+    def test_extracts_thai_date_with_buddhist_era(self):
+        self.assertEqual(
+            find_signature_date("ปริญญา...\nวันที่ 11 พฤษภาคม พ.ศ. 2569\nคณะกรรมการ"),
+            "11 พฤษภาคม พ.ศ. 2569")
+
+    def test_returns_empty_when_no_date(self):
+        self.assertEqual(find_signature_date("no date printed on this page"), "")
 
 
 class PlainSummaryProseTests(unittest.TestCase):

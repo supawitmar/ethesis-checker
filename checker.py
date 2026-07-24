@@ -566,6 +566,24 @@ def title_mismatch_detail(label, compared, expected=''):
     return detail
 
 
+def find_signature_date(text):
+    """ดึงวันที่สอบผ่านที่พิมพ์บนหน้าลงนามออกมา (ถ้ามี) เพื่อบอกว่าที่พบต่างจากระบบอย่างไร
+
+    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569"
+    คืน '' ถ้าหาไม่เจอ (ถือว่าไม่มีวันที่บนหน้าลงนาม ไม่ใช่แค่ไม่ตรง)
+    """
+    patterns = (
+        r'\bon\s+(\d{1,2}\s+[A-Za-z]+\.?\s+\d{4})',
+        r'วันท\S*\s*(\d{1,2}\s+\S+\s+(?:พ\.?\s*ศ\.?\s*)?\d{3,4})',
+        r'(\d{1,2}\s+[A-Za-zก-๙]+\.?\s+(?:พ\.?\s*ศ\.?\s*)?\d{4})',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return re.sub(r'\s+', ' ', match.group(1)).strip()
+    return ""
+
+
 def _is_bold_font(fontname):
     font = (fontname or '').upper()
     return any(marker in font for marker in ('BOLD', 'BLACK', 'SEMIBOLD', 'DEMI'))
@@ -1721,10 +1739,19 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                               ' ', text, flags=re.I)
                 return norm(re.sub(r'\b0([1-9])', r'\1', text))
             exam_found = _date_key(A["exam_date"]) in _date_key(sig_text)
-            rep.add_verification("วันที่สอบผ่าน", f"หน้าลงนาม ({signature_location})",
-                                 "pass" if exam_found else "fail")
-            if not exam_found:
-                rep.add("RED", "front_matter", f"หน้าลงนาม ({signature_location})", f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
+            exam_loc = f"หน้าลงนาม ({signature_location})"
+            found_date = "" if exam_found else find_signature_date(sig_text)
+            rep.add_verification("วันที่สอบผ่าน", exam_loc,
+                                 "pass" if exam_found else "fail",
+                                 found_date if found_date else "")
+            if not exam_found and found_date:
+                # มีวันที่บนหน้าลงนามแต่ วัน/เดือน/ปี ไม่ตรงกับข้อมูลในระบบ
+                rep.add("RED", "front_matter", exam_loc,
+                        f'พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "{found_date}"',
+                        f'ที่ถูกต้องตามระบบคือ "{A["exam_date"]}"',
+                        "แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+            elif not exam_found:
+                rep.add("RED", "front_matter", exam_loc, f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
                         "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
         if A.get("year"):
             year_found = str(A["year"]) in (pages[0] if pages else "")
