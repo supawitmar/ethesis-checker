@@ -126,6 +126,36 @@ def _extract_page_label(page_text):
     return ""
 
 
+def _is_page_number_token(token):
+    token = (token or '').strip()
+    return bool(re.fullmatch(r'\d{1,4}', token)
+                or re.fullmatch(r'[ivxlcdm]{1,10}', token, re.I)
+                or re.fullmatch(r'[ก-ฮ]', token))
+
+
+def header_extra_text(pdf_page):
+    """ข้อความในแถบหัวกระดาษ (บนสุดของหน้า) ที่ไม่ใช่เลขหน้า
+
+    หัวกระดาษของส่วนเนื้อหา/ส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น (ห้ามมี running head
+    หรือชื่อบท) เลขหน้าอยู่ในระยะขอบบน (~5-6% ของความสูง) ส่วนเนื้อความเริ่ม ~9%+
+    จึงตัดที่ 8% เพื่อดูเฉพาะแถบหัวกระดาษ คืน '' ถ้าหัวกระดาษมีแต่เลขหน้า/ว่าง
+    """
+    height = float(getattr(pdf_page, 'height', 0) or 0)
+    if not height:
+        return ""
+    cutoff = height * 0.08
+    extras = []
+    for word in (pdf_page.extract_words() or []):
+        if float(word.get('top', height)) >= cutoff:
+            continue
+        # ตัดอักขระ PUA ของฟอนต์ไทย (F700-F70F) ที่ดึงมาเป็นกล่องออกก่อน
+        raw = word.get('text', '') or ''
+        token = ''.join(c for c in raw if not (0xF700 <= ord(c) <= 0xF70F)).strip()
+        if token and not _is_page_number_token(token):
+            extras.append(token)
+    return ' '.join(extras).strip()
+
+
 def fuzzy_contains(haystack_norm, needle, threshold=FUZZY_NAME_THRESHOLD):
     n = norm(needle)
     if not n:
@@ -365,8 +395,9 @@ def _summary_sentence(issue):
     value = _corrected_value(issue)
     if value:
         return f'{sentence} ให้แก้ไขเป็น: "{value}"'.strip()
-    directive = _SUMMARY_LEAD.sub(
-        "", summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix")))
+    # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ต่อท้าย expected/fix ตามเดิม
+    # โดยไม่ตัดคำนำ "ควรเป็น/ต้องเป็น" ออก เพราะในกรณีนี้มันช่วยให้อ่านรู้เรื่อง
+    directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
     return f"{sentence} {directive}".strip() if directive else sentence.strip()
 
 
@@ -564,6 +595,24 @@ def title_mismatch_detail(label, compared, expected=''):
         if diff:
             detail += f' — ต่างที่ {diff}'
     return detail
+
+
+def find_signature_date(text):
+    """ดึงวันที่สอบผ่านที่พิมพ์บนหน้าลงนามออกมา (ถ้ามี) เพื่อบอกว่าที่พบต่างจากระบบอย่างไร
+
+    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569"
+    คืน '' ถ้าหาไม่เจอ (ถือว่าไม่มีวันที่บนหน้าลงนาม ไม่ใช่แค่ไม่ตรง)
+    """
+    patterns = (
+        r'\bon\s+(\d{1,2}\s+[A-Za-z]+\.?\s+\d{4})',
+        r'วันท\S*\s*(\d{1,2}\s+\S+\s+(?:พ\.?\s*ศ\.?\s*)?\d{3,4})',
+        r'(\d{1,2}\s+[A-Za-zก-๙]+\.?\s+(?:พ\.?\s*ศ\.?\s*)?\d{4})',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return re.sub(r'\s+', ' ', match.group(1)).strip()
+    return ""
 
 
 def _is_bold_font(fontname):
@@ -879,6 +928,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     _p("เปิดไฟล์ PDF")
     pages = []
+    header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้า)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -892,6 +942,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
             pages.append(_page_text(_pg))
+            try:
+                header_extras.append(header_extra_text(_pg))
+            except Exception:
+                header_extras.append("")
             try:
                 _pg.flush_cache()
             except Exception:
@@ -994,14 +1048,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
     expected_labels = [("i", "ก"), ("ii", "ข")]
     for k, i2 in enumerate(sig_pages[:2]):
-        lines2 = [l.strip() for l in pages[i2].split('\n') if l.strip()]
-        tokens = (lines2[:1] + lines2[-1:]) if lines2 else []
         lab_en, lab_th = expected_labels[k]
-        if not any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in tokens):
+        # ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่
+        # บรรทัดแรกเสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่
+        # เป็นเลขหน้าล้วน (สั้น) จึงไม่ชนกับข้อความในเนื้อหน้า
+        page_lines = [l.strip() for l in pages[i2].split('\n') if l.strip()]
+        matched = any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines)
+        if not matched:
+            found_lab = _extract_page_label(pages[i2])
+            what = f'พบเลขหน้า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
             rep.add(FRONT_FAILURE_ZONE, "front_matter", f"หน้าลงนามหน้า {k+1} ({page_ref(i2)})",
-                    f"ระบบไม่พบเลขหน้า \"{lab_en}\" หรือ \"{lab_th}\" บนหัว/ท้ายหน้า",
-                    f"หน้าลงนามหน้า {k+1} ต้องมีเลขหน้า {lab_en} (อังกฤษ) หรือ {lab_th} (ไทย)",
-                    "ตรวจด้วยตา — PDF บางไฟล์ดึงเลขหน้าไม่ได้", "PAGE.NUMBERING")
+                    what,
+                    f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                    f"แก้เลขหน้าหน้าลงนามหน้า {k+1} ให้เป็น {lab_th} (ไทย) หรือ {lab_en} (อังกฤษ)",
+                    "PAGE.NUMBERING")
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -1072,6 +1132,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
+    # แก้ก่อนตรวจสารบัญ↔เนื้อหา เพราะต้องรู้ว่าบทไหน "ประกาศบังคับชื่อ" — บทที่บังคับ
+    # ให้ยึดประกาศเป็นหลัก (เทียบสารบัญกับประกาศ และเนื้อหากับประกาศ แยกกันด้านล่าง)
+    # จึงไม่เทียบสารบัญ↔เนื้อหาซ้ำ ซึ่งจะแนะนำผิดทางเมื่อฝั่งสารบัญเป็นตัวสะกดผิด
+    option = resolve_option(body_ch, approved, chapters_mode)
+    enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
+
     if toc_ch:
         if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
             rep.add("RED", "body", "สารบัญ vs เนื้อหา",
@@ -1082,7 +1148,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if cn in toc_map:
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
-                if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb:
+                # บทที่ประกาศบังคับชื่อ (โหมด strict) ยึดประกาศเป็นหลัก ไม่เทียบสารบัญ↔
+                # เนื้อหา — บทที่ประกาศไม่บังคับ (รูปแบบ 2 บทที่ 3 / โหมดยกเว้นบท) ยังเทียบ
+                enforced_title = chapters_mode == "strict" and 1 <= cn <= enforced_chapters
+                if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb \
+                        and not enforced_title:
                     toc_title = _toc_chapter_title(t_raw)
                     compared = compare_values(title, toc_title, 'toc_heading')
                     rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
@@ -1132,9 +1202,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     "ระบบอ่านรูปแบบตัวหนาในสารบัญไม่ได้", "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
                     "ตรวจด้วยตา", "FORMAT.BOLD")
 
-    # ชื่อบทตามประกาศ
-    option = resolve_option(body_ch, approved, chapters_mode)
-
+    # ชื่อบทตามประกาศ (option/enforced_chapters คำนวณไว้ก่อนหน้าแล้ว)
     # ตรวจ typo เฉพาะหัวข้อหลักในสารบัญ ไม่อ่านหรือพิสูจน์อักษรเนื้อหาแต่ละย่อหน้า
     for toc_page_idx, raw in toc_lines:
         visible = _strip_toc_page_number(raw)
@@ -1151,8 +1219,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ประกาศบังคับชื่อบทเท่าที่กำหนดไว้: รูปแบบ 1 ครบ 6 บท, รูปแบบ 2 เฉพาะบท 1-2
     # (บทที่ 3 ของรูปแบบ 2 ไม่บังคับชื่อ — ตรวจแค่สารบัญตรงกับเนื้อหา)
-    enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
-
     if chapters_mode == 'strict':
         for chapter_no, _title_norm, _page_no, raw, toc_page_idx in toc_ch:
             if 1 <= chapter_no <= enforced_chapters:
@@ -1218,6 +1284,23 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     # ในสารบัญ เช่น "APPENDIX D 90" จะถูกนับเป็นหัวบทภาคผนวกจริง ทำให้หน้าเริ่มของ
     # ภาคผนวกกลายเป็นหน้าส่วนนำ (เช่น "x") แล้วฟ้องเลขหน้าผิดทั้งที่เล่มถูก
     end_scan_start = min((c[2] for c in body_ch), default=0)
+
+    # หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าเท่านั้น (ไม่มี running head/ชื่อบท)
+    # รวมทุกหน้าที่พบข้อความอื่นในหัวกระดาษเป็นรายการเดียว ให้เจ้าหน้าที่ยืนยัน (ส้ม)
+    if body_ch:
+        header_bad = [i for i in range(end_scan_start, len(pages))
+                      if i < len(header_extras) and header_extras[i]]
+        if header_bad:
+            shown = ", ".join(page_ref(i) for i in header_bad[:5])
+            more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
+            sample = header_extras[header_bad[0]]
+            rep.add("ORANGE", "body/end", f"หัวกระดาษ ({shown}{more})",
+                    f'พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ {len(header_bad)} หน้า '
+                    f'เช่น "{sample[:60]}"',
+                    "หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น",
+                    "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า",
+                    "PAGE.HEADER")
+
     for i, t in enumerate(pages):
         if i < end_scan_start:
             continue
@@ -1721,10 +1804,19 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                               ' ', text, flags=re.I)
                 return norm(re.sub(r'\b0([1-9])', r'\1', text))
             exam_found = _date_key(A["exam_date"]) in _date_key(sig_text)
-            rep.add_verification("วันที่สอบผ่าน", f"หน้าลงนาม ({signature_location})",
-                                 "pass" if exam_found else "fail")
-            if not exam_found:
-                rep.add("RED", "front_matter", f"หน้าลงนาม ({signature_location})", f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
+            exam_loc = f"หน้าลงนาม ({signature_location})"
+            found_date = "" if exam_found else find_signature_date(sig_text)
+            rep.add_verification("วันที่สอบผ่าน", exam_loc,
+                                 "pass" if exam_found else "fail",
+                                 found_date if found_date else "")
+            if not exam_found and found_date:
+                # มีวันที่บนหน้าลงนามแต่ วัน/เดือน/ปี ไม่ตรงกับข้อมูลในระบบ
+                rep.add("RED", "front_matter", exam_loc,
+                        f'พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "{found_date}"',
+                        f'ที่ถูกต้องตามระบบคือ "{A["exam_date"]}"',
+                        "แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+            elif not exam_found:
+                rep.add("RED", "front_matter", exam_loc, f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
                         "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
         if A.get("year"):
             year_found = str(A["year"]) in (pages[0] if pages else "")

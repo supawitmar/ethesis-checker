@@ -420,6 +420,10 @@ var TR = [
   [/บทคัดย่อ \(หน้า ([^)]+)\)/g, 'Abstract (page $1)'],
   [/กิตติกรรมประกาศ \(เริ่มหน้า ([^)]+)\)/g, 'Acknowledgements (from page $1)'],
   [/ระบบไม่พบเลขหน้า "(.+?)" หรือ "(.+?)" บนหัว\/ท้ายหน้า/g, 'Page label "$1" or "$2" not found at top/bottom of page'],
+  [/พบเลขหน้า "(.+?)"/g, 'Found page label "$1"'],
+  [/ไม่พบเลขหน้าบนหน้า/g, 'No page label found on the page'],
+  [/ต้องเป็นเลขหน้า "(.+?)" \(ไทย\) หรือ "(.+?)" \(อังกฤษ\)/g, 'Must be page label "$1" (TH) or "$2" (EN)'],
+  [/แก้เลขหน้าหน้าลงนามหน้า (\d+) ให้เป็น (\S+) \(ไทย\) หรือ (\S+) \(อังกฤษ\)/g, 'Renumber approval page $1 to $2 (TH) or $3 (EN)'],
   [/ต้องมีเลขหน้า (\S+) \(อังกฤษ\) หรือ (\S+) \(ไทย\)/g, 'must be numbered $1 (EN) or $2 (TH)'],
   [/ตรวจด้วยตา — PDF บางไฟล์ดึงเลขหน้าไม่ได้/g, 'Check manually — some PDFs do not expose page labels'],
   [/พบหน้าที่ระบบดึงข้อความไม่ได้ \((.+?)\) และยืนยันลำดับเลขหน้าไม่ได้/g, 'Pages with no extractable text ($1); page numbering could not be verified'],
@@ -535,6 +539,37 @@ var TR = [
   [/ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นชื่อหลักสูตร เช่น ปรัชญาดุษฎีบัณฑิต สาขาวิชา.../g, 'The bottom-right text must be the program name, e.g. Doctor of Philosophy Program in ...'],
   [/หน้า 2 — คณบดี\/ผู้อำนวยการ \(ระบุหัวหน้าส่วนงานให้ถูกต้อง\)/g, 'Page 2 — Dean/Director (verify the head of unit)'],
   [/ข้อความมุมล่างขวาใต้ลายเซ็นต้องเป็นคณะ\/ส่วนงานที่นักศึกษาสังกัด เช่น คณะวิศวกรรมศาสตร์/g, "The bottom-right text must be the student's faculty/unit, e.g. Faculty of Engineering"],
+  // ---- ข้อความในบทสรุปที่คัดลอกได้ (ต้องมาก่อนการแทนคำเดี่ยวทั่วไปด้านล่าง) ----
+  [/ผลการตรวจ: ไม่ผ่าน/g, 'Result: Not passed'],
+  [/ผลการตรวจ: รอยืนยัน/g, 'Result: Pending review'],
+  [/ผลการตรวจ: ผ่าน/g, 'Result: Passed'],
+  [/กรุณาแก้ไขทั้งหมด (\d+) จุด ดังต่อไปนี้/g, 'Please fix all $1 item(s) as follows'],
+  [/ไม่พบจุดที่ต้องแก้ไข/g, 'No items to fix'],
+  [/(\d+)\. ใน/g, '$1. In '],
+  [/ให้แก้ไขเป็น: /g, 'Change to: '],
+  [/ แตกต่างที่ /g, ' differs at '],
+  [/ เทียบกับ /g, ' vs '],
+  [/ชื่อบทในสารบัญข้อความไม่ตรง: /g, 'Chapter title in the TOC does not match: '],
+  [/ชื่อบทในเนื้อหาข้อความไม่ตรง: /g, 'Chapter title in the content does not match: '],
+  [/ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย: /g, 'Chapter title in the TOC has a minor typo: '],
+  [/ชื่อบทในเนื้อหาพิมพ์ผิดเล็กน้อย: /g, 'Chapter title in the content has a minor typo: '],
+  [/เลขหน้าบทในสารบัญควรเป็น (\d+)/g, 'The TOC chapter page should be $1'],
+  [/เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ/g, 'Staff may accept this or correct the TOC page number'],
+  [/ช่วงเลขหน้า (\d+) ถึง (\d+)/g, 'page range $1 to $2'],
+  [/ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ: /g, 'The title does not match the system record: '],
+  [/ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ: /g, 'The other-language title does not match the system record: '],
+  [/พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: /g, 'The exam pass date does not match the system: '],
+  [/ที่ถูกต้องตามระบบคือ /g, 'The correct value per the system is '],
+  [/แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ/g, 'Correct the approval-page date to match the system'],
+  [/แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ/g, 'Correct the title to match the system'],
+  [/พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ (\d+) หน้า เช่น/g, 'Found text other than the page number in the header on $1 page(s), e.g.'],
+  [/หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น/g, 'Headers in the content and end matter must contain only the page number'],
+  [/ลบข้อความอื่น \(เช่น ชื่อบท\/running head\) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า/g, 'Remove other text (e.g. chapter title/running head) from the header, leaving only the page number'],
+  [/หัวกระดาษ /g, 'Header '],
+  [/ และอีก (\d+) หน้า/g, ' and $1 more page(s)'],
+  [/ส่วนท้ายเล่ม/g, 'End matter'],
+  [/เนื้อหา \(บท\)/g, 'Content (chapters)'],
+  [/อื่น ๆ/g, 'Other'],
   [/บทที่พบในเนื้อหา/g, 'Chapters found in the content'],
   [/บทที่ (\d+)/g, 'Chapter $1'],
   [/บทคัดย่อภาษาไทย/g, 'Thai abstract'],
@@ -579,6 +614,7 @@ function applyLang(){
   });
   document.getElementById('langbtn').textContent = (LANG === 'en') ? 'ไทย' : 'EN';
   document.documentElement.lang = LANG;
+  if (typeof renderSummary === 'function') renderSummary();   // ให้ข้อความสรุปสลับภาษาด้วย
 }
 function toggleLang(){ LANG = (LANG === 'th') ? 'en' : 'th'; applyLang(); }
 
@@ -618,7 +654,10 @@ var AI_TEXT = aiSummaryText();
 // ระหว่างที่ค้างอยู่จะไม่โชว์ข้อความ AI เก่า (กันคัดลอกสรุปที่ตกรายการไปส่งนักศึกษา)
 var AI_STALE = false;
 function currentSummaryText(){
-  return (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE) ? AI_TEXT : PLAIN_TEXT;
+  const base = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE) ? AI_TEXT : PLAIN_TEXT;
+  // สลับภาษาอังกฤษ: แปลข้อความสรุป (ตรงตัวจากระบบ) ด้วยพจนานุกรมเดียวกับ dropdown
+  // ค่าที่อยู่ในเครื่องหมายคำพูด (ชื่อบท/ปริญญา/เลขหน้า) ไม่ถูกแตะ คงไว้ตามเล่มจริง
+  return (LANG === 'en') ? trEN(base) : base;
 }
 function renderSummary(){
   const ta = document.querySelector('.copy-text');

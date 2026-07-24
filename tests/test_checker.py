@@ -16,6 +16,8 @@ from checker import (
     canonical_title_status,
     closest_degree_line,
     closest_text_line,
+    find_signature_date,
+    header_extra_text,
     compare_reference_text,
     mismatch_detail,
     title_mismatch_detail,
@@ -306,13 +308,15 @@ class ThaiBookRegressionTests(unittest.TestCase):
     def test_symbol_abbreviation_list_heading_is_recognized(self):
         self.assertEqual(_toc_section_kind("คำอธิบายสัญลักษณ์/คำย่อ ฎ"), "list_abbreviations")
 
-    def test_chapter_title_policy_variant_vs_wrong(self):
-        # นโยบายเจ้าหน้าที่: REVIEW/REVIEWS (ประกาศ vs คู่มือ) = ส้ม (variant)
-        # สะกดผิดจนไม่ใช่คำ เช่น METHODLOGY/RECOMMENDATONS = แดง (wrong) ทุกตำแหน่ง
+    def test_chapter_title_policy_exact_vs_wrong(self):
+        # ยึดประกาศเป็นหลัก: ตรงประกาศ = exact ต่างแม้แต่ตัวเดียว = wrong (แดง)
         kind, _, _ = canonical_title_status("LITERATURE REVIEW", 2, 1)
         self.assertEqual(kind, "exact")
-        kind, _, _ = canonical_title_status("LITERATURE REVIEWS", 2, 1)
-        self.assertEqual(kind, "variant")
+        # บทที่ 2 เกิน S (REVIEW -> REVIEWS) = พิมพ์ผิดเล็กน้อย เหมือนบทอื่น ไม่ใช่ variant
+        kind, compared, expected = canonical_title_status("LITERATURE REVIEWS", 2, 1)
+        self.assertEqual(kind, "wrong")
+        self.assertEqual(compared["status"], "typo")
+        self.assertEqual(expected, "LITERATURE REVIEW")
         kind, _, expected = canonical_title_status("RESEARCH METHODLOGY", 3, 1)
         self.assertEqual(kind, "wrong")
         self.assertEqual(expected, "RESEARCH METHODOLOGY")
@@ -534,6 +538,57 @@ class MultiLineTitleTests(unittest.TestCase):
         page = "entitled\n" + self.APPROVED + "\nwas submitted"
         compared = compare_reference_text(page, self.APPROVED, "title")
         self.assertEqual(compared["status"], "exact")
+
+
+class HeaderOnlyPageNumberTests(unittest.TestCase):
+    """หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้า ไม่มี running head/ชื่อบท"""
+
+    class _Page:
+        def __init__(self, height, words):
+            self.height = height
+            self._words = words
+
+        def extract_words(self, *a, **k):
+            return self._words
+
+    def test_header_with_only_page_number_is_clean(self):
+        page = self._Page(841.9, [
+            {"text": "23", "top": 48.7},          # เลขหน้ามุมบนขวา
+            {"text": "CHAPTER", "top": 86.9},      # เนื้อความอยู่ต่ำกว่าแถบหัวกระดาษ
+        ])
+        self.assertEqual(header_extra_text(page), "")
+
+    def test_running_head_in_header_is_flagged(self):
+        page = self._Page(841.9, [
+            {"text": "Chapter", "top": 49}, {"text": "3", "top": 49},
+            {"text": "Methodology", "top": 49}, {"text": "42", "top": 49},
+            {"text": "bodytext", "top": 120},
+        ])
+        extra = header_extra_text(page)
+        self.assertIn("Chapter", extra)
+        self.assertIn("Methodology", extra)
+        self.assertNotIn("42", extra)   # เลขหน้าไม่นับเป็นข้อความเกิน
+
+    def test_body_text_below_header_band_is_ignored(self):
+        page = self._Page(841.9, [{"text": "Introduction", "top": 90}])
+        self.assertEqual(header_extra_text(page), "")
+
+
+class SignatureDateTests(unittest.TestCase):
+    """วันที่สอบบนหน้าลงนามที่ไม่ตรงระบบ ต้องแยกจาก "ไม่พบวันที่" และบอกวันที่ถูก"""
+
+    def test_extracts_english_date(self):
+        self.assertEqual(
+            find_signature_date("was submitted ...\non 26 June 2026\nCommittees"),
+            "26 June 2026")
+
+    def test_extracts_thai_date_with_buddhist_era(self):
+        self.assertEqual(
+            find_signature_date("ปริญญา...\nวันที่ 11 พฤษภาคม พ.ศ. 2569\nคณะกรรมการ"),
+            "11 พฤษภาคม พ.ศ. 2569")
+
+    def test_returns_empty_when_no_date(self):
+        self.assertEqual(find_signature_date("no date printed on this page"), "")
 
 
 class PlainSummaryProseTests(unittest.TestCase):
