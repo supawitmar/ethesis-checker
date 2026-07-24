@@ -24,6 +24,9 @@ from checker import (
     _committee_keyname,
     _report_thai_committee,
     _report_committee_positions,
+    _check_abstract_committees,
+    abstract_committee_block,
+    split_abstract_committee,
     _degree_subject,
     compare_reference_text,
     mismatch_detail,
@@ -580,16 +583,24 @@ class SignatureCommitteeTests(unittest.TestCase):
             return self._words
 
     def _dot_then_names(self, rows):
-        """สร้าง words: แต่ละ row = บรรทัดเส้นประ + บรรทัดชื่อ (left, right)"""
+        """สร้าง words: แต่ละ row = เส้นประ + ชื่อ [+ คุณวุฒิ] (left, right[, qleft, qright])"""
         words = []
         top = 100
-        for left, right in rows:
+        for row in rows:
+            left, right = row[0], row[1]
+            qleft = row[2] if len(row) > 2 else None
+            qright = row[3] if len(row) > 3 else None
             words.append({"text": "………………", "top": top, "x0": 60})
             words.append({"text": "………………", "top": top, "x0": 320})
             for tok in left.split():
                 words.append({"text": tok, "top": top + 13, "x0": 60})
             for tok in right.split():
                 words.append({"text": tok, "top": top + 13, "x0": 320})
+            if qleft is not None or qright is not None:
+                for tok in (qleft or "").split():
+                    words.append({"text": tok, "top": top + 26, "x0": 60})
+                for tok in (qright or "").split():
+                    words.append({"text": tok, "top": top + 26, "x0": 320})
             top += 60
         return words
 
@@ -603,13 +614,27 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("Dean", "Program Director"),                     # r7: dean | director
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, bl, br = signature_committee_slots(page)
+        members, quals, bl, br = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")
         self.assertEqual(members.get(2), "B Two")
         self.assertEqual(members.get(3), "C Three")
         self.assertIsNone(members.get(4))       # ช่องว่าง/placeholder
         self.assertIsNone(members.get(9))       # placeholder ซ้าย
         self.assertIn("Program Director", br)
+
+    def test_qualification_presence_detected_per_member(self):
+        rows = [
+            ("Candidate,", "A One,", "", "Ph.D."),                 # m1 มีคุณวุฒิ
+            ("Academic rank First Name Last name,", "B Two,", "", "Degree (Subject)"),  # m2 placeholder=ไม่มี
+            ("Academic rank First Name Last name,", "C Three,"),   # m3 ไม่มีบรรทัดคุณวุฒิ
+            ("Dean", "Program Director"),
+        ]
+        page = self._Page(842, 595, self._dot_then_names(rows))
+        members, quals, bl, br = signature_committee_slots(page)
+        self.assertEqual(members.get(1), "A One")   # ชื่อกรรมการคนที่ 1
+        self.assertTrue(quals.get(1))               # m1 มีคุณวุฒิ
+        self.assertFalse(quals.get(2))              # m2 เป็น placeholder = ไม่มี
+        self.assertFalse(quals.get(3))              # m3 ไม่มีบรรทัดคุณวุฒิ
 
     def test_page_kind_detection(self):
         self.assertEqual(_committee_page_kind("Thesis Advisory Committees\nMajor Advisor"), "advisory")
@@ -736,6 +761,69 @@ class EnglishCommitteeFuzzyTests(unittest.TestCase):
         reds = self._run(["Alice Adams", "Bob Brown"],
                          {1: "Associate Professor Dr. Alice Adams",
                           2: "Assistant Professor Bob Brown"})
+        self.assertEqual(reds, [])
+
+
+class AbstractCommitteeTests(unittest.TestCase):
+    """หน้าบทคัดย่อ: รายชื่อคณะกรรมการที่ปรึกษา + รูปแบบ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่ง)"""
+
+    def test_block_parse_english_multiline_wrap(self):
+        text = ("THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D., NITAYA\n"
+                "INDRAWATTANA, Ph.D., AMORNRAT AROONNUAL, Ph.D.\nABSTRACT\nxxx")
+        is_en, block = abstract_committee_block(text)
+        self.assertTrue(is_en)
+        names, degrees = split_abstract_committee(block)
+        self.assertEqual(names, ["NARISARA CHANTRATITA", "NITAYA INDRAWATTANA",
+                                 "AMORNRAT AROONNUAL"])
+        self.assertEqual(degrees, ["Ph.D.", "Ph.D.", "Ph.D."])
+
+    def test_block_parse_thai(self):
+        text = "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด., ธเนศ ข, พย.ด.\nบทคัดย่อ\nxxx"
+        is_en, block = abstract_committee_block(text)
+        self.assertFalse(is_en)
+        names, _ = split_abstract_committee(block)
+        self.assertEqual(names, ["คนางค์ ก", "ธเนศ ข"])
+
+    def _run(self, committees, abs_en, abs_th, pages, name_en=None, translation_ok=False):
+        rep = Report()
+        _check_abstract_committees(rep, committees, abs_en, abs_th, pages,
+                                   lambda i: f"หน้า {i}", name_en or {}, translation_ok)
+        return rep
+
+    def _reds(self, rep):
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_english_lowercase_name_flagged(self):
+        committees = {"advisory": [{"name": "ก ข", "role": ""}]}
+        pages = ["THESIS ADVISORY COMMITTEE: Narisara Chantratita, Ph.D.\nABSTRACT"]
+        reds = self._reds(self._run(committees, [0], [], pages))
+        self.assertTrue(any("ตัวพิมพ์ใหญ่" in r for r in reds))
+
+    def test_subject_in_parentheses_flagged(self):
+        committees = {"advisory": [{"name": "ก ข", "role": ""}]}
+        pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D. (Microbiology)\nABSTRACT"]
+        reds = self._reds(self._run(committees, [0], [], pages))
+        self.assertTrue(any("วงเล็บ" in r for r in reds))
+
+    def test_academic_rank_in_abstract_flagged(self):
+        committees = {"advisory": [{"name": "ก ข", "role": ""}]}
+        pages = ["THESIS ADVISORY COMMITTEE: Assoc. Prof. NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
+        reds = self._reds(self._run(committees, [0], [], pages))
+        self.assertTrue(any("ตำแหน่งทางวิชาการ" in r for r in reds))
+
+    def test_thai_names_matched_against_ethesis(self):
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
+                                    {"name": "ธเนศ ข", "role": ""}]}
+        # สลับชื่อ → ต้องฟ้อง (เทียบไทยตรง)
+        pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: ธเนศ ข, ปร.ด., คนางค์ ก, พย.ด.\nบทคัดย่อ"]
+        reds = self._reds(self._run(committees, [], [0], pages))
+        self.assertTrue(any("สลับตำแหน่งกัน" in r for r in reds))
+
+    def test_clean_english_abstract_passes(self):
+        committees = {"advisory": [{"name": "นริศรา จันทราทิตย์", "role": ""}]}
+        pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
+        name_en = {"นริศรา จันทราทิตย์": "Narisara Chantratita"}
+        reds = self._reds(self._run(committees, [0], [], pages, name_en, translation_ok=True))
         self.assertEqual(reds, [])
 
 

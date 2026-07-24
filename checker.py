@@ -188,16 +188,31 @@ def _sig_clean_name(text):
     return cleaned or None
 
 
+# placeholder ของช่องคุณวุฒิที่ template ทิ้งไว้ = ถือว่ายัง "ไม่มี" คุณวุฒิจริง
+_SIG_QUAL_PLACEHOLDERS = (
+    'DEGREESUBJECT', norm('ระบุคุณวุฒิ'), norm('คุณวุฒิ'), norm('ระบุสาขาวิชา'),
+)
+
+
+def _sig_qual_text(text):
+    """ข้อความคุณวุฒิใต้ชื่อกรรมการ — คืน '' ถ้าว่างหรือเป็น placeholder (ยังไม่กรอกจริง)"""
+    n = norm(text)
+    if not n or any(m and m in n for m in _SIG_QUAL_PLACEHOLDERS):
+        return ''
+    return (text or '').strip()
+
+
 def signature_committee_slots(pdf_page):
     """อ่านตารางลายเซ็นตามกริดตายตัว
 
-    คืน (members, bottom_left, bottom_right):
+    คืน (members, member_quals, bottom_left, bottom_right):
       members = dict{ลำดับกรรมการ 1..9 → ชื่อ (str) หรือ None ถ้าช่องว่าง/placeholder}
+      member_quals = dict{ลำดับกรรมการ 1..9 → ข้อความคุณวุฒิใต้ชื่อ ('' ถ้าไม่มี/placeholder)}
       bottom_left/right = ข้อความรวมช่องล่างสุด (คณบดี / ผู้อำนวยการหลักสูตร) ไว้ตรวจคณะ/หลักสูตร
     """
     words = pdf_page.extract_words() or []
     if not words:
-        return {}, '', ''
+        return {}, {}, '', ''
     mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
     lines = []
     for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0']))):
@@ -206,20 +221,30 @@ def signature_committee_slots(pdf_page):
             lines[-1]['words'].append(w)
         else:
             lines.append({'top': top, 'words': [w]})
-    # แถวชื่อ = บรรทัดถัดจากบรรทัดเส้นประ
-    name_rows = [lines[i + 1] for i in range(len(lines) - 1)
-                 if _sig_is_dotted(' '.join(w['text'] for w in lines[i]['words']))]
+    line_dotted = [_sig_is_dotted(' '.join(w['text'] for w in ln['words'])) for ln in lines]
+    # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวคุณวุฒิ = บรรทัดถัดจากชื่อ (ถ้าไม่ใช่เส้นประ)
+    name_rows, qual_rows = [], []
+    for i in range(len(lines) - 1):
+        if not line_dotted[i]:
+            continue
+        name_rows.append(lines[i + 1])
+        qual_rows.append(lines[i + 2] if (i + 2 < len(lines) and not line_dotted[i + 2])
+                         else None)
 
     def cell(row, left):
+        if not row:
+            return ''
         toks = [w['text'] for w in sorted(row['words'], key=lambda w: float(w['x0']))
                 if (float(w['x0']) < mid) == left]
         return ' '.join(toks).strip()
 
-    members = {}
-    for idx, row in enumerate(name_rows[:5]):   # แถว 0..4 = ระดับกรรมการ
-        members[idx + 1] = _sig_clean_name(cell(row, left=False))   # ขวา → 1..5
+    members, member_quals = {}, {}
+    for idx, (nrow, qrow) in enumerate(zip(name_rows[:5], qual_rows[:5])):  # 0..4 = ระดับกรรมการ
+        members[idx + 1] = _sig_clean_name(cell(nrow, left=False))   # ขวา → 1..5
+        member_quals[idx + 1] = _sig_qual_text(cell(qrow, left=False))
         if idx >= 1:
-            members[10 - idx] = _sig_clean_name(cell(row, left=True))  # ซ้าย → 9,8,7,6
+            members[10 - idx] = _sig_clean_name(cell(nrow, left=True))  # ซ้าย → 9,8,7,6
+            member_quals[10 - idx] = _sig_qual_text(cell(qrow, left=True))
     # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย เรียงตามบรรทัด (บน→ล่าง, ซ้าย→ขวา)
     # เพื่อไม่ให้ชื่อหลักสูตร/คณะที่อยู่คนละบรรทัดสลับกันจนเทียบไม่เจอ
     floor = (name_rows[4]['top'] + 20) if len(name_rows) >= 5 else \
@@ -229,7 +254,7 @@ def signature_committee_slots(pdf_page):
                   if float(w['top']) >= floor and float(w['x0']) < mid)
     br = ' '.join(w['text'] for w in ordered
                   if float(w['top']) >= floor and float(w['x0']) >= mid)
-    return members, bl.strip(), br.strip()
+    return members, member_quals, bl.strip(), br.strip()
 
 
 def _committee_page_kind(page_text):
@@ -336,14 +361,14 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
     for i in missing_idx:
         name = expected_names[i]
         rep.add("RED", "front_matter", loc,
-                f'ไม่พบกรรมการ "{name}" บนหน้าลงนาม',
+                f'ไม่พบกรรมการ "{name}" ตามข้อมูลอนุมัติ',
                 f'ต้องมีกรรมการชื่อ "{name}" ตามข้อมูลอนุมัติ (บฑ.)',
                 "เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
     for s in extra_slots:
         name = members.get(s) or ""
         rep.add("RED", "front_matter", loc,
                 f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
-                "รายชื่อกรรมการบนหน้าลงนามต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
+                "รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
                 "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
@@ -388,12 +413,31 @@ def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
                 "จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
-def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, program_language, A):
-    """ตรวจรายชื่อกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
+def _committee_translation(committees):
+    """แปลชื่อกรรมการไทย→อังกฤษครั้งเดียว คืน (name_en dict, translation_ok bool)
+    ใช้ร่วมกันทั้งหน้าลงนามและหน้าบทคัดย่อ (แปลไม่ครบ = ไม่ใช้เทียบชื่อ)"""
+    all_th = [m["name"] for key in ("advisory", "exam")
+              for m in committees.get(key, [])]
+    if not all_th:
+        return {}, False
+    try:
+        import llm_assist
+        translated = llm_assist.translate_names(all_th)
+    except Exception:
+        translated = []
+    if len(translated) == len(all_th) and all(str(t).strip() for t in translated):
+        return dict(zip(all_th, translated)), True
+    return {}, False
+
+
+def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
+                      program_language, A, name_en, translation_ok):
+    """ตรวจรายชื่อ+คุณวุฒิกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
 
     เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน = แดง)
     เล่มอังกฤษ/นานาชาติ: ถ้า AI แปลชื่อครบ → เทียบตามลำดับเหมือนเล่มไทย (แดง);
       ถ้าแปลไม่ได้ → ส้มให้เจ้าหน้าที่ตรวจเอง
+    คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้อง "มี" — ไม่มี = แดง
     คืน True ถ้าตรวจได้ (อ่านตารางเจอ) — ไม่งั้น False (ให้เจ้าหน้าที่ตรวจเอง)
     """
     english_book = program_language in ("international", "thai_english")
@@ -410,21 +454,6 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
     if not slots:
         return False
 
-    # แปลชื่อไทย→อังกฤษครั้งเดียว (เล่มอังกฤษ) — ถ้าแปลครบทุกชื่อ ใช้เทียบตามลำดับเหมือนเล่มไทย
-    name_en = {}
-    translation_ok = False
-    if english_book:
-        all_th = [m["name"] for key in ("advisory", "exam")
-                  for m in committees.get(key, [])]
-        try:
-            import llm_assist
-            translated = llm_assist.translate_names(all_th)
-        except Exception:
-            translated = []
-        if len(translated) == len(all_th) and all(str(t).strip() for t in translated):
-            name_en = dict(zip(all_th, translated))
-            translation_ok = True
-
     handled_any = False
     for idx in sig_pages[:2]:
         if idx not in slots or idx >= len(pages):
@@ -434,7 +463,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
         if not expected:
             continue
         handled_any = True
-        members, bottom_left, bottom_right = slots[idx]
+        members, member_quals, bottom_left, bottom_right = slots[idx]
         page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
         loc = f"{page_label} ({page_ref(idx)})"
 
@@ -453,6 +482,15 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
                     "ระบบแปลชื่อกรรมการเป็นอังกฤษไม่ได้ จึงเทียบชื่ออัตโนมัติไม่ได้",
                     f"ต้องมีกรรมการ {len(expected)} คนตามลำดับ บฑ. คือ {names_th}",
                     "โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE")
+
+        # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
+        # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
+        for k in range(1, len(expected) + 1):
+            if members.get(k) and not member_quals.get(k):
+                rep.add("RED", "front_matter", loc,
+                        f'ไม่พบคุณวุฒิใต้ชื่อกรรมการคนที่ {k} ("{members[k]}")',
+                        "ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ (Degree)",
+                        "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน", "FRONT.COMMITTEE")
 
         # ---------- ช่องคงที่: ตรวจเฉพาะชื่อหลักสูตร/คณะ (ไม่ตรวจชื่อ/คุณวุฒิบุคคล) ----------
         # ผู้อำนวยการหลักสูตร (มุมล่างขวา): บรรทัดต้องมีชื่อสาขาของปริญญา
@@ -473,6 +511,89 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
                     "โปรดตรวจชื่อคณะมุมล่างซ้ายให้ถูกต้อง", "FRONT.COMMITTEE")
 
     return handled_any
+
+
+_ABS_COMMITTEE_HEADING = re.compile(
+    r'(?:ADVISORY\s+COMMITTEE|คณะกรรมการที่ปรึกษา\S*)\s*:', re.I)
+
+
+def abstract_committee_block(page_text):
+    """ดึงบรรทัดรายชื่อคณะกรรมการที่ปรึกษาบนหน้าบทคัดย่อ (รวมบรรทัดที่ห่อคำ)
+
+    คืน (is_english, block) หรือ None ถ้าไม่พบ
+      is_english = หัวข้อเป็นภาษาอังกฤษ (ต้องเป็นตัวพิมพ์ใหญ่)
+      block = ข้อความหลัง ':' ถึงก่อนหัวข้อ ABSTRACT/บทคัดย่อ (รวมเป็นบรรทัดเดียว)
+    """
+    m = _ABS_COMMITTEE_HEADING.search(page_text or "")
+    if not m:
+        return None
+    is_english = "ADVISORY" in (page_text[m.start():m.end()].upper())
+    tail = page_text[m.end():]
+    stop = re.search(r'\n\s*(?:ABSTRACT|บทคัดย่อ)\b', tail)
+    block = tail[:stop.start()] if stop else "\n".join(tail.split("\n")[:4])
+    return is_english, re.sub(r'\s*\n\s*', ' ', block).strip()
+
+
+def split_abstract_committee(block):
+    """แยก 'ชื่อ, คุณวุฒิ, ชื่อ, คุณวุฒิ, ...' → (names, degrees) ตามลำดับ"""
+    toks = [t.strip() for t in (block or "").split(",") if t.strip()]
+    return toks[0::2], toks[1::2]
+
+
+def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
+                               page_ref, name_en, translation_ok):
+    """ตรวจรายชื่อคณะกรรมการที่ปรึกษาบนหน้าบทคัดย่อ (ชื่อ + รูปแบบ)
+
+    รูปแบบต่อคน = 'ชื่อ นามสกุล, คุณวุฒิ' — ไม่มีสาขาในวงเล็บ, ไม่มีตำแหน่งวิชาการ
+    หน้าอังกฤษ: ชื่อต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด และเทียบชื่อจากคำแปล (fuzzy)
+    หน้าไทย: เทียบชื่อไทยตรง
+    """
+    advisory = committees.get("advisory", [])
+    if not advisory:
+        return
+    for page_list, heading_en in ((abs_en_pages, True), (abs_th_pages, False)):
+        for ai in page_list:
+            if ai >= len(pages):
+                continue
+            parsed = abstract_committee_block(pages[ai])
+            if not parsed:
+                continue
+            _, block = parsed
+            names, degrees = split_abstract_committee(block)
+            if not names:
+                continue
+            loc = f"บทคัดย่อ ({page_ref(ai)}) — คณะกรรมการที่ปรึกษา"
+
+            # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
+            if "(" in block or ")" in block:
+                rep.add("RED", "front_matter", loc,
+                        "รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ",
+                        "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชาในวงเล็บ",
+                        "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
+            for i, name in enumerate(names, start=1):
+                nm = name.strip()
+                # รูปแบบ 2: ห้ามมีตำแหน่งทางวิชาการนำหน้าชื่อ
+                if _strip_committee_title(nm) != nm:
+                    rep.add("RED", "front_matter", loc,
+                            f'ชื่อกรรมการคนที่ {i} มีตำแหน่งทางวิชาการนำหน้า: "{nm}"',
+                            "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
+                            "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
+                # รูปแบบ 3: หน้าอังกฤษ ชื่อต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด
+                if heading_en and re.search(r'[a-z]', nm):
+                    rep.add("RED", "front_matter", loc,
+                            f'ชื่อกรรมการคนที่ {i} ไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด: "{nm}"',
+                            "ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด",
+                            "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
+
+            # เทียบชื่อกับข้อมูลอนุมัติ (advisory) แบบเดียวกับหน้าลงนาม
+            members = {i: n.strip() for i, n in enumerate(names, start=1)}
+            if heading_en:
+                if translation_ok:
+                    expected = [name_en[m["name"]] for m in advisory]
+                    _report_committee_positions(rep, expected, members, loc, fuzzy=True)
+            else:
+                expected = [m["name"] for m in advisory]
+                _report_committee_positions(rep, expected, members, loc, fuzzy=False)
 
 
 def fuzzy_contains(haystack_norm, needle, threshold=FUZZY_NAME_THRESHOLD):
@@ -2166,11 +2287,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         # ถ้ามีข้อมูลกรรมการจาก eThesis → ตรวจชื่อ+ตำแหน่งตามกริดตายตัวของ template
         # (เล่มไทยเทียบตรง = แดง, เล่มอังกฤษ AI แปลชื่อ = ส้มให้เจ้าหน้าที่ยืนยัน)
         committees = A.get("committees") or {}
+        prog_lang = A.get("program_language", "")
+        english_book = prog_lang in ("international", "thai_english")
+        # แปลชื่อกรรมการครั้งเดียว ใช้ทั้งหน้าลงนามและหน้าบทคัดย่อ (เล่ม/บทคัดย่ออังกฤษ)
+        name_en, translation_ok = ({}, False)
+        if committees and (english_book or abs_en_pages):
+            name_en, translation_ok = _committee_translation(committees)
         checked_committee = False
         if committees.get("advisory") or committees.get("exam"):
             checked_committee = _check_committees(
                 rep, committees, sig_pages, pages, pdf_path, page_ref,
-                A.get("program_language", ""), A)
+                prog_lang, A, name_en, translation_ok)
+            # หน้าบทคัดย่อ: รายชื่อคณะกรรมการที่ปรึกษา + รูปแบบ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่ง)
+            _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,
+                                       pages, page_ref, name_en, translation_ok)
 
         # ช่องคงที่/รายการที่ระบบยังตรวจไม่ได้ → ให้เจ้าหน้าที่ตรวจเอง
         if not checked_committee:
@@ -2178,9 +2308,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                           "เทียบกับ บฑ.1 (หน้า 1) และ บฑ.2 (หน้า 2) ทีละคน รวมการสะกด")
             rep.add_human("ลำดับและตำแหน่งการวางชื่อในตารางลายเซ็น",
                           "ชื่อที่ 1 (Major Advisor/Chair) แถวเดียวกับนักศึกษา คอลัมน์ขวา, ชื่อ 2-5 ไล่ลงขวา, ชื่อ 6 แถวเดียวกับชื่อ 5 ฝั่งซ้าย, 7-9 ไล่ขึ้น, ช่องที่เหลือถมขาว")
-        # คุณวุฒิของกรรมการ (Degree/Subject ใต้ชื่อ) ยังให้เจ้าหน้าที่ตรวจ
-        rep.add_human("คุณวุฒิ (Degree/Subject) ใต้ชื่อกรรมการแต่ละคน",
-                      "เทียบกับ บฑ.1/บฑ.2 — ระบบตรวจเฉพาะชื่อ-สกุลและตำแหน่งการวาง")
+        # คุณวุฒิใต้ชื่อกรรมการ: ระบบตรวจว่า "มี" ครบทุกคนแล้ว แต่ไม่ตรวจเนื้อหาคุณวุฒิ
+        rep.add_human("ความถูกต้องของเนื้อหาคุณวุฒิ (Degree/Subject) ใต้ชื่อกรรมการ",
+                      "เทียบกับ บฑ.1/บฑ.2 — ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจเนื้อหา")
 
         prog = A.get("program_language", "")
         if prog == "international":
