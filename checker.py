@@ -395,8 +395,9 @@ def _summary_sentence(issue):
     value = _corrected_value(issue)
     if value:
         return f'{sentence} ให้แก้ไขเป็น: "{value}"'.strip()
-    directive = _SUMMARY_LEAD.sub(
-        "", summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix")))
+    # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ต่อท้าย expected/fix ตามเดิม
+    # โดยไม่ตัดคำนำ "ควรเป็น/ต้องเป็น" ออก เพราะในกรณีนี้มันช่วยให้อ่านรู้เรื่อง
+    directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
     return f"{sentence} {directive}".strip() if directive else sentence.strip()
 
 
@@ -1047,14 +1048,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
     expected_labels = [("i", "ก"), ("ii", "ข")]
     for k, i2 in enumerate(sig_pages[:2]):
-        lines2 = [l.strip() for l in pages[i2].split('\n') if l.strip()]
-        tokens = (lines2[:1] + lines2[-1:]) if lines2 else []
         lab_en, lab_th = expected_labels[k]
-        if not any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in tokens):
+        # ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่
+        # บรรทัดแรกเสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่
+        # เป็นเลขหน้าล้วน (สั้น) จึงไม่ชนกับข้อความในเนื้อหน้า
+        page_lines = [l.strip() for l in pages[i2].split('\n') if l.strip()]
+        matched = any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines)
+        if not matched:
+            found_lab = _extract_page_label(pages[i2])
+            what = f'พบเลขหน้า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
             rep.add(FRONT_FAILURE_ZONE, "front_matter", f"หน้าลงนามหน้า {k+1} ({page_ref(i2)})",
-                    f"ระบบไม่พบเลขหน้า \"{lab_en}\" หรือ \"{lab_th}\" บนหัว/ท้ายหน้า",
-                    f"หน้าลงนามหน้า {k+1} ต้องมีเลขหน้า {lab_en} (อังกฤษ) หรือ {lab_th} (ไทย)",
-                    "ตรวจด้วยตา — PDF บางไฟล์ดึงเลขหน้าไม่ได้", "PAGE.NUMBERING")
+                    what,
+                    f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                    f"แก้เลขหน้าหน้าลงนามหน้า {k+1} ให้เป็น {lab_th} (ไทย) หรือ {lab_en} (อังกฤษ)",
+                    "PAGE.NUMBERING")
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
