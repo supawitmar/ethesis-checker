@@ -308,13 +308,15 @@ class ThaiBookRegressionTests(unittest.TestCase):
     def test_symbol_abbreviation_list_heading_is_recognized(self):
         self.assertEqual(_toc_section_kind("คำอธิบายสัญลักษณ์/คำย่อ ฎ"), "list_abbreviations")
 
-    def test_chapter_title_policy_variant_vs_wrong(self):
-        # นโยบายเจ้าหน้าที่: REVIEW/REVIEWS (ประกาศ vs คู่มือ) = ส้ม (variant)
-        # สะกดผิดจนไม่ใช่คำ เช่น METHODLOGY/RECOMMENDATONS = แดง (wrong) ทุกตำแหน่ง
+    def test_chapter_title_policy_exact_vs_wrong(self):
+        # ยึดประกาศเป็นหลัก: ตรงประกาศ = exact ต่างแม้แต่ตัวเดียว = wrong (แดง)
         kind, _, _ = canonical_title_status("LITERATURE REVIEW", 2, 1)
         self.assertEqual(kind, "exact")
-        kind, _, _ = canonical_title_status("LITERATURE REVIEWS", 2, 1)
-        self.assertEqual(kind, "variant")
+        # บทที่ 2 เกิน S (REVIEW -> REVIEWS) = พิมพ์ผิดเล็กน้อย เหมือนบทอื่น ไม่ใช่ variant
+        kind, compared, expected = canonical_title_status("LITERATURE REVIEWS", 2, 1)
+        self.assertEqual(kind, "wrong")
+        self.assertEqual(compared["status"], "typo")
+        self.assertEqual(expected, "LITERATURE REVIEW")
         kind, _, expected = canonical_title_status("RESEARCH METHODLOGY", 3, 1)
         self.assertEqual(kind, "wrong")
         self.assertEqual(expected, "RESEARCH METHODOLOGY")
