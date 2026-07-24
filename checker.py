@@ -746,6 +746,24 @@ N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญ�
 N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
+
+# คำเรียกส่วนอ้างอิง — ต้องเลือกใช้ "คำเดียว" และสารบัญต้องใช้คำเดียวกับหน้าจริง
+_REF_TERM_GROUPS = (
+    ("REFERENCES", ("REFERENCES", "REFERENCE")),
+    ("BIBLIOGRAPHY", ("BIBLIOGRAPHY",)),
+    ("รายการอ้างอิง", (norm("รายการอ้างอิง"),)),
+    ("บรรณานุกรม", (norm("บรรณานุกรม"),)),
+)
+
+
+def reference_terms(heading):
+    """คืนรายชื่อคำเรียกส่วนอ้างอิงที่ปรากฏในหัวข้อ (ตัดเลขหน้า/จุดไข่ปลาออกก่อน)
+
+    ถ้าคืนมากกว่า 1 คำ แปลว่าเลือกหลายคำ (เช่น "REFERENCES/BIBLIOGRAPHY") ซึ่งผิด
+    ใช้เทียบว่าคำในสารบัญตรงกับหัวข้อในหน้าจริงหรือไม่ด้วย
+    """
+    nl = norm(_strip_toc_page_number(heading))
+    return [label for label, keys in _REF_TERM_GROUPS if any(k in nl for k in keys)]
 N_APPENDIX = ['APPENDIX', 'APPENDICES', norm('ภาคผนวก')]
 
 CANONICAL_OPT1 = CANONICAL_OPTION_1
@@ -1894,6 +1912,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     )
                     continue
                 entry = candidates[0]
+                if section_kind == "references":
+                    # (1) สารบัญต้องเลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY (ไม่ใช่ทั้งคู่)
+                    toc_terms = reference_terms(entry["raw"])
+                    if len(toc_terms) > 1 or '/' in entry["raw"]:
+                        rep.add(
+                            "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",
+                            f'หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: "{_strip_toc_page_number(entry["raw"])}"',
+                            "ต้องเลือกใช้คำเดียว: REFERENCES หรือ BIBLIOGRAPHY อย่างใดอย่างหนึ่ง",
+                            "ลบคำที่ไม่ใช้ออกจากสารบัญ ให้เหลือคำเดียว", "FRONT.TOC_CONTENT",
+                        )
+                    # (2) คำที่เลือกในสารบัญ ต้องตรงกับหัวข้อในหน้าอ้างอิงจริง
+                    elif toc_terms and ref_head:
+                        page_terms = reference_terms(ref_head[0])
+                        if page_terms and set(toc_terms) != set(page_terms):
+                            rep.add(
+                                "RED", "front_matter",
+                                f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ "
+                                f"{section_label} ({page_ref(actual_page_idx)})",
+                                f'สารบัญใช้คำ "{toc_terms[0]}" แต่หน้าอ้างอิงจริงใช้ "{page_terms[0]}"',
+                                f'คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "{page_terms[0]}"',
+                                f'แก้คำในสารบัญให้เป็น "{page_terms[0]}"', "FRONT.TOC_CONTENT",
+                            )
                 if not entry["page_label"]:
                     rep.add(
                         "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",

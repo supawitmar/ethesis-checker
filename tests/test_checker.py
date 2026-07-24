@@ -18,6 +18,7 @@ from checker import (
     closest_text_line,
     find_signature_date,
     header_extra_text,
+    reference_terms,
     compare_reference_text,
     mismatch_detail,
     title_mismatch_detail,
@@ -538,6 +539,26 @@ class MultiLineTitleTests(unittest.TestCase):
         page = "entitled\n" + self.APPROVED + "\nwas submitted"
         compared = compare_reference_text(page, self.APPROVED, "title")
         self.assertEqual(compared["status"], "exact")
+
+
+class ReferenceHeadingTests(unittest.TestCase):
+    """สารบัญส่วนอ้างอิงต้องเลือกคำเดียว และตรงกับหัวข้อในหน้าจริง"""
+
+    def test_single_term_recognized(self):
+        self.assertEqual(reference_terms("REFERENCES ............ 118"), ["REFERENCES"])
+        self.assertEqual(reference_terms("BIBLIOGRAPHY 118"), ["BIBLIOGRAPHY"])
+        self.assertEqual(reference_terms("บรรณานุกรม ๑๑๘"), ["บรรณานุกรม"])
+        # REFERENCE (เอกพจน์) นับเป็น REFERENCES กลุ่มเดียวกัน
+        self.assertEqual(reference_terms("REFERENCE 5"), ["REFERENCES"])
+
+    def test_multiple_terms_flagged(self):
+        self.assertEqual(len(reference_terms("REFERENCES/BIBLIOGRAPHY 118")), 2)
+
+    def test_toc_term_vs_page_term_mismatch_detectable(self):
+        # สารบัญใช้ BIBLIOGRAPHY แต่หน้าจริงใช้ REFERENCES = ไม่ตรงกัน
+        toc = reference_terms("BIBLIOGRAPHY 118")
+        page = reference_terms("REFERENCES")
+        self.assertNotEqual(set(toc), set(page))
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
