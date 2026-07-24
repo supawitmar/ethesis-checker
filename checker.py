@@ -1132,6 +1132,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
+    # แก้ก่อนตรวจสารบัญ↔เนื้อหา เพราะต้องรู้ว่าบทไหน "ประกาศบังคับชื่อ" — บทที่บังคับ
+    # ให้ยึดประกาศเป็นหลัก (เทียบสารบัญกับประกาศ และเนื้อหากับประกาศ แยกกันด้านล่าง)
+    # จึงไม่เทียบสารบัญ↔เนื้อหาซ้ำ ซึ่งจะแนะนำผิดทางเมื่อฝั่งสารบัญเป็นตัวสะกดผิด
+    option = resolve_option(body_ch, approved, chapters_mode)
+    enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
+
     if toc_ch:
         if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
             rep.add("RED", "body", "สารบัญ vs เนื้อหา",
@@ -1142,7 +1148,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if cn in toc_map:
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
-                if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb:
+                # บทที่ประกาศบังคับชื่อ (โหมด strict) ยึดประกาศเป็นหลัก ไม่เทียบสารบัญ↔
+                # เนื้อหา — บทที่ประกาศไม่บังคับ (รูปแบบ 2 บทที่ 3 / โหมดยกเว้นบท) ยังเทียบ
+                enforced_title = chapters_mode == "strict" and 1 <= cn <= enforced_chapters
+                if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb \
+                        and not enforced_title:
                     toc_title = _toc_chapter_title(t_raw)
                     compared = compare_values(title, toc_title, 'toc_heading')
                     rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
@@ -1192,9 +1202,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     "ระบบอ่านรูปแบบตัวหนาในสารบัญไม่ได้", "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
                     "ตรวจด้วยตา", "FORMAT.BOLD")
 
-    # ชื่อบทตามประกาศ
-    option = resolve_option(body_ch, approved, chapters_mode)
-
+    # ชื่อบทตามประกาศ (option/enforced_chapters คำนวณไว้ก่อนหน้าแล้ว)
     # ตรวจ typo เฉพาะหัวข้อหลักในสารบัญ ไม่อ่านหรือพิสูจน์อักษรเนื้อหาแต่ละย่อหน้า
     for toc_page_idx, raw in toc_lines:
         visible = _strip_toc_page_number(raw)
@@ -1211,8 +1219,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ประกาศบังคับชื่อบทเท่าที่กำหนดไว้: รูปแบบ 1 ครบ 6 บท, รูปแบบ 2 เฉพาะบท 1-2
     # (บทที่ 3 ของรูปแบบ 2 ไม่บังคับชื่อ — ตรวจแค่สารบัญตรงกับเนื้อหา)
-    enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
-
     if chapters_mode == 'strict':
         for chapter_no, _title_norm, _page_no, raw, toc_page_idx in toc_ch:
             if 1 <= chapter_no <= enforced_chapters:
