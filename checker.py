@@ -9,6 +9,7 @@ treats ำ as า. Section headings are detected from top-of-page lines only.
 """
 import re
 import difflib
+from collections import Counter
 from pathlib import Path
 import pdfplumber
 
@@ -249,6 +250,84 @@ def _degree_subject(degree):
     return m.group(1).strip() if m else ""
 
 
+def _committee_keyname(name):
+    """คีย์เทียบชื่อกรรมการ (ตัดคำนำหน้า + normalize) สำหรับเทียบแบบเซ็ต"""
+    return norm(strip_name_prefix(name or ""))
+
+
+def _report_thai_committee(rep, expected, members, loc):
+    """เล่มไทย: เทียบชื่อไทยแบบ 'ชุดรายชื่อ' ก่อน เพื่อแยก ขาด/เกิน/สลับ
+
+    เทียบ multiset ของชื่อที่ควรมี vs ที่พบจริง:
+      - ชุดตรงกันแต่ตำแหน่งผิด = สลับ/เรียงผิด → รวมเป็นข้อความเดียว
+      - ชุดไม่ตรง = มีคนขาดหรือเกินจริง → ระบุตรง ๆ (กัน cascade ฟ้องเลื่อนทั้งแถว)
+    """
+    N = len(expected)
+    exp_keys = [_committee_keyname(m["name"]) for m in expected]
+    found_slots = {k: members[k] for k in range(1, 10) if members.get(k)}
+    found_keys = {k: _committee_keyname(v) for k, v in found_slots.items()}
+
+    if sorted(exp_keys) == sorted(found_keys.values()):
+        # ชื่อครบทุกคน — ต่างแค่ตำแหน่ง
+        wrong = [k for k in range(1, N + 1) if found_keys.get(k) != exp_keys[k - 1]]
+        if wrong:
+            _report_committee_reorder(rep, expected, exp_keys, found_keys, wrong, loc)
+        return
+
+    # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ ไม่ปล่อยให้ per-slot เลื่อนทั้งแถว
+    exp_count = Counter(exp_keys)
+    found_count = Counter(found_keys.values())
+    exp_name_of = {}
+    for m in expected:
+        exp_name_of.setdefault(_committee_keyname(m["name"]), m["name"])
+    found_name_of = {}
+    for k in sorted(found_slots):
+        found_name_of.setdefault(found_keys[k], found_slots[k])
+
+    for key in (exp_count - found_count).elements():
+        name = exp_name_of.get(key, key)
+        rep.add("RED", "front_matter", loc,
+                f'ไม่พบกรรมการ "{name}" บนหน้าลงนาม',
+                f'ต้องมีกรรมการชื่อ "{name}" ตามข้อมูลอนุมัติ (บฑ.)',
+                "เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+    for key in (found_count - exp_count).elements():
+        name = found_name_of.get(key, key)
+        rep.add("RED", "front_matter", loc,
+                f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
+                "รายชื่อกรรมการบนหน้าลงนามต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
+                "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+
+
+def _report_committee_reorder(rep, expected, exp_keys, found_keys, wrong, loc):
+    """ชื่อครบแต่วางผิดตำแหน่ง: จับคู่สลับตรง ๆ ก่อน ที่เหลือบอกลำดับที่ถูกครั้งเดียว"""
+    N = len(expected)
+    described = set()
+    for k in wrong:
+        if k in described:
+            continue
+        exp_k = exp_keys[k - 1]
+        j = next((p for p in range(1, N + 1)
+                  if p != k and found_keys.get(p) == exp_k), None)
+        # คู่สลับกันแท้ ๆ: ช่อง k มีชื่อของ j และช่อง j มีชื่อของ k
+        if j and j not in described and found_keys.get(k) == exp_keys[j - 1]:
+            lo, hi = sorted((k, j))
+            rep.add("RED", "front_matter", loc,
+                    f'กรรมการครบทุกคน แต่คนที่ {lo} ("{expected[lo - 1]["name"]}") '
+                    f'กับ คนที่ {hi} ("{expected[hi - 1]["name"]}") สลับตำแหน่งกัน',
+                    f'ช่องที่ {lo} ต้องเป็น "{expected[lo - 1]["name"]}" '
+                    f'และช่องที่ {hi} ต้องเป็น "{expected[hi - 1]["name"]}"',
+                    "สลับตำแหน่งกรรมการสองคนนี้ให้ถูกต้อง", "FRONT.COMMITTEE")
+            described.add(k)
+            described.add(j)
+    rest = [k for k in wrong if k not in described]
+    if rest:
+        order = "  ".join(f'{k}. {expected[k - 1]["name"]}' for k in range(1, N + 1))
+        rep.add("RED", "front_matter", loc,
+                "กรรมการครบทุกคน แต่เรียงผิดตำแหน่ง",
+                f'ลำดับที่ถูกต้องตามข้อมูลอนุมัติ (บฑ.) คือ {order}',
+                "จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+
+
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, program_language, A):
     """ตรวจรายชื่อกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
 
@@ -299,17 +378,20 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
         page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
         loc = f"{page_label} ({page_ref(idx)})"
 
-        found_count = sum(1 for k in range(1, 10) if members.get(k))
-        if found_count != len(expected):
-            rep.add("RED", "front_matter", loc,
-                    f"พบกรรมการที่มีชื่อ {found_count} คนบนหน้าลงนาม",
-                    f"ต้องมี {len(expected)} คนตามข้อมูลอนุมัติ",
-                    "ตรวจจำนวนและตำแหน่งกรรมการให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
-
-        for k, member in enumerate(expected, start=1):
-            th_name = member["name"]
-            found = members.get(k)
-            if english_book:
+        if not english_book:
+            # เล่มไทย: เทียบแบบชุดรายชื่อ (ขาด/เกิน/สลับ) — กัน cascade
+            _report_thai_committee(rep, expected, members, loc)
+        else:
+            # เล่มอังกฤษ: เทียบทีละตำแหน่งด้วยชื่อแปล → ส้มเสมอ (ให้เจ้าหน้าที่ยืนยัน)
+            found_count = sum(1 for k in range(1, 10) if members.get(k))
+            if found_count != len(expected):
+                rep.add("RED", "front_matter", loc,
+                        f"พบกรรมการที่มีชื่อ {found_count} คนบนหน้าลงนาม",
+                        f"ต้องมี {len(expected)} คนตามข้อมูลอนุมัติ",
+                        "ตรวจจำนวนและตำแหน่งกรรมการให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+            for k, member in enumerate(expected, start=1):
+                th_name = member["name"]
+                found = members.get(k)
                 target = name_en.get(th_name, "")
                 if not target:
                     rep.add("ORANGE", "front_matter", loc,
@@ -330,14 +412,6 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
                             f'กรรมการคนที่ {k}: {detail} ไม่ตรงกับ "{target}" (แปลจาก "{th_name}") ในตำแหน่งนี้',
                             f'ตำแหน่งนี้ควรเป็น "{target}"',
                             "โปรดตรวจชื่อและตำแหน่งกรรมการด้วยตา", "FRONT.COMMITTEE")
-            else:
-                if found and norm(strip_name_prefix(found)) == norm(strip_name_prefix(th_name)):
-                    continue
-                detail = f'พบ "{found}"' if found else "ช่องว่าง/ไม่มีชื่อ"
-                rep.add("RED", "front_matter", loc,
-                        f'กรรมการคนที่ {k}: {detail} ในตำแหน่งนี้',
-                        f'ต้องเป็น "{th_name}" (ตามลำดับ บฑ.)',
-                        "แก้ชื่อหรือตำแหน่งกรรมการให้ตรงข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
         # ---------- ช่องคงที่: ตรวจเฉพาะชื่อหลักสูตร/คณะ (ไม่ตรวจชื่อ/คุณวุฒิบุคคล) ----------
         # ผู้อำนวยการหลักสูตร (มุมล่างขวา): บรรทัดต้องมีชื่อสาขาของปริญญา

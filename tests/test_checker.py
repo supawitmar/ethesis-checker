@@ -21,6 +21,8 @@ from checker import (
     reference_terms,
     signature_committee_slots,
     _committee_page_kind,
+    _committee_keyname,
+    _report_thai_committee,
     _degree_subject,
     compare_reference_text,
     mismatch_detail,
@@ -617,6 +619,63 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("Doctor of Philosophy (Tropical Medicine)"), "Tropical Medicine")
         self.assertEqual(_degree_subject("ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)"), "อายุรศาสตร์เขตร้อน")
         self.assertEqual(_degree_subject("No Parens Here"), "")
+
+
+class ThaiCommitteeSetDiffTests(unittest.TestCase):
+    """เล่มไทย: เทียบชื่อกรรมการแบบชุด แยก ถูกต้อง/สลับ/ขาด/เกิน โดยไม่ฟ้องเลื่อนทั้งแถว"""
+
+    def _run(self, expected_names, members):
+        rep = Report()
+        expected = [{"name": n, "role": ""} for n in expected_names]
+        _report_thai_committee(rep, expected, members, "หน้ากรรมการสอบ (หน้า ก)")
+        return rep
+
+    def _reds(self, rep):
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_all_correct_positions_report_nothing(self):
+        rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
+                        {1: "คนางค์ ก", 2: "สุภาภรณ์ ข", 3: "ธเนศ ค"})
+        self.assertEqual(self._reds(rep), [])
+
+    def test_honorific_prefix_is_ignored(self):
+        rep = self._run(["คนางค์ ก"], {1: "ดร. คนางค์ ก"})
+        self.assertEqual(self._reds(rep), [])
+
+    def test_two_swapped_report_single_combined_item(self):
+        rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
+                        {1: "คนางค์ ก", 2: "ธเนศ ค", 3: "สุภาภรณ์ ข"})
+        reds = self._reds(rep)
+        self.assertEqual(len(reds), 1)          # รวมเป็น 1 ไม่ใช่ 2
+        self.assertIn("สลับตำแหน่งกัน", reds[0])
+        self.assertIn("คนที่ 2", reds[0])
+        self.assertIn("คนที่ 3", reds[0])
+
+    def test_three_cycle_reports_correct_order_once(self):
+        # หมุน 3 ตำแหน่ง (ไม่ใช่คู่สลับ) → บอกลำดับที่ถูกครั้งเดียว
+        rep = self._run(["A A", "B B", "C C"],
+                        {1: "C C", 2: "A A", 3: "B B"})
+        reds = self._reds(rep)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("เรียงผิดตำแหน่ง", reds[0])
+
+    def test_missing_member_is_named_not_cascaded(self):
+        # ขาดกรรมการกลาง แล้วดันชื่อขึ้น → ต้องฟ้อง 'ไม่พบ B' + 'พบ C เกินตำแหน่ง' ไม่ใช่แดงรัวทั้งแถว
+        rep = self._run(["A A", "B B", "C C"], {1: "A A", 2: "C C"})
+        reds = self._reds(rep)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("ไม่พบกรรมการ", reds[0])
+        self.assertIn("B B", reds[0])
+
+    def test_extra_name_not_in_committee_is_flagged(self):
+        rep = self._run(["A A", "B B"], {1: "A A", 2: "B B", 3: "X Stranger"})
+        reds = self._reds(rep)
+        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r and "Stranger" in r
+                            for r in reds))
+
+    def test_keyname_normalizes_prefix_and_spacing(self):
+        self.assertEqual(_committee_keyname("ดร. คนางค์  ก"),
+                         _committee_keyname("คนางค์ ก"))
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
