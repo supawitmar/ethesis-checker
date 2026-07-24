@@ -23,6 +23,7 @@ from checker import (
     _committee_page_kind,
     _committee_keyname,
     _report_thai_committee,
+    _report_committee_positions,
     _degree_subject,
     compare_reference_text,
     mismatch_detail,
@@ -676,6 +677,39 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
     def test_keyname_normalizes_prefix_and_spacing(self):
         self.assertEqual(_committee_keyname("ดร. คนางค์  ก"),
                          _committee_keyname("คนางค์ ก"))
+
+
+class EnglishCommitteeFuzzyTests(unittest.TestCase):
+    """เล่มอังกฤษที่แปลชื่อสำเร็จ: เทียบตามลำดับเหมือนเล่มไทย (เทียบหลวมจากชื่อแปล) = สีแดง"""
+
+    def _run(self, expected_en, members):
+        rep = Report()
+        _report_committee_positions(rep, expected_en, members,
+                                    "Examination committee page (page i)", fuzzy=True)
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_correct_order_with_spelling_variation_passes(self):
+        # ชื่อแปลสะกดต่างเล็กน้อยจากในเล่ม แต่ตำแหน่งถูก → ต้องผ่าน (ratio ≥ 0.7)
+        reds = self._run(["Narisara Chantratita", "Supaporn Songprachaa"],
+                         {1: "Narisara Chantaratid", 2: "Supaporn Songpracha"})
+        self.assertEqual(reds, [])
+
+    def test_swapped_english_names_report_single_item(self):
+        reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
+                         {1: "Alice Adams", 2: "Carol Clark", 3: "Bob Brown"})
+        self.assertEqual(len(reds), 1)
+        self.assertIn("สลับตำแหน่งกัน", reds[0])
+
+    def test_missing_english_member_named(self):
+        reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
+                         {1: "Alice Adams", 2: "Carol Clark"})
+        self.assertTrue(any("ไม่พบกรรมการ" in r and "Bob Brown" in r for r in reds))
+
+    def test_stranger_english_name_flagged(self):
+        reds = self._run(["Alice Adams", "Bob Brown"],
+                         {1: "Alice Adams", 2: "Bob Brown", 3: "Zebra Zulu"})
+        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r and "Zebra" in r
+                            for r in reds))
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):

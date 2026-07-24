@@ -9,7 +9,6 @@ treats ำ as า. Section headings are detected from top-of-page lines only.
 """
 import re
 import difflib
-from collections import Counter
 from pathlib import Path
 import pdfplumber
 
@@ -250,78 +249,114 @@ def _degree_subject(degree):
     return m.group(1).strip() if m else ""
 
 
-def _committee_keyname(name):
-    """คีย์เทียบชื่อกรรมการ (ตัดคำนำหน้า + normalize) สำหรับเทียบแบบเซ็ต"""
+def _committee_keyname(name, fuzzy=False):
+    """คีย์เทียบชื่อกรรมการ
+    fuzzy=False (เล่มไทย): ตัดคำนำหน้า + normalize เทียบตรง
+    fuzzy=True (เล่มอังกฤษ, เทียบชื่อแปล): เก็บเฉพาะตัวอักษร/เลข เทียบด้วย ratio
+    """
+    if fuzzy:
+        return re.sub(r'[^a-z0-9ก-๙]', '', norm(name or "").lower())
     return norm(strip_name_prefix(name or ""))
 
 
-def _report_thai_committee(rep, expected, members, loc):
-    """เล่มไทย: เทียบชื่อไทยแบบ 'ชุดรายชื่อ' ก่อน เพื่อแยก ขาด/เกิน/สลับ
+def _assign_committee_slots(exp_keys, found_keys, fuzzy):
+    """จับคู่ช่องกริด(slot)→ดัชนี expected แบบ greedy (best match)
 
-    เทียบ multiset ของชื่อที่ควรมี vs ที่พบจริง:
-      - ชุดตรงกันแต่ตำแหน่งผิด = สลับ/เรียงผิด → รวมเป็นข้อความเดียว
-      - ชุดไม่ตรง = มีคนขาดหรือเกินจริง → ระบุตรง ๆ (กัน cascade ฟ้องเลื่อนทั้งแถว)
+    fuzzy=False: ต้องคีย์ตรงกันเป๊ะ; fuzzy=True: ratio ≥ 0.7
+    คืน (slot_to_idx {slot: idx|None}, matched_exp set{idx})
     """
-    N = len(expected)
-    exp_keys = [_committee_keyname(m["name"]) for m in expected]
-    found_slots = {k: members[k] for k in range(1, 10) if members.get(k)}
-    found_keys = {k: _committee_keyname(v) for k, v in found_slots.items()}
+    thr = 0.7 if fuzzy else 1.0
+    slot_to_idx, used = {}, set()
+    for s in sorted(found_keys):
+        fk = found_keys[s]
+        best_i, best_r = None, thr - 1e-9
+        for i, ek in enumerate(exp_keys):
+            if i in used or not ek or not fk:
+                continue
+            r = (difflib.SequenceMatcher(None, fk, ek).ratio() if fuzzy
+                 else (1.0 if fk == ek else 0.0))
+            if r >= thr and r > best_r:
+                best_i, best_r = i, r
+        slot_to_idx[s] = best_i
+        if best_i is not None:
+            used.add(best_i)
+    return slot_to_idx, used
 
-    if sorted(exp_keys) == sorted(found_keys.values()):
-        # ชื่อครบทุกคน — ต่างแค่ตำแหน่ง
-        wrong = [k for k in range(1, N + 1) if found_keys.get(k) != exp_keys[k - 1]]
+
+def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
+    """เทียบชื่อกรรมการแบบ 'ชุดรายชื่อ' — ใช้ได้ทั้งไทย(เทียบตรง) และอังกฤษ(เทียบชื่อแปลหลวม)
+
+    - ครบทุกคนแต่วางผิดตำแหน่ง = สลับ/เรียงผิด → รวมเป็นข้อความเดียว
+    - ไม่ครบชุด = ระบุ ขาด/เกิน ตรง ๆ (กัน cascade ฟ้องเลื่อนทั้งแถว)
+    - ถูกต้องทุกตำแหน่ง = เงียบ (ผ่าน)
+    expected_names = ชื่อที่จะใช้เทียบ+แสดงผล (เล่มอังกฤษส่งชื่อที่แปลแล้วเข้ามา)
+    """
+    N = len(expected_names)
+    exp_keys = [_committee_keyname(e, fuzzy) for e in expected_names]
+    found_slots = {k: members[k] for k in range(1, 10) if members.get(k)}
+    found_keys = {k: _committee_keyname(v, fuzzy) for k, v in found_slots.items()}
+
+    slot_to_idx, matched_exp = _assign_committee_slots(exp_keys, found_keys, fuzzy)
+    extra_slots = [s for s, i in slot_to_idx.items() if i is None]
+    missing_idx = [i for i in range(N) if i not in matched_exp]
+
+    if not extra_slots and not missing_idx:
+        # ชื่อครบทุกคน — ต่างแค่ตำแหน่ง (slot ถูก เมื่อ slot_to_idx[s] == s-1)
+        wrong = sorted(s for s, i in slot_to_idx.items() if i != s - 1)
         if wrong:
-            _report_committee_reorder(rep, expected, exp_keys, found_keys, wrong, loc)
+            _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc)
         return
 
-    # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ ไม่ปล่อยให้ per-slot เลื่อนทั้งแถว
-    exp_count = Counter(exp_keys)
-    found_count = Counter(found_keys.values())
-    exp_name_of = {}
-    for m in expected:
-        exp_name_of.setdefault(_committee_keyname(m["name"]), m["name"])
-    found_name_of = {}
-    for k in sorted(found_slots):
-        found_name_of.setdefault(found_keys[k], found_slots[k])
-
-    for key in (exp_count - found_count).elements():
-        name = exp_name_of.get(key, key)
+    # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ
+    for i in missing_idx:
+        name = expected_names[i]
         rep.add("RED", "front_matter", loc,
                 f'ไม่พบกรรมการ "{name}" บนหน้าลงนาม',
                 f'ต้องมีกรรมการชื่อ "{name}" ตามข้อมูลอนุมัติ (บฑ.)',
                 "เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
-    for key in (found_count - exp_count).elements():
-        name = found_name_of.get(key, key)
+    for s in extra_slots:
+        name = members.get(s) or ""
         rep.add("RED", "front_matter", loc,
                 f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
                 "รายชื่อกรรมการบนหน้าลงนามต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
                 "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
-def _report_committee_reorder(rep, expected, exp_keys, found_keys, wrong, loc):
-    """ชื่อครบแต่วางผิดตำแหน่ง: จับคู่สลับตรง ๆ ก่อน ที่เหลือบอกลำดับที่ถูกครั้งเดียว"""
-    N = len(expected)
+def _report_thai_committee(rep, expected, members, loc):
+    """wrapper: เล่มไทยเทียบชื่อไทยแบบตรง (expected = list ของ dict มี key 'name')"""
+    _report_committee_positions(rep, [m["name"] for m in expected], members, loc,
+                                fuzzy=False)
+
+
+def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
+    """ชื่อครบแต่วางผิดตำแหน่ง: จับคู่สลับตรง ๆ ก่อน ที่เหลือบอกลำดับที่ถูกครั้งเดียว
+
+    slot_to_idx: {slot จริงบนกริด → ดัชนี expected ที่จับคู่ได้}
+    ช่อง s ควรมี expected_names[s-1]; ชื่อในช่อง s จริง ๆ ควรไปอยู่ช่อง slot_to_idx[s]+1
+    """
+    N = len(expected_names)
     described = set()
-    for k in wrong:
-        if k in described:
+    for s in wrong:
+        if s in described:
             continue
-        exp_k = exp_keys[k - 1]
-        j = next((p for p in range(1, N + 1)
-                  if p != k and found_keys.get(p) == exp_k), None)
-        # คู่สลับกันแท้ ๆ: ช่อง k มีชื่อของ j และช่อง j มีชื่อของ k
-        if j and j not in described and found_keys.get(k) == exp_keys[j - 1]:
-            lo, hi = sorted((k, j))
+        # ชื่อที่ 'ควร' อยู่ช่อง s (คือ expected[s-1]) ตอนนี้ไปโผล่ช่องไหน?
+        home = next((p for p, i in slot_to_idx.items() if i == s - 1), None)
+        belongs = slot_to_idx.get(s)
+        # คู่สลับกันแท้ ๆ: ช่อง s มีชื่อของ home และช่อง home มีชื่อของ s
+        if (home is not None and home != s and home not in described
+                and belongs is not None and belongs + 1 == home):
+            lo, hi = sorted((s, home))
             rep.add("RED", "front_matter", loc,
-                    f'กรรมการครบทุกคน แต่คนที่ {lo} ("{expected[lo - 1]["name"]}") '
-                    f'กับ คนที่ {hi} ("{expected[hi - 1]["name"]}") สลับตำแหน่งกัน',
-                    f'ช่องที่ {lo} ต้องเป็น "{expected[lo - 1]["name"]}" '
-                    f'และช่องที่ {hi} ต้องเป็น "{expected[hi - 1]["name"]}"',
+                    f'กรรมการครบทุกคน แต่คนที่ {lo} ("{expected_names[lo - 1]}") '
+                    f'กับ คนที่ {hi} ("{expected_names[hi - 1]}") สลับตำแหน่งกัน',
+                    f'ช่องที่ {lo} ต้องเป็น "{expected_names[lo - 1]}" '
+                    f'และช่องที่ {hi} ต้องเป็น "{expected_names[hi - 1]}"',
                     "สลับตำแหน่งกรรมการสองคนนี้ให้ถูกต้อง", "FRONT.COMMITTEE")
-            described.add(k)
-            described.add(j)
-    rest = [k for k in wrong if k not in described]
+            described.add(s)
+            described.add(home)
+    rest = [s for s in wrong if s not in described]
     if rest:
-        order = "  ".join(f'{k}. {expected[k - 1]["name"]}' for k in range(1, N + 1))
+        order = "  ".join(f'{k}. {expected_names[k - 1]}' for k in range(1, N + 1))
         rep.add("RED", "front_matter", loc,
                 "กรรมการครบทุกคน แต่เรียงผิดตำแหน่ง",
                 f'ลำดับที่ถูกต้องตามข้อมูลอนุมัติ (บฑ.) คือ {order}',
@@ -331,8 +366,9 @@ def _report_committee_reorder(rep, expected, exp_keys, found_keys, wrong, loc):
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, program_language, A):
     """ตรวจรายชื่อกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
 
-    เล่มไทย: เทียบชื่อไทยตรง (ไม่ตรง/ผิดตำแหน่ง = แดง)
-    เล่มอังกฤษ/นานาชาติ: AI แปลชื่อไทย→อังกฤษ เทียบหลวม → ส้ม (ให้เจ้าหน้าที่ยืนยัน)
+    เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน = แดง)
+    เล่มอังกฤษ/นานาชาติ: ถ้า AI แปลชื่อครบ → เทียบตามลำดับเหมือนเล่มไทย (แดง);
+      ถ้าแปลไม่ได้ → ส้มให้เจ้าหน้าที่ตรวจเอง
     คืน True ถ้าตรวจได้ (อ่านตารางเจอ) — ไม่งั้น False (ให้เจ้าหน้าที่ตรวจเอง)
     """
     english_book = program_language in ("international", "thai_english")
@@ -349,8 +385,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
     if not slots:
         return False
 
-    # แปลชื่อไทย→อังกฤษครั้งเดียว (เล่มอังกฤษ) เป็นตัวช่วยเทียบเคียง
+    # แปลชื่อไทย→อังกฤษครั้งเดียว (เล่มอังกฤษ) — ถ้าแปลครบทุกชื่อ ใช้เทียบตามลำดับเหมือนเล่มไทย
     name_en = {}
+    translation_ok = False
     if english_book:
         all_th = [m["name"] for key in ("advisory", "exam")
                   for m in committees.get(key, [])]
@@ -359,11 +396,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
             translated = llm_assist.translate_names(all_th)
         except Exception:
             translated = []
-        if len(translated) == len(all_th):
+        if len(translated) == len(all_th) and all(str(t).strip() for t in translated):
             name_en = dict(zip(all_th, translated))
-
-    def nkey(s):
-        return re.sub(r'[^a-z0-9ก-๙]', '', norm(s).lower())
+            translation_ok = True
 
     handled_any = False
     for idx in sig_pages[:2]:
@@ -379,39 +414,20 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref, pro
         loc = f"{page_label} ({page_ref(idx)})"
 
         if not english_book:
-            # เล่มไทย: เทียบแบบชุดรายชื่อ (ขาด/เกิน/สลับ) — กัน cascade
+            # เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน) — กัน cascade
             _report_thai_committee(rep, expected, members, loc)
+        elif translation_ok:
+            # เล่มอังกฤษ + แปลชื่อครบ: เทียบตามลำดับแบบเดียวกับเล่มไทย (เทียบหลวมจากชื่อแปล)
+            expected_en = [name_en[m["name"]] for m in expected]
+            _report_committee_positions(rep, expected_en, members, loc, fuzzy=True)
         else:
-            # เล่มอังกฤษ: เทียบทีละตำแหน่งด้วยชื่อแปล → ส้มเสมอ (ให้เจ้าหน้าที่ยืนยัน)
-            found_count = sum(1 for k in range(1, 10) if members.get(k))
-            if found_count != len(expected):
-                rep.add("RED", "front_matter", loc,
-                        f"พบกรรมการที่มีชื่อ {found_count} คนบนหน้าลงนาม",
-                        f"ต้องมี {len(expected)} คนตามข้อมูลอนุมัติ",
-                        "ตรวจจำนวนและตำแหน่งกรรมการให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
-            for k, member in enumerate(expected, start=1):
-                th_name = member["name"]
-                found = members.get(k)
-                target = name_en.get(th_name, "")
-                if not target:
-                    rep.add("ORANGE", "front_matter", loc,
-                            f'กรรมการคนที่ {k}: ระบบแปลชื่อ "{th_name}" เป็นอังกฤษไม่ได้',
-                            f'ตำแหน่งนี้ต้องเป็นกรรมการชื่อ "{th_name}" (ตามลำดับ บฑ.)',
-                            "โปรดตรวจชื่อกรรมการในตำแหน่งนี้ด้วยตา", "FRONT.COMMITTEE")
-                    continue
-                ratio = (difflib.SequenceMatcher(None, nkey(found), nkey(target)).ratio()
-                         if found else 0.0)
-                if ratio >= 0.7:
-                    rep.add("ORANGE", "front_matter", loc,
-                            f'กรรมการคนที่ {k}: ระบบเทียบเคียง "{th_name}" ≈ "{found}" ในตำแหน่งนี้',
-                            f'ควรเป็น "{target}" (ระบบแปลจาก "{th_name}")',
-                            "โปรดยืนยันว่าชื่อและตำแหน่งถูกต้อง", "FRONT.COMMITTEE")
-                else:
-                    detail = f'พบ "{found}"' if found else "ช่องว่าง/ไม่มีชื่อ"
-                    rep.add("ORANGE", "front_matter", loc,
-                            f'กรรมการคนที่ {k}: {detail} ไม่ตรงกับ "{target}" (แปลจาก "{th_name}") ในตำแหน่งนี้',
-                            f'ตำแหน่งนี้ควรเป็น "{target}"',
-                            "โปรดตรวจชื่อและตำแหน่งกรรมการด้วยตา", "FRONT.COMMITTEE")
+            # เล่มอังกฤษ + แปลไม่ได้ (ไม่มี API key/แปลไม่สำเร็จ): ลงส้มให้เจ้าหน้าที่ตรวจเอง
+            names_th = "  ".join(f'{k}. {m["name"]}'
+                                 for k, m in enumerate(expected, start=1))
+            rep.add("ORANGE", "front_matter", loc,
+                    "ระบบแปลชื่อกรรมการเป็นอังกฤษไม่ได้ จึงเทียบชื่ออัตโนมัติไม่ได้",
+                    f"ต้องมีกรรมการ {len(expected)} คนตามลำดับ บฑ. คือ {names_th}",
+                    "โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE")
 
         # ---------- ช่องคงที่: ตรวจเฉพาะชื่อหลักสูตร/คณะ (ไม่ตรวจชื่อ/คุณวุฒิบุคคล) ----------
         # ผู้อำนวยการหลักสูตร (มุมล่างขวา): บรรทัดต้องมีชื่อสาขาของปริญญา
