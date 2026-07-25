@@ -28,6 +28,7 @@ from checker import (
     _check_cover_year,
     _check_exam_date,
     _check_front_page_numbers,
+    _expected_front_label_style,
     _page_label_order,
     abstract_committee_block,
     split_abstract_committee,
@@ -847,13 +848,14 @@ class AbstractCommitteeTests(unittest.TestCase):
 
 
 class FrontPageNumberTests(unittest.TestCase):
-    """เลขหน้าส่วนนำทุกหน้าต้องเป็นโรมัน/พยัญชนะไทย เรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม"""
+    """เลขหน้าส่วนนำ: เล่มอังกฤษ=โรมัน เล่มไทย=พยัญชนะ และต้องเรียงต่อเนื่อง"""
 
-    def _run(self, labels, start=1, stop=None):
+    def _run(self, labels, style=None, start=1, stop=None):
         rep = Report()
         page_labels = {i: lab for i, lab in enumerate(labels) if lab}
-        _check_front_page_numbers(rep, page_labels, lambda i: f"หน้า {page_labels.get(i, '?')}",
-                                  start, len(labels) if stop is None else stop)
+        _check_front_page_numbers(rep, page_labels,
+                                  lambda i: f"หน้า {page_labels.get(i, '?')}",
+                                  start, len(labels) if stop is None else stop, style)
         return rep
 
     def test_label_order_by_style(self):
@@ -862,48 +864,77 @@ class FrontPageNumberTests(unittest.TestCase):
         self.assertEqual(_page_label_order("7"), ("arabic", 7))
         self.assertEqual(_page_label_order(""), (None, None))
 
-    def test_clean_roman_sequence_passes(self):
-        rep = self._run(["", "i", "ii", "iii", "iv", "v"])
+    def test_expected_style_by_program_language(self):
+        self.assertEqual(_expected_front_label_style("thai"), "thai")
+        self.assertEqual(_expected_front_label_style("international"), "roman")
+        # เล่ม thai_english ใช้ปก/หน้าลงนามอังกฤษ จึงเป็นเล่มอังกฤษ (ยืนยันจากเล่มจริง)
+        self.assertEqual(_expected_front_label_style("thai_english"), "roman")
+        self.assertIsNone(_expected_front_label_style(""))
+
+    def test_english_book_roman_passes(self):
+        rep = self._run(["", "i", "ii", "iii", "iv", "v"], style="roman")
         self.assertEqual(rep.zones["RED"], [])
         self.assertEqual(rep.zones["ORANGE"], [])
 
-    def test_clean_thai_sequence_passes(self):
-        rep = self._run(["", "ก", "ข", "ค", "ง", "จ"])
+    def test_thai_book_thai_letters_pass(self):
+        rep = self._run(["", "ก", "ข", "ค", "ง", "จ"], style="thai")
         self.assertEqual(rep.zones["RED"], [])
+
+    def test_thai_book_using_roman_is_flagged(self):
+        rep = self._run(["", "i", "ii", "iii"], style="thai")
+        reds = [i for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("เลขโรมัน", reds[0]["found"])
+        self.assertIn("เล่มหลักสูตรไทย", reds[0]["expected"])
+        self.assertIn("พยัญชนะไทย", reds[0]["expected"])
+
+    def test_english_book_using_thai_letters_is_flagged(self):
+        rep = self._run(["", "ก", "ข", "ค"], style="roman")
+        reds = [i for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("พยัญชนะไทย", reds[0]["found"])
+        self.assertIn("เล่มภาษาอังกฤษ", reds[0]["expected"])
 
     def test_duplicate_labels_reported_once(self):
         # เล่มจริง (ไทย) ที่พบ: ค, ค, ค, ง, จ — ต้องรวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
-        rep = self._run(["", "ค", "ค", "ค", "ง", "จ"])
+        rep = self._run(["", "ค", "ค", "ค", "ง", "จ"], style="thai")
         reds = [i["found"] for i in rep.zones["RED"]]
         self.assertEqual(len(reds), 1)
         self.assertIn('ถูกใช้ซ้ำ 3 หน้า', reds[0])
 
     def test_skipped_label_reported(self):
-        rep = self._run(["", "i", "ii", "v", "vi"])
+        rep = self._run(["", "i", "ii", "v", "vi"], style="roman")
         reds = [i["found"] for i in rep.zones["RED"]]
         self.assertEqual(len(reds), 1)
         self.assertIn('กระโดดจาก "ii" ไป "v"', reds[0])
 
     def test_arabic_in_front_matter_flagged(self):
-        rep = self._run(["", "i", "ii", "3", "4"])
-        self.assertTrue(any("อารบิก" in i["found"] for i in rep.zones["RED"]))
+        rep = self._run(["", "i", "ii", "3", "4"], style="roman")
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertTrue(any("เลขอารบิก" in r for r in reds))
 
-    def test_mixed_styles_flagged(self):
-        rep = self._run(["", "i", "ii", "ค", "ง"])
-        self.assertTrue(any("ปนกัน" in i["found"] for i in rep.zones["RED"]))
+    def test_arabic_flagged_even_without_program_language(self):
+        # ไม่รู้ภาษาเล่ม แต่อารบิกในส่วนนำผิดแน่นอน
+        rep = self._run(["", "1", "2", "3"])
+        self.assertTrue(any("เลขอารบิก" in i["found"] for i in rep.zones["RED"]))
+
+    def test_mixed_styles_flagged_without_program_language(self):
+        rep = self._run(["", "i", "ii", "ค"])
+        reds = [i for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("พยัญชนะไทย", reds[0]["found"])
 
     def test_unreadable_label_is_orange_not_red(self):
-        rep = self._run(["", "i", "ii", "", "iv"])
+        rep = self._run(["", "i", "ii", "", "iv"], style="roman")
         self.assertEqual(rep.zones["RED"], [])
         self.assertTrue(any("อ่านเลขหน้าส่วนนำไม่ได้" in i["found"]
                             for i in rep.zones["ORANGE"]))
 
     def test_skipped_when_body_start_unknown(self):
         # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ
-        rep = self._run(["", "i", "ii"], stop=None)
-        rep2 = Report()
-        _check_front_page_numbers(rep2, {1: "i"}, lambda i: "หน้า i", 1, None)
-        self.assertEqual(rep2.zones["RED"], [])
+        rep = Report()
+        _check_front_page_numbers(rep, {1: "i"}, lambda i: "หน้า i", 1, None, "roman")
+        self.assertEqual(rep.zones["RED"], [])
 
 
 class ExamDatePerSignaturePageTests(unittest.TestCase):

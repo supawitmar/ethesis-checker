@@ -685,46 +685,64 @@ def _check_cover_year(rep, year, cover_text):
                 "ปี = ปีที่มีผลสอบผ่าน", "", "FRONT.COVER")
 
 
-def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx):
-    """เลขหน้าส่วนนำต้องเป็นโรมัน/พยัญชนะไทย เรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
+def _expected_front_label_style(program_language):
+    """ชนิดเลขหน้าส่วนนำตามภาษาของเล่ม — เล่มหลักสูตรไทยใช้พยัญชนะ นอกนั้นใช้โรมัน
+
+    (เล่ม thai_english ใช้ปก/หน้าลงนามภาษาอังกฤษ จึงนับเป็นเล่มอังกฤษเหมือน international)
+    คืน None เมื่อยังไม่รู้ภาษาเล่ม → ตรวจได้แค่ว่าชนิดต้องไม่ปนกันและไม่ใช่อารบิก
+    """
+    if not program_language:
+        return None
+    return "thai" if program_language == "thai" else "roman"
+
+
+def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
+                              expected_style=None):
+    """เลขหน้าส่วนนำ: ชนิดต้องตรงภาษาเล่ม และเรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
 
     เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
-    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจ "ความต่อเนื่อง" ของทั้งช่วง จึงไม่ทับกับกฎเดิม
-    ที่ตรวจ "ค่าเริ่มต้น" ของหน้าลงนาม
+    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจทั้งช่วง จึงไม่ทับกับกฎเดิมที่ตรวจ "ค่าเริ่มต้น"
+    ของหน้าลงนาม
     """
     if stop_idx is None or stop_idx <= start_idx:
         return
-    seq, unread, arabic = [], [], []
+    entries, unread = [], []
     for i in range(start_idx, stop_idx):
         label = page_labels.get(i, "")
         style, value = _page_label_order(label)
         if style is None:
             unread.append(i)
-        elif style == "arabic":
-            arabic.append((i, label))
         else:
-            seq.append((i, label, style, value))
+            entries.append((i, label, style, value))
 
-    if arabic:
-        shown = ", ".join(f'{page_ref(i)} ("{lab}")' for i, lab in arabic[:5])
-        more = f" และอีก {len(arabic) - 5} หน้า" if len(arabic) > 5 else ""
-        rep.add("RED", "front_matter", "ส่วนนำ",
-                f"ส่วนนำใช้เลขหน้าอารบิก {len(arabic)} หน้า: {shown}{more}",
-                "เลขหน้าส่วนนำต้องเป็นเลขโรมัน (i, ii, iii) หรือพยัญชนะไทย (ก, ข, ค)",
-                "แก้เลขหน้าส่วนนำให้เป็นเลขโรมันหรือพยัญชนะไทย", "PAGE.NUMBERING")
+    if expected_style:
+        main_style = expected_style
+        want = _PAGE_LABEL_STYLE_NAME[expected_style]
+        book = "เล่มหลักสูตรไทย" if expected_style == "thai" else "เล่มภาษาอังกฤษ"
+        want_sentence = f"เลขหน้าส่วนนำของ{book}ต้องเป็น{want} ทั้งส่วน"
+    else:
+        # ไม่รู้ภาษาเล่ม → ยึดชนิดที่ใช้มากที่สุด (ไม่นับอารบิกซึ่งผิดแน่นอน)
+        found = [s for _i, _lab, s, _v in entries if s != "arabic"]
+        main_style = max(set(found), key=found.count) if found else None
+        want = (_PAGE_LABEL_STYLE_NAME[main_style] if main_style
+                else "เลขโรมัน (i, ii, iii) หรือพยัญชนะไทย (ก, ข, ค)")
+        want_sentence = f"เลขหน้าส่วนนำต้องเป็น{want} ทั้งส่วน"
 
-    styles = {style for _i, _lab, style, _v in seq}
-    if len(styles) > 1:
+    off_style = [(i, lab, s) for i, lab, s, _v in entries if s != main_style]
+    if off_style:
+        found_names = " / ".join(sorted({_PAGE_LABEL_STYLE_NAME[s]
+                                         for _i, _lab, s in off_style}))
+        shown = ", ".join(f'{page_ref(i)} ("{lab}")' for i, lab, _s in off_style[:5])
+        more = f" และอีก {len(off_style) - 5} หน้า" if len(off_style) > 5 else ""
         rep.add("RED", "front_matter", "ส่วนนำ",
-                "ส่วนนำใช้เลขหน้าปนกัน: "
-                + " / ".join(sorted(_PAGE_LABEL_STYLE_NAME[s] for s in styles)),
-                "เลขหน้าส่วนนำต้องเป็นชนิดเดียวกันตลอดทั้งส่วน",
-                "เลือกใช้เลขโรมันหรือพยัญชนะไทยอย่างใดอย่างหนึ่งให้ตลอดส่วนนำ",
-                "PAGE.NUMBERING")
-    elif len(seq) > 1:
-        # หน้าที่อ่านเลขไม่ได้/เป็นอารบิก ถูกฟ้องแยกไปแล้ว และทำให้ยืนยันความต่อเนื่อง
+                f"ส่วนนำใช้{found_names} {len(off_style)} หน้า: {shown}{more}",
+                want_sentence, f"แก้เลขหน้าส่วนนำให้เป็น{want}", "PAGE.NUMBERING")
+
+    seq = [e for e in entries if e[2] == main_style]
+    if len(seq) > 1:
+        # หน้าที่อ่านเลขไม่ได้/ใช้ชนิดผิด ถูกฟ้องแยกไปแล้ว และทำให้ยืนยันความต่อเนื่อง
         # ข้ามหน้านั้นไม่ได้ จึงไม่ฟ้อง "กระโดด" คร่อมหน้าเหล่านี้ (กันฟ้องซ้ำ/ฟ้องผิด)
-        broken = set(unread) | {i for i, _lab in arabic}
+        broken = set(unread) | {i for i, _lab, _s in off_style}
         problems, dup_run = [], 1
         for k in range(1, len(seq)):
             prev_i, prev_lab, _ps, prev_v = seq[k - 1]
@@ -760,7 +778,7 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx):
         more = f" และอีก {len(unread) - 5} หน้า" if len(unread) > 5 else ""
         rep.add(UNCERTAIN_ZONE, "front_matter", "ส่วนนำ",
                 f"ระบบอ่านเลขหน้าส่วนนำไม่ได้ {len(unread)} หน้า: {shown}{more}",
-                "ทุกหน้าของส่วนนำต้องมีเลขหน้าโรมันหรือพยัญชนะไทย",
+                f"ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น{want}",
                 "ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง", "UNCERTAIN.REVIEW")
 
 
@@ -1981,9 +1999,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     first_chapter = body_ch[0][2] if body_ch else front_limit
 
     # เลขหน้าส่วนนำทุกหน้า (ไม่ใช่แค่ 2 หน้าลงนาม) — ตรวจได้เมื่อรู้ว่าเนื้อหาเริ่มหน้าไหน
-    _check_front_page_numbers(rep, page_labels, page_ref,
-                              sig_pages[0] if sig_pages else 1,
-                              body_ch[0][2] if body_ch else None)
+    _check_front_page_numbers(
+        rep, page_labels, page_ref,
+        sig_pages[0] if sig_pages else 1,
+        body_ch[0][2] if body_ch else None,
+        _expected_front_label_style((approved or {}).get("program_language", "")))
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
