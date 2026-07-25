@@ -22,6 +22,11 @@ from checker import (
     signature_committee_slots,
     _committee_page_kind,
     _committee_keyname,
+    _is_white_fill,
+    _report_sig_placeholders,
+    _sig_clean_name,
+    _strip_committee_title,
+    sig_visible_placeholders,
     _report_thai_committee,
     _report_committee_positions,
     _check_abstract_committees,
@@ -845,6 +850,84 @@ class AbstractCommitteeTests(unittest.TestCase):
         pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
         reds = self._reds(self._run({}, [0], [], pages))
         self.assertEqual(reds, [])
+
+
+class CommitteeTitleAnywhereTests(unittest.TestCase):
+    """ตำแหน่งวิชาการจะเขียนหน้าหรือท้ายชื่อก็ได้ ต้องไม่ทำให้เทียบชื่อไม่ตรง"""
+
+    def test_trailing_rank_is_ignored(self):
+        # รูปแบบที่พบในเล่มจริง: "ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"
+        self.assertEqual(_strip_committee_title("ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"),
+                         "ธเนศ เกษศิลป์")
+        self.assertEqual(_committee_keyname("ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"),
+                         _committee_keyname("ธเนศ เกษศิลป์"))
+
+    def test_leading_and_trailing_rank_together(self):
+        self.assertEqual(
+            _strip_committee_title("รองศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์, ศาสตราจารย์"),
+            "คนางค์ คันธมธุรพจน์")
+
+    def test_name_ending_with_title_letter_is_kept(self):
+        # "ธเนศ"/"ศศิธร" ต้องไม่ถูกกินเพราะตัวย่อ ศ. บังคับต้องมีจุด
+        self.assertEqual(_strip_committee_title("ธเนศ เกษศิลป์"), "ธเนศ เกษศิลป์")
+        self.assertEqual(_strip_committee_title("ศศิธร วงศ์ไทย"), "ศศิธร วงศ์ไทย")
+
+    def test_title_only_cell_is_treated_as_empty(self):
+        # ช่องที่อ่านได้แต่ตำแหน่ง ไม่มีชื่อคน = ช่องว่าง ไม่ใช่ "คนที่ไม่อยู่ในรายชื่อ"
+        self.assertIsNone(_sig_clean_name(", รองศาสตราจารย์"))
+        self.assertIsNone(_sig_clean_name("ผู้ช่วยศาสตราจารย์"))
+
+    def test_duplicate_name_is_orange_not_red(self):
+        rep = Report()
+        expected = [{"name": "คนางค์ ก"}, {"name": "ธเนศ ข"}]
+        members = {1: "คนางค์ ก", 2: "ธเนศ ข", 9: "ธเนศ ข, ผู้ช่วยศาสตราจารย์"}
+        _report_thai_committee(rep, expected, members, "หน้าลงนาม")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertTrue(any("ปรากฏซ้ำ" in i["found"] for i in rep.zones["ORANGE"]))
+
+    def test_real_stranger_is_still_red(self):
+        rep = Report()
+        expected = [{"name": "คนางค์ ก"}]
+        members = {1: "คนางค์ ก", 9: "สมชาย ไม่รู้จัก"}
+        _report_thai_committee(rep, expected, members, "หน้าลงนาม")
+        self.assertTrue(any("ไม่อยู่ในรายชื่อ" in i["found"] for i in rep.zones["RED"]))
+
+
+class SignaturePlaceholderTests(unittest.TestCase):
+    """ข้อความตัวอย่างของ template ที่ถมขาวไว้ = ปกติ / ที่ยังมองเห็น = ต้องแจ้ง"""
+
+    class _Page:
+        def __init__(self, words):
+            self._words = words
+
+        def extract_words(self, *a, **k):
+            return self._words
+
+    def test_white_filled_placeholder_is_not_reported(self):
+        # เล่มจริงทั้ง 3 เล่มถมขาวไว้แบบนี้ ถ้าฟ้องจะกลายเป็น noise ทุกเล่ม
+        page = self._Page([
+            {"text": "ตำแหน่งทางวิชาการและชื่อ", "non_stroking_color": (1, 1, 1)},
+            {"text": "นามสกุล", "non_stroking_color": (1, 1, 1)},
+        ])
+        self.assertEqual(sig_visible_placeholders(page), [])
+
+    def test_visible_placeholder_is_reported(self):
+        page = self._Page([
+            {"text": "ตำแหน่งทางวิชาการและชื่อ", "non_stroking_color": (0, 0, 0)},
+        ])
+        found = sig_visible_placeholders(page)
+        self.assertTrue(found)
+        rep = Report()
+        _report_sig_placeholders(rep, found, "หน้าลงนาม")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertTrue(any("template" in i["found"] for i in rep.zones["ORANGE"]))
+
+    def test_white_detection_across_colour_spaces(self):
+        self.assertTrue(_is_white_fill((1,)))          # grayscale
+        self.assertTrue(_is_white_fill((1, 1, 1)))     # RGB
+        self.assertTrue(_is_white_fill((0, 0, 0, 0)))  # CMYK
+        self.assertFalse(_is_white_fill((0, 0, 0)))
+        self.assertFalse(_is_white_fill(None))
 
 
 class FrontPageNumberTests(unittest.TestCase):

@@ -190,10 +190,14 @@ _SIG_SKIP_MARKERS = (
     norm('ผู้วิจัย'), 'CANDIDATE', norm('คณบดี'), 'DEAN',
     norm('ประธานหลักสูตร'), 'PROGRAMDIRECTOR', 'DIRECTOR',
 )
-_SIG_TITLE_RE = re.compile(
-    r'^\s*(?:ศาสตราจารย์|รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|'
-    r'Assoc\.?\s*Prof\.?|Asst\.?\s*Prof\.?|Prof\.?|Lect\.?|ผศ\.?|รศ\.?|ศ\.?)?'
-    r'\s*(?:ดร\.?|Dr\.?)?\s*', re.I)
+# ข้อความตัวอย่างของ template ที่ต้องลบ/ถมขาวก่อนส่งเล่ม — ถ้ายังดึงข้อความได้แปลว่า
+# ยังอยู่ในไฟล์ (แต่ระบบอ่านข้อความที่ถมขาวไว้ได้ด้วย จึงยืนยันเองไม่ได้ว่ามองเห็นจริง)
+_SIG_LEFTOVER_PLACEHOLDERS = (
+    (norm('ตำแหน่งทางวิชาการและชื่อ'), 'ตำแหน่งทางวิชาการและชื่อ นามสกุล'),
+    (norm('ระบุสาขาวิชา'), 'คุณวุฒิ (ระบุสาขาวิชา)'),
+    ('ACADEMICRANK', 'Academic rank First Name Last name'),
+    ('DEGREESUBJECT', 'Degree (Subject)'),
+)
 
 
 def _sig_is_dotted(text):
@@ -206,9 +210,9 @@ def _sig_clean_name(text):
     n = norm(text)
     if not n or any(m and m in n for m in _SIG_SKIP_MARKERS):
         return None
-    cleaned = re.sub(r'\s*,\s*$', '', (text or '').strip())
-    cleaned = _SIG_TITLE_RE.sub('', cleaned).strip()
-    return cleaned or None
+    # ตัดตำแหน่งวิชาการทั้งหน้าและท้าย — ช่องที่เหลือแต่ตำแหน่ง ไม่มีชื่อคน ถือว่าว่าง
+    # (เดิมคืน ", รองศาสตราจารย์" ออกไป แล้วถูกฟ้องว่าเป็นคนที่ไม่อยู่ในรายชื่ออนุมัติ)
+    return _strip_committee_title(text) or None
 
 
 # placeholder ของช่องคุณวุฒิที่ template ทิ้งไว้ = ถือว่ายัง "ไม่มี" คุณวุฒิจริง
@@ -311,6 +315,15 @@ _COMMITTEE_TITLE_PREFIX = re.compile(
     r')[\s. ]*', re.I)
 
 
+# ตำแหน่งที่เขียนไว้ "ท้ายชื่อ" เช่น "ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์" — พบในเล่มจริง
+# ถ้าไม่ตัดออกจะเทียบชื่อไม่ตรง แล้วฟ้องผิดว่าไม่อยู่ในรายชื่อกรรมการอนุมัติ
+# ใช้รายชื่อคำเดียวกับ prefix (ตัดหัว ^[\s,]* ออกแล้วผูก $ ท้าย) เพื่อไม่ให้ลิสต์ 2 ชุดหลุดกัน
+_COMMITTEE_TITLE_SUFFIX = re.compile(
+    r'[\s,]+'
+    + _COMMITTEE_TITLE_PREFIX.pattern[_COMMITTEE_TITLE_PREFIX.pattern.index('(?:'):]
+    + r'$', re.I)
+
+
 def _strip_committee_title(name):
     """ตัดคำนำหน้า/ตำแหน่งวิชาการทั้งหมดออก เหลือเฉพาะชื่อ-สกุล (วนจนไม่เหลือคำนำหน้า)"""
     s = (name or "").strip()
@@ -318,7 +331,8 @@ def _strip_committee_title(name):
     while s and s != prev:
         prev = s
         s = _COMMITTEE_TITLE_PREFIX.sub('', s, count=1).strip()
-    return s
+        s = _COMMITTEE_TITLE_SUFFIX.sub('', s, count=1).strip()
+    return s.strip(' ,')
 
 
 def _committee_keyname(name, fuzzy=False):
@@ -387,12 +401,24 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
                 f'ไม่พบกรรมการ "{name}" ตามข้อมูลอนุมัติ',
                 f'ต้องมีกรรมการชื่อ "{name}" ตามข้อมูลอนุมัติ (บฑ.)',
                 "เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+    # ช่องที่ "เกิน" อาจเป็นชื่อคนนอกรายชื่อ (แดง) หรือชื่อกรรมการคนเดิมที่โผล่ซ้ำ
+    # อีกช่อง (ส้ม) — กรณีหลังฟ้องว่า "ไม่อยู่ในรายชื่ออนุมัติ" ไม่ได้ เพราะเขาอยู่จริง
+    # และระบบแยกไม่ออกว่าเล่มพิมพ์ซ้ำเองหรือระบบอ่านตารางซ้ำ
     for s in extra_slots:
         name = members.get(s) or ""
-        rep.add("RED", "front_matter", loc,
-                f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
-                "รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
-                "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+        dup = next((expected_names[i] for i, ek in enumerate(exp_keys)
+                    if ek and ek == found_keys.get(s)), None)
+        if dup:
+            rep.add("ORANGE", "front_matter", loc,
+                    f'พบชื่อ "{name}" ปรากฏซ้ำมากกว่าหนึ่งช่องในตารางลายเซ็น',
+                    "กรรมการแต่ละคนต้องมีช่องลงนามช่องเดียว",
+                    "ตรวจว่าชื่อนี้ถูกพิมพ์ซ้ำในช่องอื่นหรือไม่ ถ้าซ้ำให้ลบช่องที่เกินออก",
+                    "FRONT.COMMITTEE")
+        else:
+            rep.add("RED", "front_matter", loc,
+                    f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
+                    "รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
+                    "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
 def _report_thai_committee(rep, expected, members, loc):
@@ -453,6 +479,52 @@ def _committee_translation(committees):
     return {}, False
 
 
+def _is_white_fill(color):
+    """สีตัวอักษรเป็นสีขาว (ถมขาว = มองไม่เห็นบนหน้ากระดาษ) หรือไม่"""
+    if color is None:
+        return False
+    values = (color,) if isinstance(color, (int, float)) else tuple(color)
+    try:
+        nums = [float(v) for v in values]
+    except (TypeError, ValueError):
+        return False
+    if not nums:
+        return False
+    if len(nums) == 4:                      # CMYK: ขาวคือ 0,0,0,0
+        return all(v == 0 for v in nums)
+    return all(v >= 0.99 for v in nums)     # gray / RGB: ขาวคือ 1
+
+
+def sig_visible_placeholders(pdf_page):
+    """ข้อความตัวอย่างของ template ที่ยัง "มองเห็นได้" บนหน้าลงนาม (ไม่ได้ถมขาว)
+
+    เล่มจริงถมขาวช่องที่ไม่ได้ใช้ ข้อความจึงยังถูกดึงออกมาได้แม้มองไม่เห็น
+    ถ้าเช็คจากข้อความอย่างเดียวจะฟ้องทุกเล่มจนกลายเป็น noise จึงต้องดูสีตัวอักษรด้วย
+    """
+    try:
+        words = pdf_page.extract_words(extra_attrs=["non_stroking_color"])
+    except Exception:
+        return []
+    visible = norm(" ".join(w["text"] for w in words
+                            if not _is_white_fill(w.get("non_stroking_color"))))
+    return [label for key, label in _SIG_LEFTOVER_PLACEHOLDERS if key and key in visible]
+
+
+def _report_sig_placeholders(rep, found, loc):
+    """ช่องกรรมการที่ไม่ได้ใช้ต้องลบ/ถมขาวข้อความตัวอย่างของ template
+
+    ยังเป็นส้มเพราะข้อความที่ไม่ใช่สีขาวอาจถูกกล่องทึบทับไว้อีกชั้น ระบบยืนยันเองไม่ได้
+    """
+    if not found:
+        return
+    rep.add("ORANGE", "front_matter", loc,
+            "พบข้อความตัวอย่างของ template ค้างอยู่ในตารางลายเซ็น: "
+            + ", ".join(f'"{label}"' for label in found),
+            "ช่องกรรมการที่ไม่ได้ใช้ต้องลบข้อความตัวอย่างออกจากไฟล์",
+            "ตรวจว่าข้อความนี้มองเห็นบนหน้ากระดาษหรือไม่ ถ้าเห็นให้ลบออกจากช่องที่ไม่ได้ใช้",
+            "FRONT.COMMITTEE")
+
+
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                       program_language, A, name_en, translation_ok):
     """ตรวจรายชื่อ+คุณวุฒิกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
@@ -466,12 +538,13 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
     english_book = program_language in ("international", "thai_english")
 
     # อ่านตารางลายเซ็นของหน้าลงนามด้วย geometry (เปิดไฟล์เฉพาะ 2 หน้า)
-    slots = {}
+    slots, leftover = {}, {}
     try:
         with pdfplumber.open(pdf_path) as _pl:
             for idx in sig_pages[:2]:
                 if 0 <= idx < len(_pl.pages):
                     slots[idx] = signature_committee_slots(_pl.pages[idx])
+                    leftover[idx] = sig_visible_placeholders(_pl.pages[idx])
     except Exception:
         return False
     if not slots:
@@ -489,6 +562,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         members, member_quals, bottom_left, bottom_right = slots[idx]
         page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
         loc = f"{page_label} ({page_ref(idx)})"
+        _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
         if not english_book:
             # เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน) — กัน cascade

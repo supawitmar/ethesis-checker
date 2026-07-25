@@ -48,6 +48,10 @@ SESSION_TOKEN = (
     if APP_PASSWORD else secrets.token_urlsafe(32)
 )
 SESSION_MAX_AGE = 8 * 60 * 60
+# คุกกี้ต้องเป็น Secure เมื่อเสิร์ฟผ่าน HTTPS — Render ตั้งให้อัตโนมัติ ส่วน host อื่น
+# ให้ตั้ง COOKIE_SECURE=1 เอง (ถ้ารันในเครื่องด้วย http ต้องเป็น 0 ไม่งั้นล็อกอินไม่ติด)
+COOKIE_SECURE = (os.getenv("COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+                 or bool(os.getenv("RENDER")))
 
 ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยืนยัน", "YELLOW": "🟡 ข้อสังเกต"}
 
@@ -213,7 +217,7 @@ async def login(request: Request, password: str = Form(...), next: str = Form("/
         SESSION_TOKEN,
         max_age=SESSION_MAX_AGE,
         httponly=True,
-        secure=bool(os.getenv("RENDER")),
+        secure=COOKIE_SECURE,
         samesite="strict",
     )
     return response
@@ -409,11 +413,17 @@ async def rebuild_summary(job_id: str, request: Request):
     plain = plain_summary(report, failed, passed)
     result = {"plain": plain}
     if payload.get("ai") and llm_assist.enabled():
+        # ใช้โควตางานเดียวกับการตรวจเล่ม ไม่งั้นกดปุ่มรัว ๆ จะยิง AI พร้อมกันไม่จำกัด
+        if not JOB_SLOTS.acquire(blocking=False):
+            result["ai_busy"] = True
+            return result
         try:
             result["ai"] = await asyncio.to_thread(
                 llm_assist.student_summary, {**report, "plain_summary": plain})
         except Exception:
             print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
+        finally:
+            JOB_SLOTS.release()
     return result
 
 

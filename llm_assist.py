@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LLM assist layer (optional) — มีหน้าที่เดียวเท่านั้น
+LLM assist layer (optional) — มี 2 หน้าที่เท่านั้น
 
-AI **ไม่มีสิทธิ์ตัดสินหรือแก้ผลตรวจ** ผลตรวจและรายละเอียดทุกข้อในรายงาน
-มาจาก rule engine ใน checker.py ล้วน ๆ (deterministic ตรวจซ้ำได้ผลเดิม)
+1. ``student_summary`` — เรียบเรียง "ข้อความสรุป" ที่ระบบสร้างไว้แล้ว
+   (``report["plain_summary"]`` จาก ``checker.plain_summary``) ให้อ่านลื่นขึ้น
+   **ไม่แตะผลตรวจ** ห้ามเพิ่ม ลด หรือเปลี่ยนข้อเท็จจริง
 
-หน้าที่เดียวของ AI คือ อ่าน "ข้อความสรุป" ที่ระบบสร้างไว้แล้ว
-(``report["plain_summary"]`` จาก ``checker.plain_summary``) แล้วเรียบเรียงใหม่
-ให้อ่านลื่นขึ้นสำหรับส่งต่อนักศึกษา โดยห้ามเพิ่ม ลด หรือเปลี่ยนข้อเท็จจริง
+2. ``translate_names`` — ถอดชื่อกรรมการไทยเป็นตัวสะกดอังกฤษ เพื่อใช้เทียบกับชื่อ
+   บนหน้าลงนาม/บทคัดย่อของเล่มภาษาอังกฤษ
+
+   **ข้อนี้มีผลต่อผลตรวจ**: ตามที่เจ้าหน้าที่กำหนด (ก.ค. 2569) ถ้าแปลชื่อครบทุกคน
+   checker จะเทียบชื่อ/ลำดับแล้วตัดสิน แดง/ผ่าน เหมือนเล่มไทย (เทียบหลวม ratio ≥ 0.7)
+   ถ้าแปลไม่สำเร็จหรือปิด LLM ไว้ จะตกไปเป็น "ส้ม" ให้เจ้าหน้าที่ตรวจด้วยตาแทน
+   ส่วนกฎอื่นทั้งหมดในรายงานยังมาจาก rule engine ล้วน ๆ (deterministic)
 
 เปิดใช้เมื่อมี ANTHROPIC_API_KEY และไม่ได้ตั้ง LLM_ASSIST=off
 ถ้า LLM ล้มเหลวไม่ว่ากรณีใด รายงานจากกฎเดิมต้องออกครบเหมือนไม่มี LLM
@@ -17,6 +22,9 @@ import os
 import re
 
 MODEL = os.getenv("LLM_ASSIST_MODEL", "claude-opus-4-8")
+# กันงานค้าง: ถ้า API ไม่ตอบ job จะกิน slot ค้างไว้จนเจ้าหน้าที่คนอื่นตรวจไม่ได้
+TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "90"))
+MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
 
 _SUMMARY_SYSTEM = """คุณคือเจ้าหน้าที่บัณฑิตวิทยาลัยที่เรียบเรียงข้อความสรุปผลตรวจรูปเล่ม
 วิทยานิพนธ์ส่งให้นักศึกษา
@@ -60,7 +68,7 @@ def enabled():
 
 def _client():
     import anthropic
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(timeout=TIMEOUT_SECONDS, max_retries=MAX_RETRIES)
 
 
 def _first_text(response):
@@ -84,7 +92,9 @@ def translate_names(thai_names):
     """ถอดชื่อบุคคลไทยเป็นตัวสะกดอังกฤษ (ตัวช่วยเทียบเคียงหน้าลงนามเล่มภาษาอังกฤษ)
 
     คืน list ความยาวเท่ากับ input (index ตรงกัน) หรือ [] ถ้าปิด/ล้มเหลว
-    AI เป็นเพียงตัวช่วย — ผลชื่อกรรมการเล่มอังกฤษเป็น "ส้ม" ให้เจ้าหน้าที่ยืนยันเสมอ
+
+    คืนครบ = checker เทียบชื่อ/ลำดับแล้วตัดสิน แดง/ผ่าน เหมือนเล่มไทย (เทียบหลวม)
+    คืน []  = checker ลงส้มพร้อมลำดับชื่อไทย ให้เจ้าหน้าที่ตรวจด้วยตาแทน
     """
     import json
     names = [str(n).strip() for n in (thai_names or []) if str(n).strip()]
