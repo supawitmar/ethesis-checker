@@ -510,6 +510,37 @@ def sig_visible_placeholders(pdf_page):
     return [label for key, label in _SIG_LEFTOVER_PLACEHOLDERS if key and key in visible]
 
 
+def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
+                                 loc_prefix="", loc_suffix=""):
+    """ช่องสถาบันแถวล่างสุดของหน้าลงนาม — บทบาทต่างกันในสองหน้า (ยืนยันจาก template ทางการ)
+
+    หน้าอาจารย์ที่ปรึกษา: มุมล่างขวา = "ประธานหลักสูตร ... สาขาวิชา ..." → ต้องมีชื่อสาขา
+    หน้ากรรมการสอบ     : มุมล่างขวา = "คณบดี/ผู้อำนวยการคณะ/สถาบัน ..." → ต้องมีชื่อคณะ
+    มุมล่างซ้ายเป็นคณบดีบัณฑิตวิทยาลัยทั้งสองหน้า จึงไม่ใช้ตรวจคณะของนักศึกษา
+
+    ค้นจากข้อความ "ทั้งแถวล่าง" (ซ้าย+ขวา) เพราะการแบ่งคอลัมน์ด้วยพิกัด x คลาดเคลื่อน
+    ได้เมื่อข้อความไทยยาวล้ำกึ่งกลางหน้า — ช่องซ้ายเป็นบัณฑิตวิทยาลัยเสมอ จึงไม่ชนกัน
+    """
+    found_text = norm(bottom_text)
+    if kind == "advisory":
+        degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
+            or approved.get("degree_cover_en", "")
+        subject = _degree_subject(degree)
+        if subject and norm(subject) not in found_text:
+            rep.add("ORANGE", "front_matter", f"{loc_prefix}ประธานหลักสูตร{loc_suffix}",
+                    f'ไม่พบชื่อสาขา "{subject}" ในช่องประธานหลักสูตร (มุมล่างขวา)',
+                    f'ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา "{subject}"',
+                    "โปรดตรวจชื่อหลักสูตรมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
+        return
+    # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
+    faculty = approved.get("faculty", "")
+    if faculty and not english_book and norm(faculty) not in found_text:
+        rep.add("ORANGE", "front_matter", f"{loc_prefix}คณบดีคณะ{loc_suffix}",
+                f'ไม่พบชื่อคณะ "{faculty}" ในช่องคณบดีคณะ (มุมล่างขวา)',
+                f'ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ "{faculty}"',
+                "โปรดตรวจชื่อคณะมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
+
+
 def _report_sig_placeholders(rep, found, loc):
     """ช่องกรรมการที่ไม่ได้ใช้ต้องลบ/ถมขาวข้อความตัวอย่างของ template
 
@@ -589,23 +620,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                         "ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ (Degree)",
                         "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน", "FRONT.COMMITTEE")
 
-        # ---------- ช่องคงที่: ตรวจเฉพาะชื่อหลักสูตร/คณะ (ไม่ตรวจชื่อ/คุณวุฒิบุคคล) ----------
-        # ผู้อำนวยการหลักสูตร (มุมล่างขวา): บรรทัดต้องมีชื่อสาขาของปริญญา
-        degree = A.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
-            or A.get("degree_cover_en", "")
-        subject = _degree_subject(degree)
-        if subject and norm(subject) not in norm(bottom_right):
-            rep.add("ORANGE", "front_matter", f"{page_label} — ผู้อำนวยการหลักสูตร ({page_ref(idx)})",
-                    f'ไม่พบชื่อสาขา "{subject}" ในช่องผู้อำนวยการหลักสูตร (มุมล่างขวา)',
-                    f'ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา "{subject}"',
-                    "โปรดตรวจชื่อหลักสูตรมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
-        # คณบดี (มุมล่างซ้าย): ตรวจชื่อคณะ — เล่มไทยเทียบตรง, เล่มอังกฤษให้เจ้าหน้าที่ยืนยัน
-        faculty = A.get("faculty", "")
-        if faculty and not english_book and norm(faculty) not in norm(bottom_left + " " + bottom_right):
-            rep.add("ORANGE", "front_matter", f"{page_label} — คณบดี ({page_ref(idx)})",
-                    f'ไม่พบชื่อคณะ "{faculty}" ในช่องคณบดี (มุมล่างซ้าย)',
-                    f'ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ "{faculty}"',
-                    "โปรดตรวจชื่อคณะมุมล่างซ้ายให้ถูกต้อง", "FRONT.COMMITTEE")
+        _check_signature_institution(
+            rep, kind, bottom_left + " " + bottom_right, A, english_book,
+            f"{page_label} — ", f" ({page_ref(idx)})")
 
     return handled_any
 

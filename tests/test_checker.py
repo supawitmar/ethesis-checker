@@ -33,6 +33,7 @@ from checker import (
     _check_cover_year,
     _check_exam_date,
     _check_front_page_numbers,
+    _check_signature_institution,
     _expected_front_label_style,
     _page_label_order,
     abstract_committee_block,
@@ -891,6 +892,39 @@ class CommitteeTitleAnywhereTests(unittest.TestCase):
         members = {1: "คนางค์ ก", 9: "สมชาย ไม่รู้จัก"}
         _report_thai_committee(rep, expected, members, "หน้าลงนาม")
         self.assertTrue(any("ไม่อยู่ในรายชื่อ" in i["found"] for i in rep.zones["RED"]))
+
+
+class SignatureInstitutionCellTests(unittest.TestCase):
+    """ช่องล่างขวาของหน้าลงนามคนละบทบาทกัน — ที่ปรึกษา=ประธานหลักสูตร, สอบ=คณบดีคณะ"""
+
+    APPROVED = {"degree_cover_th": "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)",
+                "faculty": "คณะสังคมศาสตร์และมนุษยศาสตร์"}
+
+    def _run(self, kind, bottom, english=False):
+        rep = Report()
+        _check_signature_institution(rep, kind, bottom, self.APPROVED, english)
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_advisory_page_wants_program_subject(self):
+        ok = self._run("advisory",
+                       "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
+                       "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้อม")
+        self.assertEqual(ok, [])
+        bad = self._run("advisory", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร")
+        self.assertTrue(any("ไม่พบชื่อสาขา" in b for b in bad))
+
+    def test_exam_page_wants_faculty_not_subject(self):
+        # หน้ากรรมการสอบมีแต่ชื่อคณะ ไม่มีชื่อสาขา — ต้องไม่ฟ้อง (เดิมฟ้องผิดทุกเล่ม)
+        self.assertEqual(
+            self._run("exam", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณบดี "
+                              "คณะสังคมศาสตร์และมนุษยศาสตร์ มหาวิทยาลัยมหิดล"),
+            [])
+        bad = self._run("exam", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณบดี คณะอื่น")
+        self.assertTrue(any("ไม่พบชื่อคณะ" in b for b in bad))
+
+    def test_english_book_skips_faculty_compare(self):
+        # ชื่อคณะจาก eThesis เป็นภาษาไทย เทียบกับหน้าลงนามอังกฤษไม่ได้
+        self.assertEqual(self._run("exam", "Dean Faculty of Engineering", english=True), [])
 
 
 class SignaturePlaceholderTests(unittest.TestCase):
