@@ -126,6 +126,29 @@ def _extract_page_label(page_text):
     return ""
 
 
+# พยัญชนะไทยที่ใช้เป็นเลขหน้าส่วนนำ เรียงตามลำดับ ก ข ค ง ...
+_THAI_PAGE_LETTERS = "กขคงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ"
+
+_PAGE_LABEL_STYLE_NAME = {
+    "roman": "เลขโรมัน (i, ii, iii)",
+    "thai": "พยัญชนะไทย (ก, ข, ค)",
+    "arabic": "เลขอารบิก (1, 2, 3)",
+}
+
+
+def _page_label_order(label):
+    """แปลงเลขหน้าเป็น (ชนิด, ลำดับ) เพื่อตรวจความต่อเนื่อง — (None, None) ถ้าอ่านไม่ออก"""
+    label = (label or "").strip()
+    if not label:
+        return None, None
+    if label.isdigit():
+        return "arabic", int(label)
+    if label in _THAI_PAGE_LETTERS:
+        return "thai", _THAI_PAGE_LETTERS.index(label) + 1
+    value = _roman_to_int(label)
+    return ("roman", value) if value else (None, None)
+
+
 def _is_page_number_token(token):
     token = (token or '').strip()
     return bool(re.fullmatch(r'\d{1,4}', token)
@@ -547,10 +570,11 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
     รูปแบบต่อคน = 'ชื่อ นามสกุล, คุณวุฒิ' — ไม่มีสาขาในวงเล็บ, ไม่มีตำแหน่งวิชาการ
     หน้าอังกฤษ: ชื่อต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด และเทียบชื่อจากคำแปล (fuzzy)
     หน้าไทย: เทียบชื่อไทยตรง
+
+    กฎ "รูปแบบ" เป็นกฎของ template ล้วน จึงตรวจได้แม้ไม่มีข้อมูลกรรมการจาก eThesis
+    ส่วนการเทียบ "ชื่อและลำดับ" ทำเฉพาะเมื่อมีข้อมูลอนุมัติ
     """
-    advisory = committees.get("advisory", [])
-    if not advisory:
-        return
+    advisory = (committees or {}).get("advisory", [])
     for page_list, heading_en in ((abs_en_pages, True), (abs_th_pages, False)):
         for ai in page_list:
             if ai >= len(pages):
@@ -586,6 +610,8 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                             "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
 
             # เทียบชื่อกับข้อมูลอนุมัติ (advisory) แบบเดียวกับหน้าลงนาม
+            if not advisory:
+                continue
             members = {i: n.strip() for i, n in enumerate(names, start=1)}
             if heading_en:
                 if translation_ok:
@@ -594,6 +620,148 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             else:
                 expected = [m["name"] for m in advisory]
                 _report_committee_positions(rep, expected, members, loc, fuzzy=False)
+
+
+_ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
+
+
+def _exam_date_key(text):
+    """คีย์เทียบวันที่ — ตัดคำระบุศักราชและเลข 0 นำหน้าวันที่ออกก่อน
+
+    หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุศักราชคั่นระหว่าง
+    เดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569" ถ้าไม่ตัดออกจะฟ้องผิด
+    """
+    return norm(re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or "")))
+
+
+def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
+    """วันที่สอบต้องตรงข้อมูลอนุมัติ "ทุกหน้าลงนาม"
+
+    เดิมรวมข้อความสองหน้าลงนามแล้วค้นครั้งเดียว หน้าที่วันที่ผิดหรือหายจึงรอดไปได้
+    ถ้าอีกหน้าหนึ่งถูก และตารางยืนยันก็ขึ้นเป็นแถวเดียวแทนที่จะแยกรายหน้า
+    """
+    if not sig_pages:
+        rep.add_verification("วันที่สอบผ่าน", "หน้าลงนาม", "pending",
+                             "ระบบหาหน้าลงนามไม่เจอ")
+        return
+    for k, idx in enumerate(sig_pages):
+        loc = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
+        if _exam_date_key(exam_date) in _exam_date_key(pages[idx]):
+            rep.add_verification("วันที่สอบผ่าน", loc, "pass")
+            continue
+        found_date = find_signature_date(pages[idx])
+        rep.add_verification("วันที่สอบผ่าน", loc, "fail", found_date)
+        if found_date:
+            # มีวันที่บนหน้าลงนามแต่ วัน/เดือน/ปี ไม่ตรงกับข้อมูลในระบบ
+            rep.add("RED", "front_matter", loc,
+                    f'พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "{found_date}"',
+                    f'ที่ถูกต้องตามระบบคือ "{exam_date}"',
+                    "แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+        else:
+            rep.add("RED", "front_matter", loc, f'ไม่พบวันที่สอบ "{exam_date}"',
+                    "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+
+
+def _check_cover_year(rep, year, cover_text):
+    """ปีต้องอยู่ใน "บรรทัดปี" ของหน้าปก ไม่ใช่เจอเลขปีที่ไหนก็ได้บนหน้า
+
+    ชื่อเรื่องบางเล่มมีปีอยู่ในชื่อ การค้นทั้งหน้าจึงผ่านได้ทั้งที่หน้าปกไม่มีบรรทัดปี
+    บรรทัดปีอาจเขียน "2569" หรือ "พ.ศ. 2569" ก็ได้
+    """
+    lines = [soft(line) for line in (cover_text or "").splitlines() if soft(line)]
+    year_lines = [line for line in lines if year in line]
+    year_ok = any(soft(_ERA_PREFIX.sub(' ', line)) == year for line in year_lines)
+    rep.add_verification("ปีบนหน้าปก", "หน้าปก", "pass" if year_ok else "fail",
+                         "" if year_ok else (year_lines[0] if year_lines else ""))
+    if year_ok:
+        return
+    if year_lines:
+        rep.add("RED", "front_matter", "หน้าปก",
+                f'พบปี {year} บนหน้าปกแต่ไม่ได้อยู่ในบรรทัดปีของตัวเอง: "{year_lines[0]}"',
+                f'หน้าปกต้องมีบรรทัดที่เป็นปีเพียงอย่างเดียว เช่น "{year}" หรือ "พ.ศ. {year}"',
+                "เพิ่มหรือแก้บรรทัดปีบนหน้าปกให้มีเฉพาะปี", "FRONT.COVER")
+    else:
+        rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {year} บนหน้าปก",
+                "ปี = ปีที่มีผลสอบผ่าน", "", "FRONT.COVER")
+
+
+def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx):
+    """เลขหน้าส่วนนำต้องเป็นโรมัน/พยัญชนะไทย เรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
+
+    เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
+    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจ "ความต่อเนื่อง" ของทั้งช่วง จึงไม่ทับกับกฎเดิม
+    ที่ตรวจ "ค่าเริ่มต้น" ของหน้าลงนาม
+    """
+    if stop_idx is None or stop_idx <= start_idx:
+        return
+    seq, unread, arabic = [], [], []
+    for i in range(start_idx, stop_idx):
+        label = page_labels.get(i, "")
+        style, value = _page_label_order(label)
+        if style is None:
+            unread.append(i)
+        elif style == "arabic":
+            arabic.append((i, label))
+        else:
+            seq.append((i, label, style, value))
+
+    if arabic:
+        shown = ", ".join(f'{page_ref(i)} ("{lab}")' for i, lab in arabic[:5])
+        more = f" และอีก {len(arabic) - 5} หน้า" if len(arabic) > 5 else ""
+        rep.add("RED", "front_matter", "ส่วนนำ",
+                f"ส่วนนำใช้เลขหน้าอารบิก {len(arabic)} หน้า: {shown}{more}",
+                "เลขหน้าส่วนนำต้องเป็นเลขโรมัน (i, ii, iii) หรือพยัญชนะไทย (ก, ข, ค)",
+                "แก้เลขหน้าส่วนนำให้เป็นเลขโรมันหรือพยัญชนะไทย", "PAGE.NUMBERING")
+
+    styles = {style for _i, _lab, style, _v in seq}
+    if len(styles) > 1:
+        rep.add("RED", "front_matter", "ส่วนนำ",
+                "ส่วนนำใช้เลขหน้าปนกัน: "
+                + " / ".join(sorted(_PAGE_LABEL_STYLE_NAME[s] for s in styles)),
+                "เลขหน้าส่วนนำต้องเป็นชนิดเดียวกันตลอดทั้งส่วน",
+                "เลือกใช้เลขโรมันหรือพยัญชนะไทยอย่างใดอย่างหนึ่งให้ตลอดส่วนนำ",
+                "PAGE.NUMBERING")
+    elif len(seq) > 1:
+        # หน้าที่อ่านเลขไม่ได้/เป็นอารบิก ถูกฟ้องแยกไปแล้ว และทำให้ยืนยันความต่อเนื่อง
+        # ข้ามหน้านั้นไม่ได้ จึงไม่ฟ้อง "กระโดด" คร่อมหน้าเหล่านี้ (กันฟ้องซ้ำ/ฟ้องผิด)
+        broken = set(unread) | {i for i, _lab in arabic}
+        problems, dup_run = [], 1
+        for k in range(1, len(seq)):
+            prev_i, prev_lab, _ps, prev_v = seq[k - 1]
+            cur_i, cur_lab, _cs, cur_v = seq[k]
+            if any(j in broken for j in range(prev_i + 1, cur_i)):
+                dup_run = 1
+                continue
+            if cur_v != prev_v:
+                dup_run = 1
+                if cur_v != prev_v + 1:
+                    problems.append(f'กระโดดจาก "{prev_lab}" ไป "{cur_lab}"')
+                continue
+            # หลายหน้าใช้เลขเดียวกัน — รวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
+            dup_run += 1
+            if k == len(seq) - 1 or seq[k + 1][3] != cur_v:
+                problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
+                dup_run = 1
+        if problems:
+            more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
+            observed = ", ".join(lab for _i, lab, _s, _v in seq)
+            rep.add("RED", "front_matter", "ส่วนนำ",
+                    "เลขหน้าส่วนนำไม่ต่อเนื่อง: " + "; ".join(problems[:5]) + more,
+                    f"เลขหน้าส่วนนำต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
+                    "แก้เลขหน้าส่วนนำให้เรียงต่อเนื่องทีละหน้า", "PAGE.NUMBERING")
+
+    if unread:
+        def _after_ref(idx):
+            for j in range(idx - 1, start_idx - 1, -1):
+                if page_labels.get(j):
+                    return f"หน้าถัดจาก{page_ref(j)}"
+            return "หน้าไม่ระบุเลข"
+        shown = ", ".join(_after_ref(i) for i in unread[:5])
+        more = f" และอีก {len(unread) - 5} หน้า" if len(unread) > 5 else ""
+        rep.add(UNCERTAIN_ZONE, "front_matter", "ส่วนนำ",
+                f"ระบบอ่านเลขหน้าส่วนนำไม่ได้ {len(unread)} หน้า: {shown}{more}",
+                "ทุกหน้าของส่วนนำต้องมีเลขหน้าโรมันหรือพยัญชนะไทย",
+                "ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง", "UNCERTAIN.REVIEW")
 
 
 def fuzzy_contains(haystack_norm, needle, threshold=FUZZY_NAME_THRESHOLD):
@@ -1812,6 +1980,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     boundaries = sorted(set(sig_pages + abs_th_pages + abs_en_pages + ack_pages + toc_pages + list_pages))
     first_chapter = body_ch[0][2] if body_ch else front_limit
 
+    # เลขหน้าส่วนนำทุกหน้า (ไม่ใช่แค่ 2 หน้าลงนาม) — ตรวจได้เมื่อรู้ว่าเนื้อหาเริ่มหน้าไหน
+    _check_front_page_numbers(rep, page_labels, page_ref,
+                              sig_pages[0] if sig_pages else 1,
+                              body_ch[0][2] if body_ch else None)
+
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
         return max(1, min(nxt) - start)
@@ -1900,7 +2073,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ---------- เทียบข้อมูลอนุมัติ ----------
     _p("เทียบข้อมูลอนุมัติ (ชื่อเรื่อง/ชื่อนักศึกษา)")
-    sig_text = "\n".join(pages[i] for i in sig_pages) if sig_pages else ""
     if approved:
         A = approved
         program_language = A.get("program_language", "")
@@ -2139,7 +2311,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 rep.add("RED", "front_matter", "หน้าปก",
                         f"พบรหัสนักศึกษา {student_id} ต่อท้าย/อยู่ใกล้ชื่อนักศึกษา",
                         "หน้าปกต้องแสดงเฉพาะชื่อ-นามสกุล โดยไม่มีรหัสนักศึกษา",
-                        "ลบรหัสนักศึกษาออกจากหน้าปก", "FORM.APPROVED_MATCH")
+                        "ลบรหัสนักศึกษาออกจากหน้าปก", "FRONT.COVER")
             else:
                 rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "pass")
 
@@ -2253,35 +2425,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         _check_degree_abbr(soft(A.get("degree_abbr_th", "")), abs_th_idx, "บทคัดย่อไทย")
 
         if A.get("exam_date"):
-            signature_location = ", ".join(page_ref(idx) for idx in sig_pages) or "หน้าไม่ระบุเลข"
-            # หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุ
-            # ศักราชคั่นระหว่างเดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569"
-            # จึงตัด พ.ศ./ค.ศ./B.E./A.D. ออกจากทั้งสองฝั่งก่อนเทียบ ไม่งั้นฟ้องผิด
-            def _date_key(text):
-                text = re.sub(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?',
-                              ' ', text, flags=re.I)
-                return norm(re.sub(r'\b0([1-9])', r'\1', text))
-            exam_found = _date_key(A["exam_date"]) in _date_key(sig_text)
-            exam_loc = f"หน้าลงนาม ({signature_location})"
-            found_date = "" if exam_found else find_signature_date(sig_text)
-            rep.add_verification("วันที่สอบผ่าน", exam_loc,
-                                 "pass" if exam_found else "fail",
-                                 found_date if found_date else "")
-            if not exam_found and found_date:
-                # มีวันที่บนหน้าลงนามแต่ วัน/เดือน/ปี ไม่ตรงกับข้อมูลในระบบ
-                rep.add("RED", "front_matter", exam_loc,
-                        f'พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "{found_date}"',
-                        f'ที่ถูกต้องตามระบบคือ "{A["exam_date"]}"',
-                        "แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
-            elif not exam_found:
-                rep.add("RED", "front_matter", exam_loc, f"ไม่พบวันที่สอบ \"{A['exam_date']}\"",
-                        "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+            _check_exam_date(rep, A["exam_date"], sig_pages, pages, page_ref)
         if A.get("year"):
-            year_found = str(A["year"]) in (pages[0] if pages else "")
-            rep.add_verification("ปีบนหน้าปก", "หน้าปก", "pass" if year_found else "fail")
-            if not year_found:
-                rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {A['year']} บนหน้าปก",
-                        "ปี = ปีที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+            _check_cover_year(rep, str(A["year"]), pages[0] if pages else "")
 
         # ---------- รายชื่อกรรมการบนหน้าลงนาม ----------
         # ถ้ามีข้อมูลกรรมการจาก eThesis → ตรวจชื่อ+ตำแหน่งตามกริดตายตัวของ template
@@ -2298,9 +2444,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             checked_committee = _check_committees(
                 rep, committees, sig_pages, pages, pdf_path, page_ref,
                 prog_lang, A, name_en, translation_ok)
-            # หน้าบทคัดย่อ: รายชื่อคณะกรรมการที่ปรึกษา + รูปแบบ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่ง)
-            _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,
-                                       pages, page_ref, name_en, translation_ok)
+        # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
+        # ของ template ล้วน จึงตรวจเสมอ ส่วนการเทียบชื่อ-ลำดับทำเมื่อมีข้อมูล eThesis
+        _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,
+                                   pages, page_ref, name_en, translation_ok)
 
         # ช่องคงที่/รายการที่ระบบยังตรวจไม่ได้ → ให้เจ้าหน้าที่ตรวจเอง
         if not checked_committee:

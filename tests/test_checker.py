@@ -25,6 +25,10 @@ from checker import (
     _report_thai_committee,
     _report_committee_positions,
     _check_abstract_committees,
+    _check_cover_year,
+    _check_exam_date,
+    _check_front_page_numbers,
+    _page_label_order,
     abstract_committee_block,
     split_abstract_committee,
     _degree_subject,
@@ -825,6 +829,144 @@ class AbstractCommitteeTests(unittest.TestCase):
         name_en = {"นริศรา จันทราทิตย์": "Narisara Chantratita"}
         reds = self._reds(self._run(committees, [0], [], pages, name_en, translation_ok=True))
         self.assertEqual(reds, [])
+
+    def test_format_rules_run_without_ethesis_data(self):
+        # กฎรูปแบบเป็นกฎของ template ล้วน ต้องตรวจได้แม้เจ้าหน้าที่ไม่ได้อัปโหลด eThesis
+        pages = ["THESIS ADVISORY COMMITTEE: Assoc. Prof. Narisara Chantratita, "
+                 "Ph.D. (Microbiology)\nABSTRACT"]
+        reds = self._reds(self._run({}, [0], [], pages))
+        self.assertTrue(any("วงเล็บ" in r for r in reds))
+        self.assertTrue(any("ตำแหน่งทางวิชาการ" in r for r in reds))
+        self.assertTrue(any("ตัวพิมพ์ใหญ่" in r for r in reds))
+
+    def test_name_order_not_compared_without_ethesis_data(self):
+        # ไม่มีข้อมูลอนุมัติ = เทียบชื่อ/ลำดับไม่ได้ ต้องไม่เดาว่าขาดหรือเกิน
+        pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
+        reds = self._reds(self._run({}, [0], [], pages))
+        self.assertEqual(reds, [])
+
+
+class FrontPageNumberTests(unittest.TestCase):
+    """เลขหน้าส่วนนำทุกหน้าต้องเป็นโรมัน/พยัญชนะไทย เรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม"""
+
+    def _run(self, labels, start=1, stop=None):
+        rep = Report()
+        page_labels = {i: lab for i, lab in enumerate(labels) if lab}
+        _check_front_page_numbers(rep, page_labels, lambda i: f"หน้า {page_labels.get(i, '?')}",
+                                  start, len(labels) if stop is None else stop)
+        return rep
+
+    def test_label_order_by_style(self):
+        self.assertEqual(_page_label_order("iii"), ("roman", 3))
+        self.assertEqual(_page_label_order("ค"), ("thai", 3))
+        self.assertEqual(_page_label_order("7"), ("arabic", 7))
+        self.assertEqual(_page_label_order(""), (None, None))
+
+    def test_clean_roman_sequence_passes(self):
+        rep = self._run(["", "i", "ii", "iii", "iv", "v"])
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_clean_thai_sequence_passes(self):
+        rep = self._run(["", "ก", "ข", "ค", "ง", "จ"])
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_duplicate_labels_reported_once(self):
+        # เล่มจริง (ไทย) ที่พบ: ค, ค, ค, ง, จ — ต้องรวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
+        rep = self._run(["", "ค", "ค", "ค", "ง", "จ"])
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn('ถูกใช้ซ้ำ 3 หน้า', reds[0])
+
+    def test_skipped_label_reported(self):
+        rep = self._run(["", "i", "ii", "v", "vi"])
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn('กระโดดจาก "ii" ไป "v"', reds[0])
+
+    def test_arabic_in_front_matter_flagged(self):
+        rep = self._run(["", "i", "ii", "3", "4"])
+        self.assertTrue(any("อารบิก" in i["found"] for i in rep.zones["RED"]))
+
+    def test_mixed_styles_flagged(self):
+        rep = self._run(["", "i", "ii", "ค", "ง"])
+        self.assertTrue(any("ปนกัน" in i["found"] for i in rep.zones["RED"]))
+
+    def test_unreadable_label_is_orange_not_red(self):
+        rep = self._run(["", "i", "ii", "", "iv"])
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertTrue(any("อ่านเลขหน้าส่วนนำไม่ได้" in i["found"]
+                            for i in rep.zones["ORANGE"]))
+
+    def test_skipped_when_body_start_unknown(self):
+        # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ
+        rep = self._run(["", "i", "ii"], stop=None)
+        rep2 = Report()
+        _check_front_page_numbers(rep2, {1: "i"}, lambda i: "หน้า i", 1, None)
+        self.assertEqual(rep2.zones["RED"], [])
+
+
+class ExamDatePerSignaturePageTests(unittest.TestCase):
+    """วันที่สอบต้องตรวจแยกทีละหน้าลงนาม ไม่ใช่รวมข้อความสองหน้าแล้วค้นครั้งเดียว"""
+
+    def _run(self, pages_text, sig_pages=(1, 2), exam_date="5 พฤษภาคม 2569"):
+        rep = Report()
+        _check_exam_date(rep, exam_date, list(sig_pages), pages_text,
+                         lambda i: f"หน้า {i}")
+        return rep
+
+    def test_correct_date_on_both_pages_passes(self):
+        page = "วันที่ 5 พฤษภาคม พ.ศ. 2569"
+        rep = self._run(["ปก", page, page])
+        self.assertEqual(rep.zones["RED"], [])
+        statuses = [c["status"] for g in rep.verification for c in g["checks"]]
+        self.assertEqual(statuses, ["pass", "pass"])
+
+    def test_wrong_date_on_second_page_is_caught(self):
+        rep = self._run(["ปก", "วันที่ 5 พฤษภาคม พ.ศ. 2569",
+                         "วันที่ 6 พฤษภาคม พ.ศ. 2569"])
+        reds = [i for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("หน้าลงนาม 2", reds[0]["location"])
+        self.assertIn("6 พฤษภาคม", reds[0]["found"])
+
+    def test_missing_date_reports_not_found(self):
+        rep = self._run(["ปก", "วันที่ 5 พฤษภาคม พ.ศ. 2569", "ไม่มีวันที่บนหน้านี้"])
+        self.assertIn("ไม่พบวันที่สอบ", rep.zones["RED"][0]["found"])
+
+    def test_no_signature_page_is_pending_not_red(self):
+        rep = self._run(["ปก"], sig_pages=())
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.verification[0]["checks"][0]["status"], "pending")
+
+
+class CoverYearLineTests(unittest.TestCase):
+    """ปีบนหน้าปกต้องอยู่ในบรรทัดปีของตัวเอง ไม่ใช่พบเลขปีที่ไหนก็ได้บนหน้า"""
+
+    def _run(self, cover, year="2569"):
+        rep = Report()
+        _check_cover_year(rep, year, cover)
+        return rep
+
+    def test_standalone_year_line_passes(self):
+        rep = self._run("ชื่อเรื่อง\nบัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล\n2569\nลิขสิทธิ์ฯ")
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_buddhist_era_prefix_allowed(self):
+        rep = self._run("ชื่อเรื่อง\nพ.ศ. 2569\nลิขสิทธิ์ฯ")
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_year_only_inside_title_is_flagged(self):
+        rep = self._run("การประเมินผลกระทบ พ.ศ. 2569 ของโครงการ\nบัณฑิตวิทยาลัย")
+        self.assertIn("ไม่ได้อยู่ในบรรทัดปีของตัวเอง", rep.zones["RED"][0]["found"])
+
+    def test_missing_year_is_flagged(self):
+        rep = self._run("ชื่อเรื่อง\nบัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
+        self.assertIn("ไม่พบปี 2569", rep.zones["RED"][0]["found"])
+
+    def test_english_cover_year(self):
+        rep = self._run("A THESIS ...\nMAHIDOL UNIVERSITY\n2026\nCOPYRIGHT", year="2026")
+        self.assertEqual(rep.zones["RED"], [])
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
