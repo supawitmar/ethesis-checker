@@ -210,6 +210,14 @@
         <div class="vl">{{ student.student_id or '-' }}</div></div>
       <div style="grid-column:1/-1;"><div class="lb" data-th="ชื่อหัวข้อ (ภาษาอังกฤษ)" data-en="Thesis title (English)">ชื่อหัวข้อ (ภาษาอังกฤษ)</div>
         <div class="vl">{{ student.title_en or '-' }}</div></div>
+      {% if student.program_language != 'international' %}
+      <div style="grid-column:1/-1;"><div class="lb" data-th="ชื่อหัวข้อ (ภาษาไทย)" data-en="Thesis title (Thai)">ชื่อหัวข้อ (ภาษาไทย)</div>
+        <div class="vl">{{ student.title_th or '-' }}</div></div>
+      {% endif %}
+      <div><div class="lb" data-th="ชื่อหลักสูตร" data-en="Program">ชื่อหลักสูตร</div>
+        <div class="vl">{{ student.program or '-' }}</div></div>
+      <div><div class="lb" data-th="วันที่สอบผ่าน" data-en="Exam pass date">วันที่สอบผ่าน</div>
+        <div class="vl">{{ student.exam_date or '-' }}</div></div>
     </div>
   </div>
 
@@ -394,6 +402,10 @@ var CATMAP = {
 };
 
 var TR = [
+  // ต้องมาก่อนคำแปลหัวข้อ "ปีบนหน้าปก" ด้านล่าง ไม่งั้นถูกแทนที่กลางประโยค
+  [/เพิ่มหรือแก้บรรทัดปีบนหน้าปกให้มีเฉพาะปี/g,
+   'Add or fix the cover year line so it contains only the year'],
+  [/^ส่วนนำ$/g, 'Front matter'],
   [/ชื่อเรื่อง \(ตาม บฑ.1\)/g, 'Thesis title (per Form บฑ.1)'],
   [/ชื่อนักศึกษา/g, 'Student name'],
   [/รหัสนักศึกษา/g, 'Student ID'],
@@ -441,6 +453,36 @@ var TR = [
   [/เลขหน้ากระโดดจาก (\d+) ไป (\d+)/g, 'Page number jumps from $1 to $2'],
   [/เลขหน้าต้องต่อเนื่อง ไม่ซ้ำ ไม่ข้าม/g, 'Page numbers must run continuously without gaps or repeats'],
   [/ช่วงเลขหน้า (\d+)→(\d+)/g, 'Page range $1→$2'],
+  // เลขหน้าส่วนนำ: เล่มอังกฤษ=โรมัน เล่มไทย=พยัญชนะ และต้องเรียงต่อเนื่อง
+  // ชื่อชนิดเลขหน้า/ชนิดเล่มต้องมาก่อน เพราะถูกใส่กลางประโยคของกฎด้านล่าง
+  [/เลขโรมัน \(i, ii, iii\) หรือพยัญชนะไทย \(ก, ข, ค\)/g,
+   'Roman numerals (i, ii, iii) or Thai letters (ก, ข, ค)'],
+  [/เลขโรมัน \(i, ii, iii\)/g, 'Roman numerals (i, ii, iii)'],
+  [/พยัญชนะไทย \(ก, ข, ค\)/g, 'Thai letters (ก, ข, ค)'],
+  [/เลขอารบิก \(1, 2, 3\)/g, 'Arabic numerals (1, 2, 3)'],
+  [/เล่มหลักสูตรไทย/g, 'a Thai-program book'],
+  [/เล่มภาษาอังกฤษ/g, 'an English-language book'],
+  [/ส่วนนำใช้(.+?) (\d+) หน้า:/g, 'Front matter uses $1 on $2 page(s):'],
+  [/เลขหน้าส่วนนำของ(.+?)ต้องเป็น(.+?) ทั้งส่วน/g,
+   'Front-matter page numbers for $1 must all be $2'],
+  [/เลขหน้าส่วนนำต้องเป็น(.+?) ทั้งส่วน/g,
+   'Front-matter page numbers must all be $1'],
+  [/แก้เลขหน้าส่วนนำให้เป็น(.+)/g, 'Renumber the front matter to $1'],
+  [/เลขหน้าส่วนนำไม่ต่อเนื่อง:/g, 'Front-matter page numbers are not continuous:'],
+  [/เลขหน้า "(.+?)" ถูกใช้ซ้ำ (\d+) หน้า/g, 'page label "$1" is used on $2 pages'],
+  [/กระโดดจาก "(.+?)" ไป "(.+?)"/g, 'jumps from "$1" to "$2"'],
+  [/เลขหน้าส่วนนำต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม \(ที่พบ: (.+?)\)/g,
+   'Front-matter page numbers must run one by one without repeats or gaps (found: $1)'],
+  [/แก้เลขหน้าส่วนนำให้เรียงต่อเนื่องทีละหน้า/g,
+   'Renumber the front matter so the pages run consecutively'],
+  [/ระบบอ่านเลขหน้าส่วนนำไม่ได้ (\d+) หน้า:/g,
+   'Could not read the page label on $1 front-matter page(s):'],
+  [/ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น(.+)/g,
+   'Every front-matter page must carry a page number in $1'],
+  [/ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง/g,
+   'Check these pages manually for correct, continuous numbering'],
+  [/หน้าถัดจากหน้า /g, 'page after page '],
+  [/ และอีก (\d+) จุด/g, ' and $1 more'],
   [/พบหน้าลงนาม (\d+) หน้า/g, 'Found $1 approval page(s)'],
   [/ต้องมี 2 หน้า \(Advisory \+ Examination\)/g, 'Must have 2 pages (Advisory + Examination)'],
   [/สารบัญมี (\d+) บท เนื้อหามี (\d+) บท/g, 'TOC lists $1 chapters but content has $2'],
@@ -464,8 +506,90 @@ var TR = [
   [/ชื่อบท "(.+?)"/g, 'Chapter title "$1"'],
   [/พบ (\d+) บท/g, 'Found $1 chapters'],
   [/หัวข้อ "(.+?)"/g, 'Heading "$1"'],
+  // ---- รายชื่อกรรมการบนหน้าลงนาม ----
+  [/หน้าอาจารย์ที่ปรึกษา/g, 'Advisory committee page'],
+  [/หน้ากรรมการสอบ/g, 'Examination committee page'],
+  [/ — ประธานหลักสูตร/g, ' — Program Chair'],
+  [/ — คณบดีคณะ/g, ' — Faculty Dean'],
+  [/ — คณบดี/g, ' — Dean'],
+  [/พบกรรมการที่มีชื่อ (\d+) คนบนหน้าลงนาม/g, 'Found $1 named committee member(s) on the approval page'],
+  [/ต้องมี (\d+) คนตามข้อมูลอนุมัติ/g, 'There must be $1 per the approved data'],
+  [/ตรวจจำนวนและตำแหน่งกรรมการให้ครบตามข้อมูลอนุมัติ/g, 'Check the committee count and positions against the approved data'],
+  [/กรรมการคนที่ (\d+): ระบบเทียบเคียง "(.+?)" ≈ "(.+?)" ในตำแหน่งนี้/g, 'Committee member $1: system matched "$2" ≈ "$3" in this position'],
+  [/กรรมการคนที่ (\d+): ระบบแปลชื่อ "(.+?)" เป็นอังกฤษไม่ได้/g, 'Committee member $1: could not translate "$2" to English'],
+  [/กรรมการคนที่ (\d+): (.+?) ไม่ตรงกับ "(.+?)" \(แปลจาก "(.+?)"\) ในตำแหน่งนี้/g, 'Committee member $1: $2 does not match "$3" (translated from "$4") in this position'],
+  [/กรรมการคนที่ (\d+): (.+?) ในตำแหน่งนี้/g, 'Committee member $1: $2 in this position'],
+  [/พบ "(.+?)"/g, 'found "$1"'],
+  [/ช่องว่าง\/ไม่มีชื่อ/g, 'empty / no name'],
+  [/ต้องเป็น "(.+?)" \(ตามลำดับ บฑ\.\)/g, 'must be "$1" (per the Form order)'],
+  [/ตำแหน่งนี้ต้องเป็นกรรมการชื่อ "(.+?)" \(ตามลำดับ บฑ\.\)/g, 'This position must be committee member "$1" (per the Form order)'],
+  [/ควรเป็น "(.+?)" \(ระบบแปลจาก "(.+?)"\)/g, 'should be "$1" (system translated from "$2")'],
+  [/ตำแหน่งนี้ควรเป็น "(.+?)"/g, 'This position should be "$1"'],
+  [/แก้ชื่อหรือตำแหน่งกรรมการให้ตรงข้อมูลอนุมัติ/g, 'Fix the committee name or position to match the approved data'],
+  [/โปรดยืนยันว่าชื่อและตำแหน่งถูกต้อง/g, 'Please confirm the name and position are correct'],
+  [/โปรดตรวจชื่อและตำแหน่งกรรมการด้วยตา/g, 'Please verify the committee name and position manually'],
+  [/โปรดตรวจชื่อกรรมการในตำแหน่งนี้ด้วยตา/g, 'Please verify the committee member in this position manually'],
+  // ---- เทียบชื่อกรรมการแบบชุด (เล่มไทย): สลับ / เรียงผิด / ขาด / เกิน ----
+  [/กรรมการครบทุกคน แต่คนที่ (\d+) \("(.+?)"\) กับ คนที่ (\d+) \("(.+?)"\) สลับตำแหน่งกัน/g, 'All committee members are present, but member $1 ("$2") and member $3 ("$4") are in swapped positions'],
+  [/ช่องที่ (\d+) ต้องเป็น "(.+?)" และช่องที่ (\d+) ต้องเป็น "(.+?)"/g, 'Position $1 must be "$2" and position $3 must be "$4"'],
+  [/สลับตำแหน่งกรรมการสองคนนี้ให้ถูกต้อง/g, 'Swap these two committee members back to the correct positions'],
+  [/กรรมการครบทุกคน แต่เรียงผิดตำแหน่ง/g, 'All committee members are present, but they are in the wrong order'],
+  [/ลำดับที่ถูกต้องตามข้อมูลอนุมัติ \(บฑ\.\) คือ /g, 'The correct order per the approved data (Form) is '],
+  [/จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ/g, 'Reorder the committee members to match the approved data order'],
+  [/ต้องมีกรรมการชื่อ "(.+?)" ตามข้อมูลอนุมัติ \(บฑ\.\)/g, 'There must be a committee member "$1" per the approved data (Form)'],
+  [/เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ/g, 'Add the missing committee member(s) to match the approved data'],
+  [/พบชื่อ "(.+?)" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ/g, 'Found the name "$1", which is not in the approved committee list'],
+  [/รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ \(บฑ\.\)/g, 'The committee names must match the approved data (Form)'],
+  [/ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ/g, 'Check the committee names against the approved data'],
+  [/พบชื่อ "(.+?)" ปรากฏซ้ำมากกว่าหนึ่งช่องในตารางลายเซ็น/g,
+   'The name "$1" appears in more than one signature cell'],
+  [/กรรมการแต่ละคนต้องมีช่องลงนามช่องเดียว/g,
+   'Each committee member must have exactly one signature cell'],
+  [/ตรวจว่าชื่อนี้ถูกพิมพ์ซ้ำในช่องอื่นหรือไม่ ถ้าซ้ำให้ลบช่องที่เกินออก/g,
+   'Check whether this name is duplicated in another cell; remove the extra cell if so'],
+  [/พบข้อความตัวอย่างของ template ค้างอยู่ในตารางลายเซ็น:/g,
+   'Template sample text is still visible in the signature table:'],
+  [/ช่องกรรมการที่ไม่ได้ใช้ต้องลบข้อความตัวอย่างออกจากไฟล์/g,
+   'Unused committee cells must have the template sample text removed'],
+  [/ตรวจว่าข้อความนี้มองเห็นบนหน้ากระดาษหรือไม่ ถ้าเห็นให้ลบออกจากช่องที่ไม่ได้ใช้/g,
+   'Check whether this text is visible on the page; if it is, delete it from the unused cells'],
+  [/ระบบแปลชื่อกรรมการเป็นอังกฤษไม่ได้ จึงเทียบชื่ออัตโนมัติไม่ได้/g, 'Could not translate the committee names to English, so automatic name-matching was skipped'],
+  [/ต้องมีกรรมการ (\d+) คนตามลำดับ บฑ\. คือ /g, 'There must be $1 committee members in the Form order: '],
+  [/โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา/g, 'Please verify the committee names and positions on this page manually'],
+  // ---- คุณวุฒิใต้ชื่อกรรมการ (ตรวจว่ามี ไม่ตรวจเนื้อหา) ----
+  [/ไม่พบคุณวุฒิใต้ชื่อกรรมการคนที่ (\d+) \("(.+?)"\)/g, 'No qualification line found under committee member $1 ("$2")'],
+  [/ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ \(Degree\)/g, 'Each committee member must have a qualification (Degree) line beneath the name'],
+  [/เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน/g, 'Add the qualification line under every committee member'],
+  [/ความถูกต้องของเนื้อหาคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ/g, 'Correctness of the qualification (Degree/Subject) text under each committee name'],
+  [/เทียบกับ บฑ\.1\/บฑ\.2 — ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจเนื้อหา/g, 'Compare against Forms บฑ.1/บฑ.2 — the system checks that a qualification line exists for everyone, but not its content'],
+  // ---- รายชื่อกรรมการที่ปรึกษาบนหน้าบทคัดย่อ ----
+  [/ — คณะกรรมการที่ปรึกษา/g, ' — Advisory committee'],
+  [/รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ/g, 'The advisory committee list contains a subject in parentheses'],
+  [/รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชาในวงเล็บ/g, "The format must be 'First name Last name, Degree' with no subject in parentheses"],
+  [/ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ/g, 'Remove the parenthesised subject from the qualification'],
+  [/ชื่อกรรมการคนที่ (\d+) มีตำแหน่งทางวิชาการนำหน้า: "(.+?)"/g, 'Committee member $1 has an academic rank before the name: "$2"'],
+  [/รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ/g, 'The format must contain only the name and qualification, with no academic rank'],
+  [/ลบตำแหน่งทางวิชาการนำหน้าชื่อออก/g, 'Remove the academic rank before the name'],
+  [/ชื่อกรรมการคนที่ (\d+) ไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด: "(.+?)"/g, 'Committee member $1 is not in all capitals: "$2"'],
+  [/ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด/g, 'Committee names in the English abstract must be in all capitals'],
+  [/แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด/g, 'Change the committee name to all capitals'],
+  [/ไม่พบกรรมการ "(.+?)" ตามข้อมูลอนุมัติ/g, 'Committee member "$1" from the approved data was not found'],
+  [/ไม่พบชื่อสาขา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'Program subject "$1" not found in the Program Chair cell (bottom-right)'],
+  [/ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา "(.+?)"/g, 'The text under the signature must be the program name containing "$1"'],
+  [/โปรดตรวจชื่อหลักสูตรมุมล่างขวาให้ถูกต้อง/g, 'Please verify the program name at the bottom-right'],
+  [/ไม่พบชื่อคณะ "(.+?)" ในช่องคณบดีคณะ \(มุมล่างขวา\)/g, 'Faculty "$1" not found in the Faculty Dean cell (bottom-right)'],
+  [/ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ "(.+?)"/g, "The text under the signature should be the student's faculty: \"$1\""],
+  [/โปรดตรวจชื่อคณะมุมล่างขวาให้ถูกต้อง/g, 'Please verify the faculty name at the bottom-right'],
+  [/คุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการแต่ละคน/g, 'Qualification (Degree/Subject) under each committee name'],
+  [/เทียบกับ บฑ\.1\/บฑ\.2 — ระบบตรวจเฉพาะชื่อ-สกุลและตำแหน่งการวาง/g, 'Compare against Forms บฑ.1/บฑ.2 — the system checks only names and placement'],
   [/เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY/g, 'Use one term only: REFERENCES or BIBLIOGRAPHY'],
+  [/ลบคำที่ไม่ใช้ออกจากสารบัญ ให้เหลือคำเดียว/g, 'Remove the unused term from the TOC, leaving one'],
   [/ลบคำที่ไม่ใช้/g, 'Remove the unused term'],
+  [/หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: "(.+?)"/g, 'The reference heading in the TOC uses multiple terms: "$1"'],
+  [/ต้องเลือกใช้คำเดียว: REFERENCES หรือ BIBLIOGRAPHY อย่างใดอย่างหนึ่ง/g, 'Choose one term only: REFERENCES or BIBLIOGRAPHY'],
+  [/สารบัญใช้คำ "(.+?)" แต่หน้าอ้างอิงจริงใช้ "(.+?)"/g, 'The TOC uses "$1" but the actual reference page uses "$2"'],
+  [/คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "(.+?)"/g, 'The TOC term must match the actual page heading: "$1"'],
+  [/แก้คำในสารบัญให้เป็น "(.+?)"/g, 'Change the TOC term to "$1"'],
   [/ไม่พบหน้ารายการอ้างอิง/g, 'References section not found'],
   [/ต้องมี REFERENCES\/BIBLIOGRAPHY เสมอ/g, 'A REFERENCES/BIBLIOGRAPHY section is required'],
   [/ไม่พบประวัติผู้วิจัย \(BIOGRAPHY\)/g, 'BIOGRAPHY section not found'],
@@ -526,6 +650,10 @@ var TR = [
   [/วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน/g, 'Approval-page date must be the exam pass date'],
   [/ไม่พบปี (\S+) บนหน้าปก/g, 'Year $1 not found on the cover'],
   [/ปี = ปีที่มีผลสอบผ่าน/g, 'Year = the exam pass year'],
+  [/พบปี (\S+) บนหน้าปกแต่ไม่ได้อยู่ในบรรทัดปีของตัวเอง:/g,
+   'Year $1 appears on the cover but not on a line of its own:'],
+  [/หน้าปกต้องมีบรรทัดที่เป็นปีเพียงอย่างเดียว เช่น "(.+?)" หรือ "(.+?)"/g,
+   'The cover must have a line containing only the year, e.g. "$1" or "$2"'],
   [/มีบทคัดย่อภาษาไทย/g, 'A Thai abstract is present'],
   [/หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น/g, 'International programs use an English abstract only'],
   [/ลบบทคัดย่อไทย/g, 'Remove the Thai abstract'],
@@ -725,6 +853,8 @@ function refreshSummary(wantAi){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
       if (wantAi) {
         if (typeof data.ai === 'string' && data.ai) { AI_TEXT = data.ai; AI_STALE = false; }
+        // ai_busy = โควตางานตรวจเต็ม (มีคนกำลังตรวจเล่มอยู่) ไม่ใช่ AI ล้มเหลว
+        else if (data.ai_busy) throw new Error('busy');
         else throw new Error('empty');
       }
       renderSummary();
@@ -740,6 +870,12 @@ function regenerateAi(){
         renderStaleBar(LANG === 'en'
           ? 'Session expired — please log in again in another tab, then press this button once more.'
           : 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดปุ่มนี้ซ้ำ (ผลตรวจในหน้านี้ยังอยู่ครบ)');
+        return;
+      }
+      if (err && err.message === 'busy'){
+        renderStaleBar(LANG === 'en'
+          ? 'The system is busy checking another document — press this button again in a minute. The exact system text below is already up to date.'
+          : 'ระบบกำลังตรวจเล่มอื่นอยู่ กรุณากดปุ่มนี้อีกครั้งในอีกสักครู่ (ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว)');
         return;
       }
       renderStaleBar(LANG === 'en'

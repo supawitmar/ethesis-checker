@@ -213,6 +213,20 @@ class WebSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("scope marker", response.text)
 
+    def test_translate_names_disabled_returns_empty(self):
+        # ไม่มี API key → คืน [] (checker จะลงส้ม "แปลไม่ได้" ให้เจ้าหน้าที่ตรวจ)
+        import llm_assist
+        self.assertEqual(llm_assist.translate_names(["นริศรา จันทราทิตย์"]), [])
+
+    def test_check_accepts_committees_json(self):
+        # ส่ง committees_json ที่พังก็ไม่ทำให้ /check ล้ม
+        form = {**FORM, "committees_json": "{ broken json", "faculty": "คณะทดสอบ"}
+        response = self.client.post(
+            "/check", data=form,
+            files={"pdf": ("readable.pdf", make_pdf(), "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 200)
+
     def test_error_page_does_not_expose_internal_details(self):
         with main.JOBS_LOCK:
             main.JOBS["error-test"] = {

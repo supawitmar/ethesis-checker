@@ -234,6 +234,95 @@ def _exam_date(value, use_english):
     return f'{int(m.group(1))} {THAI_MONTHS[m.group(2)]} {year}'
 
 
+# บทบาทกรรมการ (อยู่ท้ายบรรทัด) และคำนำหน้าวิชาการ (อยู่ต้นบรรทัด) ในหน้า eThesis
+# บรรทัดกรรมการรูปแบบ: "<เลข> <คำนำหน้า+ชื่อ-สกุล> <บทบาท> [(ผู้ทรงคุณวุฒิภายนอก)]"
+_COMMITTEE_ROLE_RE = re.compile(
+    r'\s*((?:อาจารย์ที่ปรึกษา|ประธาน|กรรมการ|ผู้ทรงคุณวุฒิ)\S*'
+    r'(?:\s*\([^)]*\))?)\s*$')
+# ตัวย่อไทย (ผศ. รศ. ศ. ดร.) บังคับต้องมีจุด ไม่งั้นจะกินอักษรตัวแรกของชื่อจริง
+# ที่ขึ้นต้นด้วย ศ เช่น "ศศิธร" -> "ศิธร" หรือ "ศิริพร" -> "ิริพร" (ข้อมูลอนุมัติเพี้ยน
+# ตั้งแต่ต้นทาง แล้วทำให้เล่มที่ถูกต้องถูกฟ้องว่าชื่อกรรมการไม่ตรง)
+_ACADEMIC_TITLE_RE = re.compile(
+    r'^\s*(?:ศาสตราจารย์|รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|ผศ\.|รศ\.|ศ\.)?'
+    r'\s*(?:ดร\.)?\s*')
+
+
+def _committee_member(line):
+    """แยกบรรทัด "<เลข> <คำนำหน้า+ชื่อ> <บทบาท>" → {'name','role'} หรือ None
+
+    ตัดเลขลำดับหน้า, บทบาทท้ายบรรทัด, และคำนำหน้าวิชาการต้นบรรทัด เหลือเฉพาะชื่อ-สกุล
+    (eThesis เลขลำดับมีช่องว่างได้ เช่น 1,2,4,5 — จึงยึด "ลำดับที่ปรากฏ" ไม่ยึดเลข)
+    """
+    m = re.match(r'^\s*\d+\s+(.*\S)\s*$', line)
+    if not m:
+        return None
+    rest = m.group(1)
+    role = ''
+    role_m = _COMMITTEE_ROLE_RE.search(rest)
+    if role_m:
+        role = re.sub(r'\s+', ' ', role_m.group(1)).strip()
+        rest = rest[:role_m.start()].strip()
+    name = _ACADEMIC_TITLE_RE.sub('', rest).strip()
+    # ชื่อคนไม่มีตัวเลข — กันบรรทัดที่ขึ้นต้นด้วยเลขแต่ไม่ใช่รายชื่อ (เช่น "1 มกราคม 2569")
+    # ถูกนับเป็นกรรมการ แล้วทำให้ระบบฟ้องว่ามีกรรมการเกินจากข้อมูลอนุมัติ
+    if not name or re.search(r'\d', name):
+        return None
+    return {'name': name, 'role': role}
+
+
+# หัวข้อถัดไปในหน้า eThesis ที่บอกว่าจบรายชื่อกรรมการแล้ว — ใช้กันไม่ให้หัวข้อพวกนี้
+# ถูกเข้าใจผิดว่าเป็นบรรทัดที่ห่อมาจากกรรมการคนก่อนหน้า
+_COMMITTEE_STOP_RE = re.compile(
+    r'^(?:กำหนดสอบ|การเปลี่ยนแปลง|คณะกรรมการ|ผลการสอบ|วันที่|หัวข้อ)')
+
+
+def _is_committee_continuation(prev_line, line):
+    """บรรทัดนี้ห่อมาจากบรรทัดกรรมการก่อนหน้าหรือไม่
+
+    บรรทัดกรรมการรูปแบบ "<เลข> <ชื่อ> <บทบาท> [(ผู้ทรงคุณวุฒิภายนอก)]" ถ้า PDF
+    ตัดบรรทัดกลางวงเล็บหรือกลางชื่อ บรรทัดต่อมาจะไม่ขึ้นต้นด้วยเลขลำดับ
+    ถ้าไม่ต่อกลับ รายชื่อจะขาดคน แล้วระบบจะฟ้องผิดว่าเล่มมีกรรมการไม่ครบ
+    """
+    if not line or re.match(r'^\s*\d', line) or _COMMITTEE_STOP_RE.match(line):
+        return False
+    if prev_line.count('(') > prev_line.count(')'):
+        return True                                  # วงเล็บยังไม่ปิด
+    # ชื่อห่อบรรทัด: บรรทัดก่อนยังไม่มีบทบาท แต่บรรทัดนี้ลงท้ายด้วยบทบาท
+    return bool(_COMMITTEE_ROLE_RE.search(line)) and not _COMMITTEE_ROLE_RE.search(prev_line)
+
+
+def parse_committees(lines):
+    """ดึงคณะกรรมการที่ปรึกษาและกรรมการสอบจากหน้า eThesis เรียงตามที่ปรากฏ
+
+    คืน {'advisory': [{'name','role'}...], 'exam': [...]}
+    """
+    result = {'advisory': [], 'exam': []}
+    target, raw = None, []      # raw = บรรทัดดิบของกรรมการคนล่าสุด (ไว้ต่อบรรทัดที่ห่อ)
+    for line in lines:
+        if line.startswith('คณะกรรมการที่ปรึกษา'):
+            target, raw = 'advisory', []
+            continue
+        if line.startswith('คณะกรรมการสอบ'):
+            target, raw = 'exam', []
+            continue
+        if target is None:
+            continue
+        member = _committee_member(line)
+        if member:
+            result[target].append(member)
+            raw = [line]
+            continue
+        if raw and _is_committee_continuation(raw[-1], line):
+            merged = _committee_member(' '.join(raw + [line]))
+            if merged:
+                result[target][-1] = merged
+                raw.append(line)
+                continue
+        if result[target]:
+            target, raw = None, []   # จบลิสต์เมื่อพ้นบรรทัดของกรรมการ
+    return result
+
+
 def _detect_format(pdf):
     """หารูปแบบที่ถูกเลือกในแถว 'ล่าสุด'
 
@@ -319,6 +408,15 @@ def parse_ethesis_pdf(pdf_path):
 
     course = _find(lines, 'หลักสูตร')[0]
     writing = _find(lines, 'ภาษาที่เขียน')[0]
+    if course:
+        # ตัดรหัสหลักสูตรท้าย เช่น " [4801D02G]" ออก เหลือชื่อหลักสูตร
+        data['program'] = re.sub(r'\s*\[[^\]]*\]\s*$', '', course).strip()
+    faculty = _find(lines, 'คณะ')[0]   # _find กันชนกับ "คณะกรรมการ..." ด้วย guard อยู่แล้ว
+    if faculty and not faculty.startswith('กรรมการ'):
+        data['faculty'] = faculty.strip()
+    committees = parse_committees(lines)
+    if committees['advisory'] or committees['exam']:
+        data['committees'] = committees
     if re.search(r'นานาชาติ', course):
         data['program_language'] = 'international'
     elif re.search(r'อังกฤษ|english', writing, re.I):
