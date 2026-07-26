@@ -290,6 +290,7 @@ async def check(
     exam_date: str = Form(""),
     year: str = Form(""),
     faculty: str = Form(""),
+    program: str = Form(""),
     committees_json: str = Form(""),
     chapters_mode: str = Form("strict"),
 ):
@@ -328,6 +329,9 @@ async def check(
     }
     if faculty.strip():
         approved["faculty"] = faculty.strip()
+    # ชื่อหลักสูตร: ไม่ได้ใช้ตรวจ แต่แสดงบนหัวรายงานให้เจ้าหน้าที่อ้างอิงได้
+    if program.strip():
+        approved["program"] = program.strip()
     # committees_json = ข้อมูลกรรมการที่ดึงจาก eThesis (แปลงเป็น JSON ในฟอร์ม) — กันพัง
     if committees_json.strip():
         try:

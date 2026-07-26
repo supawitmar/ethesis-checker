@@ -195,6 +195,8 @@
     </div>
 
     <input type="hidden" name="faculty" id="faculty-field">
+    <!-- ชื่อหลักสูตรจาก eThesis — ไม่ได้ใช้ตรวจ แต่แสดงบนหัวรายงานให้เจ้าหน้าที่อ้างอิง -->
+    <input type="hidden" name="program" id="program-field">
     <input type="hidden" name="committees_json" id="committees-json">
     <div id="committee-box" class="committee-box" style="display:none;">
       <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจตำแหน่งบนหน้าลงนาม — แก้ไขไม่ได้ตรงนี้)</div>
@@ -380,6 +382,13 @@ function parseEthesisText(source, sourceHtml='') {
   else if (/อังกฤษ|english/i.test(writingLanguage)) data.program_language = 'thai_english';
   else if (/ไทย|thai/i.test(writingLanguage)) data.program_language = 'thai';
 
+  // ชื่อหลักสูตร (ตัดรหัสท้าย เช่น " [4801D02G]") — แสดงบนหัวรายงาน
+  // และชื่อคณะ — ใช้ตรวจช่องคณบดีคณะบนหน้ากรรมการสอบ
+  // (เดิมวิธี "วางข้อความ" ไม่ได้เก็บสองค่านี้ การตรวจชื่อคณะจึงไม่ทำงาน)
+  if (course) data.program = course.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+  const facultyLine = findLine('คณะ').value;
+  if (facultyLine && !/^กรรมการ/.test(facultyLine)) data.faculty = facultyLine.trim();
+
   const degree = findLine('ชื่อปริญญา');
   if (degree.index >= 0) {
     const candidates = [];
@@ -443,7 +452,8 @@ const IMPORT_LABELS = {
   degree_cover_en:'ชื่อปริญญาหน้าปก (อังกฤษ)', degree_cover_th:'ชื่อปริญญาหน้าปก (ไทย)',
   degree_sig_en:'ชื่อปริญญาหน้าลงนาม (อังกฤษ)', degree_sig_th:'ชื่อปริญญาหน้าลงนาม (ไทย)',
   degree_abbr_en:'ตัวย่อในบทคัดย่อ (อังกฤษ)', degree_abbr_th:'ตัวย่อในบทคัดย่อ (ไทย)',
-  exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก'
+  exam_date:'วันที่สอบผ่าน', year:'ปีบนหน้าปก',
+  faculty:'คณะ', program:'ชื่อหลักสูตร'
 };
 
 // เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
