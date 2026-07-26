@@ -633,6 +633,36 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertIsNone(members.get(9))       # placeholder ซ้าย
         self.assertIn("Program Director", br)
 
+    def test_last_dotted_row_is_never_a_member(self):
+        # แถวเส้นประสุดท้าย = ช่องสถาบัน แม้จะอ่านเส้นประเจอไม่ครบ 6 แถวก็ต้องไม่ถูกนับ
+        rows = [
+            ("Candidate,", "A One,"),
+            ("B Nine,", "B Two,"),
+            ("ศาสตราจารย์ ฉัตรเฉลิม อิศรางกูร ณ อยุธยา,", "พรรณชฎา ศิริวรรณบุศย์,"),  # แถวคณบดี
+        ]
+        page = self._Page(842, 595, self._dot_then_names(rows))
+        members, _quals, bl, br = signature_committee_slots(page)
+        self.assertEqual(members.get(1), "A One")
+        self.assertEqual(members.get(2), "B Two")
+        found = [v for v in members.values() if v]
+        self.assertNotIn("ฉัตรเฉลิม อิศรางกูร ณ อยุธยา", found)
+        self.assertNotIn("พรรณชฎา ศิริวรรณบุศย์", found)
+
+    def test_white_filled_text_is_not_read_as_a_member(self):
+        # เล่มจริงพบชั้นข้อความเก่าถมขาวทับกัน ถ้าอ่านรวมจะได้ชื่อกรรมการซ้ำ/ผิดช่อง
+        words = self._dot_then_names([
+            ("Candidate,", "A One,"),
+            ("", "B Two,"),
+            ("Dean", "Program Director"),
+        ])
+        for w in words:
+            w.setdefault("non_stroking_color", (0, 0, 0))
+        words += [{"text": "Ghost", "top": 173, "x0": 60, "non_stroking_color": (1, 1, 1)},
+                  {"text": "Member,", "top": 173, "x0": 90, "non_stroking_color": (1, 1, 1)}]
+        page = self._Page(842, 595, words)
+        members, _quals, _bl, _br = signature_committee_slots(page)
+        self.assertNotIn("Ghost Member", [v for v in members.values() if v])
+
     def test_qualification_presence_detected_per_member(self):
         rows = [
             ("Candidate,", "A One,", "", "Ph.D."),                 # m1 มีคุณวุฒิ

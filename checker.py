@@ -237,7 +237,14 @@ def signature_committee_slots(pdf_page):
       member_quals = dict{ลำดับกรรมการ 1..9 → ข้อความคุณวุฒิใต้ชื่อ ('' ถ้าไม่มี/placeholder)}
       bottom_left/right = ข้อความรวมช่องล่างสุด (คณบดี / ผู้อำนวยการหลักสูตร) ไว้ตรวจคณะ/หลักสูตร
     """
-    words = pdf_page.extract_words() or []
+    try:
+        words = pdf_page.extract_words(extra_attrs=["non_stroking_color"]) or []
+    except Exception:
+        words = pdf_page.extract_words() or []
+    # ข้อความที่ถมขาวไว้ (มองไม่เห็นบนหน้ากระดาษ) ต้องไม่นับเป็นเนื้อหาของช่อง
+    # เล่มจริงพบว่ามีข้อความชั้นเก่าถมขาวทับซ้อนอยู่ ถ้าอ่านรวมจะได้ชื่อกรรมการ
+    # ซ้ำหรือไปโผล่ผิดช่อง แล้วฟ้องผิดว่ามีคนเกิน/ชื่อซ้ำ
+    words = [w for w in words if not _is_white_fill(w.get("non_stroking_color"))]
     if not words:
         return {}, {}, '', ''
     mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
@@ -266,7 +273,11 @@ def signature_committee_slots(pdf_page):
         return ' '.join(toks).strip()
 
     members, member_quals = {}, {}
-    for idx, (nrow, qrow) in enumerate(zip(name_rows[:5], qual_rows[:5])):  # 0..4 = ระดับกรรมการ
+    # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
+    # (เดิมตัดด้วย [:5] ซึ่งพึ่งว่าต้องอ่านเส้นประเจอครบ 6 แถวพอดี ถ้าเจอไม่ครบ
+    #  แถวคณบดีจะเลื่อนเข้ามาเป็นกรรมการ แล้วฟ้องว่ามีชื่อนอกรายชื่ออนุมัติ)
+    member_rows = list(zip(name_rows, qual_rows))[:-1][:5]
+    for idx, (nrow, qrow) in enumerate(member_rows):     # 0..4 = ระดับกรรมการ
         members[idx + 1] = _sig_clean_name(cell(nrow, left=False))   # ขวา → 1..5
         member_quals[idx + 1] = _sig_qual_text(cell(qrow, left=False))
         if idx >= 1:
