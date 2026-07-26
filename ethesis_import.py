@@ -270,27 +270,56 @@ def _committee_member(line):
     return {'name': name, 'role': role}
 
 
+# หัวข้อถัดไปในหน้า eThesis ที่บอกว่าจบรายชื่อกรรมการแล้ว — ใช้กันไม่ให้หัวข้อพวกนี้
+# ถูกเข้าใจผิดว่าเป็นบรรทัดที่ห่อมาจากกรรมการคนก่อนหน้า
+_COMMITTEE_STOP_RE = re.compile(
+    r'^(?:กำหนดสอบ|การเปลี่ยนแปลง|คณะกรรมการ|ผลการสอบ|วันที่|หัวข้อ)')
+
+
+def _is_committee_continuation(prev_line, line):
+    """บรรทัดนี้ห่อมาจากบรรทัดกรรมการก่อนหน้าหรือไม่
+
+    บรรทัดกรรมการรูปแบบ "<เลข> <ชื่อ> <บทบาท> [(ผู้ทรงคุณวุฒิภายนอก)]" ถ้า PDF
+    ตัดบรรทัดกลางวงเล็บหรือกลางชื่อ บรรทัดต่อมาจะไม่ขึ้นต้นด้วยเลขลำดับ
+    ถ้าไม่ต่อกลับ รายชื่อจะขาดคน แล้วระบบจะฟ้องผิดว่าเล่มมีกรรมการไม่ครบ
+    """
+    if not line or re.match(r'^\s*\d', line) or _COMMITTEE_STOP_RE.match(line):
+        return False
+    if prev_line.count('(') > prev_line.count(')'):
+        return True                                  # วงเล็บยังไม่ปิด
+    # ชื่อห่อบรรทัด: บรรทัดก่อนยังไม่มีบทบาท แต่บรรทัดนี้ลงท้ายด้วยบทบาท
+    return bool(_COMMITTEE_ROLE_RE.search(line)) and not _COMMITTEE_ROLE_RE.search(prev_line)
+
+
 def parse_committees(lines):
     """ดึงคณะกรรมการที่ปรึกษาและกรรมการสอบจากหน้า eThesis เรียงตามที่ปรากฏ
 
     คืน {'advisory': [{'name','role'}...], 'exam': [...]}
     """
     result = {'advisory': [], 'exam': []}
-    target = None
+    target, raw = None, []      # raw = บรรทัดดิบของกรรมการคนล่าสุด (ไว้ต่อบรรทัดที่ห่อ)
     for line in lines:
         if line.startswith('คณะกรรมการที่ปรึกษา'):
-            target = 'advisory'
+            target, raw = 'advisory', []
             continue
         if line.startswith('คณะกรรมการสอบ'):
-            target = 'exam'
+            target, raw = 'exam', []
             continue
         if target is None:
             continue
         member = _committee_member(line)
         if member:
             result[target].append(member)
-        elif not re.match(r'^\s*\d+\s', line) and result[target]:
-            target = None   # จบลิสต์เมื่อพ้นบรรทัดที่ขึ้นต้นด้วยเลข
+            raw = [line]
+            continue
+        if raw and _is_committee_continuation(raw[-1], line):
+            merged = _committee_member(' '.join(raw + [line]))
+            if merged:
+                result[target][-1] = merged
+                raw.append(line)
+                continue
+        if result[target]:
+            target, raw = None, []   # จบลิสต์เมื่อพ้นบรรทัดของกรรมการ
     return result
 
 

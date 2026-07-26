@@ -845,6 +845,8 @@ function refreshSummary(wantAi){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
       if (wantAi) {
         if (typeof data.ai === 'string' && data.ai) { AI_TEXT = data.ai; AI_STALE = false; }
+        // ai_busy = โควตางานตรวจเต็ม (มีคนกำลังตรวจเล่มอยู่) ไม่ใช่ AI ล้มเหลว
+        else if (data.ai_busy) throw new Error('busy');
         else throw new Error('empty');
       }
       renderSummary();
@@ -860,6 +862,12 @@ function regenerateAi(){
         renderStaleBar(LANG === 'en'
           ? 'Session expired — please log in again in another tab, then press this button once more.'
           : 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดปุ่มนี้ซ้ำ (ผลตรวจในหน้านี้ยังอยู่ครบ)');
+        return;
+      }
+      if (err && err.message === 'busy'){
+        renderStaleBar(LANG === 'en'
+          ? 'The system is busy checking another document — press this button again in a minute. The exact system text below is already up to date.'
+          : 'ระบบกำลังตรวจเล่มอื่นอยู่ กรุณากดปุ่มนี้อีกครั้งในอีกสักครู่ (ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว)');
         return;
       }
       renderStaleBar(LANG === 'en'
