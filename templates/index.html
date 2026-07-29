@@ -33,8 +33,12 @@
        padding:11px 14px; margin-top:10px; }
   .committee-head { font-size:.82rem; color:#2c3e50; margin-bottom:7px; }
   .committee-summary { display:flex; flex-wrap:wrap; gap:18px; }
-  .committee-list { font-size:.82rem; color:#3d5060; line-height:1.6; }
+  .committee-list { font-size:.82rem; color:#3d5060; line-height:1.6; min-width:230px; flex:1 1 300px; }
   .committee-list b { color:var(--navy); }
+  .cm-row { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:6px; }
+  .cm-no { width:15px; color:#8894a0; flex:none; }
+  .cm-th { flex:0 1 auto; min-width:0; color:var(--navy); font-weight:600; }
+  .cm-role { flex:1 1 auto; font-size:.72rem; color:#8894a0; }
   .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:10px; padding:0;
        overflow:hidden; }
   .import-box textarea { min-height:110px; }
@@ -199,7 +203,9 @@
     <input type="hidden" name="program" id="program-field">
     <input type="hidden" name="committees_json" id="committees-json">
     <div id="committee-box" class="committee-box" style="display:none;">
-      <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจตำแหน่งบนหน้าลงนาม — แก้ไขไม่ได้ตรงนี้)</div>
+      <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
+        <span style="color:#8894a0;">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
+        เล่มภาษาอังกฤษระบบจะถอดชื่อเป็นอังกฤษให้เองตอนตรวจ</span></div>
       <div id="committee-summary" class="committee-summary"></div>
     </div>
 
@@ -457,23 +463,34 @@ const IMPORT_LABELS = {
 };
 
 // เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
+// รายชื่อกรรมการมาจากไฟล์ eThesis เท่านั้น — แสดงอย่างเดียว แก้ไม่ได้ (เป็นข้อมูลอนุมัติ)
+// เล่มภาษาอังกฤษ: ระบบถอดชื่อไทยเป็นอังกฤษด้วย AI ตอนตรวจ ไม่ให้เจ้าหน้าที่คีย์เอง
+function escapeHtml(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function renderCommitteeSummary(committees) {
   const box = document.getElementById('committee-box');
   const out = document.getElementById('committee-summary');
   if (!box || !out) return;
   function list(title, arr) {
     if (!arr || !arr.length) return '';
-    const items = arr.map((m, i) => `${i + 1}. ${m.name}${m.role ? ' — ' + m.role : ''}`).join('<br>');
-    return `<div class="committee-list"><b>${title}</b><br>${items}</div>`;
+    const rows = arr.map((m, i) => `
+      <div class="cm-row"><span class="cm-no">${i + 1}.</span>
+        <span class="cm-th">${escapeHtml(m.name)}</span>
+        <span class="cm-role">${escapeHtml(m.role || '')}</span></div>`).join('');
+    return `<div class="committee-list"><b>${title}</b>${rows}</div>`;
   }
-  out.innerHTML = list('อาจารย์ที่ปรึกษา', committees.advisory) + list('กรรมการสอบ', committees.exam);
+  out.innerHTML = list('อาจารย์ที่ปรึกษา', committees.advisory)
+                + list('กรรมการสอบ', committees.exam);
   box.style.display = '';
 }
 
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
   const filled = [];
-  // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงสรุปให้เจ้าหน้าที่เห็น
+  // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
     const cj = document.getElementById('committees-json');
     if (cj) cj.value = JSON.stringify(parsed.committees);
