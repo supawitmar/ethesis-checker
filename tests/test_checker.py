@@ -1,6 +1,8 @@
+import sys
 import unittest
 
 from checker import (
+    _COMMITTEE_TRANSLATE_MSG,
     NOT_CHECKED,
     N_APPENDIX,
     Report,
@@ -946,24 +948,43 @@ class SignaturePageKindTests(unittest.TestCase):
 
 
 class CommitteeEnglishNameSourceTests(unittest.TestCase):
-    """ชื่ออังกฤษของกรรมการ: ใช้ที่เจ้าหน้าที่กรอกก่อน ไม่ต้องพึ่ง AI แปล"""
+    """ชื่ออังกฤษของกรรมการมาจาก AI ถอดชื่อไทยเท่านั้น (ไฟล์ eThesis ไม่มีชื่ออังกฤษ)"""
 
-    def test_typed_names_are_used_without_ai(self):
-        committees = {"advisory": [{"name": "ก ข", "name_en": "A B"}],
-                      "exam": [{"name": "ค ง", "name_en": "C D"}]}
-        name_en, ok = _committee_translation(committees)
-        self.assertTrue(ok)
-        self.assertEqual(name_en, {"ก ข": "A B", "ค ง": "C D"})
-
-    def test_missing_typed_name_without_ai_is_not_usable(self):
-        # ไม่มี API key ในเครื่อง -> translate_names คืน [] -> เทียบอัตโนมัติไม่ได้
-        committees = {"advisory": [{"name": "ก ข", "name_en": "A B"}, {"name": "ค ง"}]}
-        name_en, ok = _committee_translation(committees)
+    def test_no_api_key_reports_reason(self):
+        # ไม่ได้ตั้ง ANTHROPIC_API_KEY = ปัญหาการติดตั้ง ต้องบอกให้ตรงจุด ไม่ใช่โทษเล่ม
+        committees = {"advisory": [{"name": "ก ข"}], "exam": [{"name": "ค ง"}]}
+        name_en, ok, reason = _committee_translation(committees)
         self.assertFalse(ok)
-        self.assertEqual(name_en, {"ก ข": "A B"})
+        self.assertEqual(name_en, {})
+        self.assertEqual(reason, "no_key")
+        self.assertIn("ANTHROPIC_API_KEY", _COMMITTEE_TRANSLATE_MSG[reason])
 
     def test_no_committees_is_not_usable(self):
-        self.assertEqual(_committee_translation({}), ({}, False))
+        self.assertEqual(_committee_translation({}), ({}, False, ""))
+
+    def test_duplicate_names_are_translated_once(self):
+        committees = {"advisory": [{"name": "ก ข"}],
+                      "exam": [{"name": "ก ข"}, {"name": "ค ง"}]}
+        captured = {}
+
+        class _Stub:
+            @staticmethod
+            def enabled():
+                return True
+
+            @staticmethod
+            def translate_names(names):
+                captured["names"] = list(names)
+                return ["A B", "C D"]
+
+        sys.modules["llm_assist"] = _Stub
+        try:
+            name_en, ok, reason = _committee_translation(committees)
+        finally:
+            sys.modules.pop("llm_assist", None)
+        self.assertTrue(ok)
+        self.assertEqual(captured["names"], ["ก ข", "ค ง"])   # ไม่ส่งชื่อซ้ำไปแปล
+        self.assertEqual(name_en, {"ก ข": "A B", "ค ง": "C D"})
 
 
 class SignatureInstitutionCellTests(unittest.TestCase):

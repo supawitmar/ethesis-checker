@@ -473,6 +473,11 @@ def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
                 "จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
+_COMMITTEE_TRANSLATE_MSG = {
+    "no_key": "ระบบยังไม่ได้เปิดใช้ AI (ANTHROPIC_API_KEY) จึงถอดชื่อกรรมการเป็นอังกฤษไม่ได้",
+    "failed": "ระบบถอดชื่อกรรมการเป็นอังกฤษไม่สำเร็จ จึงเทียบชื่ออัตโนมัติไม่ได้",
+}
+
 _SIG_LABEL_KIND = {'i': 'advisory', 'ii': 'exam',
                    norm('ก'): 'advisory', norm('ข'): 'exam'}
 
@@ -489,36 +494,28 @@ def signature_page_kind(page_label, page_text):
 
 
 def _committee_translation(committees):
-    """ชื่อกรรมการภาษาอังกฤษสำหรับเทียบเล่มอังกฤษ คืน (name_en dict, usable bool)
+    """ชื่อกรรมการภาษาอังกฤษสำหรับเทียบเล่มอังกฤษ คืน (name_en dict, usable, reason)
 
-    ลำดับความสำคัญ
-      1. ชื่ออังกฤษที่ "เจ้าหน้าที่กรอกในฟอร์ม" (`name_en`) — เชื่อถือได้ ตรวจซ้ำได้ผลเดิม
-      2. คำแปลจาก AI เฉพาะคนที่ยังไม่ได้กรอก (ต้องมี ANTHROPIC_API_KEY)
-    ได้ไม่ครบทุกคน = usable False → ระบบไม่เทียบชื่อเอง แต่ลงส้มให้เจ้าหน้าที่ตรวจ
+    ไฟล์ eThesis มีแต่ชื่อไทย (ตรวจแล้วทั้ง 3 ไฟล์ตัวอย่าง — ภาษาอังกฤษมีเฉพาะ
+    ชื่อนักศึกษา/ชื่อปริญญา/ชื่อเรื่อง) เล่มภาษาอังกฤษจึงต้องให้ AI ถอดชื่อไทยให้
+    ถอดไม่ครบทุกคน = usable False → ไม่เทียบชื่อเอง ลงส้มให้เจ้าหน้าที่ตรวจ
+    reason อธิบายสาเหตุ ('no_key' | 'failed' | '') เพื่อบอกเจ้าหน้าที่ให้ตรงจุด
     ใช้ร่วมกันทั้งหน้าลงนามและหน้าบทคัดย่อ
     """
-    members = [m for key in ("advisory", "exam") for m in committees.get(key, [])]
-    if not members:
-        return {}, False
-    name_en, missing = {}, []
-    for member in members:
-        typed = str(member.get("name_en") or "").strip()
-        if typed:
-            name_en[member["name"]] = typed
-        elif member["name"] not in name_en:
-            missing.append(member["name"])
-    missing = [n for n in dict.fromkeys(missing) if n not in name_en]
-    if not missing:
-        return name_en, True
+    names = list(dict.fromkeys(m["name"] for key in ("advisory", "exam")
+                               for m in committees.get(key, []) if m.get("name")))
+    if not names:
+        return {}, False, ""
     try:
         import llm_assist
-        translated = llm_assist.translate_names(missing)
+        if not llm_assist.enabled():
+            return {}, False, "no_key"
+        translated = llm_assist.translate_names(names)
     except Exception:
-        translated = []
-    if len(translated) == len(missing) and all(str(t).strip() for t in translated):
-        name_en.update(dict(zip(missing, translated)))
-        return name_en, True
-    return name_en, False
+        return {}, False, "failed"
+    if len(translated) == len(names) and all(str(t).strip() for t in translated):
+        return dict(zip(names, translated)), True, ""
+    return {}, False, "failed"
 
 
 def _is_white_fill(color):
@@ -599,7 +596,8 @@ def _report_sig_placeholders(rep, found, loc):
 
 
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
-                      program_language, A, name_en, translation_ok, page_labels=None):
+                      program_language, A, name_en, translation_ok, page_labels=None,
+                      translate_reason=""):
     """ตรวจรายชื่อ+คุณวุฒิกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
 
     หน้าไหนเป็นของใครยึดเลขหน้าก่อน (i/ก = ที่ปรึกษา, ii/ข = กรรมการสอบ)
@@ -647,12 +645,13 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
             expected_en = [name_en[m["name"]] for m in expected]
             _report_committee_positions(rep, expected_en, members, loc, fuzzy=True)
         else:
-            # เล่มอังกฤษ + ไม่มีชื่ออังกฤษให้เทียบ: ลงส้มให้เจ้าหน้าที่ตรวจเอง
-            # (เจ้าหน้าที่กรอกชื่ออังกฤษของกรรมการในฟอร์มได้ แล้วระบบจะเทียบให้อัตโนมัติ)
+            # เล่มอังกฤษ + ถอดชื่อไม่ได้: ลงส้มให้เจ้าหน้าที่ตรวจเอง พร้อมบอกสาเหตุ
+            # ให้ตรงจุด (ไม่ได้ตั้ง API key = ปัญหาการติดตั้ง ไม่ใช่ปัญหาของเล่ม)
             names_th = "  ".join(f'{k}. {m["name"]}'
                                  for k, m in enumerate(expected, start=1))
             rep.add("ORANGE", "front_matter", loc,
-                    "ยังไม่มีชื่อกรรมการภาษาอังกฤษให้เทียบ จึงตรวจชื่ออัตโนมัติไม่ได้",
+                    _COMMITTEE_TRANSLATE_MSG.get(translate_reason,
+                                                 _COMMITTEE_TRANSLATE_MSG["failed"]),
                     f"ต้องมีกรรมการ {len(expected)} คนตามลำดับ บฑ. คือ {names_th}",
                     "โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE")
 
@@ -2589,15 +2588,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         committees = A.get("committees") or {}
         prog_lang = A.get("program_language", "")
         english_book = prog_lang in ("international", "thai_english")
-        # แปลชื่อกรรมการครั้งเดียว ใช้ทั้งหน้าลงนามและหน้าบทคัดย่อ (เล่ม/บทคัดย่ออังกฤษ)
-        name_en, translation_ok = ({}, False)
+        # ถอดชื่อกรรมการเป็นอังกฤษครั้งเดียว ใช้ทั้งหน้าลงนามและหน้าบทคัดย่อ
+        name_en, translation_ok, translate_reason = ({}, False, "")
         if committees and (english_book or abs_en_pages):
-            name_en, translation_ok = _committee_translation(committees)
+            name_en, translation_ok, translate_reason = _committee_translation(committees)
         checked_committee = False
         if committees.get("advisory") or committees.get("exam"):
             checked_committee = _check_committees(
                 rep, committees, sig_pages, pages, pdf_path, page_ref,
-                prog_lang, A, name_en, translation_ok, page_labels)
+                prog_lang, A, name_en, translation_ok, page_labels, translate_reason)
         # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
         # ของ template ล้วน จึงตรวจเสมอ ส่วนการเทียบชื่อ-ลำดับทำเมื่อมีข้อมูล eThesis
         _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,

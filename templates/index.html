@@ -37,11 +37,8 @@
   .committee-list b { color:var(--navy); }
   .cm-row { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:6px; }
   .cm-no { width:15px; color:#8894a0; flex:none; }
-  .cm-row input { flex:1 1 120px; min-width:0; padding:5px 7px; font-size:.8rem; font-family:inherit;
-       border:1px solid #cbd9e6; border-radius:6px; background:#fff; }
-  .cm-row input:focus { outline:2px solid var(--navy); outline-offset:-1px; }
-  .cm-en:placeholder-shown { background:#fffaf0; border-color:#e7cf9e; }
-  .cm-role { flex:1 0 100%; padding-left:20px; font-size:.72rem; color:#8894a0; }
+  .cm-th { flex:0 1 auto; min-width:0; color:var(--navy); font-weight:600; }
+  .cm-role { flex:1 1 auto; font-size:.72rem; color:#8894a0; }
   .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:10px; padding:0;
        overflow:hidden; }
   .import-box textarea { min-height:110px; }
@@ -207,8 +204,8 @@
     <input type="hidden" name="committees_json" id="committees-json">
     <div id="committee-box" class="committee-box" style="display:none;">
       <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
-        <span style="color:#8894a0;">แก้ชื่อไทยได้ และ<b>กรอกชื่ออังกฤษ</b> (ช่องพื้นเหลือง) ให้ครบ
-        ถ้าเล่มเป็นภาษาอังกฤษ — ไม่กรอกระบบจะเทียบชื่อบนหน้าลงนามให้ไม่ได้</span></div>
+        <span style="color:#8894a0;">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
+        เล่มภาษาอังกฤษระบบจะถอดชื่อเป็นอังกฤษให้เองตอนตรวจ</span></div>
       <div id="committee-summary" class="committee-summary"></div>
     </div>
 
@@ -466,68 +463,37 @@ const IMPORT_LABELS = {
 };
 
 // เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
-// รายชื่อกรรมการเป็น "แบบฟอร์ม" — ชื่อไทยจาก eThesis (แก้ได้) คู่กับชื่ออังกฤษที่
-// เจ้าหน้าที่กรอกเอง เล่มภาษาอังกฤษจะได้เทียบชื่อบนหน้าลงนามได้โดยไม่ต้องพึ่ง AI แปล
-let COMMITTEES = {advisory: [], exam: []};
-
+// รายชื่อกรรมการมาจากไฟล์ eThesis เท่านั้น — แสดงอย่างเดียว แก้ไม่ได้ (เป็นข้อมูลอนุมัติ)
+// เล่มภาษาอังกฤษ: ระบบถอดชื่อไทยเป็นอังกฤษด้วย AI ตอนตรวจ ไม่ให้เจ้าหน้าที่คีย์เอง
 function escapeHtml(text) {
   return String(text == null ? '' : text)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function syncCommitteesJson() {
-  const field = document.getElementById('committees-json');
-  if (!field) return;
-  const clean = {};
-  ['advisory', 'exam'].forEach(function(key){
-    clean[key] = (COMMITTEES[key] || [])
-      .map(m => ({name: (m.name || '').trim(), role: m.role || '',
-                  name_en: (m.name_en || '').trim()}))
-      .filter(m => m.name);
-  });
-  field.value = (clean.advisory.length || clean.exam.length) ? JSON.stringify(clean) : '';
 }
 
 function renderCommitteeSummary(committees) {
   const box = document.getElementById('committee-box');
   const out = document.getElementById('committee-summary');
   if (!box || !out) return;
-  COMMITTEES = {advisory: (committees.advisory || []).map(m => Object.assign({}, m)),
-                exam: (committees.exam || []).map(m => Object.assign({}, m))};
-  function list(title, key) {
-    const arr = COMMITTEES[key] || [];
-    if (!arr.length) return '';
+  function list(title, arr) {
+    if (!arr || !arr.length) return '';
     const rows = arr.map((m, i) => `
-      <div class="cm-row">
-        <span class="cm-no">${i + 1}.</span>
-        <input class="cm-th" data-key="${key}" data-i="${i}" data-fld="name"
-               value="${escapeHtml(m.name)}" aria-label="ชื่อไทย คนที่ ${i + 1}">
-        <input class="cm-en" data-key="${key}" data-i="${i}" data-fld="name_en"
-               value="${escapeHtml(m.name_en || '')}" placeholder="ชื่อภาษาอังกฤษ"
-               aria-label="ชื่ออังกฤษ คนที่ ${i + 1}">
-        <span class="cm-role">${escapeHtml(m.role || '')}</span>
-      </div>`).join('');
+      <div class="cm-row"><span class="cm-no">${i + 1}.</span>
+        <span class="cm-th">${escapeHtml(m.name)}</span>
+        <span class="cm-role">${escapeHtml(m.role || '')}</span></div>`).join('');
     return `<div class="committee-list"><b>${title}</b>${rows}</div>`;
   }
-  out.innerHTML = list('อาจารย์ที่ปรึกษา', 'advisory') + list('กรรมการสอบ', 'exam');
-  out.querySelectorAll('input[data-key]').forEach(function(input){
-    input.addEventListener('input', function(){
-      const list = COMMITTEES[input.dataset.key];
-      if (list && list[input.dataset.i]) {
-        list[input.dataset.i][input.dataset.fld] = input.value;
-        syncCommitteesJson();
-      }
-    });
-  });
-  syncCommitteesJson();
+  out.innerHTML = list('อาจารย์ที่ปรึกษา', committees.advisory)
+                + list('กรรมการสอบ', committees.exam);
   box.style.display = '';
 }
 
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
   const filled = [];
-  // committees เป็น object — แสดงเป็นแบบฟอร์มให้แก้ได้ แล้ว sync ลง hidden field เอง
+  // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
+    const cj = document.getElementById('committees-json');
+    if (cj) cj.value = JSON.stringify(parsed.committees);
     renderCommitteeSummary(parsed.committees);
     filled.push('รายชื่อกรรมการ');
   }
