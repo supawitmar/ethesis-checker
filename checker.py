@@ -71,32 +71,69 @@ def _page_text(page):
     if not chars:
         return page.extract_text() or ''
     rows = {}
-    for c in chars:
+    for c in _thai_chars(chars):
         rows.setdefault(round(c['top'] / 3.0), []).append(c)
     out_lines = []
     for key in sorted(rows):
-        row = rows[key]
-        bases = sorted((c for c in row if not _TH_MARKS.match(c['text'])),
-                       key=lambda c: c['x0'])
-        if not bases:
-            continue
-        attached = {id(b): [] for b in bases}
-        for m in row:
-            if _TH_MARKS.match(m['text']):
-                base = min(bases, key=lambda b: abs(b['x1'] - m['x0']))
-                attached[id(base)].append(m)
-        parts, prev = [], None
-        for b in bases:
-            if prev is not None and (b['x0'] - prev['x1']) > 1.2:
-                parts.append(' ')
-            marks = ''.join(m['text'] for m in sorted(attached[id(b)],
-                                                      key=lambda m: (m['x0'], m['top'])))
-            parts.append(b['text'] + marks)
-            prev = b
-        line = re.sub(r' +', ' ', ''.join(parts)).replace('ํา', 'ำ').strip()
+        line = _compose_thai_line(rows[key])
         if line:
             out_lines.append(line)
     return '\n'.join(out_lines)
+
+
+def _thai_chars(chars):
+    """แปลง "ช่องว่างกว้างศูนย์" ให้เป็นนิคหิต ก่อนประกอบข้อความ
+
+    ฟอนต์ไทยบางตัวใน PDF map นิคหิต (ํ ซึ่งเป็นครึ่งบนของสระ ำ) ไปเป็นอักขระเว้นวรรค
+    ทำให้ "จำลองทำนาย" ถูกอ่านออกมาเป็น "จา ลองทา นาย" — เจ้าหน้าที่อ่านข้อความใน
+    รายงานไม่รู้เรื่องว่าหมายถึงตรงไหนของเล่ม
+
+    แยกจากช่องว่างจริงได้ชัดเจนด้วยความกว้าง: สำรวจเล่มจริง 9 เล่มพบช่องว่างจริง
+    20,303 ตัวกว้าง >= 0.5 pt ทุกตัว ส่วนกว้างศูนย์มี 62 ตัวและตามด้วยสระ า ถึง 55 ตัว
+    (จำ สำ คำ ทำ ดำ นำ กำ ซ้ำ) จึงไม่ใช่การเว้นวรรคของจริงแน่นอน
+
+    เมื่อกลายเป็นนิคหิตแล้ว _compose_thai_line จะผูกกลับเข้าพยัญชนะฐานเอง
+    ได้ "จํา" แล้วรวมเป็น "จำ" ตามปกติ
+    """
+    out = []
+    for c in chars:
+        if c.get('text') == ' ' and (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5:
+            c = {**c, 'text': 'ํ'}     # NIKHAHIT
+        out.append(c)
+    return out
+
+
+# ลำดับที่ถูกต้องของไทยคือ พยัญชนะ + สระ + วรรณยุกต์ + การันต์
+# เรียงตามพิกัด x เฉย ๆ จะได้ "ท่ี" แทน "ที่" เพราะวรรณยุกต์วางเยื้องซ้ายกว่าสระ
+_MARK_ORDER = {**{c: 0 for c in 'ัิีึืฺุู็ํ'},   # สระบน-ล่าง ไม้ไต่คู้ นิคหิต
+               **{c: 1 for c in '่้๊๋'},  # วรรณยุกต์ เอก โท ตรี จัตวา
+               **{c: 2 for c in '์๎'}}              # การันต์ ยามักการ
+
+
+def _compose_thai_line(chars):
+    """ประกอบข้อความ 1 บรรทัดจาก chars โดยผูก combining mark ไทยกลับเข้าพยัญชนะฐาน"""
+    bases = sorted((c for c in chars if not _TH_MARKS.match(c['text'])),
+                   key=lambda c: c['x0'])
+    if not bases:
+        return ''
+    attached = {id(b): [] for b in bases}
+    for m in chars:
+        if _TH_MARKS.match(m['text']):
+            base = min(bases, key=lambda b: abs(b['x1'] - m['x0']))
+            attached[id(base)].append(m)
+    parts, prev = [], None
+    for b in bases:
+        if prev is not None and (b['x0'] - prev['x1']) > 1.2:
+            parts.append(' ')
+        marks = ''.join(m['text'] for m in sorted(
+            attached[id(b)],
+            key=lambda m: (_MARK_ORDER.get(m['text'], 1), float(m['x0']))))
+        parts.append(b['text'] + marks)
+        prev = b
+    line = re.sub(r' +', ' ', ''.join(parts))
+    # นิคหิต + า = ำ  ส่วน นิคหิต + ำ เกิดจากไฟล์ที่มี ำ อยู่แล้วและยังใส่นิคหิตซ้ำมาให้
+    # (ถ้าไม่ยุบจะได้ "คํำสํำคัญ" แทน "คำสำคัญ")
+    return line.replace('ํำ', 'ำ').replace('ํา', 'ำ').strip()
 
 
 def top_lines(page_text, k=10):
@@ -232,10 +269,11 @@ def _sig_qual_text(text):
 def signature_committee_slots(pdf_page):
     """อ่านตารางลายเซ็นตามกริดตายตัว
 
-    คืน (members, member_quals, bottom_left, bottom_right):
+    คืน (members, member_quals, bottom_text):
       members = dict{ลำดับกรรมการ 1..9 → ชื่อ (str) หรือ None ถ้าช่องว่าง/placeholder}
       member_quals = dict{ลำดับกรรมการ 1..9 → ข้อความคุณวุฒิใต้ชื่อ ('' ถ้าไม่มี/placeholder)}
-      bottom_left/right = ข้อความรวมช่องล่างสุด (คณบดี / ผู้อำนวยการหลักสูตร) ไว้ตรวจคณะ/หลักสูตร
+      bottom_text = ข้อความช่องล่างสุด (คณบดี + ประธานหลักสูตร) เรียงตาม "ลำดับการอ่าน"
+                    บน→ล่าง ซ้าย→ขวา ไว้ตรวจชื่อคณะ/หลักสูตร
     """
     try:
         words = pdf_page.extract_words(extra_attrs=["non_stroking_color"]) or []
@@ -246,7 +284,7 @@ def signature_committee_slots(pdf_page):
     # ซ้ำหรือไปโผล่ผิดช่อง แล้วฟ้องผิดว่ามีคนเกิน/ชื่อซ้ำ
     words = [w for w in words if not _is_white_fill(w.get("non_stroking_color"))]
     if not words:
-        return {}, {}, '', ''
+        return {}, {}, ''
     mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
     lines = []
     for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0']))):
@@ -283,16 +321,25 @@ def signature_committee_slots(pdf_page):
         if idx >= 1:
             members[10 - idx] = _sig_clean_name(cell(nrow, left=True))  # ซ้าย → 9,8,7,6
             member_quals[10 - idx] = _sig_qual_text(cell(qrow, left=True))
-    # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย เรียงตามบรรทัด (บน→ล่าง, ซ้าย→ขวา)
-    # เพื่อไม่ให้ชื่อหลักสูตร/คณะที่อยู่คนละบรรทัดสลับกันจนเทียบไม่เจอ
+    # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย
+    #
+    # ไม่มีวิธีเรียงคำวิธีเดียวที่ถูกกับทุกเล่ม เพราะสองช่องนี้กว้างไม่เท่ากันและข้อความยาว
+    # ไม่เท่ากัน จากเล่มจริง:
+    #   - บางเล่มชื่อหลักสูตรไทยยาวจนขึ้นบรรทัดใหม่ "...ผู้ใหญ่และ" / "ผู้สูงอายุ"
+    #     ถ้าแบ่งซ้าย-ขวาด้วยกึ่งกลางหน้า คำท้ายตกไปคนละฝั่ง ชื่อสาขาขาดกลาง
+    #   - บางเล่มทั้งสองช่องมีข้อความหลายบรรทัด ถ้าเรียงตามลำดับการอ่านล้วน ๆ
+    #     คำของสองช่องจะสลับกันเป็นบรรทัดต่อบรรทัด ชื่อสาขาก็ขาดกลางเหมือนกัน
+    #
+    # จึงคืนทั้งสองแบบต่อกัน แล้วให้ผู้เรียกค้นแบบ substring — เจอแบบใดแบบหนึ่งถือว่าผ่าน
+    # กฎนี้เป็นสีส้ม "โปรดตรวจ" อยู่แล้ว การฟ้องเกินทั้งที่เล่มถูกเสียหายกว่าการไม่ฟ้อง
     floor = (name_rows[4]['top'] + 20) if len(name_rows) >= 5 else \
             (name_rows[-1]['top'] if name_rows else 0)
-    ordered = sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0'])))
-    bl = ' '.join(w['text'] for w in ordered
-                  if float(w['top']) >= floor and float(w['x0']) < mid)
-    br = ' '.join(w['text'] for w in ordered
-                  if float(w['top']) >= floor and float(w['x0']) >= mid)
-    return members, member_quals, bl.strip(), br.strip()
+    band = [w for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0'])))
+            if float(w['top']) >= floor]
+    reading = ' '.join(w['text'] for w in band)
+    by_column = ' '.join(w['text'] for w in band if float(w['x0']) < mid) + ' ' + \
+                ' '.join(w['text'] for w in band if float(w['x0']) >= mid)
+    return members, member_quals, (reading + '\n' + by_column).strip()
 
 
 def _committee_page_kind(page_text):
@@ -557,8 +604,8 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
     หน้ากรรมการสอบ     : มุมล่างขวา = "คณบดี/ผู้อำนวยการคณะ/สถาบัน ..." → ต้องมีชื่อคณะ
     มุมล่างซ้ายเป็นคณบดีบัณฑิตวิทยาลัยทั้งสองหน้า จึงไม่ใช้ตรวจคณะของนักศึกษา
 
-    ค้นจากข้อความ "ทั้งแถวล่าง" (ซ้าย+ขวา) เพราะการแบ่งคอลัมน์ด้วยพิกัด x คลาดเคลื่อน
-    ได้เมื่อข้อความไทยยาวล้ำกึ่งกลางหน้า — ช่องซ้ายเป็นบัณฑิตวิทยาลัยเสมอ จึงไม่ชนกัน
+    รับ bottom_text ที่เรียงตามลำดับการอ่านมาแล้ว (ดู signature_committee_slots)
+    จึงค้นจากข้อความทั้งแถวล่างรวมกัน — ช่องซ้ายเป็นบัณฑิตวิทยาลัยเสมอ จึงไม่ชนกัน
     """
     found_text = norm(bottom_text)
     if kind == "advisory":
@@ -632,7 +679,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         if not expected:
             continue
         handled_any = True
-        members, member_quals, bottom_left, bottom_right = slots[idx]
+        members, member_quals, bottom_text = slots[idx]
         page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
         loc = f"{page_label} ({page_ref(idx)})"
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
@@ -653,7 +700,8 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                     _COMMITTEE_TRANSLATE_MSG.get(translate_reason,
                                                  _COMMITTEE_TRANSLATE_MSG["failed"]),
                     f"ต้องมีกรรมการ {len(expected)} คนตามลำดับ บฑ. คือ {names_th}",
-                    "โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE")
+                    "โปรดตรวจรายชื่อและตำแหน่งกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE",
+                    system_note=True)
 
         # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
@@ -665,7 +713,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                         "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน", "FRONT.COMMITTEE")
 
         _check_signature_institution(
-            rep, kind, bottom_left + " " + bottom_right, A, english_book,
+            rep, kind, bottom_text, A, english_book,
             f"{page_label} — ", f" ({page_ref(idx)})")
 
     return handled_any
@@ -692,10 +740,60 @@ def abstract_committee_block(page_text):
     return is_english, re.sub(r'\s*\n\s*', ' ', block).strip()
 
 
+# คุณวุฒิที่ขึ้นต้นก้อนข้อความ เช่น "ปร.ด." "วศ.ด." "Ph.D." "PhD." "Ed.D." "P.hD."
+# ตามด้วยสาขาในวงเล็บได้ (ผิดรูปแบบ แต่มีในเล่มจริง และมีกฎฟ้องแยกอยู่แล้ว)
+_ABS_DEGREE_HEAD = re.compile(
+    r'^\s*(?:'
+    r'[A-Za-z]{1,3}(?:\.[A-Za-z]{1,3})*\.?'      # Ph.D. / PhD. / Ed.D. / P.hD. / Ph.D
+    r'|[ก-๙]{1,4}\.(?:[ก-๙]{1,4}\.)*'            # ปร.ด. / วศ.ด. / ศษ.ด. / พย.ม.
+    r')\s*(?:\([^)]*\))?\s*\.?\s*')
+
+
 def split_abstract_committee(block):
-    """แยก 'ชื่อ, คุณวุฒิ, ชื่อ, คุณวุฒิ, ...' → (names, degrees) ตามลำดับ"""
-    toks = [t.strip() for t in (block or "").split(",") if t.strip()]
-    return toks[0::2], toks[1::2]
+    """แยก 'ชื่อ, คุณวุฒิ, ชื่อ, คุณวุฒิ, ...' → (names, degrees) ตามลำดับ
+
+    รูปแบบตาม template คือคั่นทุกช่องด้วยจุลภาค แต่เล่มจริงพบว่าบางเล่ม "ลืมจุลภาค"
+    ระหว่างคุณวุฒิของคนก่อนกับชื่อของคนถัดไป เช่น
+        "ศรัณยา โฆสิตะมงคล, ปร.ด.(การพยาบาล) อุษาวดี อัศดรวิเศษ, Ph.D. (NURSING)"
+    ถ้าแบ่งด้วยจุลภาคสลับกันเฉย ๆ ชื่อคนที่ 2 จะกลายเป็น "Ph.D. (NURSING)" แล้วระบบ
+    ฟ้องแดงว่า "ไม่พบกรรมการ" ทั้งที่ชื่อพิมพ์อยู่ครบ — จึงตัดคุณวุฒิที่หัวก้อนออกก่อน
+    ส่วนที่เหลือในก้อนเดียวกันคือชื่อของคนถัดไป (ตัวขาดจุลภาคมีกฎฟ้องรูปแบบแยกต่างหาก)
+    """
+    names, degrees = [], []
+    for kind, text, _ in _scan_abstract_committee(block):
+        (names if kind == "name" else degrees).append(text)
+    return names, degrees
+
+
+def _scan_abstract_committee(block):
+    """ไล่อ่านก้อนรายชื่อกรรมการทีละช่อง — yield (kind, text, missing_comma)
+
+    kind = 'name' | 'degree'
+    missing_comma = True เมื่อชื่อนี้ติดมากับคุณวุฒิของคนก่อนหน้าโดยไม่มีจุลภาคคั่น
+    """
+    expect_name = True
+    for tok in [t.strip() for t in (block or "").split(",") if t.strip()]:
+        if expect_name:
+            yield "name", tok, False
+            expect_name = False
+            continue
+        m = _ABS_DEGREE_HEAD.match(tok)
+        if not m:
+            yield "degree", tok, False
+            expect_name = True
+            continue
+        yield "degree", tok[:m.end()].strip(), False
+        rest = tok[m.end():].strip()
+        if rest:
+            yield "name", rest, True   # ขาดจุลภาคคั่น — ที่เหลือคือชื่อคนถัดไป
+        else:
+            expect_name = True
+
+
+def abstract_committee_missing_commas(block):
+    """คืนรายชื่อกรรมการที่ไม่มีจุลภาคคั่นจากคุณวุฒิของคนก่อนหน้า"""
+    return [text for kind, text, missing in _scan_abstract_committee(block)
+            if kind == "name" and missing]
 
 
 def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
@@ -725,10 +823,21 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
 
             # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
             if "(" in block or ")" in block:
+                inside = ", ".join(f'"({s})"' for s in re.findall(r'\(([^)]*)\)', block))
                 rep.add("RED", "front_matter", loc,
-                        "รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ",
+                        f"รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ: {inside}"
+                        if inside else "รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ",
                         "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชาในวงเล็บ",
-                        "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
+                        f"ลบ {inside} ออก ให้เหลือเฉพาะชื่อและคุณวุฒิ"
+                        if inside else "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
+
+            # รูปแบบ 1.1: ต้องมีจุลภาคคั่นระหว่างคุณวุฒิของคนก่อนกับชื่อคนถัดไป
+            # (เจอในเล่มจริง ถ้าไม่ฟ้องตรงนี้ เจ้าหน้าที่จะไม่รู้ว่าต้องเติมจุลภาคตรงไหน)
+            for nm in abstract_committee_missing_commas(block):
+                rep.add("RED", "front_matter", loc,
+                        f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
+                        "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
+                        f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
             for i, name in enumerate(names, start=1):
                 nm = name.strip()
                 # รูปแบบ 2: ห้ามมีตำแหน่งทางวิชาการนำหน้าชื่อ
@@ -1097,6 +1206,10 @@ def issues_to_fix(report, failed=None, passed=None):
       นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
     - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
 
+    ข้อที่ตั้ง system_note=True ไม่เข้าสรุปทุกกรณี เพราะเป็นข้อจำกัดของระบบเอง
+    (เช่น ยังไม่ได้ตั้ง API key จึงถอดชื่อกรรมการเป็นอังกฤษไม่ได้) นักศึกษาแก้เล่ม
+    ยังไงข้อนี้ก็ไม่หาย การใส่ไว้ในใบสั่งแก้ทำให้นักศึกษาสับสน
+
     failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
     """
     failed = set(failed or ())
@@ -1108,7 +1221,7 @@ def issues_to_fix(report, failed=None, passed=None):
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
             items.append(issue)
-    return items
+    return [it for it in items if not it.get("system_note")]
 
 
 def _corrected_value(issue):
@@ -1394,12 +1507,21 @@ def _font_lines(pdf_page, tolerance=2.5):
             grouped.append({'top': top, 'words': [word]})
         else:
             grouped[-1]['words'].append(word)
+    # ข้อความที่ประกอบจาก extract_words ยังมีสระ/วรรณยุกต์ไทยหลุดตำแหน่งและนิคหิตที่
+    # ฟอนต์ map เป็นช่องว่าง ("จำลอง" -> "จา ลอง") ถ้าเอาไปแสดงในรายงานเจ้าหน้าที่จะ
+    # อ่านไม่ออกว่าหมายถึงข้อความไหนของเล่ม จึงประกอบข้อความใหม่จาก chars ด้วยตัวเดียว
+    # กับ _page_text ส่วนการนับตัวหนายังใช้ words ตามเดิม (chars ไม่มี fontname ที่เชื่อได้)
+    page_chars = _thai_chars(getattr(pdf_page, 'chars', None) or [])
+
     results = []
     for group in grouped:
         line_words = sorted(group['words'], key=lambda word: float(word.get('x0', 0)))
         text = ' '.join(word.get('text', '') for word in line_words).strip()
         if not text:
             continue
+        row_chars = [c for c in page_chars
+                     if abs(float(c.get('top', 0)) - group['top']) <= tolerance]
+        text = _compose_thai_line(row_chars) or text
         heading_words = list(line_words)
         if heading_words and re.fullmatch(r'(?:\d+|[IVXLCDM]+)', heading_words[-1].get('text', ''), re.I):
             heading_words = heading_words[:-1]
@@ -1663,7 +1785,14 @@ class Report:
         group["checks"].append({"location": location, "status": status,
                                 "detail": soft(detail)})
 
-    def add(self, zone, part, loc, found, expected, fix="", rule_id=None):
+    def add(self, zone, part, loc, found, expected, fix="", rule_id=None,
+            system_note=False):
+        """system_note=True = ข้อจำกัดของระบบ ไม่ใช่จุดที่นักศึกษาแก้ได้
+
+        ยังแสดงในรายงานฝั่งเจ้าหน้าที่ตามปกติ แต่ไม่นับเป็น "จุดที่ต้องแก้" ในข้อความ
+        สรุปที่ส่งให้นักศึกษา (เช่น ระบบถอดชื่อกรรมการเป็นอังกฤษไม่ได้เพราะยังไม่ได้
+        ตั้งค่า API key — เป็นเรื่องการติดตั้งเซิร์ฟเวอร์ นักศึกษาทำอะไรกับเล่มก็ไม่หาย)
+        """
         rule_id = rule_id or DEFAULT_RULE_BY_PART.get(part, "FORM.REQUIRED")
         fix = fix or f"แก้ไขให้เป็นไปตามข้อกำหนด: {expected}"
         self.zones[zone].append({
@@ -1672,6 +1801,7 @@ class Report:
             "found": found,
             "expected": expected,
             "fix": fix,
+            "system_note": system_note,
             **rule_reference(rule_id),
         })
 
