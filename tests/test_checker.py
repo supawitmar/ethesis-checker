@@ -629,13 +629,13 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("Dean", "Program Director"),                     # r7: dean | director
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, quals, bl, br = signature_committee_slots(page)
+        members, quals, bottom = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")
         self.assertEqual(members.get(2), "B Two")
         self.assertEqual(members.get(3), "C Three")
         self.assertIsNone(members.get(4))       # ช่องว่าง/placeholder
         self.assertIsNone(members.get(9))       # placeholder ซ้าย
-        self.assertIn("Program Director", br)
+        self.assertIn("Program Director", bottom)
 
     def test_last_dotted_row_is_never_a_member(self):
         # แถวเส้นประสุดท้าย = ช่องสถาบัน แม้จะอ่านเส้นประเจอไม่ครบ 6 แถวก็ต้องไม่ถูกนับ
@@ -645,7 +645,7 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("ศาสตราจารย์ ฉัตรเฉลิม อิศรางกูร ณ อยุธยา,", "พรรณชฎา ศิริวรรณบุศย์,"),  # แถวคณบดี
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, _quals, bl, br = signature_committee_slots(page)
+        members, _quals, bottom = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")
         self.assertEqual(members.get(2), "B Two")
         found = [v for v in members.values() if v]
@@ -664,7 +664,7 @@ class SignatureCommitteeTests(unittest.TestCase):
         words += [{"text": "Ghost", "top": 173, "x0": 60, "non_stroking_color": (1, 1, 1)},
                   {"text": "Member,", "top": 173, "x0": 90, "non_stroking_color": (1, 1, 1)}]
         page = self._Page(842, 595, words)
-        members, _quals, _bl, _br = signature_committee_slots(page)
+        members, _quals, _bottom = signature_committee_slots(page)
         self.assertNotIn("Ghost Member", [v for v in members.values() if v])
 
     def test_qualification_presence_detected_per_member(self):
@@ -675,7 +675,7 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("Dean", "Program Director"),
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, quals, bl, br = signature_committee_slots(page)
+        members, quals, bottom = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")   # ชื่อกรรมการคนที่ 1
         self.assertTrue(quals.get(1))               # m1 มีคุณวุฒิ
         self.assertFalse(quals.get(2))              # m2 เป็น placeholder = ไม่มี
