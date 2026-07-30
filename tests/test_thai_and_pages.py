@@ -101,6 +101,23 @@ class SplitAbstractCommittee(unittest.TestCase):
         self.assertEqual(names, ["SOMCHAI JAIDEE", "SOMSRI DEEJAI"])
         self.assertEqual(degrees, ["Dr. med.", "Dr. phil."])
 
+    def test_two_degrees_per_person(self):
+        """คนหนึ่งมีคุณวุฒิหลายตัวคั่นจุลภาค เช่น "..., M.D., Ph.D., ..."
+
+        เคยทำให้การสลับ ชื่อ/คุณวุฒิ เลื่อนทั้งชุด จนได้ชื่อเพี้ยนอย่าง
+        "RAJIT BOONSAEN" และ "OL UDOL" แล้วฟ้องว่าไม่พบกรรมการ
+        """
+        names, degrees = split_abstract_committee(
+            "MAYUREE HOMSANIT, M.D., Ph.D., THIRAJIT BOONSAEN, M.D., Ph.D., "
+            "KAMOL UDOL, M.D., M.Sc.")
+        self.assertEqual(names, ["MAYUREE HOMSANIT", "THIRAJIT BOONSAEN", "KAMOL UDOL"])
+        self.assertEqual(degrees, ["M.D.", "Ph.D.", "M.D.", "Ph.D.", "M.D.", "M.Sc."])
+
+    def test_name_starting_with_short_word_is_not_eaten_as_a_degree(self):
+        """ตัวย่อคุณวุฒิต้องมีจุด ไม่งั้นคำแรกของชื่อจะถูกกินเป็นคุณวุฒิ (THIRAJIT -> THI)"""
+        names, _ = split_abstract_committee("SOM CHAI, Ph.D., THIRAJIT BOONSAEN, Ph.D.")
+        self.assertEqual(names, ["SOM CHAI", "THIRAJIT BOONSAEN"])
+
     def test_trailing_comma_and_extra_spaces(self):
         names, _ = split_abstract_committee("ยุพา จิ๋วพัฒนกุล, ปร.ด., รักชนก คชไกร , ปร.ด.,")
         self.assertEqual(names, ["ยุพา จิ๋วพัฒนกุล", "รักชนก คชไกร"])

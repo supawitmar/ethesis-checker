@@ -784,9 +784,23 @@ def abstract_committee_block(page_text):
 # ตามด้วยสาขาในวงเล็บได้ (ผิดรูปแบบ แต่มีในเล่มจริง และมีกฎฟ้องแยกอยู่แล้ว)
 _ABS_DEGREE_HEAD = re.compile(
     r'^\s*(?:'
-    r'[A-Za-z]{1,3}(?:\.[A-Za-z]{1,3})*\.?'      # Ph.D. / PhD. / Ed.D. / P.hD. / Ph.D
+    # (?=[A-Za-z]*\.) บังคับว่าต้องมี "จุด" อยู่ในตัวย่อ ไม่งั้นคำขึ้นต้นของชื่อคน
+    # จะถูกกินเป็นคุณวุฒิ เช่น "THIRAJIT BOONSAEN" เคยถูกอ่านเป็นคุณวุฒิ "THI"
+    # แล้วเหลือ "RAJIT BOONSAEN" กลายเป็นชื่อคน
+    r'(?=[A-Za-z]*\.)[A-Za-z]{1,4}(?:\.[A-Za-z]{1,4})*\.?'   # Ph.D. / PhD. / M.Sc. / Ph.D
     r'|[ก-๙]{1,4}\.(?:[ก-๙]{1,4}\.)*'            # ปร.ด. / วศ.ด. / ศษ.ด. / พย.ม.
     r')\s*(?:\([^)]*\))?\s*\.?\s*')
+
+
+def _is_degree_only(text):
+    """ก้อนนี้เป็น "คุณวุฒิล้วน" หรือไม่ (ไม่มีชื่อคนปนอยู่)
+
+    ใช้จับกรณีคนหนึ่งมีคุณวุฒิหลายตัวคั่นจุลภาค เช่น "..., M.D., Ph.D., ..."
+    ซึ่งทำให้การสลับ ชื่อ/คุณวุฒิ เลื่อนไปทั้งชุดถ้าไม่รู้จัก
+    """
+    s = (text or "").strip()
+    m = _ABS_DEGREE_HEAD.match(s)
+    return bool(s) and bool(m) and m.end() == len(s) and not _looks_like_person_name(s)
 
 
 def split_abstract_committee(block):
@@ -827,9 +841,16 @@ def _scan_abstract_committee(block):
     missing_comma = True เมื่อชื่อนี้ติดมากับคุณวุฒิของคนก่อนหน้าโดยไม่มีจุลภาคคั่น
     """
     expect_name = True
+    seen_name = False
     for tok in [t.strip() for t in (block or "").split(",") if t.strip()]:
         if expect_name:
+            # คุณวุฒิตัวที่ 2 ของคนเดิม (เช่น "..., M.D., Ph.D., ชื่อคนถัดไป, ...")
+            # ไม่ใช่ชื่อคนใหม่ ถ้านับผิดจะเลื่อนสลับ ชื่อ/คุณวุฒิ ไปทั้งชุด
+            if seen_name and _is_degree_only(tok):
+                yield "degree", tok, False
+                continue
             yield "name", tok, False
+            seen_name = True
             expect_name = False
             continue
         m = _ABS_DEGREE_HEAD.match(tok)
@@ -914,7 +935,10 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                 # ข้อมูลอนุมัติเป็นชื่อไทย แต่หน้านี้พิมพ์ชื่ออังกฤษ ต้องถอดก่อนจึงเทียบได้
                 if translation_ok:
                     # ถอดในเครื่อง = เทียบเคียง ลงส้ม; AI = แดงได้ (เหตุผลใน _check_committees)
-                    expected = [name_en[m["name"]] for m in advisory]
+                    # แปลงเป็นตัวพิมพ์ใหญ่ให้ตรงกับรูปแบบของหน้านี้ (ชื่อกรรมการใน
+                    # บทคัดย่ออังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด) เจ้าหน้าที่จะได้เทียบ
+                    # กับที่พิมพ์ในเล่มได้ตรง ๆ ไม่ต้องแปลงในหัวเอง
+                    expected = [name_en[m["name"]].upper() for m in advisory]
                     offline = translate_reason == "offline"
                     _report_committee_positions(
                         rep, expected, members, loc, fuzzy=True,
