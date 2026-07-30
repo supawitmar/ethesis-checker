@@ -261,7 +261,7 @@ class SignatureBottomCell(unittest.TestCase):
             [("บัณฑิตวิทยาลัย", 60.0), ("สาขาวิชาการพยาบาลผู้ใหญ่และ", 320.0)],
             [("ผู้สูงอายุ", 320.0)],
         ])
-        _members, _quals, bottom = signature_committee_slots(page)
+        _members, _quals, bottom, _raw = signature_committee_slots(page)
         self.assertIn(norm("การพยาบาลผู้ใหญ่และผู้สูงอายุ"), norm(bottom))
 
     def test_subject_in_right_cell_when_both_cells_are_long(self):
@@ -273,7 +273,7 @@ class SignatureBottomCell(unittest.TestCase):
              ("Information", 320.0), ("Technology", 400.0)],
             [("Studies", 60.0), ("Management", 320.0)],
         ])
-        _members, _quals, bottom = signature_committee_slots(page)
+        _members, _quals, bottom, _raw = signature_committee_slots(page)
         self.assertIn(norm("Information Technology Management"), norm(bottom))
 
     def test_name_is_not_split_when_cell_starts_just_left_of_page_centre(self):
@@ -296,13 +296,13 @@ class SignatureBottomCell(unittest.TestCase):
         words.append(word("……………", 297.53, top))
         page = _FakePage(595.32, words)          # กึ่งกลาง = 297.66 (ขวาของ 297.53)
 
-        members, _quals, _bottom = signature_committee_slots(page)
+        members, _quals, _bottom, _raw = signature_committee_slots(page)
         self.assertEqual(members.get(1), "มยุรี หอมสนิท")
         self.assertIsNone(members.get(9))        # ต้องไม่มีชื่อหลุดไปช่องซ้าย
 
     def test_empty_page_returns_blank(self):
-        members, quals, bottom = signature_committee_slots(_FakePage(595.0, []))
-        self.assertEqual((members, quals, bottom), ({}, {}, ""))
+        members, quals, bottom, raw = signature_committee_slots(_FakePage(595.0, []))
+        self.assertEqual((members, quals, bottom, raw), ({}, {}, "", {}))
 
 
 class SystemNoteNotSentToStudent(unittest.TestCase):

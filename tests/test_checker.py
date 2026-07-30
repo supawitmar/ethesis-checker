@@ -631,7 +631,7 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("Dean", "Program Director"),                     # r7: dean | director
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, quals, bottom = signature_committee_slots(page)
+        members, quals, bottom, _raw = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")
         self.assertEqual(members.get(2), "B Two")
         self.assertEqual(members.get(3), "C Three")
@@ -647,7 +647,7 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("ศาสตราจารย์ ฉัตรเฉลิม อิศรางกูร ณ อยุธยา,", "พรรณชฎา ศิริวรรณบุศย์,"),  # แถวคณบดี
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, _quals, bottom = signature_committee_slots(page)
+        members, _quals, bottom, _raw = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")
         self.assertEqual(members.get(2), "B Two")
         found = [v for v in members.values() if v]
@@ -666,7 +666,7 @@ class SignatureCommitteeTests(unittest.TestCase):
         words += [{"text": "Ghost", "top": 173, "x0": 60, "non_stroking_color": (1, 1, 1)},
                   {"text": "Member,", "top": 173, "x0": 90, "non_stroking_color": (1, 1, 1)}]
         page = self._Page(842, 595, words)
-        members, _quals, _bottom = signature_committee_slots(page)
+        members, _quals, _bottom, _raw = signature_committee_slots(page)
         self.assertNotIn("Ghost Member", [v for v in members.values() if v])
 
     def test_qualification_presence_detected_per_member(self):
@@ -677,7 +677,7 @@ class SignatureCommitteeTests(unittest.TestCase):
             ("Dean", "Program Director"),
         ]
         page = self._Page(842, 595, self._dot_then_names(rows))
-        members, quals, bottom = signature_committee_slots(page)
+        members, quals, bottom, _raw = signature_committee_slots(page)
         self.assertEqual(members.get(1), "A One")   # ชื่อกรรมการคนที่ 1
         self.assertTrue(quals.get(1))               # m1 มีคุณวุฒิ
         self.assertFalse(quals.get(2))              # m2 เป็น placeholder = ไม่มี
@@ -700,7 +700,8 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
     def _run(self, expected_names, members):
         rep = Report()
         expected = [{"name": n, "role": ""} for n in expected_names]
-        _report_thai_committee(rep, expected, members, "หน้ากรรมการสอบ (หน้า ก)")
+        loc = "หน้ากรรมการสอบ (หน้า ก)"
+        _report_thai_committee(rep, expected, members, loc, order_loc=loc)
         return rep
 
     def _reds(self, rep):
@@ -715,22 +716,23 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
         rep = self._run(["คนางค์ ก"], {1: "ดร. คนางค์ ก"})
         self.assertEqual(self._reds(rep), [])
 
-    def test_two_swapped_report_single_combined_item(self):
+    def test_swapped_names_are_left_to_staff_not_flagged_red(self):
+        """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ระบบตรวจแค่ "ชื่อครบและถูกคน"
+        ส่วนลำดับให้เจ้าหน้าที่ตรวจเอง จึงไม่ฟ้องแดง แต่ต้องมีรายการม่วงไว้ให้ดู
+        """
         rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
                         {1: "คนางค์ ก", 2: "ธเนศ ค", 3: "สุภาภรณ์ ข"})
-        reds = self._reds(rep)
-        self.assertEqual(len(reds), 1)          # รวมเป็น 1 ไม่ใช่ 2
-        self.assertIn("สลับตำแหน่งกัน", reds[0])
-        self.assertIn("คนที่ 2", reds[0])
-        self.assertIn("คนที่ 3", reds[0])
+        self.assertEqual(self._reds(rep), [])
+        self.assertTrue(rep.human_checklist)
+        why = rep.human_checklist[0]["why"]
+        self.assertIn("ลำดับตามข้อมูลอนุมัติ", why)
+        self.assertIn("ไม่ตรงลำดับข้างต้น", why)   # บอกสิ่งที่ระบบสังเกตเห็นด้วย
 
-    def test_three_cycle_reports_correct_order_once(self):
-        # หมุน 3 ตำแหน่ง (ไม่ใช่คู่สลับ) → บอกลำดับที่ถูกครั้งเดียว
-        rep = self._run(["A A", "B B", "C C"],
-                        {1: "C C", 2: "A A", 3: "B B"})
-        reds = self._reds(rep)
-        self.assertEqual(len(reds), 1)
-        self.assertIn("เรียงผิดตำแหน่ง", reds[0])
+    def test_correct_order_still_listed_for_staff(self):
+        rep = self._run(["A A", "B B"], {1: "A A", 2: "B B"})
+        self.assertEqual(self._reds(rep), [])
+        self.assertTrue(rep.human_checklist)
+        self.assertNotIn("ไม่ตรงลำดับ", rep.human_checklist[0]["why"])
 
     def test_missing_member_is_named_not_cascaded(self):
         # ขาดกรรมการกลาง แล้วดันชื่อขึ้น → ต้องฟ้อง 'ไม่พบ B' + 'พบ C เกินตำแหน่ง' ไม่ใช่แดงรัวทั้งแถว
@@ -786,11 +788,10 @@ class EnglishCommitteeFuzzyTests(unittest.TestCase):
                          {1: "Narisara Chantaratid", 2: "Supaporn Songpracha"})
         self.assertEqual(reds, [])
 
-    def test_swapped_english_names_report_single_item(self):
+    def test_swapped_english_names_are_left_to_staff(self):
         reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
                          {1: "Alice Adams", 2: "Carol Clark", 3: "Bob Brown"})
-        self.assertEqual(len(reds), 1)
-        self.assertIn("สลับตำแหน่งกัน", reds[0])
+        self.assertEqual(reds, [])          # ลำดับ = เรื่องของเจ้าหน้าที่
 
     def test_missing_english_member_named(self):
         reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
@@ -861,10 +862,19 @@ class AbstractCommitteeTests(unittest.TestCase):
     def test_thai_names_matched_against_ethesis(self):
         committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
                                     {"name": "ธเนศ ข", "role": ""}]}
-        # สลับชื่อ → ต้องฟ้อง (เทียบไทยตรง)
+        # ชื่อครบและถูกคน ต่างแค่ลำดับ → ไม่ฟ้อง (ลำดับให้เจ้าหน้าที่ตรวจเอง)
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: ธเนศ ข, ปร.ด., คนางค์ ก, พย.ด.\nบทคัดย่อ"]
         reds = self._reds(self._run(committees, [], [0], pages))
-        self.assertTrue(any("สลับตำแหน่งกัน" in r for r in reds))
+        self.assertEqual(reds, [])
+
+    def test_wrong_person_in_thai_abstract_is_flagged(self):
+        """"ถูกคน" ต้องยังตรวจ — ชื่อนอกรายชื่ออนุมัติต้องฟ้อง"""
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
+                                    {"name": "ธเนศ ข", "role": ""}]}
+        pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด., สมชาย ใจดี, พย.ด.\nบทคัดย่อ"]
+        reds = self._reds(self._run(committees, [], [0], pages))
+        self.assertTrue(any("ไม่พบกรรมการ" in r and "ธเนศ ข" in r for r in reds))
+        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r for r in reds))
 
     def test_clean_english_abstract_passes(self):
         committees = {"advisory": [{"name": "นริศรา จันทราทิตย์", "role": ""}]}

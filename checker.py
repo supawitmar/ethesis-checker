@@ -282,6 +282,7 @@ def signature_committee_slots(pdf_page):
       member_quals = dict{ลำดับกรรมการ 1..9 → ข้อความคุณวุฒิใต้ชื่อ ('' ถ้าไม่มี/placeholder)}
       bottom_text = ข้อความช่องล่างสุด (คณบดี + ประธานหลักสูตร) เรียงตาม "ลำดับการอ่าน"
                     บน→ล่าง ซ้าย→ขวา ไว้ตรวจชื่อคณะ/หลักสูตร
+      member_raw = dict{ลำดับ → ข้อความดิบของช่อง (ยังมีตำแหน่งวิชาการ)} ไว้เทียบตำแหน่ง
     """
     try:
         words = pdf_page.extract_words(extra_attrs=["non_stroking_color"]) or []
@@ -292,7 +293,7 @@ def signature_committee_slots(pdf_page):
     # ซ้ำหรือไปโผล่ผิดช่อง แล้วฟ้องผิดว่ามีคนเกิน/ชื่อซ้ำ
     words = [w for w in words if not _is_white_fill(w.get("non_stroking_color"))]
     if not words:
-        return {}, {}, ''
+        return {}, {}, '', {}
     mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
     lines = []
     for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0']))):
@@ -327,16 +328,20 @@ def signature_committee_slots(pdf_page):
                 if (float(w['x0']) < mid) == left]
         return ' '.join(toks).strip()
 
-    members, member_quals = {}, {}
+    members, member_quals, member_raw = {}, {}, {}
     # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
     # (เดิมตัดด้วย [:5] ซึ่งพึ่งว่าต้องอ่านเส้นประเจอครบ 6 แถวพอดี ถ้าเจอไม่ครบ
     #  แถวคณบดีจะเลื่อนเข้ามาเป็นกรรมการ แล้วฟ้องว่ามีชื่อนอกรายชื่ออนุมัติ)
     member_rows = list(zip(name_rows, qual_rows))[:-1][:5]
     for idx, (nrow, qrow) in enumerate(member_rows):     # 0..4 = ระดับกรรมการ
-        members[idx + 1] = _sig_clean_name(cell(nrow, left=False))   # ขวา → 1..5
+        right = cell(nrow, left=False)
+        members[idx + 1] = _sig_clean_name(right)                    # ขวา → 1..5
+        member_raw[idx + 1] = right
         member_quals[idx + 1] = _sig_qual_text(cell(qrow, left=False))
         if idx >= 1:
-            members[10 - idx] = _sig_clean_name(cell(nrow, left=True))  # ซ้าย → 9,8,7,6
+            left = cell(nrow, left=True)
+            members[10 - idx] = _sig_clean_name(left)                # ซ้าย → 9,8,7,6
+            member_raw[10 - idx] = left
             member_quals[10 - idx] = _sig_qual_text(cell(qrow, left=True))
     # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย
     #
@@ -356,7 +361,7 @@ def signature_committee_slots(pdf_page):
     reading = ' '.join(w['text'] for w in band)
     by_column = ' '.join(w['text'] for w in band if float(w['x0']) < mid) + ' ' + \
                 ' '.join(w['text'] for w in band if float(w['x0']) >= mid)
-    return members, member_quals, (reading + '\n' + by_column).strip()
+    return members, member_quals, (reading + '\n' + by_column).strip(), member_raw
 
 
 def _committee_page_kind(page_text):
@@ -454,13 +459,18 @@ def _assign_committee_slots(exp_keys, found_keys, fuzzy, threshold=None):
 
 
 def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="RED",
-                                threshold=None):
-    """เทียบชื่อกรรมการแบบ 'ชุดรายชื่อ' — ใช้ได้ทั้งไทย(เทียบตรง) และอังกฤษ(เทียบชื่อแปลหลวม)
+                                threshold=None, raw=None, order_loc=None):
+    """เทียบ "รายชื่อ" กรรมการกับข้อมูลอนุมัติ — ครบไหม และถูกคนไหม
 
-    - ครบทุกคนแต่วางผิดตำแหน่ง = สลับ/เรียงผิด → รวมเป็นข้อความเดียว
-    - ไม่ครบชุด = ระบุ ขาด/เกิน ตรง ๆ (กัน cascade ฟ้องเลื่อนทั้งแถว)
-    - ถูกต้องทุกตำแหน่ง = เงียบ (ผ่าน)
-    expected_names = ชื่อที่จะใช้เทียบ+แสดงผล (เล่มอังกฤษส่งชื่อที่แปลแล้วเข้ามา)
+    นโยบายเจ้าหน้าที่ (ก.ค. 2569)
+      - ขาดคน / มีชื่อนอกรายชื่ออนุมัติ = ระบบฟ้อง (แดง หรือส้มถ้าเทียบจากคำถอดเสียง)
+      - "ลำดับการวางชื่อ" ระบบไม่ฟันธง ให้เจ้าหน้าที่ตรวจเอง (รายการสีม่วง)
+        เพราะการอ่านตำแหน่งช่องขึ้นกับ layout ของเล่ม ระบบยืนยันเองไม่ได้เสมอ
+      - ระดับตำแหน่งทางวิชาการต่างจากข้อมูลอนุมัติ = ข้อสังเกต (เหลือง)
+
+    expected_names = ชื่อที่จะใช้เทียบ+แสดงผล (เล่มอังกฤษส่งชื่อที่ถอดแล้วเข้ามา)
+    raw = dict{slot → ข้อความดิบของช่อง} ไว้เทียบตำแหน่งทางวิชาการ (ไม่ส่งมาก็ข้าม)
+    order_loc = ชื่อรายการสำหรับให้เจ้าหน้าที่ตรวจลำดับเอง (ไม่ส่งมาก็ไม่เพิ่ม)
     """
     N = len(expected_names)
     exp_keys = [_committee_keyname(e, fuzzy) for e in expected_names]
@@ -472,12 +482,16 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="
     extra_slots = [s for s, i in slot_to_idx.items() if i is None]
     missing_idx = [i for i in range(N) if i not in matched_exp]
 
+    # ระดับตำแหน่งทางวิชาการของคนที่จับคู่ได้ (เทียบเฉพาะเมื่อระบุมาทั้งสองฝั่ง)
+    for slot, idx in slot_to_idx.items():
+        if idx is not None and raw and raw.get(slot):
+            _report_committee_rank(rep, expected_names[idx], raw[slot], idx + 1, loc)
+
+    if order_loc:
+        _note_committee_order(rep, expected_names, slot_to_idx, order_loc)
+
     if not extra_slots and not missing_idx:
-        # ชื่อครบทุกคน — ต่างแค่ตำแหน่ง (slot ถูก เมื่อ slot_to_idx[s] == s-1)
-        wrong = sorted(s for s, i in slot_to_idx.items() if i != s - 1)
-        if wrong:
-            _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc, zone)
-        return
+        return       # ชื่อครบและถูกคน — ลำดับให้เจ้าหน้าที่ตรวจเอง (รายการม่วง)
 
     # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ
     for i in missing_idx:
@@ -506,45 +520,80 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="
                     "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
-def _report_thai_committee(rep, expected, members, loc):
+# ระดับตำแหน่งทางวิชาการ — เรียงจากยาวไปสั้น เพราะ "ผู้ช่วยศาสตราจารย์" มีคำว่า
+# "ศาสตราจารย์" อยู่ข้างใน ถ้าจับสั้นก่อนจะได้ระดับผิด
+_ACADEMIC_RANKS = (
+    ("ผู้ช่วยศาสตราจารย์", "asst"), ("รองศาสตราจารย์", "assoc"),
+    ("ศาสตราจารย์เกียรติคุณ", "prof"), ("ศาสตราจารย์คลินิก", "prof"),
+    ("ศาสตราจารย์", "prof"), ("อาจารย์", "lecturer"),
+    ("ผศ.", "asst"), ("รศ.", "assoc"), ("ศ.", "prof"),
+    ("ASSISTANTPROFESSOR", "asst"), ("ASSTPROF", "asst"),
+    ("ASSOCIATEPROFESSOR", "assoc"), ("ASSOCPROF", "assoc"),
+    ("CLINICALPROFESSOR", "prof"), ("EMERITUSPROFESSOR", "prof"),
+    ("PROFESSOR", "prof"), ("PROF", "prof"), ("LECTURER", "lecturer"),
+)
+
+_RANK_LABEL = {"prof": "ศาสตราจารย์", "assoc": "รองศาสตราจารย์",
+               "asst": "ผู้ช่วยศาสตราจารย์", "lecturer": "อาจารย์"}
+
+
+def _academic_rank(text):
+    """ระดับตำแหน่งทางวิชาการที่อยู่ในข้อความ ('' ถ้าไม่ระบุ)
+
+    สนใจเฉพาะ "ระดับ" (ศ./รศ./ผศ./อาจารย์) ไม่สนคำนำหน้าอื่นอย่าง ดร. นพ. พญ.
+    เพราะเป็นวุฒิ/วิชาชีพ ไม่ใช่ตำแหน่งทางวิชาการ
+    ตามที่เจ้าหน้าที่กำหนด: eThesis "ผู้ช่วยศาสตราจารย์ ดร.พญ. มยุรี หอมสนิท"
+    กับเล่ม "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท" ถือว่าตรงกัน เพราะระดับเดียวกัน
+    """
+    n = norm(text)
+    for word, rank in _ACADEMIC_RANKS:
+        if norm(word) in n:
+            return rank
+    return ""
+
+
+def _report_committee_rank(rep, expected_name, found_text, order, loc):
+    """ระดับตำแหน่งทางวิชาการต่างจากข้อมูลอนุมัติ = ข้อสังเกต (เหลือง)
+
+    ฟ้องเฉพาะเมื่อ "ทั้งสองฝั่งระบุระดับมา แล้วขัดกัน" เท่านั้น
+    ถ้าฝั่งใดไม่ระบุก็สรุปไม่ได้ว่าผิด (ข้อมูล eThesis หลายรายการไม่ได้ใส่ระดับมา)
+    """
+    want, got = _academic_rank(expected_name), _academic_rank(found_text)
+    if not want or not got or want == got:
+        return
+    rep.add("YELLOW", "front_matter", loc,
+            f'กรรมการคนที่ {order} ("{_strip_committee_title(expected_name)}") '
+            f'ระบุตำแหน่งทางวิชาการเป็น "{_RANK_LABEL[got]}" '
+            f'แต่ข้อมูลอนุมัติเป็น "{_RANK_LABEL[want]}"',
+            f'ตำแหน่งทางวิชาการควรตรงกับข้อมูลอนุมัติ คือ "{_RANK_LABEL[want]}"',
+            "เจ้าหน้าที่ตรวจสอบว่าตำแหน่งทางวิชาการเปลี่ยนไปหลังยื่น บฑ. หรือพิมพ์ผิด",
+            "FRONT.COMMITTEE")
+
+
+def _report_thai_committee(rep, expected, members, loc, raw=None, order_loc=None):
     """wrapper: เล่มไทยเทียบชื่อไทยแบบตรง (expected = list ของ dict มี key 'name')"""
     _report_committee_positions(rep, [m["name"] for m in expected], members, loc,
-                                fuzzy=False)
+                                fuzzy=False, raw=raw, order_loc=order_loc)
 
 
-def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc, zone="RED"):
-    """ชื่อครบแต่วางผิดตำแหน่ง: จับคู่สลับตรง ๆ ก่อน ที่เหลือบอกลำดับที่ถูกครั้งเดียว
+def _note_committee_order(rep, expected_names, slot_to_idx, loc):
+    """ลำดับการวางชื่อ = รายการที่เจ้าหน้าที่ตรวจเอง (สีม่วง) ไม่ใช่ข้อฟ้อง
 
-    slot_to_idx: {slot จริงบนกริด → ดัชนี expected ที่จับคู่ได้}
-    ช่อง s ควรมี expected_names[s-1]; ชื่อในช่อง s จริง ๆ ควรไปอยู่ช่อง slot_to_idx[s]+1
+    ตามนโยบายเจ้าหน้าที่ (ก.ค. 2569) ระบบตรวจแค่ว่า "ชื่อครบและถูกคน"
+    ส่วนลำดับให้คนตัดสิน เพราะการอ่านว่าชื่อไหนอยู่ช่องไหนขึ้นกับ layout ของเล่ม
+    ระบบยืนยันเองไม่ได้เสมอ ฟันธงไปจะฟ้องผิดใส่เล่มที่ถูกต้อง
+
+    แต่ยังบอก "สิ่งที่ระบบสังเกตเห็น" ไว้ในรายการนั้นด้วย เจ้าหน้าที่จะได้ดูตรงจุด
     """
-    N = len(expected_names)
-    described = set()
-    for s in wrong:
-        if s in described:
-            continue
-        # ชื่อที่ 'ควร' อยู่ช่อง s (คือ expected[s-1]) ตอนนี้ไปโผล่ช่องไหน?
-        home = next((p for p, i in slot_to_idx.items() if i == s - 1), None)
-        belongs = slot_to_idx.get(s)
-        # คู่สลับกันแท้ ๆ: ช่อง s มีชื่อของ home และช่อง home มีชื่อของ s
-        if (home is not None and home != s and home not in described
-                and belongs is not None and belongs + 1 == home):
-            lo, hi = sorted((s, home))
-            rep.add(zone, "front_matter", loc,
-                    f'กรรมการครบทุกคน แต่คนที่ {lo} ("{expected_names[lo - 1]}") '
-                    f'กับ คนที่ {hi} ("{expected_names[hi - 1]}") สลับตำแหน่งกัน',
-                    f'ช่องที่ {lo} ต้องเป็น "{expected_names[lo - 1]}" '
-                    f'และช่องที่ {hi} ต้องเป็น "{expected_names[hi - 1]}"',
-                    "สลับตำแหน่งกรรมการสองคนนี้ให้ถูกต้อง", "FRONT.COMMITTEE")
-            described.add(s)
-            described.add(home)
-    rest = [s for s in wrong if s not in described]
-    if rest:
-        order = "  ".join(f'{k}. {expected_names[k - 1]}' for k in range(1, N + 1))
-        rep.add(zone, "front_matter", loc,
-                "กรรมการครบทุกคน แต่เรียงผิดตำแหน่ง",
-                f'ลำดับที่ถูกต้องตามข้อมูลอนุมัติ (บฑ.) คือ {order}',
-                "จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
+    order = "  ".join(f'{k}. {name}' for k, name in enumerate(expected_names, start=1))
+    wrong = sorted(s for s, i in slot_to_idx.items() if i is not None and i != s - 1)
+    note = ""
+    if wrong:
+        seen = "  ".join(
+            f'ช่องที่ {s} = "{expected_names[slot_to_idx[s]]}"' for s in wrong)
+        note = f" — ระบบอ่านได้ว่า {seen} ซึ่งไม่ตรงลำดับข้างต้น โปรดตรวจ"
+    rep.add_human(loc, f"ลำดับตามข้อมูลอนุมัติ (บฑ.) คือ {order}{note}",
+                  "FRONT.COMMITTEE")
 
 
 _COMMITTEE_TRANSLATE_MSG = {
@@ -723,14 +772,15 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         if not expected:
             continue
         handled_any = True
-        members, member_quals, bottom_text = slots[idx]
+        members, member_quals, bottom_text, member_raw = slots[idx]
         page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
         loc = f"{page_label} ({page_ref(idx)})"
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
         if not english_book:
             # เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน) — กัน cascade
-            _report_thai_committee(rep, expected, members, loc)
+            _report_thai_committee(rep, expected, members, loc,
+                                   raw=member_raw, order_loc=loc)
         elif translation_ok:
             # เล่มอังกฤษ + ถอดชื่อได้ครบ: เทียบตามลำดับแบบเดียวกับเล่มไทย (เทียบหลวม)
             # ถอดในเครื่องเป็นการ "เทียบเคียง" จึงลงส้ม ไม่ฟันธงแดง (ดู docstring)
@@ -739,7 +789,8 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
             _report_committee_positions(
                 rep, expected_en, members, loc, fuzzy=True,
                 zone="ORANGE" if offline else "RED",
-                threshold=_offline_name_threshold() if offline else None)
+                threshold=_offline_name_threshold() if offline else None,
+                raw=member_raw, order_loc=loc)
         else:
             # เล่มอังกฤษ + ถอดชื่อไม่ได้: ลงส้มให้เจ้าหน้าที่ตรวจเอง พร้อมบอกสาเหตุ
             # ให้ตรงจุด (ไม่ได้ตั้ง API key = ปัญหาการติดตั้ง ไม่ใช่ปัญหาของเล่ม)
@@ -952,7 +1003,8 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                     _report_committee_positions(
                         rep, expected, members, loc, fuzzy=True,
                         zone="ORANGE" if offline else "RED",
-                        threshold=_offline_name_threshold() if offline else None)
+                        threshold=_offline_name_threshold() if offline else None,
+                        order_loc=loc)
                 else:
                     # ถอดไม่ได้ = เทียบไม่ได้ ต้องบอกเจ้าหน้าที่ ไม่ใช่ข้ามเงียบ ๆ
                     # (เดิมข้ามไปเฉย ๆ เจ้าหน้าที่จึงไม่รู้ว่าหน้านี้ยังไม่ได้ตรวจชื่อ)
@@ -966,7 +1018,8 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                             "FRONT.ABSTRACT", system_note=True)
             else:
                 expected = [m["name"] for m in advisory]
-                _report_committee_positions(rep, expected, members, loc, fuzzy=False)
+                _report_committee_positions(rep, expected, members, loc, fuzzy=False,
+                                            order_loc=loc)
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
