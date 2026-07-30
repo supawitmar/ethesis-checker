@@ -80,6 +80,27 @@ class SplitAbstractCommittee(unittest.TestCase):
             abstract_committee_missing_commas("ยอด สุขะมงคล, ปร.ด., ทวีศักดิ์ สมานชื่น, ปร.ด."),
             [])
 
+    def test_multi_part_degree_is_not_split_into_a_name(self):
+        """คุณวุฒิที่มีหลายท่อนคั่นด้วยช่องว่าง เช่น "Dr. rer. nat." (เยอรมัน)
+
+        เคยฟ้องผิดว่า "ชื่อกรรมการคนที่ 5 ไม่ได้เป็นตัวพิมพ์ใหญ่: rer. nat."
+        เพราะตัดคุณวุฒิที่หัวก้อนแล้วเหมาว่าส่วนที่เหลือคือชื่อคนถัดไป
+        """
+        block = ("PICHITPONG SOONTORNPIPIT, Ph.D., JUTATIP SILLABUTRA, Ph.D.,"
+                 "PRATANA SATITVIPAWEE, Ph.D., "
+                 "WACHIRAPORN WANICHNOPPARAT, Dr. rer. nat.")
+        names, degrees = split_abstract_committee(block)
+        self.assertEqual(names, ["PICHITPONG SOONTORNPIPIT", "JUTATIP SILLABUTRA",
+                                 "PRATANA SATITVIPAWEE", "WACHIRAPORN WANICHNOPPARAT"])
+        self.assertEqual(degrees[-1], "Dr. rer. nat.")
+        self.assertEqual(abstract_committee_missing_commas(block), [])
+
+    def test_other_multi_part_degrees(self):
+        names, degrees = split_abstract_committee(
+            "SOMCHAI JAIDEE, Dr. med., SOMSRI DEEJAI, Dr. phil.")
+        self.assertEqual(names, ["SOMCHAI JAIDEE", "SOMSRI DEEJAI"])
+        self.assertEqual(degrees, ["Dr. med.", "Dr. phil."])
+
     def test_trailing_comma_and_extra_spaces(self):
         names, _ = split_abstract_committee("ยุพา จิ๋วพัฒนกุล, ปร.ด., รักชนก คชไกร , ปร.ด.,")
         self.assertEqual(names, ["ยุพา จิ๋วพัฒนกุล", "รักชนก คชไกร"])
