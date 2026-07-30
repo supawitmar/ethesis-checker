@@ -1,4 +1,6 @@
 import sys
+
+import translit
 import unittest
 
 from checker import (
@@ -947,17 +949,47 @@ class SignaturePageKindTests(unittest.TestCase):
         self.assertEqual(signature_page_kind("iii", "Thesis Advisory Committees"), "advisory")
 
 
-class CommitteeEnglishNameSourceTests(unittest.TestCase):
-    """ชื่ออังกฤษของกรรมการมาจาก AI ถอดชื่อไทยเท่านั้น (ไฟล์ eThesis ไม่มีชื่ออังกฤษ)"""
+class _NoTranslit:
+    """จำลองเครื่องที่ยังไม่ได้ติดตั้ง pythainlp เพื่อบังคับให้ตกไปทาง AI"""
 
-    def test_no_api_key_reports_reason(self):
-        # ไม่ได้ตั้ง ANTHROPIC_API_KEY = ปัญหาการติดตั้ง ต้องบอกให้ตรงจุด ไม่ใช่โทษเล่ม
-        committees = {"advisory": [{"name": "ก ข"}], "exam": [{"name": "ค ง"}]}
+    @staticmethod
+    def romanize_names(names):
+        return []
+
+    @staticmethod
+    def match_threshold():
+        return 0.60
+
+
+class CommitteeEnglishNameSourceTests(unittest.TestCase):
+    """ชื่ออังกฤษของกรรมการได้จากการถอดชื่อไทย (ไฟล์ eThesis ไม่มีชื่ออังกฤษ)
+
+    ทางหลักคือถอดในเครื่องด้วย translit (ฟรี ไม่ต้องใช้ API)
+    ถ้าถอดในเครื่องไม่ได้จึงตกไปใช้ AI แล้วค่อยเป็น 'ไม่มีเครื่องมือ'
+    """
+
+    def test_offline_transliteration_is_the_primary_path(self):
+        committees = {"advisory": [{"name": "ยอด สุขะมงคล"}]}
         name_en, ok, reason = _committee_translation(committees)
+        if translit.enabled():
+            self.assertTrue(ok)
+            self.assertEqual(reason, "offline")   # ไม่แตะ AI เลย
+            self.assertTrue(name_en["ยอด สุขะมงคล"].strip())
+        else:
+            self.assertFalse(ok)
+
+    def test_reports_reason_when_no_tool_available(self):
+        # ถอดในเครื่องไม่ได้ + ไม่ได้ตั้ง API key = ปัญหาการติดตั้ง ต้องบอกให้ตรงจุด
+        committees = {"advisory": [{"name": "ก ข"}], "exam": [{"name": "ค ง"}]}
+        sys.modules["translit"] = _NoTranslit
+        try:
+            name_en, ok, reason = _committee_translation(committees)
+        finally:
+            sys.modules.pop("translit", None)
         self.assertFalse(ok)
         self.assertEqual(name_en, {})
-        self.assertEqual(reason, "no_key")
-        self.assertIn("ANTHROPIC_API_KEY", _COMMITTEE_TRANSLATE_MSG[reason])
+        self.assertEqual(reason, "no_tool")
+        self.assertIn("pythainlp", _COMMITTEE_TRANSLATE_MSG[reason])
 
     def test_no_committees_is_not_usable(self):
         self.assertEqual(_committee_translation({}), ({}, False, ""))
@@ -978,10 +1010,12 @@ class CommitteeEnglishNameSourceTests(unittest.TestCase):
                 return ["A B", "C D"]
 
         sys.modules["llm_assist"] = _Stub
+        sys.modules["translit"] = _NoTranslit      # บังคับให้ตกไปทาง AI
         try:
             name_en, ok, reason = _committee_translation(committees)
         finally:
             sys.modules.pop("llm_assist", None)
+            sys.modules.pop("translit", None)
         self.assertTrue(ok)
         self.assertEqual(captured["names"], ["ก ข", "ค ง"])   # ไม่ส่งชื่อซ้ำไปแปล
         self.assertEqual(name_en, {"ก ข": "A B", "ค ง": "C D"})
