@@ -255,24 +255,50 @@ class SignatureBottomCell(unittest.TestCase):
 
         เคสนี้เคยฟ้องส้มผิดว่า "ไม่พบชื่อสาขา" ทั้งที่เล่มพิมพ์ถูกต้อง
         """
+        # ช่องขวาเริ่มตรงกับเส้นประขวา (320) เหมือนเล่มจริง
         page = self._page([
-            [("คณบดี", 60.0), ("ประธานหลักสูตร", 250.0)],
-            [("บัณฑิตวิทยาลัย", 60.0), ("สาขาวิชาการพยาบาลผู้ใหญ่และ", 250.0)],
-            [("ผู้สูงอายุ", 250.0)],          # คำท้ายอยู่ซ้ายของกึ่งกลางหน้า (297.5)
+            [("คณบดี", 60.0), ("ประธานหลักสูตร", 320.0)],
+            [("บัณฑิตวิทยาลัย", 60.0), ("สาขาวิชาการพยาบาลผู้ใหญ่และ", 320.0)],
+            [("ผู้สูงอายุ", 320.0)],
         ])
         _members, _quals, bottom = signature_committee_slots(page)
         self.assertIn(norm("การพยาบาลผู้ใหญ่และผู้สูงอายุ"), norm(bottom))
 
     def test_subject_in_right_cell_when_both_cells_are_long(self):
         """สองช่องยาวทั้งคู่ — เรียงตามลำดับอ่านล้วน ๆ จะสลับกัน ต้องยังหาเจอ"""
+        # ช่องขวาเริ่มตรงกับเส้นประขวา (320) เหมือนเล่มจริง
         page = self._page([
-            [("Dean", 60.0), ("Program", 300.0), ("Director", 360.0)],
+            [("Dean", 60.0), ("Program", 320.0), ("Director", 380.0)],
             [("Faculty", 60.0), ("of", 110.0), ("Graduate", 140.0),
-             ("Information", 300.0), ("Technology", 380.0)],
-            [("Studies", 60.0), ("Management", 300.0)],
+             ("Information", 320.0), ("Technology", 400.0)],
+            [("Studies", 60.0), ("Management", 320.0)],
         ])
         _members, _quals, bottom = signature_committee_slots(page)
         self.assertIn(norm("Information Technology Management"), norm(bottom))
+
+    def test_name_is_not_split_when_cell_starts_just_left_of_page_centre(self):
+        """เส้นแบ่งคอลัมน์ต้องมาจากเส้นประ ไม่ใช่กึ่งกลางหน้า
+
+        เล่มจริงพบช่องขวาเริ่มที่ x0=297.53 ขณะที่กึ่งกลางหน้าคือ 297.66
+        ต่างกัน 0.13 pt ทำให้คำแรกของช่องขวาตกไปฝั่งซ้าย ชื่อกรรมการเลยขาดครึ่ง
+        ("มยุรี หอมสนิท" เหลือ "หอมสนิท" ส่วน "มยุรี" ไปโผล่เป็นกรรมการอีกคน)
+        """
+        words, top = [], 100.0
+        for i in range(5):                       # แถวกรรมการ 1..5
+            words.append(word("……………", 43.0, top))
+            words.append(word("……………", 297.53, top))
+            top += 20.0
+            if i == 0:                           # ชื่อเริ่มชิดเส้นประขวาพอดี
+                words.append(word("มยุรี", 297.53, top))
+                words.append(word("หอมสนิท", 360.0, top))
+            top += 20.0
+        words.append(word("……………", 43.0, top))
+        words.append(word("……………", 297.53, top))
+        page = _FakePage(595.32, words)          # กึ่งกลาง = 297.66 (ขวาของ 297.53)
+
+        members, _quals, _bottom = signature_committee_slots(page)
+        self.assertEqual(members.get(1), "มยุรี หอมสนิท")
+        self.assertIsNone(members.get(9))        # ต้องไม่มีชื่อหลุดไปช่องซ้าย
 
     def test_empty_page_returns_blank(self):
         members, quals, bottom = signature_committee_slots(_FakePage(595.0, []))

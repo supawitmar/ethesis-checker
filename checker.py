@@ -302,6 +302,15 @@ def signature_committee_slots(pdf_page):
         else:
             lines.append({'top': top, 'words': [w]})
     line_dotted = [_sig_is_dotted(' '.join(w['text'] for w in ln['words'])) for ln in lines]
+
+    # เส้นแบ่งสองคอลัมน์ต้องมาจาก "เส้นประของ template" ไม่ใช่กึ่งกลางหน้า
+    # เล่มจริงพบว่าช่องขวาเริ่มที่ x0=297.53 ขณะที่กึ่งกลางหน้าคือ 297.66 ต่างกัน
+    # แค่ 0.13 pt คำแรกของทุกช่องขวาจึงถูกโยนไปฝั่งซ้าย ชื่อกรรมการเลยขาดครึ่ง
+    # ("มยุรี หอมสนิท" เหลือ "หอมสนิท" ส่วน "มยุรี" ไปโผล่เป็นกรรมการอีกคน)
+    dot_starts = [float(w['x0']) for ln in lines for w in ln['words']
+                  if _sig_is_dotted(w['text']) and float(w['x0']) > mid * 0.6]
+    if dot_starts:
+        mid = min(dot_starts) - 2.0     # เผื่อคำที่เริ่มชิดขอบซ้ายของช่องพอดี
     # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวคุณวุฒิ = บรรทัดถัดจากชื่อ (ถ้าไม่ใช่เส้นประ)
     name_rows, qual_rows = [], []
     for i in range(len(lines) - 1):
