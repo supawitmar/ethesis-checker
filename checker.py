@@ -454,6 +454,70 @@ def _strip_committee_title(name):
     return s.strip(' ,')
 
 
+# คำนำหน้าชื่อ "นักศึกษา" — ตัดออกก่อนเทียบเสมอ ตามที่เจ้าหน้าที่กำหนด (ก.ค. 2569)
+# "ชื่อนักศึกษา ให้ตรวจแบบไม่มีคำนำหน้า ถ้ามีให้เตือนส้ม"
+#
+# ยศทหาร/ตำรวจเขียนย่อได้หลายสิบแบบ (พ.จ.ต. จ.ส.อ. ร.ต.อ. น.ท. พล.ต.ต. ...)
+# ไล่รายคำไม่มีวันครบ จึงจับ "อักษรไทย 1-4 ตัวคั่นด้วยจุด" เป็นรูปแบบเดียว —
+# ชื่อคนไทยไม่มีจุดอยู่แล้ว จึงไม่ไปโดนชื่อจริง
+# ฝั่งอังกฤษยศมักตามด้วยเลขชั้น (บฑ. ของเล่มที่ 9 เขียน "CPO 3 NUTCHANOP PETSUK")
+# จึงเผื่อเลขท้ายคำนำหน้าไว้ด้วย
+_STUDENT_TITLE_PREFIX = re.compile(
+    r'^\s*(?:'
+    # "หญิง" ต่อท้ายยศได้ เช่น "ร.ต.อ.หญิง" / "พันเอกหญิง" ต้องตัดไปด้วย
+    r'(?:[ก-๙]{1,4}\.\s*){1,4}(?:หญิง)?'
+    r'|ว่าที่\s*(?:ร้อยตรี|ร้อยโท|ร้อยเอก)|'
+    r'นายแพทย์|แพทย์หญิง|ทันตแพทย์|สัตวแพทย์|เภสัชกร|'   # ต้องมาก่อน "นาย"
+    r'(?:พล|พัน|ร้อย|พันจ่า|จ่าสิบ|สิบ|นาวา|เรือ)(?:เอก|โท|ตรี)(?:หญิง)?|'
+    r'นางสาว|นาง|นาย(?=\s|[ก-๙])|'
+    r'(?:[A-Z]\.){2,4}'
+    r'|(?:Pol\.?\s*)?(?:Gen|Lt|Col|Maj|Capt|Sgt|Cpl|Pvt|CPO|PO|Cdr|Adm|Lieut|'
+    r'Mr|Mrs|Miss|Ms|Dr)\b\.?'
+    r')\s*\.?\s*\d*\s*', re.I)
+
+
+def _strip_student_title(name):
+    """ตัดคำนำหน้า/ยศออกจากชื่อนักศึกษา เหลือเฉพาะชื่อ-สกุล"""
+    s = (name or "").strip()
+    prev = None
+    while s and s != prev:
+        prev = s
+        s = _STUDENT_TITLE_PREFIX.sub('', s, count=1).strip()
+    return s or (name or "").strip()
+
+
+def _student_title_in_page(page_text, core_name):
+    """คำนำหน้าที่เล่มพิมพ์ไว้หน้าชื่อนักศึกษา ('' ถ้าไม่มี)
+
+    ใช้เตือน (ส้ม) ว่า "ชื่อนักศึกษาไม่ควรมีคำนำหน้า" โดยไม่ตีตกเล่ม
+    """
+    key = norm(core_name)
+    if not key:
+        return ""
+    for line in (page_text or "").splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        stripped = _strip_student_title(raw)
+        if stripped != raw and norm(stripped).startswith(key):
+            return raw[:len(raw) - len(stripped)].strip()
+    return ""
+
+
+def _report_student_title(rep, page_text, core_name, loc, label, rule_id):
+    """ชื่อ-สกุลตรงแล้ว เหลือแค่ดูว่ามีคำนำหน้าเกินมาไหม — มี = ส้ม (เตือน ไม่ตีตก)"""
+    found = _student_title_in_page(page_text, core_name)
+    if not found:
+        rep.add_verification("ชื่อนักศึกษา", loc, "pass")
+        return
+    rep.add_verification("ชื่อนักศึกษา", loc, "pending", f'พบคำนำหน้า "{found}"')
+    rep.add("ORANGE", "front_matter", loc,
+            f'พบคำนำหน้าหน้า{label}: "{found}"',
+            f'{label}ต้องเป็นชื่อ-นามสกุลเท่านั้น ไม่มีคำนำหน้านามหรือยศ '
+            f'คือ "{core_name}"',
+            f'ลบ "{found}" ออกจากหน้าเอกสาร แล้วให้เจ้าหน้าที่ยืนยัน', rule_id)
+
+
 def _display_committee_name(name):
     """ชื่อกรรมการที่เอาไปแสดงในรายงาน — ตัดคำนำหน้าออกให้ตรงกับที่ระบบใช้เทียบ
 
@@ -2741,7 +2805,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             ]
             ack_full_text = soft(" ".join(ack_lines))
             ack_tail_text = soft(" ".join(ack_lines[-8:]))
-            expected_ack_name = student_name_th if thai_book else person_name_sentence_case(student_name)
+            # ชื่อผู้เขียนท้ายกิตติกรรมประกาศก็คือชื่อนักศึกษา จึงเทียบแบบ
+            # "ไม่เอาคำนำหน้า" ตามกติกาเดียวกัน (บฑ. มียศ แต่เล่มมักพิมพ์แค่ชื่อ-สกุล)
+            expected_ack_name = _strip_student_title(
+                student_name_th if thai_book else person_name_sentence_case(student_name))
             if thai_book:
                 exact_at_end = norm(expected_ack_name) in norm(ack_tail_text)
                 name_elsewhere = norm(expected_ack_name) in norm(ack_full_text)
@@ -2766,19 +2833,25 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 )
 
         if primary_student_name:
+            # เทียบ "ชื่อ-สกุล" อย่างเดียว ไม่เอาคำนำหน้า/ยศ ตามที่เจ้าหน้าที่กำหนด
+            # (บฑ. ของเล่มที่ 9 เขียน "พ.จ.ต. ณัชนพ เพชรสุข" แต่เล่มพิมพ์แค่ชื่อ-สกุล
+            #  เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด)
+            core_name = _strip_student_title(primary_student_name)
             name_spots = [("หน้าปก", 0)] + [
                 (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", idx) for k, idx in enumerate(sig_pages)
             ]
             for spot_name, spot_idx in name_spots:
-                compared = compare_reference_text(pages[spot_idx], primary_student_name, 'student_name')
-                rep.add_verification("ชื่อนักศึกษา", spot_name,
-                                     "pass" if compared['status'] == 'exact' else "fail",
-                                     "" if compared['status'] == 'exact' else compared['actual'])
+                compared = compare_reference_text(pages[spot_idx], core_name, 'student_name')
                 if compared['status'] != 'exact':
+                    rep.add_verification("ชื่อนักศึกษา", spot_name, "fail",
+                                         compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อนักศึกษา", compared, primary_student_name),
-                            f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{primary_student_name}\"",
+                            mismatch_detail("ชื่อนักศึกษา", compared, core_name),
+                            f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{core_name}\"",
                             "แก้การสะกดชื่อ", "FORM.APPROVED_MATCH")
+                    continue
+                _report_student_title(rep, pages[spot_idx], core_name, spot_name,
+                                      "ชื่อนักศึกษา", "FORM.APPROVED_MATCH")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
@@ -2788,7 +2861,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             ]
         else:
             name_checks = [(student_name, abs_en_idx, "บทคัดย่อ", "ชื่อนักศึกษา", False)]
-        PREFIX_RE = r"(นางสาว|นาง|นาย|MRS\.?|MISS|MS\.?|MR\.?|ดร\.?|DR\.?)"
         for nm3, aidx, albl, nlbl, required in name_checks:
             if not nm3:
                 if required:
@@ -2801,26 +2873,19 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                 rep.add_verification("ชื่อนักศึกษา", albl, "pending",
                                      f"เล่มไม่มีหน้า{albl}")
                 continue
-            compared = compare_reference_text(pages[aidx], nm3, 'student_name')
+            core3 = _strip_student_title(nm3)
+            compared = compare_reference_text(pages[aidx], core3, 'student_name')
             if compared['status'] != 'exact':
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",
-                        mismatch_detail(f"{nlbl}", compared, nm3),
-                        f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{nm3}\"",
+                        mismatch_detail(f"{nlbl}", compared, core3),
+                        f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{core3}\"",
                         "ตรวจการสะกด", "FORM.APPROVED_MATCH")
             else:
-                first_tok = nm3.split()[0]
-                if re.search(PREFIX_RE + r"\s*" + re.escape(norm(first_tok))[:12], norm(pages[aidx]), re.I) and \
-                   re.search(PREFIX_RE, pages[aidx], re.I):
-                    rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
-                                         "pending", "พบคำนำหน้านามหน้าชื่อ")
-                    rep.add(FRONT_FAILURE_ZONE, "front_matter", f"{albl} ({page_ref(aidx)})",
-                            f"พบคำนำหน้านามหน้า{nlbl} (เช่น นาย/นางสาว/Mr./Miss)",
-                            "ชื่อนักศึกษาต้องไม่มีคำนำหน้านาม",
-                            "ลบคำนำหน้านามออก แล้วให้เจ้าหน้าที่ยืนยัน", "FORM.APPROVED_MATCH")
-                else:
-                    rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})", "pass")
+                _report_student_title(rep, pages[aidx], core3,
+                                      f"{albl} ({page_ref(aidx)})", nlbl,
+                                      "FORM.APPROVED_MATCH")
 
         # รหัสนักศึกษา = เลข 7 หลัก + รหัสหลักสูตร (เช่น "6838141 SHSS/M") ต้องตรวจทั้งชุด
         # และต้องปรากฏในบทคัดย่อ "ทุกภาษาที่เล่มมี" (นานาชาติมีเฉพาะอังกฤษ)

@@ -11,6 +11,8 @@ import unittest
 from checker import (
     Report,
     _compose_thai_line,
+    _report_student_title,
+    _strip_student_title,
     _report_thai_committee,
     _sig_words,
     _strip_committee_title,
@@ -415,6 +417,73 @@ class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):
         page = "จำเนียร จวงตระกูล\nศิริพร แย้มนิล\n"
         self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 2: "จวงตระกูล"},
                                     page_text=page), [])
+
+
+class StudentNameIgnoresTitles(unittest.TestCase):
+    """นโยบายเจ้าหน้าที่ (ก.ค. 2569): "ชื่อนักศึกษา ให้ตรวจแบบไม่มีคำนำหน้า ถ้ามีให้เตือนส้ม"
+
+    เล่มที่ 9: บฑ. เขียน "พ.จ.ต. ณัชนพ เพชรสุข" / "CPO 3 NUTCHANOP PETSUK"
+    แต่เล่มพิมพ์แค่ชื่อ-สกุล เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด
+    """
+
+    def test_strips_thai_rank_abbreviations(self):
+        for raw, want in (
+            ("พ.จ.ต. ณัชนพ เพชรสุข", "ณัชนพ เพชรสุข"),
+            ("จ.ส.อ. มานะ อดทน", "มานะ อดทน"),
+            ("พ.ต.ท. วิชัย ศรีสุข", "วิชัย ศรีสุข"),
+            ("ร.ต.อ.หญิง สมหญิง ใจดี", "สมหญิง ใจดี"),
+        ):
+            self.assertEqual(_strip_student_title(raw), want, raw)
+
+    def test_strips_thai_full_word_titles(self):
+        for raw, want in (
+            ("นายสมชาย ใจดี", "สมชาย ใจดี"),
+            ("นางสาว สุดา ดีงาม", "สุดา ดีงาม"),
+            ("ว่าที่ร้อยตรี ก้อง ทองดี", "ก้อง ทองดี"),
+            ("จ่าสิบเอก มานะ อดทน", "มานะ อดทน"),
+            ("พันเอกหญิง สมหญิง ใจดี", "สมหญิง ใจดี"),
+            ("นายแพทย์ สมชาย ใจดี", "สมชาย ใจดี"),   # ต้องไม่ตัดแค่ "นาย" แล้วเหลือ "แพทย์"
+        ):
+            self.assertEqual(_strip_student_title(raw), want, raw)
+
+    def test_strips_english_rank_with_class_number(self):
+        self.assertEqual(_strip_student_title("CPO 3 NUTCHANOP PETSUK"),
+                         "NUTCHANOP PETSUK")
+        self.assertEqual(_strip_student_title("Lt. Col. Somchai Jaidee"),
+                         "Somchai Jaidee")
+        self.assertEqual(_strip_student_title("Miss Suda Deengam"), "Suda Deengam")
+
+    def test_plain_names_are_untouched(self):
+        for raw in ("ณัชนพ เพชรสุข", "NUTCHANOP PETSUK", "นภา ใจดี",
+                    "MISSAKORN SOMCHAI"):     # ห้ามกิน "MISS" ที่เป็นส่วนของชื่อ
+            self.assertEqual(_strip_student_title(raw), raw, raw)
+
+    def _oranges(self, page_text, core):
+        rep = Report()
+        _report_student_title(rep, page_text, core, "หน้าปก", "ชื่อนักศึกษา",
+                              "FORM.APPROVED_MATCH")
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_prefix_in_the_book_is_orange_not_red(self):
+        rep = Report()
+        _report_student_title(rep, "นายสมชาย ใจดี\n", "สมชาย ใจดี", "หน้าปก",
+                              "ชื่อนักศึกษา", "FORM.APPROVED_MATCH")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        self.assertIn('"นาย"', rep.zones["ORANGE"][0]["found"])
+
+    def test_rank_prefix_is_named_in_the_message(self):
+        out = self._oranges("พ.จ.ต. ณัชนพ เพชรสุข\n", "ณัชนพ เพชรสุข")
+        self.assertEqual(len(out), 1)
+        self.assertIn('"พ.จ.ต."', out[0])
+        self.assertEqual(self._oranges("CPO 3 NUTCHANOP PETSUK\n",
+                                       "NUTCHANOP PETSUK")[0].count('"CPO 3"'), 1)
+
+    def test_clean_name_reports_nothing(self):
+        self.assertEqual(self._oranges("ณัชนพ เพชรสุข\n", "ณัชนพ เพชรสุข"), [])
+        # บรรทัดที่มีรหัสนักศึกษาต่อท้าย (หน้าบทคัดย่อ) ก็ต้องไม่ฟ้อง
+        self.assertEqual(
+            self._oranges("ณัชนพ เพชรสุข 6538041 SHPP/D\n", "ณัชนพ เพชรสุข"), [])
 
 
 if __name__ == "__main__":
