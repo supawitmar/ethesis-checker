@@ -9,7 +9,10 @@
 import unittest
 
 from checker import (
+    Report,
     _compose_thai_line,
+    _report_thai_committee,
+    _sig_words,
     _strip_committee_title,
     _thai_chars,
     abstract_committee_missing_commas,
@@ -328,6 +331,90 @@ class SystemNoteNotSentToStudent(unittest.TestCase):
             "RED": [{"found": "ระบบอ่านไฟล์ไม่ได้", "system_note": True}],
             "ORANGE": [], "YELLOW": []}}
         self.assertEqual(issues_to_fix(report), [])
+
+
+class _CharPage:
+    """หน้า PDF ปลอมที่มี chars จริง (ใช้ทดสอบการซ่อมนิคหิตบนหน้าลงนาม)"""
+
+    def __init__(self, chars, width=595.0):
+        self.chars = chars
+        self.width = width
+
+    def extract_words(self, **_kwargs):          # ทางสำรองเมื่ออ่าน chars ไม่ได้
+        return []
+
+
+class SignatureNikhahitRepair(unittest.TestCase):
+    """ฟอนต์ map นิคหิตของ ำ เป็น "ช่องว่างกว้างศูนย์" — เจอในเล่มที่ 9
+
+    ถ้าอ่านหน้าลงนามด้วย extract_words ตรง ๆ ตัวนั้นถูกนับเป็นการเว้นวรรค
+    "จำเนียร จวงตระกูล" จึงกลายเป็น "จ าเนียร จวงตระกูล" แล้วเทียบกับ บฑ. ไม่ตรง
+    ระบบฟ้องแดงผิดสองข้อ: ไม่พบกรรมการคนนี้ + พบชื่อนอกรายชื่ออนุมัติ
+    """
+
+    def _chars(self, text, x0=100.0, top=100.0):
+        out, x = [], x0
+        for c in text:
+            width = 0.0 if c == " " else 6.0     # ช่องว่างกว้างศูนย์ = นิคหิต
+            out.append({"text": c, "x0": x, "x1": x + width, "top": top,
+                        "doctop": top, "bottom": top + 10.0, "upright": True,
+                        "size": 10.0, "non_stroking_color": (0, 0, 0),
+                        "fontname": "TH"})
+            x += width
+        return out
+
+    def test_zero_width_space_becomes_sara_am(self):
+        words = _sig_words(_CharPage(self._chars("จ าเนียร")))
+        self.assertEqual("".join(w["text"] for w in words), "จำเนียร")
+
+    def test_real_space_still_separates_words(self):
+        chars = self._chars("จ าเนียร", x0=100.0)
+        chars += self._chars("จวงตระกูล", x0=180.0)      # เว้นระยะจริง
+        texts = [w["text"] for w in _sig_words(_CharPage(chars))]
+        self.assertEqual(texts, ["จำเนียร", "จวงตระกูล"])
+
+
+class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):
+    """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ดูแค่ "ชื่อ" ว่าครบและถูกคน ไม่ดูตำแหน่งช่อง
+
+    "แต่ละเล่มทำมาไม่เหมือนกัน" — เล่มที่จัดตารางต่างจาก template จะอ่านไม่เข้าช่อง
+    ถ้าเชื่อช่องอย่างเดียวระบบจะฟ้องผิดว่าไม่พบกรรมการ ทั้งที่ชื่อพิมพ์อยู่บนหน้าครบ
+    """
+
+    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
+
+    def _reds(self, members, page_text=None):
+        rep = Report()
+        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ",
+                               page_text=page_text)
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_names_read_into_the_wrong_cells_are_not_flagged(self):
+        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 5: "จำเนียร จวงตระกูล"}), [])
+
+    def test_name_found_on_the_page_counts_even_if_no_cell_matched(self):
+        page = ("ศาสตราจารย์พิศิษฐ์ จำเนียร จวงตระกูล\n"
+                "รองศาสตราจารย์ ศิริพร แย้มนิล\n")
+        self.assertEqual(self._reds({}, page_text=page), [])
+
+    def test_genuinely_missing_name_is_still_red(self):
+        page = "รองศาสตราจารย์ ศิริพร แย้มนิล\n"
+        reds = self._reds({1: "ศิริพร แย้มนิล"}, page_text=page)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("จำเนียร จวงตระกูล", reds[0])
+
+    def test_stranger_is_still_red(self):
+        page = "ศิริพร แย้มนิล\nจำเนียร จวงตระกูล\nสมชาย ใจดี\n"
+        reds = self._reds({1: "ศิริพร แย้มนิล", 2: "จำเนียร จวงตระกูล",
+                           3: "สมชาย ใจดี"}, page_text=page)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("สมชาย ใจดี", reds[0])
+
+    def test_half_a_name_read_into_a_cell_is_not_called_a_stranger(self):
+        """ระบบแบ่งช่องคร่อมคำจนได้ "จวงตระกูล" ลอยมาช่องหนึ่ง — ไม่ใช่คนนอก"""
+        page = "จำเนียร จวงตระกูล\nศิริพร แย้มนิล\n"
+        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 2: "จวงตระกูล"},
+                                    page_text=page), [])
 
 
 if __name__ == "__main__":
