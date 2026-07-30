@@ -161,7 +161,7 @@ class AcademicRankIsAnObservationOnly(unittest.TestCase):
 
     def _yellows(self, expected_name, found_text):
         rep = Report()
-        _report_committee_rank(rep, expected_name, found_text, 1, "หน้าอาจารย์ที่ปรึกษา")
+        _report_committee_rank(rep, expected_name, found_text, "หน้าอาจารย์ที่ปรึกษา")
         return [i["found"] for i in rep.zones["YELLOW"]]
 
     def test_same_rank_with_extra_prefixes_passes(self):
@@ -182,6 +182,31 @@ class AcademicRankIsAnObservationOnly(unittest.TestCase):
                                        "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท,"), [])
         self.assertEqual(self._yellows("ผู้ช่วยศาสตราจารย์ มยุรี หอมสนิท",
                                        "มยุรี หอมสนิท,"), [])
+
+    def test_thai_name_containing_sara_is_not_read_as_professor(self):
+        """ตัวย่อ "ศ." ต้องเทียบกับข้อความดิบ ไม่ใช่ข้อความที่ normalize แล้ว
+
+        norm() ตัดจุดทิ้ง "ศ." จึงเหลือ "ศ" ตัวเดียว แล้วไปแมตช์ตัว ศ ที่อยู่ในชื่อคน
+        เล่มที่ 9 โดนเต็ม ๆ — ชื่อที่ไม่มีตำแหน่งทางวิชาการเลยถูกอ่านว่าเป็นศาสตราจารย์
+        แล้วฟ้องเหลืองผิด 6 ข้อ
+        """
+        for name in ("ศิริพร แย้มนิล", "กมลพร สอนศรี", "ศรีสมบัติ โชคประจักษ์ชัด",
+                     "ธเนศ เกษศิลป์", "สมศักดิ์ อมรสิริพงศ์"):
+            self.assertEqual(_academic_rank(name), "", name)
+
+    def test_thai_rank_abbreviations_still_recognised(self):
+        self.assertEqual(_academic_rank("ศ. ดร.สมชาย ใจดี"), "prof")
+        self.assertEqual(_academic_rank("รศ.ดร. ศิริพร แย้มนิล"), "assoc")
+        self.assertEqual(_academic_rank("ผศ.ดร. มยุรี หอมสนิท"), "asst")
+
+    def test_doctor_title_in_the_middle_is_stripped(self):
+        """eThesis เขียน "ศาสตราจารย์ พิศิษฐ์ ดร. จำเนียร จวงตระกูล"
+        ส่วนเล่มเขียน "ศาสตราจารย์พิศิษฐ์ จำเนียร จวงตระกูล" — ต้องเทียบได้ตรงกัน
+        """
+        self.assertEqual(_strip_committee_title("ศาสตราจารย์ พิศิษฐ์ ดร. จำเนียร จวงตระกูล"),
+                         _strip_committee_title("ศาสตราจารย์พิศิษฐ์ จำเนียร จวงตระกูล"))
+        self.assertEqual(_strip_committee_title("ศาสตราจารย์พิเศษ ดร.จำเนียร จวงตระกูล"),
+                         "จำเนียร จวงตระกูล")
 
     def test_assistant_professor_not_read_as_professor(self):
         """"ผู้ช่วยศาสตราจารย์" มีคำว่า "ศาสตราจารย์" อยู่ข้างใน ต้องจับตัวยาวก่อน"""

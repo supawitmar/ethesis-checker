@@ -716,23 +716,26 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
         rep = self._run(["คนางค์ ก"], {1: "ดร. คนางค์ ก"})
         self.assertEqual(self._reds(rep), [])
 
-    def test_swapped_names_are_left_to_staff_not_flagged_red(self):
-        """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ระบบตรวจแค่ "ชื่อครบและถูกคน"
-        ส่วนลำดับให้เจ้าหน้าที่ตรวจเอง จึงไม่ฟ้องแดง แต่ต้องมีรายการม่วงไว้ให้ดู
+    def test_swapped_names_are_not_flagged_at_all(self):
+        """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ระบบดูแค่ "ชื่อครบและถูกคน"
+
+        ไม่ดูว่าใครอยู่ช่องไหน เพราะแต่ละเล่มจัดหน้าไม่เหมือนกัน — สลับช่องจึงเงียบ
+        เหลือแค่รายชื่อจาก บฑ. ไว้ให้เจ้าหน้าที่ทานเอง (สีม่วง)
         """
         rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
                         {1: "คนางค์ ก", 2: "ธเนศ ค", 3: "สุภาภรณ์ ข"})
         self.assertEqual(self._reds(rep), [])
+        self.assertEqual(rep.zones["YELLOW"], [])
         self.assertTrue(rep.human_checklist)
         why = rep.human_checklist[0]["why"]
-        self.assertIn("ลำดับตามข้อมูลอนุมัติ", why)
-        self.assertIn("ไม่ตรงลำดับข้างต้น", why)   # บอกสิ่งที่ระบบสังเกตเห็นด้วย
+        self.assertIn("รายชื่อกรรมการตามข้อมูลอนุมัติ", why)
+        self.assertNotIn("ช่องที่", why)          # ห้ามอ้างตำแหน่งช่องอีกต่อไป
 
-    def test_correct_order_still_listed_for_staff(self):
+    def test_names_listed_for_staff_even_when_all_correct(self):
         rep = self._run(["A A", "B B"], {1: "A A", 2: "B B"})
         self.assertEqual(self._reds(rep), [])
         self.assertTrue(rep.human_checklist)
-        self.assertNotIn("ไม่ตรงลำดับ", rep.human_checklist[0]["why"])
+        self.assertNotIn("ลำดับ", rep.human_checklist[0]["why"])
 
     def test_missing_member_is_named_not_cascaded(self):
         # ขาดกรรมการกลาง แล้วดันชื่อขึ้น → ต้องฟ้อง 'ไม่พบ B' + 'พบ C เกินตำแหน่ง' ไม่ใช่แดงรัวทั้งแถว

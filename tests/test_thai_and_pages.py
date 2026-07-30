@@ -9,7 +9,13 @@
 import unittest
 
 from checker import (
+    Report,
     _compose_thai_line,
+    classify,
+    _report_student_title,
+    _strip_student_title,
+    _report_thai_committee,
+    _sig_words,
     _strip_committee_title,
     _thai_chars,
     abstract_committee_missing_commas,
@@ -328,6 +334,186 @@ class SystemNoteNotSentToStudent(unittest.TestCase):
             "RED": [{"found": "ระบบอ่านไฟล์ไม่ได้", "system_note": True}],
             "ORANGE": [], "YELLOW": []}}
         self.assertEqual(issues_to_fix(report), [])
+
+
+class _CharPage:
+    """หน้า PDF ปลอมที่มี chars จริง (ใช้ทดสอบการซ่อมนิคหิตบนหน้าลงนาม)"""
+
+    def __init__(self, chars, width=595.0):
+        self.chars = chars
+        self.width = width
+
+    def extract_words(self, **_kwargs):          # ทางสำรองเมื่ออ่าน chars ไม่ได้
+        return []
+
+
+class SignatureNikhahitRepair(unittest.TestCase):
+    """ฟอนต์ map นิคหิตของ ำ เป็น "ช่องว่างกว้างศูนย์" — เจอในเล่มที่ 9
+
+    ถ้าอ่านหน้าลงนามด้วย extract_words ตรง ๆ ตัวนั้นถูกนับเป็นการเว้นวรรค
+    "จำเนียร จวงตระกูล" จึงกลายเป็น "จ าเนียร จวงตระกูล" แล้วเทียบกับ บฑ. ไม่ตรง
+    ระบบฟ้องแดงผิดสองข้อ: ไม่พบกรรมการคนนี้ + พบชื่อนอกรายชื่ออนุมัติ
+    """
+
+    def _chars(self, text, x0=100.0, top=100.0):
+        out, x = [], x0
+        for c in text:
+            width = 0.0 if c == " " else 6.0     # ช่องว่างกว้างศูนย์ = นิคหิต
+            out.append({"text": c, "x0": x, "x1": x + width, "top": top,
+                        "doctop": top, "bottom": top + 10.0, "upright": True,
+                        "size": 10.0, "non_stroking_color": (0, 0, 0),
+                        "fontname": "TH"})
+            x += width
+        return out
+
+    def test_zero_width_space_becomes_sara_am(self):
+        words = _sig_words(_CharPage(self._chars("จ าเนียร")))
+        self.assertEqual("".join(w["text"] for w in words), "จำเนียร")
+
+    def test_real_space_still_separates_words(self):
+        chars = self._chars("จ าเนียร", x0=100.0)
+        chars += self._chars("จวงตระกูล", x0=180.0)      # เว้นระยะจริง
+        texts = [w["text"] for w in _sig_words(_CharPage(chars))]
+        self.assertEqual(texts, ["จำเนียร", "จวงตระกูล"])
+
+
+class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):
+    """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ดูแค่ "ชื่อ" ว่าครบและถูกคน ไม่ดูตำแหน่งช่อง
+
+    "แต่ละเล่มทำมาไม่เหมือนกัน" — เล่มที่จัดตารางต่างจาก template จะอ่านไม่เข้าช่อง
+    ถ้าเชื่อช่องอย่างเดียวระบบจะฟ้องผิดว่าไม่พบกรรมการ ทั้งที่ชื่อพิมพ์อยู่บนหน้าครบ
+    """
+
+    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
+
+    def _reds(self, members, page_text=None):
+        rep = Report()
+        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ",
+                               page_text=page_text)
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_names_read_into_the_wrong_cells_are_not_flagged(self):
+        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 5: "จำเนียร จวงตระกูล"}), [])
+
+    def test_name_found_on_the_page_counts_even_if_no_cell_matched(self):
+        page = ("ศาสตราจารย์พิศิษฐ์ จำเนียร จวงตระกูล\n"
+                "รองศาสตราจารย์ ศิริพร แย้มนิล\n")
+        self.assertEqual(self._reds({}, page_text=page), [])
+
+    def test_genuinely_missing_name_is_still_red(self):
+        page = "รองศาสตราจารย์ ศิริพร แย้มนิล\n"
+        reds = self._reds({1: "ศิริพร แย้มนิล"}, page_text=page)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("จำเนียร จวงตระกูล", reds[0])
+
+    def test_stranger_is_still_red(self):
+        page = "ศิริพร แย้มนิล\nจำเนียร จวงตระกูล\nสมชาย ใจดี\n"
+        reds = self._reds({1: "ศิริพร แย้มนิล", 2: "จำเนียร จวงตระกูล",
+                           3: "สมชาย ใจดี"}, page_text=page)
+        self.assertEqual(len(reds), 1)
+        self.assertIn("สมชาย ใจดี", reds[0])
+
+    def test_half_a_name_read_into_a_cell_is_not_called_a_stranger(self):
+        """ระบบแบ่งช่องคร่อมคำจนได้ "จวงตระกูล" ลอยมาช่องหนึ่ง — ไม่ใช่คนนอก"""
+        page = "จำเนียร จวงตระกูล\nศิริพร แย้มนิล\n"
+        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 2: "จวงตระกูล"},
+                                    page_text=page), [])
+
+
+class StudentNameIgnoresTitles(unittest.TestCase):
+    """นโยบายเจ้าหน้าที่ (ก.ค. 2569): "ชื่อนักศึกษา ให้ตรวจแบบไม่มีคำนำหน้า ถ้ามีให้เตือนส้ม"
+
+    เล่มที่ 9: บฑ. เขียน "พ.จ.ต. ณัชนพ เพชรสุข" / "CPO 3 NUTCHANOP PETSUK"
+    แต่เล่มพิมพ์แค่ชื่อ-สกุล เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด
+    """
+
+    def test_strips_thai_rank_abbreviations(self):
+        for raw, want in (
+            ("พ.จ.ต. ณัชนพ เพชรสุข", "ณัชนพ เพชรสุข"),
+            ("จ.ส.อ. มานะ อดทน", "มานะ อดทน"),
+            ("พ.ต.ท. วิชัย ศรีสุข", "วิชัย ศรีสุข"),
+            ("ร.ต.อ.หญิง สมหญิง ใจดี", "สมหญิง ใจดี"),
+        ):
+            self.assertEqual(_strip_student_title(raw), want, raw)
+
+    def test_strips_thai_full_word_titles(self):
+        for raw, want in (
+            ("นายสมชาย ใจดี", "สมชาย ใจดี"),
+            ("นางสาว สุดา ดีงาม", "สุดา ดีงาม"),
+            ("ว่าที่ร้อยตรี ก้อง ทองดี", "ก้อง ทองดี"),
+            ("จ่าสิบเอก มานะ อดทน", "มานะ อดทน"),
+            ("พันเอกหญิง สมหญิง ใจดี", "สมหญิง ใจดี"),
+            ("นายแพทย์ สมชาย ใจดี", "สมชาย ใจดี"),   # ต้องไม่ตัดแค่ "นาย" แล้วเหลือ "แพทย์"
+        ):
+            self.assertEqual(_strip_student_title(raw), want, raw)
+
+    def test_strips_english_rank_with_class_number(self):
+        self.assertEqual(_strip_student_title("CPO 3 NUTCHANOP PETSUK"),
+                         "NUTCHANOP PETSUK")
+        self.assertEqual(_strip_student_title("Lt. Col. Somchai Jaidee"),
+                         "Somchai Jaidee")
+        self.assertEqual(_strip_student_title("Miss Suda Deengam"), "Suda Deengam")
+
+    def test_plain_names_are_untouched(self):
+        for raw in ("ณัชนพ เพชรสุข", "NUTCHANOP PETSUK", "นภา ใจดี",
+                    "MISSAKORN SOMCHAI"):     # ห้ามกิน "MISS" ที่เป็นส่วนของชื่อ
+            self.assertEqual(_strip_student_title(raw), raw, raw)
+
+    def _oranges(self, page_text, core):
+        rep = Report()
+        _report_student_title(rep, page_text, core, "หน้าปก", "ชื่อนักศึกษา",
+                              "FORM.APPROVED_MATCH")
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_prefix_in_the_book_is_orange_not_red(self):
+        rep = Report()
+        _report_student_title(rep, "นายสมชาย ใจดี\n", "สมชาย ใจดี", "หน้าปก",
+                              "ชื่อนักศึกษา", "FORM.APPROVED_MATCH")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        self.assertIn('"นาย"', rep.zones["ORANGE"][0]["found"])
+
+    def test_rank_prefix_is_named_in_the_message(self):
+        out = self._oranges("พ.จ.ต. ณัชนพ เพชรสุข\n", "ณัชนพ เพชรสุข")
+        self.assertEqual(len(out), 1)
+        self.assertIn('"พ.จ.ต."', out[0])
+        self.assertEqual(self._oranges("CPO 3 NUTCHANOP PETSUK\n",
+                                       "NUTCHANOP PETSUK")[0].count('"CPO 3"'), 1)
+
+    def test_clean_name_reports_nothing(self):
+        self.assertEqual(self._oranges("ณัชนพ เพชรสุข\n", "ณัชนพ เพชรสุข"), [])
+        # บรรทัดที่มีรหัสนักศึกษาต่อท้าย (หน้าบทคัดย่อ) ก็ต้องไม่ฟ้อง
+        self.assertEqual(
+            self._oranges("ณัชนพ เพชรสุข 6538041 SHPP/D\n", "ณัชนพ เพชรสุข"), [])
+
+
+class ChapterTitleIssuesAreNotReportedTwice(unittest.TestCase):
+    """ชื่อบทผิดจากประกาศ = ปัญหาเดียว ต้องอยู่ข้อเดียวและหมวดเดียว
+
+    เดิมแยกเป็นข้อของสารบัญกับข้อของเนื้อหา และยังตกคนละหมวดอีก
+    (ต่างเล็กน้อย -> "สะกดผิดเล็กน้อย (typo)" / ต่างมาก -> "ชื่อบทไม่ตรงประกาศ")
+    เจ้าหน้าที่จึงเห็นเป็นสองเรื่องทั้งที่ต้องแก้ครั้งเดียว
+    """
+
+    def test_small_and_large_differences_share_one_category(self):
+        small = {"found": 'ชื่อบทพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.98): "X"',
+                 "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 6"}
+        large = {"found": 'ชื่อบทข้อความไม่ตรง: "X"',
+                 "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 2"}
+        self.assertEqual(classify(small), "ชื่อบทไม่ตรงประกาศ")
+        self.assertEqual(classify(large), "ชื่อบทไม่ตรงประกาศ")
+
+    def test_toc_vs_body_mismatch_is_a_different_category(self):
+        """สารบัญ↔เนื้อหาไม่ตรงกัน (ไม่ได้อ้างประกาศ) ยังเป็นคนละหมวดตามเดิม"""
+        item = {"found": 'ชื่อบทในเนื้อหาข้อความไม่ตรง: "X"',
+                "expected": 'ต้องสะกดตรงกับชื่อบทในสารบัญ: "Y"',
+                "location": "บทที่ 3 (หน้า 45)"}
+        self.assertEqual(classify(item), "สะกดผิด (typo)")
+
+    def test_other_typos_still_land_in_the_typo_category(self):
+        item = {"found": 'ชื่อปริญญาพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.95): "X"',
+                "expected": "", "location": "หน้าปก"}
+        self.assertNotEqual(classify(item), "ชื่อบทไม่ตรงประกาศ")
 
 
 if __name__ == "__main__":
