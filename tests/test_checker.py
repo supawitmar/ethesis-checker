@@ -728,8 +728,10 @@ class ThaiCommitteeSetDiffTests(unittest.TestCase):
         self.assertEqual(rep.zones["YELLOW"], [])
         self.assertTrue(rep.human_checklist)
         why = rep.human_checklist[0]["why"]
-        self.assertIn("รายชื่อกรรมการตามข้อมูลอนุมัติ", why)
+        self.assertIn("รายชื่อตามข้อมูลอนุมัติ", why)
         self.assertNotIn("ช่องที่", why)          # ห้ามอ้างตำแหน่งช่องอีกต่อไป
+        # ต้องบอกด้วยว่าระบบเทียบให้แล้ว ไม่ใช่ "ระบบไม่ได้ตรวจ"
+        self.assertIn("ระบบเทียบชื่อให้แล้ว", why)
 
     def test_names_listed_for_staff_even_when_all_correct(self):
         rep = self._run(["A A", "B B"], {1: "A A", 2: "B B"})

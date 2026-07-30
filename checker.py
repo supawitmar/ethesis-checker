@@ -504,18 +504,84 @@ def _student_title_in_page(page_text, core_name):
     return ""
 
 
-def _report_student_title(rep, page_text, core_name, loc, label, rule_id):
-    """ชื่อ-สกุลตรงแล้ว เหลือแค่ดูว่ามีคำนำหน้าเกินมาไหม — มี = ส้ม (เตือน ไม่ตีตก)"""
-    found = _student_title_in_page(page_text, core_name)
-    if not found:
+# รูปแบบการพิมพ์ชื่อนักศึกษา แยกตามหน้า (นโยบายเจ้าหน้าที่ ก.ค. 2569)
+# "ชื่อนักศึกษาภาษาอังกฤษในหน้าลงนาม ต้องเป็น Capital case และจะมีหรือไม่มีคำนำหน้านามก็ได้
+#  ส่วนชื่อในหน้าปก และหน้าบทคัดย่อ ต้องเป็น UPPERCASE และไม่มีคำนำหน้านาม"
+_STUDENT_NAME_STYLE = {
+    "cover":     ("upper", False),
+    "abstract":  ("upper", False),
+    "signature": ("title", True),
+}
+
+_STYLE_LABEL = {"upper": "ตัวพิมพ์ใหญ่ทั้งหมด (UPPERCASE)",
+                "title": "ตัวพิมพ์ใหญ่ต้นคำ (Capital Case)"}
+
+
+def _printed_student_name(page_text, core_name):
+    """ข้อความชื่อนักศึกษา "ตามที่พิมพ์จริงในเล่ม" ('' ถ้าหาไม่เจอ)
+
+    ต้องดูตัวสะกดจริง ไม่ใช่ค่าจากข้อมูลอนุมัติ เพราะกฎนี้ตรวจ "ตัวพิมพ์"
+    """
+    words = [w for w in (core_name or "").split() if w]
+    if not words:
+        return ""
+    pat = re.compile(r'\s+'.join(re.escape(w) for w in words), re.I)
+    for line in (page_text or "").splitlines():
+        found = pat.search(line)
+        if found:
+            return found.group(0)
+    return ""
+
+
+def _is_title_case(text):
+    """ทุกคำขึ้นต้นด้วยตัวพิมพ์ใหญ่ และไม่ใช่ตัวพิมพ์ใหญ่ทั้งคำ
+
+    แยกที่ขีดกลาง/อะพอสทรอฟีด้วย เพราะชื่อจริงมีแบบ Pan-Ngum และ O'Brien
+    """
+    parts = [p for p in re.split(r"[\s\-']+", text or "") if re.search(r'[A-Za-z]', p)]
+    return bool(parts) and all(p[0].isupper() and not (len(p) > 1 and p.isupper())
+                               for p in parts)
+
+
+def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule_id):
+    """ตรวจ "รูปแบบการพิมพ์" ชื่อนักศึกษาบนหน้านั้น — คำนำหน้า + ตัวพิมพ์
+
+    รวมเป็นข้อเดียวต่อหน้า (ทั้งสองเรื่องแก้ที่บรรทัดเดียวกัน จะแยกสองข้อก็ซ้ำซ้อน)
+    ตัวพิมพ์ตรวจเฉพาะชื่อภาษาอังกฤษ — ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก
+    """
+    want_case, allow_title = _STUDENT_NAME_STYLE[kind]
+    found_title = "" if allow_title else _student_title_in_page(page_text, core_name)
+    printed = _printed_student_name(page_text, core_name)
+    english = bool(re.search(r'[A-Za-z]', core_name or ""))
+    bad_case = bool(english and printed) and (
+        not printed.isupper() if want_case == "upper" else not _is_title_case(printed))
+
+    if not found_title and not bad_case:
         rep.add_verification("ชื่อนักศึกษา", loc, "pass")
         return
-    rep.add_verification("ชื่อนักศึกษา", loc, "pending", f'พบคำนำหน้า "{found}"')
-    rep.add("ORANGE", "front_matter", loc,
-            f'พบคำนำหน้าหน้า{label}: "{found}"',
-            f'{label}ต้องเป็นชื่อ-นามสกุลเท่านั้น ไม่มีคำนำหน้านามหรือยศ '
-            f'คือ "{core_name}"',
-            f'ลบ "{found}" ออกจากหน้าเอกสาร แล้วให้เจ้าหน้าที่ยืนยัน', rule_id)
+
+    want_text = core_name.upper() if want_case == "upper" else \
+        person_name_sentence_case(core_name)
+    reasons = []
+    if bad_case:
+        reasons.append(f"ต้องเป็น{_STYLE_LABEL[want_case]}")
+    if found_title:
+        reasons.append(f'มีคำนำหน้านาม "{found_title}" ซึ่งหน้านี้ต้องไม่มี')
+    seen = printed or core_name
+    if found_title:
+        seen = f"{found_title} {seen}".strip()
+
+    # ตัวพิมพ์ผิดบนหน้าปก/บทคัดย่อ = ชัดเจน ฟันธงแดงได้ (เทียบกับกฎชื่อกรรมการที่แดงอยู่แล้ว)
+    # ส่วนหน้าลงนามและกรณีมีแต่คำนำหน้าเกิน = ส้ม ให้เจ้าหน้าที่ตัดสิน
+    zone = "RED" if (bad_case and kind != "signature") else "ORANGE"
+    rep.add_verification("ชื่อนักศึกษา", loc,
+                         "fail" if zone == "RED" else "pending", "; ".join(reasons))
+    rep.add(zone, "front_matter", loc,
+            f'{label}บนหน้านี้พิมพ์ว่า "{seen}" — ' + " · ".join(reasons),
+            f'{label}ในหน้านี้ต้องเป็น{_STYLE_LABEL[want_case]}'
+            + ("" if allow_title else " และไม่มีคำนำหน้านาม")
+            + f' คือ "{want_text}"',
+            f'แก้{label}บนหน้านี้เป็น "{want_text}"', rule_id)
 
 
 def _display_committee_name(name):
@@ -622,7 +688,9 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="
     missing_idx = [i for i in range(N) if i not in matched_exp]
 
     if order_loc:
-        _note_committee_reference(rep, expected_names, order_loc)
+        _note_committee_reference(rep, expected_names, order_loc,
+                                  matched=not extra_slots and not missing_idx,
+                                  approx=fuzzy)
 
     if not extra_slots and not missing_idx:
         return       # ชื่อครบและถูกคน — จบ ไม่ต้องดูว่าใครอยู่ช่องไหน
@@ -727,16 +795,28 @@ def _report_thai_committee(rep, expected, members, loc, raw=None, order_loc=None
                                 page_text=page_text)
 
 
-def _note_committee_reference(rep, expected_names, loc):
+def _note_committee_reference(rep, expected_names, loc, matched=True, approx=False):
     """รายชื่อกรรมการตามข้อมูลอนุมัติ = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
 
-    ระบบเทียบ "ชื่อ" ให้แล้ว แต่ไม่ตรวจว่าใครอยู่ช่องไหน (แต่ละเล่มจัดหน้าไม่เหมือนกัน)
-    จึงพิมพ์รายชื่อจาก บฑ. ไว้ตรงนี้ให้เจ้าหน้าที่กวาดตาเทียบกับหน้าจริงได้ทันที
+    **ไม่ได้แปลว่าระบบไม่ตรวจ** — ระบบเทียบ "ชื่อครบและถูกคน" ให้แล้ว
+    รายการนี้บอกผลที่ระบบเทียบได้ พร้อมพิมพ์รายชื่อจาก บฑ. ไว้ให้กวาดตาทานอีกครั้ง
+    (ข้อความเดิมบอกแค่รายชื่อ เจ้าหน้าที่จึงเข้าใจว่าระบบไม่ได้ตรวจให้เลย)
+
+    สิ่งที่ระบบยืนยันเองไม่ได้ จึงต้องให้คนดู
+      - ตำแหน่งการวางชื่อในตาราง (แต่ละเล่มจัดหน้าไม่เหมือนกัน)
+      - ตัวสะกดของชื่อที่ถอดเสียงมา (approx=True) — ระบบเทียบเคียงได้ แต่ไม่ฟันธง
     """
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(expected_names, start=1))
-    rep.add_human(loc, f"รายชื่อกรรมการตามข้อมูลอนุมัติ (บฑ.) คือ {names}",
-                  "FRONT.COMMITTEE")
+    if not matched:
+        head = "ระบบเทียบแล้วพบว่าชื่อไม่ครบหรือไม่ตรง (ดูข้อที่ฟ้องไว้)"
+    elif approx:
+        head = ("ระบบเทียบชื่อให้แล้ว พบครบทุกคน แต่เป็นการเทียบจากชื่อที่ระบบถอดเสียงเอง "
+                "จึงยืนยันตัวสะกดแทนไม่ได้")
+    else:
+        head = "ระบบเทียบชื่อให้แล้ว พบครบทุกคนและตรงกับข้อมูลอนุมัติ"
+    rep.add_human(loc, f"{head} — โปรดทานอีกครั้งกับรายชื่อตามข้อมูลอนุมัติ (บฑ.) "
+                       f"คือ {names}", "FRONT.COMMITTEE")
 
 
 _COMMITTEE_TRANSLATE_MSG = {
@@ -928,7 +1008,10 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         elif translation_ok:
             # เล่มอังกฤษ + ถอดชื่อได้ครบ: เทียบชื่อแบบชุดเหมือนเล่มไทย (เทียบหลวม)
             # ถอดในเครื่องเป็นการ "เทียบเคียง" จึงลงส้ม ไม่ฟันธงแดง (ดู docstring)
-            expected_en = [name_en[m["name"]] for m in expected]
+            # แสดงเป็นตัวพิมพ์ใหญ่ต้นคำให้ตรงกับที่หน้าลงนามพิมพ์จริง (คำถอดเสียง
+            # ออกมาเป็นตัวพิมพ์เล็กล้วน ถ้าโชว์ดิบ ๆ เจ้าหน้าที่จะเทียบกับเล่มลำบาก)
+            expected_en = [person_name_sentence_case(name_en[m["name"]])
+                           for m in expected]
             offline = translate_reason == "offline"
             _report_committee_positions(
                 rep, expected_en, members, loc, fuzzy=True,
@@ -2863,10 +2946,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             # (บฑ. ของเล่มที่ 9 เขียน "พ.จ.ต. ณัชนพ เพชรสุข" แต่เล่มพิมพ์แค่ชื่อ-สกุล
             #  เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด)
             core_name = _strip_student_title(primary_student_name)
-            name_spots = [("หน้าปก", 0)] + [
-                (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", idx) for k, idx in enumerate(sig_pages)
+            name_spots = [("หน้าปก", 0, "cover")] + [
+                (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", idx, "signature")
+                for k, idx in enumerate(sig_pages)
             ]
-            for spot_name, spot_idx in name_spots:
+            for spot_name, spot_idx, spot_kind in name_spots:
                 compared = compare_reference_text(pages[spot_idx], core_name, 'student_name')
                 if compared['status'] != 'exact':
                     rep.add_verification("ชื่อนักศึกษา", spot_name, "fail",
@@ -2876,8 +2960,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                             f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{core_name}\"",
                             "แก้การสะกดชื่อ", "FORM.APPROVED_MATCH")
                     continue
-                _report_student_title(rep, pages[spot_idx], core_name, spot_name,
-                                      "ชื่อนักศึกษา", "FORM.APPROVED_MATCH")
+                _report_student_name_style(rep, pages[spot_idx], core_name, spot_name,
+                                           "ชื่อนักศึกษา", spot_kind,
+                                           "FORM.APPROVED_MATCH")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
@@ -2909,9 +2994,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{core3}\"",
                         "ตรวจการสะกด", "FORM.APPROVED_MATCH")
             else:
-                _report_student_title(rep, pages[aidx], core3,
-                                      f"{albl} ({page_ref(aidx)})", nlbl,
-                                      "FORM.APPROVED_MATCH")
+                _report_student_name_style(rep, pages[aidx], core3,
+                                           f"{albl} ({page_ref(aidx)})", nlbl,
+                                           "abstract", "FORM.APPROVED_MATCH")
 
         # รหัสนักศึกษา = เลข 7 หลัก + รหัสหลักสูตร (เช่น "6838141 SHSS/M") ต้องตรวจทั้งชุด
         # และต้องปรากฏในบทคัดย่อ "ทุกภาษาที่เล่มมี" (นานาชาติมีเฉพาะอังกฤษ)
