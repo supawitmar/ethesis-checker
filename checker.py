@@ -39,6 +39,14 @@ UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
 
 FUZZY_NAME_THRESHOLD = 0.82
 
+# เกณฑ์เทียบชื่อที่ 'ถอดเสียงเอง' ขึ้นกับ engine ที่ใช้ได้ในเครื่อง — ดู translit._THRESHOLD
+def _offline_name_threshold():
+    try:
+        import translit
+        return translit.match_threshold()
+    except Exception:
+        return 0.60
+
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
 # tone marks, THANTHAKHAT, NIKHAHIT, YAMAKKAN
 _TH_MARKS = re.compile('[ัิ-ฺ็-๎]')
@@ -366,9 +374,17 @@ _COMMITTEE_TITLE_PREFIX = re.compile(
     r'รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|'
     r'ว่าที่ร้อยตรี|นางสาว|นาง|นาย|'
     r'ผศ\.|รศ\.|ศ\.|ดร\.|'
+    # คำนำหน้าแพทย์/ทหาร — พบในเล่มจริง eThesis เขียน "พันเอก ศักรินทร์ จิรพงศธร"
+    # แต่เล่มเขียน "Col. Sakkarin Chirapongsathorn" ถ้าไม่ตัดออกทั้งสองฝั่ง
+    # ชื่อจะเทียบไม่ตรงแล้วฟ้องผิดว่าไม่อยู่ในรายชื่อกรรมการอนุมัติ
+    r'นายแพทย์|แพทย์หญิง|ทันตแพทย์|สัตวแพทย์|เภสัชกร|'
+    r'นพ\.|พญ\.|ทพ\.|สพ\.|ภก\.|'
+    r'พลเอก|พลโท|พลตรี|พันเอก|พันโท|พันตรี|ร้อยเอก|ร้อยโท|'
+    r'พล\.อ\.|พล\.ท\.|พล\.ต\.|พ\.อ\.|พ\.ท\.|พ\.ต\.|ร\.อ\.|ร\.ท\.|'
     r'Clinical\s+Professor|Emeritus\s+Professor|'
     r'Associate\s+Professor|Assistant\s+Professor|Professor|'
     r'Assoc\.?\s*Prof\.?|Asst\.?\s*Prof\.?|Prof\.?|'
+    r'Lt\.?\s*Gen\.?|Maj\.?\s*Gen\.?|Lt\.?\s*Col\.?|Gen\.?|Col\.?|Maj\.?|Capt\.?|'
     r'Lecturer|Lect\.?|Dr\.?|Mr\.?|Mrs\.?|Miss|Ms\.?'
     r')[\s. ]*', re.I)
 
@@ -404,13 +420,13 @@ def _committee_keyname(name, fuzzy=False):
     return norm(base)
 
 
-def _assign_committee_slots(exp_keys, found_keys, fuzzy):
+def _assign_committee_slots(exp_keys, found_keys, fuzzy, threshold=None):
     """จับคู่ช่องกริด(slot)→ดัชนี expected แบบ greedy (best match)
 
     fuzzy=False: ต้องคีย์ตรงกันเป๊ะ; fuzzy=True: ratio ≥ 0.7
     คืน (slot_to_idx {slot: idx|None}, matched_exp set{idx})
     """
-    thr = 0.7 if fuzzy else 1.0
+    thr = threshold or (0.7 if fuzzy else 1.0)
     slot_to_idx, used = {}, set()
     for s in sorted(found_keys):
         fk = found_keys[s]
@@ -428,7 +444,8 @@ def _assign_committee_slots(exp_keys, found_keys, fuzzy):
     return slot_to_idx, used
 
 
-def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
+def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="RED",
+                                threshold=None):
     """เทียบชื่อกรรมการแบบ 'ชุดรายชื่อ' — ใช้ได้ทั้งไทย(เทียบตรง) และอังกฤษ(เทียบชื่อแปลหลวม)
 
     - ครบทุกคนแต่วางผิดตำแหน่ง = สลับ/เรียงผิด → รวมเป็นข้อความเดียว
@@ -441,7 +458,8 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
     found_slots = {k: members[k] for k in range(1, 10) if members.get(k)}
     found_keys = {k: _committee_keyname(v, fuzzy) for k, v in found_slots.items()}
 
-    slot_to_idx, matched_exp = _assign_committee_slots(exp_keys, found_keys, fuzzy)
+    slot_to_idx, matched_exp = _assign_committee_slots(exp_keys, found_keys, fuzzy,
+                                                       threshold)
     extra_slots = [s for s, i in slot_to_idx.items() if i is None]
     missing_idx = [i for i in range(N) if i not in matched_exp]
 
@@ -449,13 +467,13 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
         # ชื่อครบทุกคน — ต่างแค่ตำแหน่ง (slot ถูก เมื่อ slot_to_idx[s] == s-1)
         wrong = sorted(s for s, i in slot_to_idx.items() if i != s - 1)
         if wrong:
-            _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc)
+            _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc, zone)
         return
 
     # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ
     for i in missing_idx:
         name = expected_names[i]
-        rep.add("RED", "front_matter", loc,
+        rep.add(zone, "front_matter", loc,
                 f'ไม่พบกรรมการ "{name}" ตามข้อมูลอนุมัติ',
                 f'ต้องมีกรรมการชื่อ "{name}" ตามข้อมูลอนุมัติ (บฑ.)',
                 "เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ", "FRONT.COMMITTEE")
@@ -473,7 +491,7 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy):
                     "ตรวจว่าชื่อนี้ถูกพิมพ์ซ้ำในช่องอื่นหรือไม่ ถ้าซ้ำให้ลบช่องที่เกินออก",
                     "FRONT.COMMITTEE")
         else:
-            rep.add("RED", "front_matter", loc,
+            rep.add(zone, "front_matter", loc,
                     f'พบชื่อ "{name}" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ',
                     "รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ (บฑ.)",
                     "ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
@@ -485,7 +503,7 @@ def _report_thai_committee(rep, expected, members, loc):
                                 fuzzy=False)
 
 
-def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
+def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc, zone="RED"):
     """ชื่อครบแต่วางผิดตำแหน่ง: จับคู่สลับตรง ๆ ก่อน ที่เหลือบอกลำดับที่ถูกครั้งเดียว
 
     slot_to_idx: {slot จริงบนกริด → ดัชนี expected ที่จับคู่ได้}
@@ -503,7 +521,7 @@ def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
         if (home is not None and home != s and home not in described
                 and belongs is not None and belongs + 1 == home):
             lo, hi = sorted((s, home))
-            rep.add("RED", "front_matter", loc,
+            rep.add(zone, "front_matter", loc,
                     f'กรรมการครบทุกคน แต่คนที่ {lo} ("{expected_names[lo - 1]}") '
                     f'กับ คนที่ {hi} ("{expected_names[hi - 1]}") สลับตำแหน่งกัน',
                     f'ช่องที่ {lo} ต้องเป็น "{expected_names[lo - 1]}" '
@@ -514,14 +532,14 @@ def _report_committee_reorder(rep, expected_names, slot_to_idx, wrong, loc):
     rest = [s for s in wrong if s not in described]
     if rest:
         order = "  ".join(f'{k}. {expected_names[k - 1]}' for k in range(1, N + 1))
-        rep.add("RED", "front_matter", loc,
+        rep.add(zone, "front_matter", loc,
                 "กรรมการครบทุกคน แต่เรียงผิดตำแหน่ง",
                 f'ลำดับที่ถูกต้องตามข้อมูลอนุมัติ (บฑ.) คือ {order}',
                 "จัดเรียงตำแหน่งกรรมการให้ตรงตามลำดับข้อมูลอนุมัติ", "FRONT.COMMITTEE")
 
 
 _COMMITTEE_TRANSLATE_MSG = {
-    "no_key": "ระบบยังไม่ได้เปิดใช้ AI (ANTHROPIC_API_KEY) จึงถอดชื่อกรรมการเป็นอังกฤษไม่ได้",
+    "no_tool": "ระบบยังไม่ได้ติดตั้งตัวถอดชื่อภาษาไทย (pythainlp) จึงเทียบชื่ออัตโนมัติไม่ได้",
     "failed": "ระบบถอดชื่อกรรมการเป็นอังกฤษไม่สำเร็จ จึงเทียบชื่ออัตโนมัติไม่ได้",
 }
 
@@ -553,10 +571,24 @@ def _committee_translation(committees):
                                for m in committees.get(key, []) if m.get("name")))
     if not names:
         return {}, False, ""
+
+    # ทางหลัก: ถอดในเครื่อง (ฟรี ผลคงที่ ไม่มีวันล่ม) — ดู translit.py
+    # ต้องตัดคำนำหน้า (นพ./พันเอก/ศาสตราจารย์) ออกก่อนถอด ไม่งั้นจะได้ "naph. kittiyot"
+    # ซึ่งเทียบกับ "Kittiyod" ในเล่มไม่ตรง — translit ไม่รู้จักคำนำหน้าของบัณฑิตวิทยาลัย
+    try:
+        import translit
+        romanized = translit.romanize_names(
+            [_strip_committee_title(n) or n for n in names])
+        if len(romanized) == len(names):
+            return dict(zip(names, romanized)), True, "offline"
+    except Exception:
+        pass
+
+    # ทางสำรอง: AI (ถ้าเจ้าหน้าที่ตั้งคีย์ไว้) — แม่นกว่าเล็กน้อยแต่มีค่าใช้จ่าย
     try:
         import llm_assist
         if not llm_assist.enabled():
-            return {}, False, "no_key"
+            return {}, False, "no_tool"
         translated = llm_assist.translate_names(names)
     except Exception:
         return {}, False, "failed"
@@ -648,9 +680,12 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
     """ตรวจรายชื่อ+คุณวุฒิกรรมการบนหน้าลงนามเทียบข้อมูลอนุมัติ (ตามกริดตายตัวของ template)
 
     หน้าไหนเป็นของใครยึดเลขหน้าก่อน (i/ก = ที่ปรึกษา, ii/ข = กรรมการสอบ)
-    เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน = แดง)
-    เล่มอังกฤษ/นานาชาติ: ถ้ามีชื่ออังกฤษครบ (เจ้าหน้าที่กรอก หรือ AI แปล)
-      → เทียบตามลำดับเหมือนเล่มไทย (แดง); ถ้าไม่มี → ส้มให้เจ้าหน้าที่ตรวจเอง
+    เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน = แดง เพราะเทียบตัวต่อตัวได้ตรง ๆ)
+    เล่มอังกฤษ/นานาชาติ: ต้องถอดชื่อไทยเป็นอังกฤษก่อน จึงเป็นการ "เทียบเคียง"
+      ถอดในเครื่อง (translit) → ผลไม่ตรงลง **ส้ม** เพราะคนไทยไม่ได้สะกดชื่อตัวเอง
+        ตามหลักราชบัณฑิตเสมอ (ภู่วรวรรณ → หลักคือ Phuworawan แต่เจ้าตัวใช้ Poovorawan)
+        ฟันธงแดงจากคำถอดจะฟ้องผิดใส่เล่มที่ถูกต้อง
+      AI แปล → แดงได้ (แม่นกว่า) ; ถอดไม่ได้เลย → ส้มให้เจ้าหน้าที่ตรวจเอง
     คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้อง "มี" — ไม่มี = แดง
     คืน True ถ้าตรวจได้ (อ่านตารางเจอ) — ไม่งั้น False (ให้เจ้าหน้าที่ตรวจเอง)
     """
@@ -688,9 +723,14 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
             # เล่มไทย: เทียบชื่อไทยแบบชุด (สลับ/ขาด/เกิน) — กัน cascade
             _report_thai_committee(rep, expected, members, loc)
         elif translation_ok:
-            # เล่มอังกฤษ + แปลชื่อครบ: เทียบตามลำดับแบบเดียวกับเล่มไทย (เทียบหลวมจากชื่อแปล)
+            # เล่มอังกฤษ + ถอดชื่อได้ครบ: เทียบตามลำดับแบบเดียวกับเล่มไทย (เทียบหลวม)
+            # ถอดในเครื่องเป็นการ "เทียบเคียง" จึงลงส้ม ไม่ฟันธงแดง (ดู docstring)
             expected_en = [name_en[m["name"]] for m in expected]
-            _report_committee_positions(rep, expected_en, members, loc, fuzzy=True)
+            offline = translate_reason == "offline"
+            _report_committee_positions(
+                rep, expected_en, members, loc, fuzzy=True,
+                zone="ORANGE" if offline else "RED",
+                threshold=_offline_name_threshold() if offline else None)
         else:
             # เล่มอังกฤษ + ถอดชื่อไม่ได้: ลงส้มให้เจ้าหน้าที่ตรวจเอง พร้อมบอกสาเหตุ
             # ให้ตรงจุด (ไม่ได้ตั้ง API key = ปัญหาการติดตั้ง ไม่ใช่ปัญหาของเล่ม)
@@ -797,7 +837,7 @@ def abstract_committee_missing_commas(block):
 
 
 def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
-                               page_ref, name_en, translation_ok):
+                               page_ref, name_en, translation_ok, translate_reason=""):
     """ตรวจรายชื่อคณะกรรมการที่ปรึกษาบนหน้าบทคัดย่อ (ชื่อ + รูปแบบ)
 
     รูปแบบต่อคน = 'ชื่อ นามสกุล, คุณวุฒิ' — ไม่มีสาขาในวงเล็บ, ไม่มีตำแหน่งวิชาการ
@@ -858,9 +898,26 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                 continue
             members = {i: n.strip() for i, n in enumerate(names, start=1)}
             if heading_en:
+                # ข้อมูลอนุมัติเป็นชื่อไทย แต่หน้านี้พิมพ์ชื่ออังกฤษ ต้องถอดก่อนจึงเทียบได้
                 if translation_ok:
+                    # ถอดในเครื่อง = เทียบเคียง ลงส้ม; AI = แดงได้ (เหตุผลใน _check_committees)
                     expected = [name_en[m["name"]] for m in advisory]
-                    _report_committee_positions(rep, expected, members, loc, fuzzy=True)
+                    offline = translate_reason == "offline"
+                    _report_committee_positions(
+                        rep, expected, members, loc, fuzzy=True,
+                        zone="ORANGE" if offline else "RED",
+                        threshold=_offline_name_threshold() if offline else None)
+                else:
+                    # ถอดไม่ได้ = เทียบไม่ได้ ต้องบอกเจ้าหน้าที่ ไม่ใช่ข้ามเงียบ ๆ
+                    # (เดิมข้ามไปเฉย ๆ เจ้าหน้าที่จึงไม่รู้ว่าหน้านี้ยังไม่ได้ตรวจชื่อ)
+                    names_th = "  ".join(f'{k}. {m["name"]}'
+                                         for k, m in enumerate(advisory, start=1))
+                    rep.add("ORANGE", "front_matter", loc,
+                            _COMMITTEE_TRANSLATE_MSG.get(
+                                translate_reason, _COMMITTEE_TRANSLATE_MSG["failed"]),
+                            f"ต้องมีกรรมการที่ปรึกษา {len(advisory)} คนตามลำดับ บฑ. คือ {names_th}",
+                            "โปรดตรวจรายชื่อและลำดับกรรมการบนหน้านี้ด้วยตา",
+                            "FRONT.ABSTRACT", system_note=True)
             else:
                 expected = [m["name"] for m in advisory]
                 _report_committee_positions(rep, expected, members, loc, fuzzy=False)
@@ -2730,7 +2787,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
         # ของ template ล้วน จึงตรวจเสมอ ส่วนการเทียบชื่อ-ลำดับทำเมื่อมีข้อมูล eThesis
         _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,
-                                   pages, page_ref, name_en, translation_ok)
+                                   pages, page_ref, name_en, translation_ok,
+                                   translate_reason)
 
         # ช่องคงที่/รายการที่ระบบยังตรวจไม่ได้ → ให้เจ้าหน้าที่ตรวจเอง
         if not checked_committee:

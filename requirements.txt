@@ -4,3 +4,8 @@ pdfplumber==0.11.4
 python-multipart==0.0.9
 jinja2==3.1.4
 anthropic>=0.66.0
+# ถอดชื่อกรรมการไทยเป็นอังกฤษในเครื่อง (ไม่ต้องใช้ API ไม่มีค่าใช้จ่าย) — ดู translit.py
+pythainlp>=5.0
+# ทำให้ใช้ engine thai2rom_onnx ได้ ซึ่งแม่นกว่า royin มาก (13/13 vs 12/13 จากเล่มจริง)
+# ถ้าลงไม่สำเร็จ ระบบจะถอยไปใช้ royin ให้เองอัตโนมัติ ไม่พัง
+onnxruntime>=1.17
