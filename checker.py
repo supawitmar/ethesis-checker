@@ -2338,7 +2338,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     if nonbold:
                         rep.add(
                             BOLD_FAILURE_ZONE, "front_matter", f"สารบัญ ({page_ref(toc_idx)})",
-                            "หัวข้อหลักไม่เป็นตัวหนา: " + ", ".join(nonbold),
+                            # ใส่เครื่องหมายคำพูดให้ชัดว่าเป็น "ข้อความที่คัดมาจากเล่ม"
+                            # ไม่ใช่คำของระบบ (รายงานอังกฤษจะได้ไม่แปลชื่อหัวข้อของเล่ม)
+                            "หัวข้อหลักไม่เป็นตัวหนา: "
+                            + ", ".join(f'"{t}"' for t in nonbold),
                             "ACKNOWLEDGEMENTS, ABSTRACT, LIST OF ..., ชื่อบท, REFERENCE(S) และ BIOGRAPHY ต้องเป็นตัวหนา",
                             "ตั้งหัวข้อระดับหลักในสารบัญเป็นตัวหนา",
                             "FORMAT.BOLD",

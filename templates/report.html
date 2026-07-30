@@ -398,7 +398,9 @@ var CATMAP = {
   'ชื่อบทไม่ตรงประกาศ':'Chapter name (regulation)', 'ไม่ตรงข้อมูลอนุมัติ':'Approved-data mismatch',
   'เลขหน้า':'Page numbering', 'จำนวนหน้าไม่ตรง':'Page count mismatch', 'เกินจำนวนหน้า':'Page limit exceeded',
   'เกินจำนวนที่กำหนด':'Limit exceeded', 'รูปแบบตัวอักษร':'Text formatting', 'คำนำหน้านาม':'Name prefix',
-  'ภาษาไม่ครบตามหลักสูตร':'Language requirement', 'โครงสร้างเล่ม':'Document structure', 'อื่นๆ':'Other'
+  'ภาษาไม่ครบตามหลักสูตร':'Language requirement', 'โครงสร้างเล่ม':'Document structure', 'อื่นๆ':'Other',
+  'สะกดผิดเล็กน้อย (typo)':'Minor typo', 'ข้อมูลนักศึกษาไม่ถูกต้อง':'Student data incorrect',
+  'ชื่อปริญญาไม่ตรงข้อมูลอนุมัติ':'Degree name mismatch'
 };
 
 var TR = [
@@ -407,6 +409,21 @@ var TR = [
   // แล้วรายงานอังกฤษจะเหลือไทยปนอยู่ เช่น "Change to:เลขpage" (พบในเล่มทดสอบ)
   // ---- ชื่อหมวด / หัวข้อตารางเทียบ / รายการที่ระบบไม่ได้ตรวจ ----
   // ผูก ^...$ ไว้กับข้อความสั้นที่เป็นคำทั่วไป (เช่น "เลขหน้า") ไม่งั้นจะไปแทนกลางประโยคอื่น
+  [/หัวข้อหลักไม่เป็นตัวหนา/g, 'These top-level headings are not bold'],
+  [/หัวข้อสารบัญข้อความไม่ตรง/g, 'The TOC heading text does not match'],
+  [/แก้การสะกดหัวข้อสารบัญ/g, 'Correct the spelling of the TOC heading'],
+  [/ลำดับที่พบ: /g, 'Order found: '],
+  [/ลำดับที่ต้องเป็น: /g, 'Required order: '],
+  [/ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด/g, 'Move each front-matter section into the required order'],
+  [/บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: /g, 'The abbreviated degree line has extra text: '],
+  [/บรรทัดนี้ต้องเป็น "(.+?)" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย/g, 'This line must read exactly "$1", with nothing before or after'],
+  [/ลบข้อความเกินออกจากบรรทัดชื่อปริญญา/g, 'Remove the extra text from the degree line'],
+  [/หัวข้อ (.+?) ไม่มีเลขหน้า/g, 'Heading $1 has no page number'],
+  [/หัวข้อ (.+?) ต้องระบุเลขหน้าที่เริ่มต้นจริง/g, '$1 must show the page where it actually starts'],
+  [/กินพื้นที่ (\d+) หน้า/g, 'Spans $1 pages'],
+  [/บทคัดย่อ \(อังกฤษ\)ต้องไม่เกิน (\d+) หน้า/g, 'The English abstract must not exceed $1 pages'],
+  [/บทคัดย่อ \(ไทย\)ต้องไม่เกิน (\d+) หน้า/g, 'The Thai abstract must not exceed $1 pages'],
+  [/กิตติกรรมประกาศต้องไม่เกิน (\d+) หน้า/g, 'The acknowledgements must not exceed $1 page(s)'],
   [/^โครงสร้างเล่ม$/g, 'Document structure'],
   [/^เลขหน้า$/g, 'Page numbers'],
   [/^ขาดหาย\/ไม่พบ$/g, 'Missing / not found'],
