@@ -2033,6 +2033,11 @@ def resolve_option(body_ch, approved, chapters_mode):
 def classify(issue):
     f, e, loc = issue.get("found", ""), issue.get("expected", ""), issue.get("location", "")
     text = f + " " + e + " " + loc
+    # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
+    # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
+    # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
+    if "ชื่อบท" in text:
+        return "ชื่อบทไม่ตรงประกาศ" if "ประกาศ" in text else "สะกดผิด (typo)"
     if "พิมพ์ผิดเล็กน้อย" in text or "typo" in text.lower():
         return "สะกดผิดเล็กน้อย (typo)"
     if "ตัวอักษรหนา" in text or "ตัวหนา" in text:
@@ -2051,10 +2056,6 @@ def classify(issue):
         return "จำนวนหน้าไม่ตรง"
     if "เลขหน้า" in text:
         return "เลขหน้า"
-    if "ชื่อบท" in text and "ประกาศ" in text:
-        return "ชื่อบทไม่ตรงประกาศ"
-    if "ชื่อบท" in text:
-        return "สะกดผิด (typo)"
     if "ชื่อเรื่อง" in text:
         return "ชื่อเรื่องไม่ตรง บฑ.1"
     if "สะกด" in text or "คะแนน" in f:
@@ -2430,26 +2431,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                         mismatch_detail("หัวข้อสารบัญ", compared, expected),
                         f"ควรเป็น \"{expected}\"", "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
 
-    # ประกาศบังคับชื่อบทเท่าที่กำหนดไว้: รูปแบบ 1 ครบ 6 บท, รูปแบบ 2 เฉพาะบท 1-2
-    # (บทที่ 3 ของรูปแบบ 2 ไม่บังคับชื่อ — ตรวจแค่สารบัญตรงกับเนื้อหา)
-    if chapters_mode == 'strict':
-        for chapter_no, _title_norm, _page_no, raw, toc_page_idx in toc_ch:
-            if 1 <= chapter_no <= enforced_chapters:
-                actual_title = _toc_chapter_title(raw)
-                kind, compared, expected_title = canonical_title_status(
-                    actual_title, chapter_no, option)
-                if kind == 'variant':
-                    rep.add("ORANGE", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {chapter_no}",
-                            f'ชื่อบทสะกดตามคู่มือ: "{actual_title}"',
-                            f"ประกาศใช้ \"{expected_title}\" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้",
-                            "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ",
-                            "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
-                elif kind == 'wrong':
-                    rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {chapter_no}",
-                            mismatch_detail("ชื่อบทในสารบัญ", compared, expected_title),
-                            f"ควรเป็น \"{expected_title}\"", "แก้การสะกดชื่อบทในสารบัญ",
-                            "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
-
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_chapter_count']:
         if option == 1 and len(body_ch) != 6:
             rep.add("RED", "body", "ทั้งเล่ม", f"พบ {len(body_ch)} บท",
@@ -2458,32 +2439,77 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             rep.add("RED", "body", "ทั้งเล่ม", f"พบ {len(body_ch)} บท",
                     "รูปแบบตีพิมพ์ต้องมี 2-3 บท", "", "BODY.OPTION2")
 
+    # ---------- ชื่อบทเทียบประกาศ (สารบัญ + เนื้อหา รวมเป็นข้อเดียวต่อบท) ----------
+    #
     # ชื่อบทต้องตรงกันทั้ง 3 ทาง: ประกาศ ↔ สารบัญ ↔ เนื้อหา โดยยึดประกาศเป็นหลัก
-    # จึงเทียบเนื้อหากับประกาศเสมอ แม้สารบัญกับเนื้อหาจะต่างกันไปแล้ว (เดิมข้ามไป
-    # ทำให้ไม่รู้ว่าฝั่งไหนผิดจากประกาศ)
-    if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_title_against_canonical']:
+    # จึงเทียบทั้งสองฝั่งกับประกาศเสมอ แม้สารบัญกับเนื้อหาจะต่างกันไปแล้ว
+    #
+    # เดิมแยกเป็นสองข้อ (ฝั่งสารบัญข้อหนึ่ง ฝั่งเนื้อหาอีกข้อหนึ่ง) ทั้งที่เป็น
+    # "ชื่อบทเดียวกันผิดจากประกาศ" เรื่องเดียว เจ้าหน้าที่ต้องอ่านซ้ำสองรอบ
+    # ยิ่งกว่านั้นสองข้อยังตกไปคนละหมวด (ฝั่งที่ต่างเล็กน้อยเข้าหมวด "สะกดผิด"
+    # ฝั่งที่ต่างมากเข้าหมวด "ชื่อบทไม่ตรงประกาศ") จึงดูเหมือนเป็นคนละปัญหา
+    # ตอนนี้รวมเป็นข้อเดียวต่อบท และบอกในข้อความว่าผิดที่ไหนบ้าง
+    if chapters_mode == "strict":
         canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
-        for cn, title, body_page_idx, _ in body_ch:
-            if not (1 <= cn <= enforced_chapters):
-                continue
-            kind, compared, expected_title = canonical_title_status(title, cn, option)
+        rule_id = "BODY.OPTION1" if option == 1 else "BODY.OPTION2"
+        toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4]) for c in toc_ch}
+        body_by_ch = ({c[0]: (c[1], c[2]) for c in body_ch}
+                      if body_ch and BODY_RULES['check_body_title_against_canonical'] else {})
+
+        def _title_status(title, cn):
+            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้"""
+            kind, compared, expected = canonical_title_status(title, cn, option)
             if kind == 'exact':
-                continue
-            # หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่ — ยอมรับกรณีชื่อมาตรฐานขึ้นต้นด้วยข้อความที่พบ
+                return None
+            # หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่ — ยอมรับถ้าชื่อมาตรฐานขึ้นต้นด้วยข้อความที่พบ
             nb = norm(title)
             if len(nb) >= 8 and any(norm(cand).startswith(nb) for cand in canon[cn - 1]):
+                return None
+            return kind, compared, expected
+
+        for cn in sorted(set(toc_by_ch) | set(body_by_ch)):
+            if not (1 <= cn <= enforced_chapters):
                 continue
-            if kind == 'variant':
-                rep.add("ORANGE", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})",
-                        f'ชื่อบทในเนื้อหาสะกดตามคู่มือ: "{title}"',
-                        f"ประกาศใช้ \"{expected_title}\" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้",
-                        "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ",
-                        "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
+            toc_title, toc_idx = toc_by_ch.get(cn, (None, None))
+            body_title, body_idx = body_by_ch.get(cn, (None, None))
+            toc_bad = _title_status(toc_title, cn) if toc_title is not None else None
+            body_bad = _title_status(body_title, cn) if body_title is not None else None
+            if not toc_bad and not body_bad:
+                continue
+
+            expected_title = (toc_bad or body_bad)[2]
+            both = bool(toc_bad and body_bad)
+            same = both and norm(toc_title) == norm(body_title)
+            zone = ("ORANGE" if all(s[0] == 'variant' for s in (toc_bad, body_bad) if s)
+                    else "RED")
+            if both:
+                where = f"บทที่ {cn} — สารบัญ ({page_ref(toc_idx)}) และในเนื้อหา ({page_ref(body_idx)})"
+                part = "front_matter"
+            elif toc_bad:
+                where, part = f"สารบัญ ({page_ref(toc_idx)}) บทที่ {cn}", "front_matter"
             else:
-                rep.add("RED", "body", f"บทที่ {cn} ({page_ref(body_page_idx)})",
-                        mismatch_detail("ชื่อบทในเนื้อหา", compared, expected_title),
-                        f"ตามประกาศ 2569 ควรเป็น \"{expected_title}\"", "แก้ชื่อบทให้ตรงประกาศ",
-                        "BODY.OPTION1" if option == 1 else "BODY.OPTION2")
+                where, part = f"บทที่ {cn} ({page_ref(body_idx)})", "body"
+
+            if zone == "ORANGE":
+                seen = (f'"{toc_title}"' if same or not both else
+                        f'สารบัญพิมพ์ "{toc_title}" ส่วนเนื้อหาพิมพ์ "{body_title}"')
+                rep.add("ORANGE", part, where,
+                        f'ชื่อบทสะกดตามคู่มือ: {seen}',
+                        f'ประกาศใช้ "{expected_title}" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้',
+                        "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ", rule_id)
+                continue
+
+            if both and not same:
+                found = (f'ชื่อบทไม่ตรงประกาศ: สารบัญพิมพ์ "{toc_title}" '
+                         f'ส่วนเนื้อหาพิมพ์ "{body_title}"')
+            else:
+                # ชื่อเดียวกันทั้งสองที่ (หรือผิดที่เดียว) — ชี้จุดต่างให้ด้วย
+                bad = toc_bad or body_bad
+                found = mismatch_detail("ชื่อบท", bad[1], expected_title)
+            rep.add("RED", part, where, found,
+                    f'ตามประกาศ 2569 ควรเป็น "{expected_title}"',
+                    "แก้ชื่อบทให้ตรงประกาศ" + (" ทั้งในสารบัญและในเนื้อหา" if both else ""),
+                    rule_id)
 
     # ---------- ส่วนท้ายเล่ม ----------
     _p("ตรวจส่วนท้ายเล่ม (อ้างอิง/ภาคผนวก/ประวัติ)")

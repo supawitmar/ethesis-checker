@@ -11,6 +11,7 @@ import unittest
 from checker import (
     Report,
     _compose_thai_line,
+    classify,
     _report_student_title,
     _strip_student_title,
     _report_thai_committee,
@@ -484,6 +485,35 @@ class StudentNameIgnoresTitles(unittest.TestCase):
         # บรรทัดที่มีรหัสนักศึกษาต่อท้าย (หน้าบทคัดย่อ) ก็ต้องไม่ฟ้อง
         self.assertEqual(
             self._oranges("ณัชนพ เพชรสุข 6538041 SHPP/D\n", "ณัชนพ เพชรสุข"), [])
+
+
+class ChapterTitleIssuesAreNotReportedTwice(unittest.TestCase):
+    """ชื่อบทผิดจากประกาศ = ปัญหาเดียว ต้องอยู่ข้อเดียวและหมวดเดียว
+
+    เดิมแยกเป็นข้อของสารบัญกับข้อของเนื้อหา และยังตกคนละหมวดอีก
+    (ต่างเล็กน้อย -> "สะกดผิดเล็กน้อย (typo)" / ต่างมาก -> "ชื่อบทไม่ตรงประกาศ")
+    เจ้าหน้าที่จึงเห็นเป็นสองเรื่องทั้งที่ต้องแก้ครั้งเดียว
+    """
+
+    def test_small_and_large_differences_share_one_category(self):
+        small = {"found": 'ชื่อบทพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.98): "X"',
+                 "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 6"}
+        large = {"found": 'ชื่อบทข้อความไม่ตรง: "X"',
+                 "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 2"}
+        self.assertEqual(classify(small), "ชื่อบทไม่ตรงประกาศ")
+        self.assertEqual(classify(large), "ชื่อบทไม่ตรงประกาศ")
+
+    def test_toc_vs_body_mismatch_is_a_different_category(self):
+        """สารบัญ↔เนื้อหาไม่ตรงกัน (ไม่ได้อ้างประกาศ) ยังเป็นคนละหมวดตามเดิม"""
+        item = {"found": 'ชื่อบทในเนื้อหาข้อความไม่ตรง: "X"',
+                "expected": 'ต้องสะกดตรงกับชื่อบทในสารบัญ: "Y"',
+                "location": "บทที่ 3 (หน้า 45)"}
+        self.assertEqual(classify(item), "สะกดผิด (typo)")
+
+    def test_other_typos_still_land_in_the_typo_category(self):
+        item = {"found": 'ชื่อปริญญาพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.95): "X"',
+                "expected": "", "location": "หน้าปก"}
+        self.assertNotEqual(classify(item), "ชื่อบทไม่ตรงประกาศ")
 
 
 if __name__ == "__main__":
