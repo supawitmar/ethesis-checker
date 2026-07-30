@@ -898,6 +898,7 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                 continue
             members = {i: n.strip() for i, n in enumerate(names, start=1)}
             if heading_en:
+                # ข้อมูลอนุมัติเป็นชื่อไทย แต่หน้านี้พิมพ์ชื่ออังกฤษ ต้องถอดก่อนจึงเทียบได้
                 if translation_ok:
                     # ถอดในเครื่อง = เทียบเคียง ลงส้ม; AI = แดงได้ (เหตุผลใน _check_committees)
                     expected = [name_en[m["name"]] for m in advisory]
@@ -906,6 +907,17 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         rep, expected, members, loc, fuzzy=True,
                         zone="ORANGE" if offline else "RED",
                         threshold=_offline_name_threshold() if offline else None)
+                else:
+                    # ถอดไม่ได้ = เทียบไม่ได้ ต้องบอกเจ้าหน้าที่ ไม่ใช่ข้ามเงียบ ๆ
+                    # (เดิมข้ามไปเฉย ๆ เจ้าหน้าที่จึงไม่รู้ว่าหน้านี้ยังไม่ได้ตรวจชื่อ)
+                    names_th = "  ".join(f'{k}. {m["name"]}'
+                                         for k, m in enumerate(advisory, start=1))
+                    rep.add("ORANGE", "front_matter", loc,
+                            _COMMITTEE_TRANSLATE_MSG.get(
+                                translate_reason, _COMMITTEE_TRANSLATE_MSG["failed"]),
+                            f"ต้องมีกรรมการที่ปรึกษา {len(advisory)} คนตามลำดับ บฑ. คือ {names_th}",
+                            "โปรดตรวจรายชื่อและลำดับกรรมการบนหน้านี้ด้วยตา",
+                            "FRONT.ABSTRACT", system_note=True)
             else:
                 expected = [m["name"] for m in advisory]
                 _report_committee_positions(rep, expected, members, loc, fuzzy=False)

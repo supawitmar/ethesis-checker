@@ -8,7 +8,8 @@ import difflib
 import unittest
 
 import translit
-from checker import _committee_keyname, _strip_committee_title
+from checker import (Report, _check_abstract_committees,
+                     _committee_keyname, _strip_committee_title)
 
 # (ชื่อไทยใน eThesis, ตัวสะกดอังกฤษที่พิมพ์บนหน้าลงนามจริง)
 REAL_PAIRS = [
@@ -91,6 +92,52 @@ class RomanizeRealNames(unittest.TestCase):
     def test_threshold_matches_engine(self):
         self.assertIn(translit.engine_name(), ("thai2rom_onnx", "royin"))
         self.assertGreaterEqual(self.threshold, 0.60)
+
+
+class EnglishAbstractUsesTransliteratedNames(unittest.TestCase):
+    """หน้าบทคัดย่ออังกฤษต้องเทียบกับ 'ชื่อที่ถอดแล้ว' ของคณะกรรมการที่ปรึกษาจาก eThesis
+
+    ข้อมูลอนุมัติเป็นชื่อไทย แต่หน้านี้พิมพ์ชื่ออังกฤษ ถ้าไม่ถอดก่อนก็เทียบไม่ได้
+    """
+
+    ADVISORY = [{"name": "ยอด สุขะมงคล"}, {"name": "ทวีศักดิ์ สมานชื่น"}]
+    PAGE = ("ADVISORY COMMITTEE: YOD SUKAMONGKOL, Ph.D., "
+            "TAWEESAK SAMANCHUEN, Ph.D.\n\nABSTRACT\n")
+
+    def _run(self, name_en, translation_ok, reason):
+        """คืน (ข้อที่ฟ้องเรื่องกรรมการ, จำนวนที่เป็นสีแดง)"""
+        rep = Report()
+        _check_abstract_committees(
+            rep, {"advisory": self.ADVISORY}, [0], [], [self.PAGE],
+            lambda i: "หน้า iv", name_en, translation_ok, reason)
+        picked = {z: [it for it in rep.zones[z] if "กรรมการ" in it["location"]]
+                  for z in ("RED", "ORANGE")}
+        return picked["RED"] + picked["ORANGE"], len(picked["RED"])
+
+    @unittest.skipUnless(translit.enabled(), "ยังไม่ได้ติดตั้ง pythainlp")
+    def test_matching_names_pass_quietly(self):
+        rom = translit.romanize_names([m["name"] for m in self.ADVISORY])
+        name_en = dict(zip((m["name"] for m in self.ADVISORY), rom))
+        issues, _reds = self._run(name_en, True, "offline")
+        self.assertEqual(issues, [])
+
+    def test_reports_when_transliteration_unavailable(self):
+        """เดิมข้ามไปเงียบ ๆ เจ้าหน้าที่จึงไม่รู้ว่าหน้านี้ยังไม่ได้ตรวจชื่อ"""
+        issues, reds = self._run({}, False, "no_tool")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(reds, 0)          # เป็นส้ม ไม่ใช่แดง
+        self.assertIn("เทียบชื่ออัตโนมัติไม่ได้", issues[0]["found"])
+        # เป็นข้อจำกัดของระบบ ไม่ใช่จุดที่นักศึกษาแก้ได้
+        self.assertTrue(issues[0]["system_note"])
+
+    @unittest.skipUnless(translit.enabled(), "ยังไม่ได้ติดตั้ง pythainlp")
+    def test_wrong_name_is_orange_not_red_on_offline_path(self):
+        """ถอดเสียงเองเป็นการเทียบเคียง ห้ามฟันธงแดง"""
+        name_en = {"ยอด สุขะมงคล": "somchai jaidee",
+                   "ทวีศักดิ์ สมานชื่น": "taweesak samanchuen"}
+        issues, reds = self._run(name_en, True, "offline")
+        self.assertTrue(issues, "ควรฟ้องว่าชื่อไม่ตรง")
+        self.assertEqual(reds, 0, "ห้ามมีสีแดงจากคำที่ถอดเสียงเอง")
 
 
 class RomanizeEdgeCases(unittest.TestCase):
