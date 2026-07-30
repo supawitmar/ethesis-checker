@@ -805,6 +805,21 @@ def split_abstract_committee(block):
     return names, degrees
 
 
+def _looks_like_person_name(text):
+    """ข้อความนี้หน้าตาเหมือน "ชื่อ นามสกุล" หรือไม่
+
+    ใช้แยกว่าส่วนที่เหลือหลังคุณวุฒิเป็น "ชื่อคนถัดไปที่ลืมใส่จุลภาค" หรือเป็น
+    "ส่วนท้ายของคุณวุฒิเอง" — คุณวุฒิบางแบบมีหลายท่อนคั่นด้วยช่องว่าง เช่น
+    "Dr. rer. nat." (เยอรมัน), "Dr. med.", "Dr. phil." ซึ่งท่อนหลังขึ้นต้นด้วย
+    ตัวพิมพ์เล็กเสมอ ต่างจากชื่อคนที่ขึ้นต้นด้วยตัวพิมพ์ใหญ่หรืออักษรไทย
+    และตามรูปแบบที่กำหนดไว้ ชื่อต้องมีทั้งชื่อและนามสกุล = อย่างน้อย 2 คำ
+    """
+    s = (text or "").strip()
+    if len(s.split()) < 2:
+        return False
+    return not s[:1].islower()
+
+
 def _scan_abstract_committee(block):
     """ไล่อ่านก้อนรายชื่อกรรมการทีละช่อง — yield (kind, text, missing_comma)
 
@@ -818,16 +833,14 @@ def _scan_abstract_committee(block):
             expect_name = False
             continue
         m = _ABS_DEGREE_HEAD.match(tok)
-        if not m:
+        rest = tok[m.end():].strip() if m else ""
+        if not m or not _looks_like_person_name(rest):
+            # ทั้งก้อนคือคุณวุฒิ (รวมคุณวุฒิหลายท่อนอย่าง "Dr. rer. nat.")
             yield "degree", tok, False
             expect_name = True
             continue
         yield "degree", tok[:m.end()].strip(), False
-        rest = tok[m.end():].strip()
-        if rest:
-            yield "name", rest, True   # ขาดจุลภาคคั่น — ที่เหลือคือชื่อคนถัดไป
-        else:
-            expect_name = True
+        yield "name", rest, True       # ขาดจุลภาคคั่น — ที่เหลือคือชื่อคนถัดไป
 
 
 def abstract_committee_missing_commas(block):
