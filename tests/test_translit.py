@@ -8,8 +8,9 @@ import difflib
 import unittest
 
 import translit
-from checker import (Report, _check_abstract_committees,
-                     _committee_keyname, _strip_committee_title)
+from checker import (Report, _academic_rank, _check_abstract_committees,
+                     _committee_keyname, _report_committee_rank,
+                     _strip_committee_title)
 
 # (ชื่อไทยใน eThesis, ตัวสะกดอังกฤษที่พิมพ์บนหน้าลงนามจริง)
 REAL_PAIRS = [
@@ -150,6 +151,45 @@ class RomanizeEdgeCases(unittest.TestCase):
     def test_threshold_has_a_safe_default(self):
         self.assertGreaterEqual(translit.match_threshold(), 0.60)
 
+class AcademicRankIsAnObservationOnly(unittest.TestCase):
+    """ระดับตำแหน่งทางวิชาการต่างจากข้อมูลอนุมัติ = เหลือง (ข้อสังเกต) ไม่ใช่แดง
+
+    ตามที่เจ้าหน้าที่กำหนด: eThesis "ผู้ช่วยศาสตราจารย์ ดร.พญ. มยุรี หอมสนิท"
+    กับเล่ม "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท" ถือว่าผ่าน เพราะระดับเดียวกัน
+    (ดร./พญ./นพ. เป็นวุฒิและวิชาชีพ ไม่ใช่ตำแหน่งทางวิชาการ)
+    """
+
+    def _yellows(self, expected_name, found_text):
+        rep = Report()
+        _report_committee_rank(rep, expected_name, found_text, 1, "หน้าอาจารย์ที่ปรึกษา")
+        return [i["found"] for i in rep.zones["YELLOW"]]
+
+    def test_same_rank_with_extra_prefixes_passes(self):
+        self.assertEqual(
+            self._yellows("ผู้ช่วยศาสตราจารย์ ดร.พญ. มยุรี หอมสนิท",
+                          "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท,"), [])
+
+    def test_conflicting_rank_is_yellow(self):
+        out = self._yellows("รองศาสตราจารย์ พญ. มยุรี หอมสนิท",
+                            "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท,")
+        self.assertEqual(len(out), 1)
+        self.assertIn("ผู้ช่วยศาสตราจารย์", out[0])
+        self.assertIn("รองศาสตราจารย์", out[0])
+
+    def test_rank_missing_on_either_side_is_not_flagged(self):
+        """ข้อมูล eThesis หลายรายการไม่ได้ใส่ระดับมา สรุปไม่ได้ว่าผิด"""
+        self.assertEqual(self._yellows("พญ. มยุรี หอมสนิท",
+                                       "ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท,"), [])
+        self.assertEqual(self._yellows("ผู้ช่วยศาสตราจารย์ มยุรี หอมสนิท",
+                                       "มยุรี หอมสนิท,"), [])
+
+    def test_assistant_professor_not_read_as_professor(self):
+        """"ผู้ช่วยศาสตราจารย์" มีคำว่า "ศาสตราจารย์" อยู่ข้างใน ต้องจับตัวยาวก่อน"""
+        self.assertEqual(_academic_rank("ผู้ช่วยศาสตราจารย์มยุรี หอมสนิท"), "asst")
+        self.assertEqual(_academic_rank("รองศาสตราจารย์มยุรี"), "assoc")
+        self.assertEqual(_academic_rank("ศาสตราจารย์มยุรี"), "prof")
+        self.assertEqual(_academic_rank("Assoc. Prof. Mayuree"), "assoc")
+        self.assertEqual(_academic_rank("มยุรี หอมสนิท"), "")
 
 if __name__ == "__main__":
     unittest.main()
