@@ -412,6 +412,7 @@ var TR = [
   [/หัวข้อหลักไม่เป็นตัวหนา/g, 'These top-level headings are not bold'],
   [/หัวข้อสารบัญข้อความไม่ตรง/g, 'The TOC heading text does not match'],
   [/แก้การสะกดหัวข้อสารบัญ/g, 'Correct the spelling of the TOC heading'],
+  [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
   [/ลำดับที่พบ: /g, 'Order found: '],
   [/ลำดับที่ต้องเป็น: /g, 'Required order: '],
   [/ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด/g, 'Move each front-matter section into the required order'],
