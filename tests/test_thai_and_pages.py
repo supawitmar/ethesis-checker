@@ -12,7 +12,8 @@ from checker import (
     Report,
     _compose_thai_line,
     classify,
-    _report_student_title,
+    _report_committee_name_case,
+    _report_student_name_style,
     _strip_student_title,
     _report_thai_committee,
     _sig_words,
@@ -459,16 +460,17 @@ class StudentNameIgnoresTitles(unittest.TestCase):
                     "MISSAKORN SOMCHAI"):     # ห้ามกิน "MISS" ที่เป็นส่วนของชื่อ
             self.assertEqual(_strip_student_title(raw), raw, raw)
 
-    def _oranges(self, page_text, core):
+    def _run(self, page_text, core, kind="cover"):
         rep = Report()
-        _report_student_title(rep, page_text, core, "หน้าปก", "ชื่อนักศึกษา",
-                              "FORM.APPROVED_MATCH")
-        return [i["found"] for i in rep.zones["ORANGE"]]
+        _report_student_name_style(rep, page_text, core, "หน้าปก", "ชื่อนักศึกษา",
+                                   kind, "FORM.APPROVED_MATCH")
+        return rep
+
+    def _oranges(self, page_text, core, kind="cover"):
+        return [i["found"] for i in self._run(page_text, core, kind).zones["ORANGE"]]
 
     def test_prefix_in_the_book_is_orange_not_red(self):
-        rep = Report()
-        _report_student_title(rep, "นายสมชาย ใจดี\n", "สมชาย ใจดี", "หน้าปก",
-                              "ชื่อนักศึกษา", "FORM.APPROVED_MATCH")
+        rep = self._run("นายสมชาย ใจดี\n", "สมชาย ใจดี")
         self.assertEqual(rep.zones["RED"], [])
         self.assertEqual(len(rep.zones["ORANGE"]), 1)
         self.assertIn('"นาย"', rep.zones["ORANGE"][0]["found"])
@@ -485,6 +487,101 @@ class StudentNameIgnoresTitles(unittest.TestCase):
         # บรรทัดที่มีรหัสนักศึกษาต่อท้าย (หน้าบทคัดย่อ) ก็ต้องไม่ฟ้อง
         self.assertEqual(
             self._oranges("ณัชนพ เพชรสุข 6538041 SHPP/D\n", "ณัชนพ เพชรสุข"), [])
+
+
+class StudentNameLetterCaseByPage(unittest.TestCase):
+    """นโยบายเจ้าหน้าที่ (ก.ค. 2569) — ตัวพิมพ์ของชื่อนักศึกษาต่างกันตามหน้า
+
+    "ชื่อนักศึกษาภาษาอังกฤษในหน้าลงนาม ต้องเป็น Capital case และจะมีหรือไม่มี
+     คำนำหน้านามก็ได้ ส่วนชื่อในหน้าปก และหน้าบทคัดย่อ ต้องเป็น UPPERCASE
+     และไม่มีคำนำหน้านาม"
+    """
+
+    CORE = "NAMMONT PROMPIANPONG"
+
+    def _run(self, page_text, kind, core=None):
+        rep = Report()
+        _report_student_name_style(rep, page_text, core or self.CORE, "ที่นี่",
+                                   "ชื่อนักศึกษา", kind, "FORM.APPROVED_MATCH")
+        return rep
+
+    def _issues(self, page_text, kind, core=None):
+        rep = self._run(page_text, kind, core)
+        return [(z, i["found"]) for z in ("RED", "ORANGE") for i in rep.zones[z]]
+
+    def test_cover_and_abstract_accept_uppercase_without_prefix(self):
+        self.assertEqual(self._issues("NAMMONT PROMPIANPONG\n", "cover"), [])
+        self.assertEqual(
+            self._issues("NAMMONT PROMPIANPONG 6637951 EGRS/M\n", "abstract"), [])
+
+    def test_cover_rejects_title_case(self):
+        out = self._issues("Nammont Prompianpong\n", "cover")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0], "RED")
+        self.assertIn("UPPERCASE", out[0][1])
+
+    def test_signature_accepts_capital_case_with_or_without_prefix(self):
+        """เล่มที่ 15 พิมพ์ "Mr. Nammont Prompianpong" บนหน้าลงนาม — ต้องผ่าน"""
+        self.assertEqual(
+            self._issues("Mr. Nammont Prompianpong, Asst. Prof. X,\n", "signature"), [])
+        self.assertEqual(self._issues("Nammont Prompianpong\n", "signature"), [])
+
+    def test_signature_flags_all_caps_and_lowercase_as_orange(self):
+        for text in ("NAMMONT PROMPIANPONG\n", "nammont prompianpong\n"):
+            out = self._issues(text, "signature")
+            self.assertEqual(len(out), 1, text)
+            self.assertEqual(out[0][0], "ORANGE", text)
+            self.assertIn("Capital Case", out[0][1])
+
+    def test_cover_reports_case_and_prefix_in_one_issue(self):
+        """แก้ที่บรรทัดเดียวกัน จึงต้องเป็นข้อเดียว ไม่ใช่สองข้อ"""
+        out = self._issues("Mr. Nammont Prompianpong\n", "cover")
+        self.assertEqual(len(out), 1)
+        self.assertIn("UPPERCASE", out[0][1])
+        self.assertIn('"Mr."', out[0][1])
+
+    def test_hyphenated_surname_is_valid_capital_case(self):
+        """เล่มจริงเขียนทั้ง "Pan-Ngum" และ "Pan-ngum" — เจ้าตัวเลือกเอง ต้องผ่านทั้งคู่"""
+        for printed in ("Wirichada Pan-Ngum\n", "Wirichada Pan-ngum\n"):
+            self.assertEqual(self._issues(printed, "signature",
+                                          core="WIRICHADA PAN-NGUM"), [], printed)
+
+    def test_thai_name_has_no_letter_case_to_check(self):
+        self.assertEqual(self._issues("นํ้ามนต์ พรหมเพียรพงศ์\n", "cover",
+                                      core="นํ้ามนต์ พรหมเพียรพงศ์"), [])
+
+
+class CommitteeNamesOnSignaturePageAreCapitalCase(unittest.TestCase):
+    """ชื่อกรรมการบนหน้าลงนามใช้กติกาตัวพิมพ์เดียวกับชื่อนักศึกษาบนหน้าเดียวกัน
+
+    "รายชื่ออาจารย์ในหน้าลงนามที่ตรวจก็ควรต้องเป็น Capital Case"
+    """
+
+    def _found(self, members):
+        rep = Report()
+        _report_committee_name_case(rep, members, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
+        self.assertEqual(rep.zones["RED"], [])      # เป็นข้อสังเกต ไม่ตีตกเล่ม
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_capital_case_names_pass(self):
+        self.assertEqual(self._found({1: "Naphat Ketphat",
+                                      2: "Phumin Kirawanich"}), [])
+
+    def test_all_caps_and_lowercase_are_flagged(self):
+        out = self._found({1: "NAPHAT KETPHAT", 2: "Phumin Kirawanich"})
+        self.assertEqual(len(out), 1)
+        self.assertIn('"NAPHAT KETPHAT"', out[0])
+        self.assertNotIn("Phumin", out[0])          # คนที่ถูกต้องต้องไม่ถูกพาดพิง
+        self.assertTrue(self._found({1: "naphat ketphat"}))
+
+    def test_every_offending_name_is_listed_in_one_issue(self):
+        out = self._found({1: "NAPHAT KETPHAT", 2: "phumin kirawanich"})
+        self.assertEqual(len(out), 1)               # ข้อเดียวต่อหน้า ไม่ฟ้องรายคน
+        self.assertIn('"NAPHAT KETPHAT"', out[0])
+        self.assertIn('"phumin kirawanich"', out[0])
+
+    def test_thai_committee_names_are_skipped(self):
+        self.assertEqual(self._found({1: "มยุรี หอมสนิท", 2: "ถิรจิต บุญแสน"}), [])
 
 
 class ChapterTitleIssuesAreNotReportedTwice(unittest.TestCase):
