@@ -439,6 +439,10 @@ var TR = [
   [/ แก้ชื่อบทให้ตรงประกาศ ทั้งในสารบัญและในเนื้อหา/g, ' Correct the chapter title to match the regulation, both in the TOC and in the body'],
   [/แก้ชื่อบทให้ตรงประกาศ ทั้งในสารบัญและในเนื้อหา/g, 'Correct the chapter title to match the regulation, both in the TOC and in the body'],
   [/ และในเนื้อหา /g, ' and in the body '],
+  // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
+  [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
+  [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'Committee names on the approval pages must be in Capital Case'],
+  [/แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Capital Case; staff to confirm'],
   // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Capital Case ----
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้พิมพ์ว่า/g, 'The name printed on this page is'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE) with no title prefix:'],

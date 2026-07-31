@@ -533,14 +533,29 @@ def _printed_student_name(page_text, core_name):
     return ""
 
 
+# คำเชื่อมในนามสกุลที่เขียนตัวเล็กเป็นปกติ (van Beethoven, de la Cruz, bin Ahmad)
+_NAME_PARTICLES = {"van", "von", "de", "del", "della", "da", "di", "du", "la", "le",
+                   "bin", "binti", "al", "ibn", "of", "the"}
+
+
 def _is_title_case(text):
     """ทุกคำขึ้นต้นด้วยตัวพิมพ์ใหญ่ และไม่ใช่ตัวพิมพ์ใหญ่ทั้งคำ
 
-    แยกที่ขีดกลาง/อะพอสทรอฟีด้วย เพราะชื่อจริงมีแบบ Pan-Ngum และ O'Brien
+    แบ่งที่ "ช่องว่าง" อย่างเดียว ไม่แบ่งที่ขีดกลาง — นามสกุลไทยที่ถอดเป็นอังกฤษ
+    เขียนได้ทั้ง "Pan-Ngum" และ "Pan-ngum" (เจ้าตัวเลือกเอง เจอทั้งสองแบบในเล่มจริง)
+    ถ้าไปบังคับตัวหลังขีดกลางจะฟ้องผิดใส่ชื่อที่สะกดถูกตามเจ้าของ
     """
-    parts = [p for p in re.split(r"[\s\-']+", text or "") if re.search(r'[A-Za-z]', p)]
-    return bool(parts) and all(p[0].isupper() and not (len(p) > 1 and p.isupper())
-                               for p in parts)
+    words = [w for w in re.split(r"\s+", text or "") if re.search(r'[A-Za-z]', w)]
+    if not words:
+        return False
+    for word in words:
+        if word.lower().strip(".,") in _NAME_PARTICLES:
+            continue
+        letters = re.sub(r'[^A-Za-z]', '', word)
+        first = re.search(r'[A-Za-z]', word).group(0)
+        if not first.isupper() or (len(letters) > 1 and letters.isupper()):
+            return False
+    return True
 
 
 def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule_id):
@@ -795,6 +810,27 @@ def _report_thai_committee(rep, expected, members, loc, raw=None, order_loc=None
                                 page_text=page_text)
 
 
+def _report_committee_name_case(rep, members, loc):
+    """ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)
+
+    กติกาเดียวกับชื่อนักศึกษาบนหน้าเดียวกัน (นโยบายเจ้าหน้าที่ ก.ค. 2569)
+    เป็นกฎ "รูปแบบ" ของ template จึงตรวจได้แม้ไม่มีข้อมูลอนุมัติ
+    ตรวจเฉพาะชื่อภาษาอังกฤษ — ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก
+    ลงส้มเพราะระบบอ่านชื่อจากตาราง อาจอ่านคร่อมคำได้ ให้เจ้าหน้าที่ยืนยัน
+    """
+    bad = [members[k] for k in sorted(members)
+           if members.get(k) and re.search(r'[A-Za-z]', members[k])
+           and not _is_title_case(members[k])]
+    if not bad:
+        return
+    shown = ", ".join(f'"{n}"' for n in bad)
+    rep.add("ORANGE", "front_matter", loc,
+            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
+            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)",
+            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
+            "FRONT.COMMITTEE")
+
+
 def _note_committee_reference(rep, expected_names, loc, matched=True, approx=False):
     """รายชื่อกรรมการตามข้อมูลอนุมัติ = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
 
@@ -992,12 +1028,16 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
             continue
         kind = signature_page_kind(page_labels.get(idx, ""), pages[idx])
         expected = committees.get(kind, []) if kind else []
+        members, member_quals, bottom_text, member_raw = slots[idx]
+        page_label = ("หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else
+                      "หน้ากรรมการสอบ" if kind == "exam" else
+                      f"หน้าลงนาม {sig_pages.index(idx) + 1}")
+        loc = f"{page_label} ({page_ref(idx)})"
+        # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
+        _report_committee_name_case(rep, members, loc)
         if not expected:
             continue
         handled_any = True
-        members, member_quals, bottom_text, member_raw = slots[idx]
-        page_label = "หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else "หน้ากรรมการสอบ"
-        loc = f"{page_label} ({page_ref(idx)})"
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
         if not english_book:
