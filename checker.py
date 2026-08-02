@@ -810,6 +810,67 @@ def _report_thai_committee(rep, expected, members, loc, raw=None, order_loc=None
                                 page_text=page_text)
 
 
+# หัวบทจริง vs บรรทัดบทในสารบัญ — ต่างกันที่ "มีชื่อบทและเลขหน้าอยู่บรรทัดเดียวกัน"
+#   สารบัญ : "CHAPTER 4 RESULTS 23" / "บทที่ 4 ผลการวิจัย 23"
+#   หัวบท  : "CHAPTER 4" (ชื่อบทอยู่บรรทัดถัดไป) หรือ "บทที่ 4 ผลการวิจัย"
+_CHAPTER_HEAD_LINE = re.compile(r'^(?:CHAPTER|บทที่)\s*\d', re.I)
+_TOC_CHAPTER_LINE = re.compile(r'^(?:CHAPTER|บทที่)\s*\d+\s+\S.*\s\d{1,3}\s*$', re.I)
+
+
+def _looks_like_chapter_start(line):
+    s = (line or "").strip()
+    return bool(_CHAPTER_HEAD_LINE.match(s)) and not _TOC_CHAPTER_LINE.match(s)
+
+
+def _toc_continuation_pages(pages, toc_start, hard_stop, limit=12):
+    """หน้าทั้งหมดที่เป็น "สารบัญ" ต่อเนื่องจากหน้าแรก
+
+    คำว่า "สารบัญ" พิมพ์เฉพาะหน้าแรก หน้าถัด ๆ ไปจึงหาจากลักษณะหน้าแทน:
+    มีบรรทัดที่ลงท้ายด้วยเลขหน้าตั้งแต่ 3 บรรทัดขึ้นไป
+
+    เดิมตัดไว้แค่ 4 หน้าตายตัว เล่มที่ 4 มีสารบัญ 5 หน้า (ซ ฌ ญ ฎ ฏ) หน้าสุดท้าย
+    จึงหลุด — ซึ่งเป็นหน้าที่มี บรรณานุกรม / ภาคผนวก / ประวัติผู้วิจัย พอดี
+    ระบบเลยฟ้องผิดว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+    """
+    out = [toc_start]
+    for idx in range(toc_start + 1, min(hard_stop, toc_start + limit, len(pages))):
+        lines = [ln.strip() for ln in pages[idx].split('\n') if ln.strip()]
+        # ขึ้นบทแล้ว = พ้นสารบัญแน่นอน (บรรทัดแรกมักเป็นเลขหน้า หัวข้อจึงอยู่บรรทัด 2)
+        # ต้องแยกจาก "บรรทัดบทในสารบัญ" ให้ออก — หน้าสารบัญหน้าที่ 2 ขึ้นต้นด้วย
+        # "CHAPTER 4 RESULTS 23" ได้ตามปกติ ถ้าเหมารวมจะตัดหน้าสารบัญทิ้ง (เล่มที่ 1)
+        if any(_looks_like_chapter_start(ln) for ln in lines[:2]):
+            break
+        if sum(1 for ln in lines if re.search(r'\d{1,3}\s*$', ln)) < 3:
+            break
+        out.append(idx)
+    return out
+
+
+def _page_count_issue(count_wrong, last_arabic):
+    """รวม "จำนวนหน้ารวมไม่ตรง" ของทุกหน้าบทคัดย่อเป็นข้อเดียว
+
+    count_wrong = [(ชื่อตำแหน่ง, เลขที่เล่มระบุ), ...]
+    คืน (zone, ตำแหน่ง, ข้อความ "พบ")
+
+    จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
+    เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ · ยุบเป็นข้อเดียวได้ แต่ต้องบอก
+    ให้ครบว่าเป็นหน้าไหนบ้าง (และถ้าสองหน้าระบุคนละเลข ต้องบอกว่าหน้าไหนระบุเท่าไร)
+    """
+    where = " · ".join(lbl for lbl, _num in count_wrong)
+    stated = {num for _lbl, num in count_wrong}
+    # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
+    # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
+    zone = "ORANGE" if all(abs(num - last_arabic) <= 2 for num in stated) else "RED"
+    if len(stated) == 1:
+        found = (f"ระบุจำนวนหน้า {stated.pop()} "
+                 f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
+    else:
+        detail = " · ".join(f"{lbl} ระบุ {num}" for lbl, num in count_wrong)
+        found = (f"ระบุจำนวนหน้าไม่ตรงกัน: {detail} "
+                 f"— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
+    return zone, where, found
+
+
 def _report_committee_name_case(rep, members, loc):
     """ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)
 
@@ -1115,8 +1176,14 @@ _ABS_DEGREE_HEAD = re.compile(
     # จะถูกกินเป็นคุณวุฒิ เช่น "THIRAJIT BOONSAEN" เคยถูกอ่านเป็นคุณวุฒิ "THI"
     # แล้วเหลือ "RAJIT BOONSAEN" กลายเป็นชื่อคน
     r'(?=[A-Za-z]*\.)[A-Za-z]{1,4}(?:\.[A-Za-z]{1,4})*\.?'   # Ph.D. / PhD. / M.Sc. / Ph.D
-    r'|[ก-๙]{1,4}\.(?:[ก-๙]{1,4}\.)*'            # ปร.ด. / วศ.ด. / ศษ.ด. / พย.ม.
+    # ฝั่งไทยยอมให้มีช่องว่างคั่นระหว่างท่อน — เล่มจริงพิมพ์ "พย. ด." / "ปร. ด."
+    # (ยอมเฉพาะฝั่งไทยเพราะชื่อคนไทยไม่มีจุด ตัวจับจึงวิ่งเลยเข้าไปในชื่อไม่ได้
+    #  ต่างจากฝั่งอังกฤษที่ ". SOMCHAI" จะถูกกินเป็นท่อนคุณวุฒิได้)
+    r'|[ก-๙]{1,4}\.(?:\s*[ก-๙]{1,4}\.)*'         # ปร.ด. / วศ.ด. / พย. ด. / ว.ว.
     r')\s*(?:\([^)]*\))?\s*\.?\s*')
+
+# คุณวุฒิหลายใบของคนเดียวเขียนต่อกันด้วย "และ" ได้ เช่น "พ.บ., ว.ว. และ อ.ว."
+_DEGREE_CONJUNCTION = re.compile(r'\s+(?:และ|and)\s+', re.I)
 
 
 def _is_degree_only(text):
@@ -1124,10 +1191,20 @@ def _is_degree_only(text):
 
     ใช้จับกรณีคนหนึ่งมีคุณวุฒิหลายตัวคั่นจุลภาค เช่น "..., M.D., Ph.D., ..."
     ซึ่งทำให้การสลับ ชื่อ/คุณวุฒิ เลื่อนไปทั้งชุดถ้าไม่รู้จัก
+    รวมถึงที่คั่นด้วย "และ" ในก้อนเดียวกัน ("ว.ว. และ อ.ว.")
+
+    เช็คจากโครงสร้างล้วน ๆ — ทุกท่อนต้องเป็นคุณวุฒิเต็มท่อน จึงไม่ต้องเดาว่า
+    หน้าตาเหมือนชื่อคนไหม (ชื่อคนไทยไม่มีจุด ชื่ออังกฤษก็แมตช์ไม่เต็มท่อน)
     """
     s = (text or "").strip()
-    m = _ABS_DEGREE_HEAD.match(s)
-    return bool(s) and bool(m) and m.end() == len(s) and not _looks_like_person_name(s)
+    if not s:
+        return False
+    for part in _DEGREE_CONJUNCTION.split(s):
+        part = part.strip()
+        m = _ABS_DEGREE_HEAD.match(part)
+        if not part or not m or m.end() != len(part):
+            return False
+    return True
 
 
 def split_abstract_committee(block):
@@ -1239,20 +1316,24 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
                         f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
-            for i, name in enumerate(names, start=1):
-                nm = name.strip()
-                # รูปแบบ 2: ห้ามมีตำแหน่งทางวิชาการนำหน้าชื่อ
-                if _strip_committee_title(nm) != nm:
-                    rep.add("RED", "front_matter", loc,
-                            f'ชื่อกรรมการคนที่ {i} มีตำแหน่งทางวิชาการนำหน้า: "{nm}"',
-                            "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
-                            "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
-                # รูปแบบ 3: หน้าอังกฤษ ชื่อต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด
-                if heading_en and re.search(r'[a-z]', nm):
-                    rep.add("RED", "front_matter", loc,
-                            f'ชื่อกรรมการคนที่ {i} ไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด: "{nm}"',
-                            "ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด",
-                            "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
+            # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
+            # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
+            stripped = [nm for nm in (n.strip() for n in names)
+                        if _strip_committee_title(nm) != nm]
+            if stripped:
+                shown = ", ".join(f'"{nm}"' for nm in stripped)
+                rep.add("RED", "front_matter", loc,
+                        f'ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า: {shown}',
+                        "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
+                        "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
+            lower = [nm for nm in (n.strip() for n in names)
+                     if heading_en and re.search(r'[a-z]', nm)]
+            if lower:
+                shown = ", ".join(f'"{nm}"' for nm in lower)
+                rep.add("RED", "front_matter", loc,
+                        f'ชื่อกรรมการไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด: {shown}',
+                        "ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด",
+                        "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
 
             # เทียบชื่อกับข้อมูลอนุมัติ (advisory) แบบเดียวกับหน้าลงนาม
             if not advisory:
@@ -1971,10 +2052,18 @@ def _is_toc_major_heading(text):
     )
 
 
+# เลขหน้าในสารบัญเขียนได้ 3 แบบ: อารบิก / โรมัน / พยัญชนะไทย
+_TOC_PAGE_TOKEN = r'(?:\d{1,4}|[ivxlcdm]+|[ก-ฮ])'
+
+
 def _strip_toc_page_number(text):
     s = soft(text)
     # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
-    s = re.sub(r'\s+(?:\d+|[ivxlcdm]+|[ก-ฮ])\s*$', '', s, flags=re.I)
+    # รองรับ "ช่วงหน้า" ด้วย เช่น "LIST OF TABLES xi-xii" / "สารบัญตาราง ฎ-ฏ"
+    # เล่มที่หัวข้อกินสองหน้าเขียนแบบนี้ ถ้าไม่ตัดจะจำแนกหัวข้อไม่ออก แล้วฟ้องผิดว่า
+    # "ไม่พบหัวข้อ LIST OF TABLES ในสารบัญ" ทั้งที่มีอยู่ (เล่มที่ 3)
+    s = re.sub(rf'\s+{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?\s*$', '', s,
+               flags=re.I)
     # ตัด "จุดไข่ปลา" (dot leader) ที่ลากเชื่อมชื่อหัวข้อกับเลขหน้า เช่น
     #   "LIST OF TABLES ......................" หรือ "ABSTRACT ………… ."
     # มันคือเส้นประของ template ไม่ใช่การสะกด ถ้าไม่ตัดจะทำให้ compare_values
@@ -1985,8 +2074,14 @@ def _strip_toc_page_number(text):
 
 
 def _toc_page_label(text):
-    """Return the page label printed at the end of one TOC entry."""
-    match = re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', soft(text), re.I)
+    """Return the page label printed at the end of one TOC entry.
+
+    ถ้าเขียนเป็นช่วง ("xi-xii") ให้ยึด "หน้าแรก" เพราะกฎที่ใช้ค่านี้ถามว่า
+    หัวข้อเริ่มหน้าไหน
+    """
+    match = re.search(rf'\s({_TOC_PAGE_TOKEN})\s*[-–—]\s*{_TOC_PAGE_TOKEN}\s*$',
+                      soft(text), re.I) or \
+        re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', soft(text), re.I)
     if not match:
         return ""
     label = match.group(1)
@@ -2406,8 +2501,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         front_boundaries = sorted(set(
             sig_pages + abs_th_pages + abs_en_pages + ack_pages + list_pages))
         after_toc = [b for b in front_boundaries if b > toc_start]
-        toc_stop = min(after_toc) if after_toc else toc_start + 3
-        toc_page_indices = list(range(toc_start, min(toc_stop, toc_start + 4, n)))
+        toc_page_indices = _toc_continuation_pages(
+            pages, toc_start, min(after_toc) if after_toc else n)
     else:
         toc_page_indices = []
     toc_lines = [(page_idx, line) for page_idx in toc_page_indices
@@ -2740,6 +2835,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ---------- กฎหน้าบทคัดย่อ (ตรวจทั้งช่วงของบทคัดย่อ ไม่ใช่แค่หน้าแรก) ----------
     abstract_idxs = sorted(set(abs_en_pages + abs_th_pages))
+    # "จำนวนหน้ารวม" เป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
+    # เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ จึงเก็บผลไว้ก่อนแล้วรวมเป็นข้อเดียว
+    # (ตามที่เจ้าหน้าที่สั่ง: ยุบได้ แต่ต้องบอกว่าเป็นหน้าไหนบ้าง)
+    count_missing, count_wrong = [], []
     for ai in abstract_idxs:
         span_pgs = list(range(ai, min(ai + span_of(ai), n)))
         lbl = f"บทคัดย่อ ({page_ref(ai)})"
@@ -2754,19 +2853,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if m2:
                 break
         if not m2:
-            rep.add(FRONT_FAILURE_ZONE, "front_matter", lbl,
-                    "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
-                    "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
+            count_missing.append(lbl)
         elif last_arabic is not None and int(m2.group(1)) != last_arabic:
-            stated_pages = int(m2.group(1))
-            # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
-            # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
-            count_zone = "ORANGE" if abs(stated_pages - last_arabic) <= 2 else "RED"
-            rep.add(count_zone, "front_matter", lbl,
-                    f"ระบุจำนวนหน้า {stated_pages} แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}",
-                    f"จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
-                    "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรง",
-                    "FRONT.ABSTRACT")
+            count_wrong.append((lbl, int(m2.group(1))))
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
@@ -2783,6 +2872,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     break
             if done_kw:
                 break
+
+    if count_missing:
+        rep.add(FRONT_FAILURE_ZONE, "front_matter", " · ".join(count_missing),
+                "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
+                "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
+    if count_wrong:
+        zone, where, found_count = _page_count_issue(count_wrong, last_arabic)
+        rep.add(zone, "front_matter", where, found_count,
+                "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า",
+                "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้",
+                "FRONT.ABSTRACT")
 
     # พบข้อความตัวหนาในบทคัดย่อ = ข้อสังเกตสีเหลือง แต่ยังผ่านได้
     if abstract_idxs:

@@ -17,6 +17,11 @@ from checker import (
     _strip_student_title,
     _report_thai_committee,
     _sig_words,
+    _page_count_issue,
+    _toc_continuation_pages,
+    _toc_page_label,
+    _toc_section_kind,
+    _strip_toc_page_number,
     _strip_committee_title,
     _thai_chars,
     abstract_committee_missing_commas,
@@ -128,6 +133,38 @@ class SplitAbstractCommittee(unittest.TestCase):
     def test_trailing_comma_and_extra_spaces(self):
         names, _ = split_abstract_committee("ยุพา จิ๋วพัฒนกุล, ปร.ด., รักชนก คชไกร , ปร.ด.,")
         self.assertEqual(names, ["ยุพา จิ๋วพัฒนกุล", "รักชนก คชไกร"])
+
+    def test_thai_degree_written_with_a_space_after_the_dot(self):
+        """เล่มจริงพิมพ์ "พย. ด." / "ปร. ด." (เว้นวรรคหลังจุด) ไม่ใช่ "พย.ด."
+
+        เดิมจับได้แค่ท่อนแรก ท่อนที่เหลือเลื่อนไปเป็นชื่อคน
+        """
+        names, degrees = split_abstract_committee(
+            "อัจฉราพร สี่หิรัญวงศ์, พย. ด., อาภาวรรณ หนูคง, ปร. ด.")
+        self.assertEqual(names, ["อัจฉราพร สี่หิรัญวงศ์", "อาภาวรรณ หนูคง"])
+        self.assertEqual(degrees, ["พย. ด.", "ปร. ด."])
+
+    def test_degrees_joined_with_and_in_one_field(self):
+        """คนเดียวมีหลายวุฒิเขียนต่อกันด้วย "และ" เช่น "พ.บ., ว.ว. และ อ.ว."
+
+        เดิม "ว.ว. และ อ.ว." ถูกอ่านเป็นชื่อคน แล้วทำให้ชื่อ/วุฒิสลับกันทั้งชุด
+        จนฟ้องแดงว่าพบชื่อ "ว.ว. และ อ.ว." และ "ปร. ด." ที่ไม่อยู่ในรายชื่ออนุมัติ
+        """
+        block = ("อัจฉราพร สี่หิรัญวงศ์, พย. ด., อัจฉริยา พ่วงแก้ว, พย. ด., "
+                 "อาภาวรรณ หนูคง, ปร. ด., ปัญจมา ปาราจารย์, พ.บ., ว.ว. และ อ.ว., "
+                 "ทวีศักดิ์ สมานชื่น, ปร. ด.")
+        names, degrees = split_abstract_committee(block)
+        self.assertEqual(names, ["อัจฉราพร สี่หิรัญวงศ์", "อัจฉริยา พ่วงแก้ว",
+                                 "อาภาวรรณ หนูคง", "ปัญจมา ปาราจารย์",
+                                 "ทวีศักดิ์ สมานชื่น"])
+        self.assertIn("ว.ว. และ อ.ว.", degrees)
+        self.assertEqual(abstract_committee_missing_commas(block), [])
+
+    def test_english_degrees_joined_with_and(self):
+        names, degrees = split_abstract_committee(
+            "SOMCHAI JAIDEE, M.D., Ph.D. and D.Sc., SOMSRI DEEJAI, Ph.D.")
+        self.assertEqual(names, ["SOMCHAI JAIDEE", "SOMSRI DEEJAI"])
+        self.assertIn("Ph.D. and D.Sc.", degrees)
 
     def test_empty_block(self):
         self.assertEqual(split_abstract_committee(""), ([], []))
@@ -549,6 +586,119 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
     def test_thai_name_has_no_letter_case_to_check(self):
         self.assertEqual(self._issues("นํ้ามนต์ พรหมเพียรพงศ์\n", "cover",
                                       core="นํ้ามนต์ พรหมเพียรพงศ์"), [])
+
+
+class MultiPageTableOfContents(unittest.TestCase):
+    """สารบัญยาวหลายหน้า — คำว่า "สารบัญ" พิมพ์เฉพาะหน้าแรก
+
+    เล่มที่ 4 มีสารบัญ 5 หน้า (ซ ฌ ญ ฎ ฏ) เดิมตัดไว้แค่ 4 หน้าตายตัว หน้าสุดท้าย
+    จึงหลุด ซึ่งเป็นหน้าที่มี บรรณานุกรม / ภาคผนวก / ประวัติผู้วิจัย พอดี
+    ระบบเลยฟ้องแดงผิด 4 ข้อว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+    """
+
+    def _toc_page(self, n):
+        return "\n".join(f"หัวข้อที่ {i} {i * 10}" for i in range(1, n + 1))
+
+    def test_five_page_toc_is_read_whole(self):
+        pages = ["สารบัญ\n" + self._toc_page(5)] + [self._toc_page(5) for _ in range(4)]
+        pages.append("ฐ\nสารบัญตาราง\n")
+        self.assertEqual(_toc_continuation_pages(pages, 0, 5), [0, 1, 2, 3, 4])
+
+    def test_stops_at_the_next_front_matter_section(self):
+        pages = ["สารบัญ\n" + self._toc_page(5), self._toc_page(5),
+                 "ฐ\nสารบัญตาราง\n1 หน้า 10"]
+        self.assertEqual(_toc_continuation_pages(pages, 0, 2), [0, 1])
+
+    def test_stops_when_the_body_starts(self):
+        for head in ("บทที่ 1 บทนำ", "CHAPTER 1", "บทที่ 1"):
+            pages = ["สารบัญ\n" + self._toc_page(5), self._toc_page(5),
+                     f"1\n{head}\nเนื้อหา 1\nเนื้อหา 2\nเนื้อหา 3"]
+            self.assertEqual(_toc_continuation_pages(pages, 0, len(pages)), [0, 1], head)
+
+    def test_toc_page_may_start_with_a_chapter_entry(self):
+        """หน้าสารบัญหน้าที่ 2 ขึ้นต้นด้วย "CHAPTER 4 RESULTS 23" ได้ตามปกติ
+
+        เล่มที่ 1 เป็นแบบนี้ ถ้าเหมาว่าขึ้นบทแล้วจะตัดหน้าสารบัญทิ้ง
+        แล้วฟ้องผิดว่าไม่พบ REFERENCES / APPENDIX / BIOGRAPHY ในสารบัญ
+        """
+        pages = ["v\nTABLE OF CONTENTS\nACKNOWLEDGEMENTS iii\nABSTRACT iv\nLIST OF TABLES vii",
+                 "vi\nCHAPTER 4 RESULTS 23\nREFERENCES 48\nAPPENDIX 55\nBIOGRAPHY 83",
+                 "vii\nLIST OF TABLES"]
+        self.assertEqual(_toc_continuation_pages(pages, 0, 2), [0, 1])
+
+    def test_stops_when_the_page_has_no_page_numbers(self):
+        pages = ["สารบัญ\n" + self._toc_page(5), "ข้อความธรรมดาไม่มีเลขหน้าท้ายบรรทัด"]
+        self.assertEqual(_toc_continuation_pages(pages, 0, len(pages)), [0])
+
+    def test_single_page_toc(self):
+        self.assertEqual(_toc_continuation_pages(["สารบัญ\n" + self._toc_page(3)], 0, 1),
+                         [0])
+
+
+class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
+    """จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ทั้งบทคัดย่อไทยและอังกฤษ
+
+    เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ · ยุบเป็นข้อเดียวได้
+    แต่ต้องบอกให้ครบว่าเป็นหน้าไหนบ้าง (คำสั่งเจ้าหน้าที่ ก.ค. 2569)
+    """
+
+    TH, EN = "บทคัดย่อ (หน้า ง)", "บทคัดย่อ (หน้า ฉ)"
+
+    def test_same_number_on_both_pages_is_one_issue_naming_both(self):
+        zone, where, found = _page_count_issue([(self.TH, 171), (self.EN, 171)], 154)
+        self.assertEqual(zone, "RED")
+        self.assertIn(self.TH, where)
+        self.assertIn(self.EN, where)
+        self.assertIn("171", found)
+        self.assertIn("154", found)
+
+    def test_different_numbers_say_which_page_states_what(self):
+        _zone, _where, found = _page_count_issue([(self.TH, 171), (self.EN, 170)], 154)
+        self.assertIn(f"{self.TH} ระบุ 171", found)
+        self.assertIn(f"{self.EN} ระบุ 170", found)
+        self.assertIn("154", found)
+
+    def test_small_difference_stays_orange(self):
+        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 155)], 154)
+        self.assertEqual(zone, "ORANGE")
+
+    def test_any_large_difference_makes_it_red(self):
+        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 171)], 154)
+        self.assertEqual(zone, "RED")
+
+    def test_single_page_keeps_the_plain_message(self):
+        _zone, where, found = _page_count_issue([(self.TH, 171)], 154)
+        self.assertEqual(where, self.TH)
+        self.assertNotIn("ไม่ตรงกัน", found)
+
+
+class TocEntriesMayCarryAPageRange(unittest.TestCase):
+    """หัวข้อที่กินสองหน้าเขียนเลขหน้าเป็นช่วงได้ เช่น "LIST OF TABLES xi-xii"
+
+    เดิมตัดได้แค่เลขหน้าเดี่ยว ช่วงจึงติดมากับชื่อหัวข้อ ระบบจำแนกไม่ออก
+    แล้วฟ้องผิดว่า "ไม่พบหัวข้อ LIST OF TABLES ในสารบัญ" ทั้งที่มีอยู่ (เล่มที่ 3)
+    """
+
+    def test_kind_is_recognised_with_a_range(self):
+        for line, kind in (("LIST OF TABLES xi-xii", "list_tables"),
+                           ("สารบัญตาราง ฎ-ฏ", "list_tables"),
+                           ("LIST OF FIGURES xiii–xiv", "list_figures"),
+                           ("APPENDIX 55-83", "appendix")):
+            self.assertEqual(_toc_section_kind(line), kind, line)
+
+    def test_heading_text_drops_the_whole_range(self):
+        self.assertEqual(_strip_toc_page_number("LIST OF TABLES xi-xii"),
+                         "LIST OF TABLES")
+        self.assertEqual(_strip_toc_page_number("สารบัญตาราง ฎ-ฏ"), "สารบัญตาราง")
+
+    def test_page_label_is_the_start_of_the_range(self):
+        self.assertEqual(_toc_page_label("LIST OF TABLES xi-xii"), "xi")
+        self.assertEqual(_toc_page_label("APPENDIX 55-83"), "55")
+        self.assertEqual(_toc_page_label("สารบัญตาราง ฎ-ฏ"), "ฎ")
+
+    def test_single_page_label_still_works(self):
+        self.assertEqual(_toc_page_label("REFERENCES 48"), "48")
+        self.assertEqual(_strip_toc_page_number("REFERENCES 48"), "REFERENCES")
 
 
 class CommitteeNamesOnSignaturePageAreCapitalCase(unittest.TestCase):
