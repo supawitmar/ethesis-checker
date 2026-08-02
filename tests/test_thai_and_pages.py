@@ -17,6 +17,7 @@ from checker import (
     _strip_student_title,
     _report_thai_committee,
     _sig_words,
+    _page_count_issue,
     _toc_continuation_pages,
     _toc_page_label,
     _toc_section_kind,
@@ -600,6 +601,43 @@ class MultiPageTableOfContents(unittest.TestCase):
     def test_single_page_toc(self):
         self.assertEqual(_toc_continuation_pages(["สารบัญ\n" + self._toc_page(3)], 0, 1),
                          [0])
+
+
+class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
+    """จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ทั้งบทคัดย่อไทยและอังกฤษ
+
+    เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ · ยุบเป็นข้อเดียวได้
+    แต่ต้องบอกให้ครบว่าเป็นหน้าไหนบ้าง (คำสั่งเจ้าหน้าที่ ก.ค. 2569)
+    """
+
+    TH, EN = "บทคัดย่อ (หน้า ง)", "บทคัดย่อ (หน้า ฉ)"
+
+    def test_same_number_on_both_pages_is_one_issue_naming_both(self):
+        zone, where, found = _page_count_issue([(self.TH, 171), (self.EN, 171)], 154)
+        self.assertEqual(zone, "RED")
+        self.assertIn(self.TH, where)
+        self.assertIn(self.EN, where)
+        self.assertIn("171", found)
+        self.assertIn("154", found)
+
+    def test_different_numbers_say_which_page_states_what(self):
+        _zone, _where, found = _page_count_issue([(self.TH, 171), (self.EN, 170)], 154)
+        self.assertIn(f"{self.TH} ระบุ 171", found)
+        self.assertIn(f"{self.EN} ระบุ 170", found)
+        self.assertIn("154", found)
+
+    def test_small_difference_stays_orange(self):
+        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 155)], 154)
+        self.assertEqual(zone, "ORANGE")
+
+    def test_any_large_difference_makes_it_red(self):
+        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 171)], 154)
+        self.assertEqual(zone, "RED")
+
+    def test_single_page_keeps_the_plain_message(self):
+        _zone, where, found = _page_count_issue([(self.TH, 171)], 154)
+        self.assertEqual(where, self.TH)
+        self.assertNotIn("ไม่ตรงกัน", found)
 
 
 class TocEntriesMayCarryAPageRange(unittest.TestCase):

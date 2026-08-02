@@ -846,6 +846,31 @@ def _toc_continuation_pages(pages, toc_start, hard_stop, limit=12):
     return out
 
 
+def _page_count_issue(count_wrong, last_arabic):
+    """รวม "จำนวนหน้ารวมไม่ตรง" ของทุกหน้าบทคัดย่อเป็นข้อเดียว
+
+    count_wrong = [(ชื่อตำแหน่ง, เลขที่เล่มระบุ), ...]
+    คืน (zone, ตำแหน่ง, ข้อความ "พบ")
+
+    จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
+    เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ · ยุบเป็นข้อเดียวได้ แต่ต้องบอก
+    ให้ครบว่าเป็นหน้าไหนบ้าง (และถ้าสองหน้าระบุคนละเลข ต้องบอกว่าหน้าไหนระบุเท่าไร)
+    """
+    where = " · ".join(lbl for lbl, _num in count_wrong)
+    stated = {num for _lbl, num in count_wrong}
+    # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
+    # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
+    zone = "ORANGE" if all(abs(num - last_arabic) <= 2 for num in stated) else "RED"
+    if len(stated) == 1:
+        found = (f"ระบุจำนวนหน้า {stated.pop()} "
+                 f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
+    else:
+        detail = " · ".join(f"{lbl} ระบุ {num}" for lbl, num in count_wrong)
+        found = (f"ระบุจำนวนหน้าไม่ตรงกัน: {detail} "
+                 f"— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
+    return zone, where, found
+
+
 def _report_committee_name_case(rep, members, loc):
     """ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)
 
@@ -2794,6 +2819,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ---------- กฎหน้าบทคัดย่อ (ตรวจทั้งช่วงของบทคัดย่อ ไม่ใช่แค่หน้าแรก) ----------
     abstract_idxs = sorted(set(abs_en_pages + abs_th_pages))
+    # "จำนวนหน้ารวม" เป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
+    # เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ จึงเก็บผลไว้ก่อนแล้วรวมเป็นข้อเดียว
+    # (ตามที่เจ้าหน้าที่สั่ง: ยุบได้ แต่ต้องบอกว่าเป็นหน้าไหนบ้าง)
+    count_missing, count_wrong = [], []
     for ai in abstract_idxs:
         span_pgs = list(range(ai, min(ai + span_of(ai), n)))
         lbl = f"บทคัดย่อ ({page_ref(ai)})"
@@ -2808,19 +2837,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
             if m2:
                 break
         if not m2:
-            rep.add(FRONT_FAILURE_ZONE, "front_matter", lbl,
-                    "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
-                    "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
+            count_missing.append(lbl)
         elif last_arabic is not None and int(m2.group(1)) != last_arabic:
-            stated_pages = int(m2.group(1))
-            # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
-            # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
-            count_zone = "ORANGE" if abs(stated_pages - last_arabic) <= 2 else "RED"
-            rep.add(count_zone, "front_matter", lbl,
-                    f"ระบุจำนวนหน้า {stated_pages} แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}",
-                    f"จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
-                    "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรง",
-                    "FRONT.ABSTRACT")
+            count_wrong.append((lbl, int(m2.group(1))))
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
@@ -2837,6 +2856,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
                     break
             if done_kw:
                 break
+
+    if count_missing:
+        rep.add(FRONT_FAILURE_ZONE, "front_matter", " · ".join(count_missing),
+                "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
+                "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
+    if count_wrong:
+        zone, where, found_count = _page_count_issue(count_wrong, last_arabic)
+        rep.add(zone, "front_matter", where, found_count,
+                "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า",
+                "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้",
+                "FRONT.ABSTRACT")
 
     # พบข้อความตัวหนาในบทคัดย่อ = ข้อสังเกตสีเหลือง แต่ยังผ่านได้
     if abstract_idxs:

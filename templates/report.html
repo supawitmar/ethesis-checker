@@ -439,6 +439,12 @@ var TR = [
   [/ แก้ชื่อบทให้ตรงประกาศ ทั้งในสารบัญและในเนื้อหา/g, ' Correct the chapter title to match the regulation, both in the TOC and in the body'],
   [/แก้ชื่อบทให้ตรงประกาศ ทั้งในสารบัญและในเนื้อหา/g, 'Correct the chapter title to match the regulation, both in the TOC and in the body'],
   [/ และในเนื้อหา /g, ' and in the body '],
+  // ---- จำนวนหน้ารวมท้ายบทคัดย่อ (ยุบสองหน้าเป็นข้อเดียว) ----
+  [/ระบุจำนวนหน้าไม่ตรงกัน:/g, 'The stated page counts do not agree:'],
+  [/ ระบุ (\d+)/g, ' states $1'],
+  [/— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ (\d+)/g, '— the last page number read is $1'],
+  [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า/g, 'The stated page count must equal the last page number of the document, and must be the same on every page that states it'],
+  [/เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้/g, 'Staff to confirm the last page number from the file, then correct the figure on every page that states it'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
   [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
   [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'Committee names on the approval pages must be in Capital Case'],
