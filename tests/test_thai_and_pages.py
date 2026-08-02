@@ -134,6 +134,38 @@ class SplitAbstractCommittee(unittest.TestCase):
         names, _ = split_abstract_committee("ยุพา จิ๋วพัฒนกุล, ปร.ด., รักชนก คชไกร , ปร.ด.,")
         self.assertEqual(names, ["ยุพา จิ๋วพัฒนกุล", "รักชนก คชไกร"])
 
+    def test_thai_degree_written_with_a_space_after_the_dot(self):
+        """เล่มจริงพิมพ์ "พย. ด." / "ปร. ด." (เว้นวรรคหลังจุด) ไม่ใช่ "พย.ด."
+
+        เดิมจับได้แค่ท่อนแรก ท่อนที่เหลือเลื่อนไปเป็นชื่อคน
+        """
+        names, degrees = split_abstract_committee(
+            "อัจฉราพร สี่หิรัญวงศ์, พย. ด., อาภาวรรณ หนูคง, ปร. ด.")
+        self.assertEqual(names, ["อัจฉราพร สี่หิรัญวงศ์", "อาภาวรรณ หนูคง"])
+        self.assertEqual(degrees, ["พย. ด.", "ปร. ด."])
+
+    def test_degrees_joined_with_and_in_one_field(self):
+        """คนเดียวมีหลายวุฒิเขียนต่อกันด้วย "และ" เช่น "พ.บ., ว.ว. และ อ.ว."
+
+        เดิม "ว.ว. และ อ.ว." ถูกอ่านเป็นชื่อคน แล้วทำให้ชื่อ/วุฒิสลับกันทั้งชุด
+        จนฟ้องแดงว่าพบชื่อ "ว.ว. และ อ.ว." และ "ปร. ด." ที่ไม่อยู่ในรายชื่ออนุมัติ
+        """
+        block = ("อัจฉราพร สี่หิรัญวงศ์, พย. ด., อัจฉริยา พ่วงแก้ว, พย. ด., "
+                 "อาภาวรรณ หนูคง, ปร. ด., ปัญจมา ปาราจารย์, พ.บ., ว.ว. และ อ.ว., "
+                 "ทวีศักดิ์ สมานชื่น, ปร. ด.")
+        names, degrees = split_abstract_committee(block)
+        self.assertEqual(names, ["อัจฉราพร สี่หิรัญวงศ์", "อัจฉริยา พ่วงแก้ว",
+                                 "อาภาวรรณ หนูคง", "ปัญจมา ปาราจารย์",
+                                 "ทวีศักดิ์ สมานชื่น"])
+        self.assertIn("ว.ว. และ อ.ว.", degrees)
+        self.assertEqual(abstract_committee_missing_commas(block), [])
+
+    def test_english_degrees_joined_with_and(self):
+        names, degrees = split_abstract_committee(
+            "SOMCHAI JAIDEE, M.D., Ph.D. and D.Sc., SOMSRI DEEJAI, Ph.D.")
+        self.assertEqual(names, ["SOMCHAI JAIDEE", "SOMSRI DEEJAI"])
+        self.assertIn("Ph.D. and D.Sc.", degrees)
+
     def test_empty_block(self):
         self.assertEqual(split_abstract_committee(""), ([], []))
         self.assertEqual(split_abstract_committee(None), ([], []))
