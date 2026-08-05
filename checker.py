@@ -123,15 +123,20 @@ def _attach_thai_marks(chars):
 
     mark ของไทยเป็นอักขระกว้างศูนย์ (x0 == x1) ที่วางไว้ตรงขอบขวาของพยัญชนะฐานพอดี
     จึงผูกกลับเข้าฐานที่ขอบขวาใกล้ที่สุดได้ แล้วเรียง สระ → วรรณยุกต์ → การันต์
+
+    "ช่องว่าง" ต้องไม่นับเป็นฐาน — เล่มจริง (เล่มที่ 6) วางการันต์ของ "ทวีศักดิ์" ไว้
+    ห่างจาก ด เล็กน้อยจนขอบขวาของช่องว่างที่ตามมาใกล้กว่า mark จึงไปเกาะช่องว่าง
+    ได้ "ทวีศักดิ ์สมานชื่น" — เจ้าหน้าที่อ่านรายงานแล้วนึกว่าระบบอ่านชื่อผิดคน
     """
     bases = sorted((c for c in chars if not _TH_MARKS.match(c['text'])),
                    key=lambda c: float(c['x0']))
     if not bases:
         return []
+    anchors = [b for b in bases if b['text'].strip()] or bases
     attached = {id(b): [] for b in bases}
     for m in chars:
         if _TH_MARKS.match(m['text']):
-            base = min(bases, key=lambda b: abs(float(b['x1']) - float(m['x0'])))
+            base = min(anchors, key=lambda b: abs(float(b['x1']) - float(m['x0'])))
             attached[id(base)].append(m)
     out = []
     for b in bases:
@@ -748,6 +753,27 @@ def _pair_near_names(expected_names, missing_idx, extra_slots, members):
             pairs.append((i, best))
             used_slots.add(best)
     return pairs
+
+
+def _report_missing_form_fields(rep, approved, required_fields):
+    """ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง — สีส้ม ไม่ใช่สีแดง
+
+    ช่องฟอร์มว่าง = ข้อมูลอ้างอิงไม่ครบ **ไม่ใช่ข้อบกพร่องของเล่ม** จึงต้องไม่ตัดสิน
+    ว่าเล่ม "ไม่ผ่าน" และต้องไม่เข้ารายการที่นักศึกษาต้องแก้ (system_note) เพราะ
+    นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย — คนที่ทำให้หายได้คือเจ้าหน้าที่ที่กรอกฟอร์ม
+
+    เจอจริงกับเล่มที่ 6: หน้า eThesis ไม่มีบรรทัดตัวย่อปริญญาภาษาอังกฤษให้อ่าน และ
+    "DOCTOR OF NURSING SCIENCE" ยังไม่มีในตารางตัวย่อ ระบบจึงเว้นช่องว่างไว้
+    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
+    """
+    for field_name in required_fields:
+        if soft(approved.get(field_name, "")):
+            continue
+        rep.add("ORANGE", "front_matter", "ข้อมูลอ้างอิงในแบบฟอร์ม",
+                f"ไม่ได้กรอก{FORM_FIELD_LABELS[field_name]} ระบบจึงข้ามการเทียบข้อมูลนี้",
+                "การตรวจอย่างเข้มต้องมีข้อมูลอ้างอิงครบทุกช่องที่กำหนด",
+                "กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ.",
+                "FORM.REQUIRED", system_note=True)
 
 
 def _report_committee_unreadable(rep, expected_names, members, loc, read_names):
@@ -3160,17 +3186,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         A = approved
         program_language = A.get("program_language", "")
         required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())
-        for field_name in required_fields:
-            if not soft(A.get(field_name, "")):
-                rep.add(
-                    FRONT_FAILURE_ZONE,
-                    "front_matter",
-                    "ข้อมูลอ้างอิงในแบบฟอร์ม",
-                    f"ไม่ได้กรอก{FORM_FIELD_LABELS[field_name]}",
-                    "การตรวจอย่างเข้มต้องมีข้อมูลอ้างอิงครบทุกช่องที่กำหนด",
-                    "กรอกข้อมูลให้ครบแล้วตรวจใหม่",
-                    "FORM.REQUIRED",
-                )
+        _report_missing_form_fields(rep, A, required_fields)
 
         cover_text = pages[0] if pages else ""
         missing_cover_items = [

@@ -12,6 +12,40 @@ from ethesis_import import (
 )
 
 
+class ThaiPuaGlyphs(unittest.TestCase):
+    """PUA ที่ไม่ได้แมป จะถูก _PUA_LEFTOVER ลบทิ้งเงียบ ๆ ชื่อกรรมการจึงขาดสระ
+
+    เจอจริงกับ eThesis ของ 6236350: "ปัญจมา" ถูกอ่านเป็น "ปญจมา" แล้วรายงานเอา
+    ชื่อที่ผิดไปโชว์ให้เจ้าหน้าที่เทียบกับเล่ม
+    """
+
+    def test_raised_mai_han_akat_is_mapped(self):
+        self.assertEqual(_fix_thai_pua("ปญจมา"), "ปัญจมา")
+
+    def test_raised_mai_taikhu_is_mapped(self):
+        self.assertEqual(_fix_thai_pua("เปน"), "เป็น")
+
+    def test_known_pua_block_still_works(self):
+        self.assertEqual(_fix_thai_pua("ทวีศักดิ"), "ทวีศักดิ์")
+
+
+class EnglishDegreeAbbreviation(unittest.TestCase):
+    """ตัวย่อปริญญาอังกฤษเดาจากตัวอักษรแรกไม่ได้ (Ph.D. ไม่ใช่ D.O.P.) ต้องเปิดตาราง
+
+    ปริญญาที่ไม่มีในตารางทำให้ช่องฟอร์มว่าง แล้วเคยฟ้องแดงใส่เล่มที่ถูกต้อง
+    """
+
+    def test_doctor_of_nursing_science(self):
+        self.assertEqual(_degree_abbr("DOCTOR OF NURSING SCIENCE"), "D.N.S.")
+
+    def test_subject_in_brackets_is_kept(self):
+        self.assertEqual(_degree_abbr("DOCTOR OF NURSING SCIENCE(NURSING)"),
+                         "D.N.S. (NURSING)")
+
+    def test_unknown_degree_is_left_blank_not_guessed(self):
+        self.assertEqual(_degree_abbr("DOCTOR OF SOMETHING UNLISTED"), "")
+
+
 class CommitteeParsingTests(unittest.TestCase):
     """ดึงชื่อ-สกุลกรรมการจากหน้า eThesis (ตัดคำนำหน้าวิชาการ + บทบาทท้ายบรรทัด)"""
 

@@ -216,6 +216,17 @@ class AbstractNamesHaveNoAcademicTitle(unittest.TestCase):
 class ThaiTextRepair(unittest.TestCase):
     """ซ่อมข้อความไทยจาก PDF ให้เจ้าหน้าที่อ่านออกว่าหมายถึงตรงไหนของเล่ม"""
 
+    def test_mark_never_attaches_to_a_space(self):
+        """เล่มที่ 6 อ่าน "ทวีศักดิ์ สมานชื่น" ได้เป็น "ทวีศักดิ ์สมานชื่น"
+
+        การันต์วางห่างจาก ด เล็กน้อยจนขอบขวาของช่องว่างที่ตามมาใกล้กว่า
+        ถ้านับช่องว่างเป็นฐานได้ mark จะไปเกาะช่องว่างแล้วชื่อขาดกลาง
+        """
+        chars = [ch("ด", 10.0), {"text": " ", "x0": 16.0, "x1": 20.0, "top": 100.0},
+                 {"text": "์", "x0": 18.0, "x1": 18.0, "top": 100.0},
+                 ch("ส", 30.0)]
+        self.assertEqual(_compose_thai_line(chars), "ด์ ส")
+
     def test_zero_width_space_becomes_sara_am(self):
         """ฟอนต์ map นิคหิตของ ำ เป็นตัวเว้นวรรคกว้างศูนย์ -> "จำ" ไม่ใช่ "จา " """
         chars = [ch("จ", 10.0), {"text": " ", "x0": 16.4, "x1": 16.4, "top": 100.0},
