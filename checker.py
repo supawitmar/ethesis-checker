@@ -157,11 +157,18 @@ def _is_blank_page_text(page_text):
     )
 
 
+# เศษที่ติดมากับบรรทัดเลขหน้า — เส้นคั่น/จุดไข่ปลา/หัวกระดาษที่เป็นสัญลักษณ์ล้วน
+# เล่มจริงพบบรรทัดเลขหน้าเป็น ". 1" ทุกหน้าคี่ (จุดของเส้นตกแต่งติดมาด้วย)
+# ถ้าไม่ปัดออก ระบบจะอ่านเลขหน้าไม่ได้ 119 จาก 177 หน้า แล้วฟ้อง "เลขหน้ากระโดด" 45 ข้อ
+_PAGE_LABEL_NOISE = re.compile(r'^[\s.\-—–_•·|:]+|[\s.\-—–_•·|:]+$')
+
+
 def _extract_page_label(page_text):
     """Read the page label printed at the top or bottom of a document page."""
     lines = [line.strip() for line in (page_text or '').splitlines() if line.strip()]
     candidates = (lines[:1] + lines[-1:]) if lines else []
-    for candidate in candidates:
+    for raw in candidates:
+        candidate = _PAGE_LABEL_NOISE.sub('', raw)
         if re.fullmatch(r'\d{1,4}', candidate):
             return str(int(candidate))
         if re.fullmatch(r'[ivxlcdm]{1,10}', candidate, re.I):
@@ -844,6 +851,52 @@ def _toc_continuation_pages(pages, toc_start, hard_stop, limit=12):
             break
         out.append(idx)
     return out
+
+
+def ethesis_matches_book(approved, pages):
+    """ไฟล์ eThesis กับไฟล์เล่ม "น่าจะเป็นของนักศึกษาคนเดียวกัน" ไหม
+
+    คืน (ตรงกันไหม, [สัญญาณที่ตรวจ], [สัญญาณที่พบ])
+
+    ดู 3 สัญญาณจากส่วนนำ: รหัสนักศึกษา / ชื่อนักศึกษา / ชื่อเรื่อง
+      - เจอ "อย่างน้อยหนึ่งอย่าง" = คนเดียวกัน · ที่เหลือไม่ตรงคือข้อผิดของเล่มจริง ๆ
+      - ไม่เจอเลยสักอย่าง = น่าจะอัปโหลดไฟล์สลับคน เพราะเล่มที่พิมพ์ผิดจริง ๆ
+        ยากมากที่จะผิดพร้อมกันทั้งรหัส ทั้งชื่อ และทั้งชื่อเรื่อง
+
+    เกิดขึ้นจริงหลายครั้งตอนใช้งาน แล้วรายงานออกมาแดงยาวเป็นสิบข้อโดยไม่มีข้อไหน
+    ช่วยอะไรเลย เจ้าหน้าที่ที่ไม่ทันสังเกตอาจส่งกลับให้นักศึกษาแก้ทั้งที่เล่มไม่ผิด
+    """
+    front = "\n".join(pages[:20])
+    nfront, digits = norm(front), re.sub(r'\D', '', front)
+    checked, found = [], []
+
+    student_id = re.sub(r'\D', '', (approved.get("student_id") or ""))
+    if len(student_id) >= 6:
+        checked.append("รหัสนักศึกษา")
+        if student_id in digits:
+            found.append("รหัสนักศึกษา")
+
+    names = [approved.get("student_name"), approved.get("student_name_th")]
+    keys = [norm(_strip_student_title(nm)) for nm in names if soft(nm or "")]
+    if keys:
+        checked.append("ชื่อนักศึกษา")
+        if any(k and k in nfront for k in keys):
+            found.append("ชื่อนักศึกษา")
+
+    titles = [t for t in (approved.get("title_en"), approved.get("title_th"))
+              if len(norm(t or "")) >= 20]
+    if titles:
+        checked.append("ชื่อเรื่อง")
+        # ชื่อเรื่องยาวและพิมพ์ผิดบางคำได้ จึงหาว่ามี "ท่อนยาว ๆ" ของชื่อเรื่องโผล่ไหม
+        # (แบ่งเป็นคำไม่ได้ เพราะภาษาไทยไม่เว้นวรรคระหว่างคำ)
+        for title in titles:
+            nt = norm(title)
+            chunks = [nt[i:i + 15] for i in range(0, len(nt) - 14, 5)]
+            if any(c in nfront for c in chunks):
+                found.append("ชื่อเรื่อง")
+                break
+
+    return (bool(found) or len(checked) < 2), checked, found
 
 
 def _page_count_issue(count_wrong, last_arabic):
@@ -1945,13 +1998,15 @@ def mismatch_detail(label, compared, expected=''):
 
     ถ้าส่ง expected มาด้วย จะต่อท้ายว่า "ต่างที่ ..." ชี้ตำแหน่ง/วิธีที่ผิด
     """
+    # เขียนให้เหมือนคนพูด: บอกว่า "ในเล่มเขียนว่าอะไร" ก่อน แล้วค่อยบอกว่าต่างยังไง
+    # (ของเดิมขึ้นต้นด้วยคำตัดสินแบบระบบ เช่น "ชื่อบทข้อความไม่ตรง:" และมีคะแนน
+    #  ความใกล้เคียงซึ่งเจ้าหน้าที่เอาไปใช้อะไรไม่ได้)
     if compared['status'] == 'case':
-        detail = f'{label}ตัวพิมพ์เล็ก-ใหญ่ไม่ตรง: "{compared["actual"]}"'
+        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}" — ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
     elif compared['status'] == 'typo':
-        detail = (f'{label}พิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง {compared["score"]:.2f}): '
-                  f'"{compared["actual"]}"')
+        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}" — พิมพ์ผิดเล็กน้อย'
     else:
-        detail = f'{label}ข้อความไม่ตรง: "{compared["actual"]}"'
+        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}"'
     # ชี้จุดต่างเฉพาะเมื่อใกล้เคียงกัน (typo/ตัวพิมพ์) — ถ้าเป็นคนละข้อความ
     # (mismatch) การไล่ทีละตัวอักษรจะรกและสับสน ให้ดูข้อความที่ถูกต้องแทน
     if expected and compared['status'] in ('typo', 'case'):
@@ -2339,7 +2394,13 @@ class Report:
         return "ผ่าน"
 
 
-def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
+def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
+              skip_identity_check=False):
+    """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
+
+    ใช้เฉพาะเครื่องมือตรวจคำแปล (check_i18n --corpus) ที่จงใจจับคู่ข้อมูลอ้างอิง
+    สมมติกับเล่มไหนก็ได้ เพื่อให้ทุกข้อความของระบบถูกสร้างออกมาให้ตรวจคำแปล
+    """
     def _p(msg):
         if progress:
             try:
@@ -2411,6 +2472,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     abs_th_idx = abs_th_pages[0] if abs_th_pages else None
     abs_en_idx = abs_en_pages[0] if abs_en_pages else None
     has_th_abs, has_en_abs = abs_th_idx is not None, abs_en_idx is not None
+
+    # ไฟล์ eThesis เป็นของนักศึกษาคนเดียวกับเล่มไหม — ต้องรู้ก่อนกฎอื่นที่ใช้ข้อมูลอนุมัติ
+    # (รวมถึงกฎชนิดเลขหน้าส่วนนำ ที่อ่าน program_language จากข้อมูลอนุมัติ)
+    same_student, sig_checked, _sig_found = (
+        ethesis_matches_book(approved, pages)
+        if approved and not skip_identity_check else (True, [], []))
     if not ack_pages:
         rep.add("RED", "front_matter", "ส่วนนำ", "ไม่พบกิตติกรรมประกาศ",
                 "ส่วนนำต้องมีกิตติกรรมประกาศ", "เพิ่มกิตติกรรมประกาศก่อนบทคัดย่อ",
@@ -2564,7 +2631,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
     # แก้ก่อนตรวจสารบัญ↔เนื้อหา เพราะต้องรู้ว่าบทไหน "ประกาศบังคับชื่อ" — บทที่บังคับ
     # ให้ยึดประกาศเป็นหลัก (เทียบสารบัญกับประกาศ และเนื้อหากับประกาศ แยกกันด้านล่าง)
     # จึงไม่เทียบสารบัญ↔เนื้อหาซ้ำ ซึ่งจะแนะนำผิดทางเมื่อฝั่งสารบัญเป็นตัวสะกดผิด
-    option = resolve_option(body_ch, approved, chapters_mode)
+    # ถ้าไฟล์ eThesis เป็นของคนอื่น ค่า "รูปแบบเล่ม" ในนั้นก็เป็นของคนอื่นด้วย
+    # ปล่อยให้ระบบเดารูปแบบจากตัวเล่มเองแทน ไม่งั้นชื่อบทจะถูกเทียบกับผังบทผิดชุด
+    # แล้วฟ้องแดงรัวทั้งเล่ม (เล่มที่ 3 คู่กับ eThesis คนอื่น: แดง 49 ข้อ)
+    option = resolve_option(body_ch, approved if same_student else None, chapters_mode)
     enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
 
     if toc_ch:
@@ -2816,7 +2886,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
         rep, page_labels, page_ref,
         sig_pages[0] if sig_pages else 1,
         body_ch[0][2] if body_ch else None,
-        _expected_front_label_style((approved or {}).get("program_language", "")))
+        _expected_front_label_style(
+            (approved or {}).get("program_language", "") if same_student else ""))
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
@@ -2911,7 +2982,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None):
 
     # ---------- เทียบข้อมูลอนุมัติ ----------
     _p("เทียบข้อมูลอนุมัติ (ชื่อเรื่อง/ชื่อนักศึกษา)")
-    if approved:
+    if approved and not same_student:
+        # ข้ามการเทียบข้อมูลอนุมัติทั้งชุด — ถ้าปล่อยให้เทียบต่อ รายงานจะแดงยาวเป็นสิบข้อ
+        # โดยไม่มีข้อไหนช่วยอะไร และเสี่ยงที่เจ้าหน้าที่จะส่งกลับให้นักศึกษาแก้ทั้งที่เล่มไม่ผิด
+        rep.add("ORANGE", "front_matter", "ไฟล์ที่อัปโหลด",
+                "ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง ("
+                + " / ".join(sig_checked) + ") น่าจะเป็นคนละคนกัน",
+                "ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน",
+                "ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ "
+                "(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน)",
+                "FORM.REQUIRED", system_note=True)
+    elif approved:
         A = approved
         program_language = A.get("program_language", "")
         required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())

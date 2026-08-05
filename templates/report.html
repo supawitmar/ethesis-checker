@@ -303,6 +303,9 @@
     {% endfor %}
     {% endif %}
 
+    {% set PART_LABEL = {'front_matter':'ส่วนนำ', 'body':'ส่วนเนื้อหา',
+                         'end_matter':'ส่วนท้ายเล่ม', 'body/end':'เนื้อหาและส่วนท้ายเล่ม',
+                         '-':'ทั้งเล่ม'} %}
     {% set zone_meta = [('RED','🔴 ไม่ผ่าน','🔴 Must fix'),('ORANGE','🟠 รอยืนยัน','🟠 Pending confirmation'),('YELLOW','🟡 ข้อสังเกต','🟡 Notice')] %}
     {% for zone, th_lbl, en_lbl in zone_meta %}
     <h2 class="sec"><span data-th="{{ th_lbl }}" data-en="{{ en_lbl }}">{{ th_lbl }}</span>
@@ -319,7 +322,7 @@
       <div class="issue {{ zone }}" data-zone="{{ zone }}" data-idx="{{ report.issues_by_zone[zone].index(it) }}">
         <div class="bar"></div>
         <div class="in">
-          <div class="loc"><span class="part">{{ it.part }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
+          <div class="loc"><span class="part tr-cat">{{ PART_LABEL.get(it.part, it.part) }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
@@ -399,6 +402,8 @@ var CATMAP = {
   'เลขหน้า':'Page numbering', 'จำนวนหน้าไม่ตรง':'Page count mismatch', 'เกินจำนวนหน้า':'Page limit exceeded',
   'เกินจำนวนที่กำหนด':'Limit exceeded', 'รูปแบบตัวอักษร':'Text formatting', 'คำนำหน้านาม':'Name prefix',
   'ภาษาไม่ครบตามหลักสูตร':'Language requirement', 'โครงสร้างเล่ม':'Document structure', 'อื่นๆ':'Other',
+  'ส่วนนำ':'Front matter', 'ส่วนเนื้อหา':'Body', 'ส่วนท้ายเล่ม':'End matter',
+  'เนื้อหาและส่วนท้ายเล่ม':'Body & end matter', 'ทั้งเล่ม':'Whole document',
   'สะกดผิดเล็กน้อย (typo)':'Minor typo', 'ข้อมูลนักศึกษาไม่ถูกต้อง':'Student data incorrect',
   'ชื่อปริญญาไม่ตรงข้อมูลอนุมัติ':'Degree name mismatch'
 };
@@ -445,6 +450,25 @@ var TR = [
   [/— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ (\d+)/g, '— the last page number read is $1'],
   [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า/g, 'The stated page count must equal the last page number of the document, and must be the same on every page that states it'],
   [/เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้/g, 'Staff to confirm the last page number from the file, then correct the figure on every page that states it'],
+  // ---- "…ในเล่มเขียนว่า …" (ข้อความแบบภาษาคน) ----
+  [/ชื่อบทในเล่มเขียนว่า/g, 'The chapter title in the document reads'],
+  [/ชื่อเรื่องในเล่มเขียนว่า/g, 'The thesis title in the document reads'],
+  [/ชื่อนักศึกษาในเล่มเขียนว่า/g, 'The student name in the document reads'],
+  [/ชื่อภาษาไทยในเล่มเขียนว่า/g, 'The Thai name in the document reads'],
+  [/ชื่อภาษาอังกฤษในเล่มเขียนว่า/g, 'The English name in the document reads'],
+  [/ชื่อปริญญาแบบย่อในเล่มเขียนว่า/g, 'The abbreviated degree name in the document reads'],
+  [/ชื่อปริญญาในเล่มเขียนว่า/g, 'The degree name in the document reads'],
+  [/หัวข้อสารบัญในเล่มเขียนว่า/g, 'The TOC heading in the document reads'],
+  [/ — พิมพ์ผิดเล็กน้อย/g, ' — a small typo'],
+  [/ — ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, ' — only the upper\/lower case differs'],
+  // ---- ด่านกันอัปโหลดไฟล์สลับคน ----
+  [/^ไฟล์ที่อัปโหลด$/g, 'Uploaded files'],
+  [/ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง \((.+?)\) น่าจะเป็นคนละคนกัน/g, 'The approved data matches the document on none of these ($1) — they look like two different students'],
+  [/ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน/g, 'The eThesis file and the document file must belong to the same student'],
+  [/ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ \(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน\)/g, 'Check whether the eThesis file matches the document, then run the check again (all approved-data comparisons were skipped for now)'],
+  [/ชื่อเรื่อง \/ /g, 'Thesis title / '],
+  [/ \/ ชื่อเรื่อง\)/g, ' / Thesis title)'],
+  [/^ชื่อเรื่อง$/g, 'Thesis title'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
   [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
   [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'Committee names on the approval pages must be in Capital Case'],
