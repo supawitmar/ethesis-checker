@@ -118,25 +118,40 @@ _MARK_ORDER = {**{c: 0 for c in 'ัิีึืฺุู็ํ'},   # สระ
                **{c: 2 for c in '์๎'}}              # การันต์ ยามักการ
 
 
-def _compose_thai_line(chars):
-    """ประกอบข้อความ 1 บรรทัดจาก chars โดยผูก combining mark ไทยกลับเข้าพยัญชนะฐาน"""
+def _attach_thai_marks(chars):
+    """ผูก combining mark ไทยกลับเข้าพยัญชนะฐาน คืน [(char ฐาน, ฐาน+mark)] เรียงตาม x
+
+    mark ของไทยเป็นอักขระกว้างศูนย์ (x0 == x1) ที่วางไว้ตรงขอบขวาของพยัญชนะฐานพอดี
+    จึงผูกกลับเข้าฐานที่ขอบขวาใกล้ที่สุดได้ แล้วเรียง สระ → วรรณยุกต์ → การันต์
+    """
     bases = sorted((c for c in chars if not _TH_MARKS.match(c['text'])),
-                   key=lambda c: c['x0'])
+                   key=lambda c: float(c['x0']))
     if not bases:
-        return ''
+        return []
     attached = {id(b): [] for b in bases}
     for m in chars:
         if _TH_MARKS.match(m['text']):
-            base = min(bases, key=lambda b: abs(b['x1'] - m['x0']))
+            base = min(bases, key=lambda b: abs(float(b['x1']) - float(m['x0'])))
             attached[id(base)].append(m)
-    parts, prev = [], None
+    out = []
     for b in bases:
-        if prev is not None and (b['x0'] - prev['x1']) > 1.2:
-            parts.append(' ')
         marks = ''.join(m['text'] for m in sorted(
             attached[id(b)],
             key=lambda m: (_MARK_ORDER.get(m['text'], 1), float(m['x0']))))
-        parts.append(b['text'] + marks)
+        out.append((b, b['text'] + marks))
+    return out
+
+
+def _compose_thai_line(chars):
+    """ประกอบข้อความ 1 บรรทัดจาก chars โดยผูก combining mark ไทยกลับเข้าพยัญชนะฐาน"""
+    pieces = _attach_thai_marks(chars)
+    if not pieces:
+        return ''
+    parts, prev = [], None
+    for b, text in pieces:
+        if prev is not None and (float(b['x0']) - float(prev['x1'])) > 1.2:
+            parts.append(' ')
+        parts.append(text)
         prev = b
     line = re.sub(r' +', ' ', ''.join(parts))
     # นิคหิต + า = ำ  ส่วน นิคหิต + ำ เกิดจากไฟล์ที่มี ำ อยู่แล้วและยังใส่นิคหิตซ้ำมาให้
@@ -293,7 +308,7 @@ def _sig_words(pdf_page):
     if chars:
         try:
             words = pdfplumber.utils.extract_words(
-                chars, extra_attrs=["non_stroking_color"]) or []
+                chars, extra_attrs=["non_stroking_color"], return_chars=True) or []
         except Exception:
             words = []
     if not words:                       # หน้าที่อ่าน chars ไม่ได้ ใช้ทางเดิม
@@ -301,9 +316,49 @@ def _sig_words(pdf_page):
             words = pdf_page.extract_words(extra_attrs=["non_stroking_color"]) or []
         except Exception:
             words = pdf_page.extract_words() or []
+    words = _rejoin_thai_marks(words)
     # นิคหิตที่ซ่อมแล้วยังลอยอยู่หน้า "า" ต้องรวมเป็น "ำ" ตัวเดียวเหมือน _compose_thai_line
     return [{**w, 'text': (w.get('text') or '').replace('ํา', 'ำ').replace('ํำ', 'ำ')}
             for w in words]
+
+
+def _rejoin_thai_marks(words):
+    """ซ่อม "ภาษาเลื่อน" ของคำที่ตัดมาจาก extract_words
+
+    extract_words ตัดคำจากระยะห่างแกน x ล้วน ๆ ส่วน combining mark ของไทยเป็นอักขระ
+    กว้างศูนย์ที่วางคร่อมขอบพยัญชนะ ผลคือ
+      1. mark หลุดออกไปเป็น "คำ" ของตัวเอง — เล่มจริง (เล่มทดสอบ 3) อ่านชื่อกรรมการ
+         "สุภาภรณ์ สงค์ประชา" ได้เป็น "สุภาภรณ ์ สงค์ประชา" การันต์กลายเป็นคำกลางชื่อ
+      2. mark ที่อยู่ในคำเดียวกันเรียงตามพิกัด x จึงสลับที่ ได้ "ท่ี" แทน "ที่"
+    ทั้งสองแบบทำให้เจ้าหน้าที่อ่านรายงานแล้วนึกว่าระบบอ่านชื่อผิดคน
+
+    ต้องซ่อมหลัง extract_words ไม่ใช่แทนที่มัน เพราะขอบเขตคำ/พิกัดของ extract_words
+    คือสิ่งที่ signature_committee_slots ใช้แบ่งช่องตาราง การตัดคำเองด้วยระยะห่าง
+    จะไปเปลี่ยนผลการแบ่งช่องของทุกเล่มที่อ่านถูกอยู่แล้ว
+    """
+    if not any(w.get('chars') for w in words):
+        return words                    # ทางเดิม (fixture ในเทส/หน้าที่ไม่มี chars)
+    real, floating = [], []
+    for w in words:
+        cs = w.get('chars') or []
+        if cs and all(_TH_MARKS.match(c['text']) for c in cs):
+            floating.append(w)
+        else:
+            real.append(w)
+    if not real:
+        return words
+    for w in floating:
+        for c in (w.get('chars') or []):
+            x, top = float(c['x0']), float(c['top'])
+            same_line = [r for r in real if abs(float(r['top']) - top) <= 3] or real
+            host = min(same_line,
+                       key=lambda r: min(abs(float(r['x1']) - x), abs(float(r['x0']) - x)))
+            host.setdefault('chars', []).append(c)
+    out = []
+    for w in real:
+        text = ''.join(t for _, t in _attach_thai_marks(w['chars'])) or w.get('text', '')
+        out.append({**w, 'text': text})
+    return out
 
 
 def signature_committee_slots(pdf_page):
@@ -650,6 +705,78 @@ def _assign_committee_slots(exp_keys, found_keys, fuzzy, threshold=None):
     return slot_to_idx, used
 
 
+# "เกือบเหมือน" — ต่างกันระดับตัวสะกด/ฟอนต์อ่านเพี้ยน ไม่ใช่คนละคน
+# คนละคนจริง ๆ คะแนนจะต่ำกว่านี้มาก (ชื่อไทยคนละคนวัดได้ราว 0.2-0.5)
+_NEAR_NAME_RATIO = 0.85
+
+
+def _committee_surname(name):
+    """นามสกุลของกรรมการ (คำสุดท้ายหลังตัดคำนำหน้า)
+
+    ต้องแยกคำก่อนเรียก norm() เพราะ norm ตัดช่องว่างทิ้งจนแยกชื่อกับสกุลไม่ออก
+    """
+    toks = [t for t in re.split(r'\s+', _strip_committee_title(name) or '') if t]
+    return norm(toks[-1]) if toks else ''
+
+
+def _pair_near_names(expected_names, missing_idx, extra_slots, members):
+    """จับคู่ "กรรมการที่หาย" กับ "ชื่อที่เกินมา" ที่เกือบเหมือนกัน (greedy best match)
+
+    ชื่อที่ต่างกันแค่ตัวสะกดหรือระบบอ่านเพี้ยนไปตัวสองตัว เดิมถูกฟ้องเป็นแดงสองข้อ
+    (ขาดคนนี้ + เจอคนแปลกหน้า) ทั้งที่เป็นคนเดียวกัน — คู่แบบนี้ต้องเป็นส้มข้อเดียว
+
+    คืน [(ดัชนี expected, ช่อง)] ที่จับคู่ได้
+    """
+    pairs, used_slots = [], set()
+    for i in missing_idx:
+        want = _committee_keyname(expected_names[i])
+        want_last = _committee_surname(expected_names[i])
+        best, best_r = None, 0.0
+        for s in extra_slots:
+            if s in used_slots:
+                continue
+            got = _committee_keyname(members.get(s) or '')
+            if not want or not got:
+                continue
+            r = difflib.SequenceMatcher(None, got, want).ratio()
+            # นามสกุลตรงกันทั้งคำ = สัญญาณว่าคนเดียวกันแม้ชื่อต้นจะอ่านเพี้ยน
+            if len(want_last) >= 3 and want_last == _committee_surname(members.get(s) or ''):
+                r = max(r, _NEAR_NAME_RATIO)
+            if r >= _NEAR_NAME_RATIO and r > best_r:
+                best, best_r = s, r
+        if best is not None:
+            pairs.append((i, best))
+            used_slots.add(best)
+    return pairs
+
+
+def _report_committee_unreadable(rep, expected_names, members, loc, read_names):
+    """อ่านหน้านี้แล้วไม่ตรงกับข้อมูลอนุมัติสักคน — ไม่ฟันธงว่าเล่มผิด
+
+    ถ้ารายชื่อในเล่มถูกจริง อย่างน้อยหนึ่งคนต้องแมตช์ การที่ไม่แมตช์เลยจึงแปลได้
+    สองทางพอ ๆ กัน คือ (ก) ระบบอ่านหน้านี้ไม่ออก (หน้าสแกน/ฟอนต์เพี้ยน) หรือ
+    (ข) เล่มใส่รายชื่อผิดชุด ระบบแยกสองกรณีนี้ไม่ได้ จึงลงส้มให้เจ้าหน้าที่ตัดสิน
+    แทนการฟ้องแดงรายคน — ความเสียหายของการปรับเล่มที่ถูกให้ตกสูงกว่ามาก
+    """
+    names = "  ".join(f'{k}. {_display_committee_name(n)}'
+                      for k, n in enumerate(expected_names, start=1))
+    if not read_names:
+        rep.add("ORANGE", "front_matter", loc,
+                "ระบบอ่านรายชื่อกรรมการบนหน้านี้ไม่ได้ (อาจเป็นหน้าภาพสแกน "
+                "หรือใช้ฟอนต์ที่ระบบอ่านไม่ออก)",
+                f"ต้องมีกรรมการ {len(expected_names)} คนตามข้อมูลอนุมัติ (บฑ.) คือ {names}",
+                "โปรดตรวจรายชื่อกรรมการบนหน้านี้ด้วยตา", "FRONT.COMMITTEE",
+                system_note=True)
+        return
+    got = "  ".join(f'"{n}"' for n in read_names)
+    rep.add("ORANGE", "front_matter", loc,
+            f"รายชื่อบนหน้านี้ไม่ตรงกับข้อมูลอนุมัติสักคนเดียว — ระบบอ่านได้ว่า {got}",
+            f"ต้องมีกรรมการ {len(expected_names)} คนตามข้อมูลอนุมัติ (บฑ.) คือ {names}",
+            "ตรวจว่าเป็นรายชื่อกรรมการชุดที่ถูกต้องหรือไม่ "
+            "ถ้ารายชื่อในเล่มถูกแล้วแปลว่าระบบอ่านหน้านี้ไม่ตรง ให้ผ่านได้",
+            "FRONT.COMMITTEE")
+
+
 def _page_committee_lines(page_text, fuzzy):
     """คืน [(คีย์เทียบชื่อของบรรทัด, ข้อความบรรทัดดิบ)] ของทั้งหน้า
 
@@ -709,13 +836,49 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="
 
     missing_idx = [i for i in range(N) if i not in matched_exp]
 
-    if order_loc:
-        _note_committee_reference(rep, expected_names, order_loc,
-                                  matched=not extra_slots and not missing_idx,
-                                  approx=fuzzy)
+    # ชิ้นส่วนของชื่อกรรมการที่อนุมัติแล้ว (เล่มขึ้นบรรทัดใหม่กลางชื่อ หรือระบบแบ่งช่อง
+    # คร่อมคำ) ไม่ใช่ "คนนอก" — คนคนนั้นถูกนับว่าพบไปแล้วจากด่านทั้งหน้า
+    def _is_fragment(slot):
+        fk = found_keys.get(slot) or ""
+        if any(ek and ek == fk for ek in exp_keys):
+            return False                    # ชื่อซ้ำช่อง ไม่ใช่เศษชื่อ
+        return len(fk) >= 3 and any(ek and (fk in ek or ek in fk) for ek in exp_keys)
 
-    if not extra_slots and not missing_idx:
+    extra_slots = [s for s in extra_slots if not _is_fragment(s)]
+
+    # ชื่อที่ "เกือบตรง" = คนเดียวกันแต่สะกดต่างหรือระบบอ่านเพี้ยนไปตัวสองตัว
+    near_pairs = _pair_near_names(expected_names, missing_idx, extra_slots, members)
+    for i, s in near_pairs:
+        missing_idx.remove(i)
+        extra_slots.remove(s)
+
+    if order_loc:
+        _note_committee_reference(
+            rep, expected_names, order_loc,
+            matched=not extra_slots and not missing_idx and not near_pairs,
+            approx=fuzzy)
+
+    if not extra_slots and not missing_idx and not near_pairs:
         return       # ชื่อครบและถูกคน — จบ ไม่ต้องดูว่าใครอยู่ช่องไหน
+
+    # ไม่ตรงสักคน = แยกไม่ออกว่า "อ่านไม่ออก" หรือ "รายชื่อผิดชุด" → ไม่ฟันธงรายคน
+    if N >= 2 and not matched_exp and not near_pairs:
+        _report_committee_unreadable(rep, expected_names, members, loc,
+                                     [v for _, v in sorted(found_slots.items())])
+        return
+
+    for i, s in near_pairs:
+        want = _display_committee_name(expected_names[i])
+        got = members.get(s) or ""
+        rep.add("ORANGE", "front_matter", loc,
+                f'พบชื่อ "{got}" ซึ่งใกล้เคียงกับ "{want}" ในข้อมูลอนุมัติ '
+                f'แต่ตัวสะกดไม่ตรงกัน',
+                f'ต้องเป็น "{want}" ตามข้อมูลอนุมัติ (บฑ.)',
+                "ตรวจตัวสะกดชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ "
+                "ถ้าชื่อในเล่มถูกแล้วแปลว่าระบบอ่านตัวอักษรเพี้ยน ให้ผ่านได้",
+                "FRONT.COMMITTEE")
+        if raw and raw.get(s):
+            _report_committee_rank(rep, expected_names[i], raw[s], loc)
 
     # ชื่อไม่ครบชุด → ระบุ ขาด/เกิน ตรง ๆ
     for i in missing_idx:
@@ -732,11 +895,6 @@ def _report_committee_positions(rep, expected_names, members, loc, fuzzy, zone="
         fk = found_keys.get(s) or ""
         dup = next((expected_names[i] for i, ek in enumerate(exp_keys)
                     if ek and ek == fk), None)
-        # ชิ้นส่วนของชื่อกรรมการที่อนุมัติแล้ว (เล่มขึ้นบรรทัดใหม่กลางชื่อ หรือระบบ
-        # แบ่งช่องคร่อมคำ) ไม่ใช่ "คนนอก" — คนคนนั้นถูกนับว่าพบไปแล้วจากด่านทั้งหน้า
-        if not dup and len(fk) >= 3 and any(ek and (fk in ek or ek in fk)
-                                            for ek in exp_keys):
-            continue
         if dup:
             rep.add("ORANGE", "front_matter", loc,
                     f'พบชื่อ "{name}" ปรากฏซ้ำมากกว่าหนึ่งช่องในตารางลายเซ็น',
@@ -1149,6 +1307,12 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         loc = f"{page_label} ({page_ref(idx)})"
         # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
         _report_committee_name_case(rep, members, loc)
+        # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
+        # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
+        read_names = [members[k] for k in sorted(members) if members.get(k)]
+        rep.add_info("front_matter", f"รายชื่อที่ระบบอ่านได้จาก{page_label}",
+                     "  ".join(f'{k}. {n}' for k, n in enumerate(read_names, start=1))
+                     or "ระบบอ่านรายชื่อบนหน้านี้ไม่ได้")
         if not expected:
             continue
         handled_any = True

@@ -409,6 +409,17 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- อ่านรายชื่อกรรมการไม่ได้ / ชื่อเกือบตรง (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ระบบอ่านรายชื่อกรรมการบนหน้านี้ไม่ได้ \(อาจเป็นหน้าภาพสแกน หรือใช้ฟอนต์ที่ระบบอ่านไม่ออก\)/g, 'The system could not read the committee names on this page (it may be a scanned image, or use a font the system cannot read)'],
+  [/รายชื่อบนหน้านี้ไม่ตรงกับข้อมูลอนุมัติสักคนเดียว — ระบบอ่านได้ว่า/g, 'None of the names on this page match the approved data — the system read:'],
+  [/ตรวจว่าเป็นรายชื่อกรรมการชุดที่ถูกต้องหรือไม่ ถ้ารายชื่อในเล่มถูกแล้วแปลว่าระบบอ่านหน้านี้ไม่ตรง ให้ผ่านได้/g, 'Check whether this is the correct set of committee members. If the names in the document are correct, the system misread this page and it may be passed'],
+  [/ตรวจตัวสะกดชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ ถ้าชื่อในเล่มถูกแล้วแปลว่าระบบอ่านตัวอักษรเพี้ยน ให้ผ่านได้/g, 'Check the spelling of the committee name against the approved data. If the name in the document is correct, the system misread a character and it may be passed'],
+  [/พบชื่อ "(.+?)" ซึ่งใกล้เคียงกับ "(.+?)" ในข้อมูลอนุมัติ แต่ตัวสะกดไม่ตรงกัน/g, 'Found the name "$1", which is close to "$2" in the approved data, but the spelling does not match'],
+  [/ต้องเป็น "(.+?)" ตามข้อมูลอนุมัติ \(บฑ\.\)/g, 'Must be "$1" per the approved data (Form บฑ.)'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้าอาจารย์ที่ปรึกษา/g, 'Names the system read from the advisory committee page'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้ากรรมการสอบ/g, 'Names the system read from the examination committee page'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้าลงนาม (\d+)/g, 'Names the system read from approval page $1'],
+  [/ระบบอ่านรายชื่อบนหน้านี้ไม่ได้/g, 'The system could not read the names on this page'],
   // ---- ประโยคเต็ม: ต้องอยู่บนสุด เพราะกฎด้านล่างบางข้อแทนแบบ "เศษคำ" ----
   // ถ้าปล่อยให้เศษคำยิงก่อน ประโยคจะถูกฉีกจนกฎเต็มประโยคแมตช์ไม่ได้
   // แล้วรายงานอังกฤษจะเหลือไทยปนอยู่ เช่น "Change to:เลขpage" (พบในเล่มทดสอบ)
