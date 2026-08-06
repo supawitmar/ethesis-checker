@@ -1,0 +1,37 @@
+# Dockerfile ใช้ COPY . . ถ้าไม่มีไฟล์นี้ ทุกอย่างในโฟลเดอร์จะถูกฝังลง image
+# รวมถึง .env ที่มี APP_PASSWORD กับ ANTHROPIC_API_KEY — ลบทีหลังไม่ได้ เพราะติดอยู่ใน layer
+#
+# บน Render ไม่เคยมีปัญหานี้ (clone จาก git ซึ่งไม่มี .env อยู่แล้ว) แต่ build ในเครื่อง
+# แล้ว push image ขึ้น registry เมื่อไหร่ คีย์จะหลุดไปด้วย
+
+# ---- ความลับ (สำคัญที่สุด) ----
+.env
+.env.*
+
+# ---- virtualenv / cache ----
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- git ----
+.git/
+.gitignore
+.gitattributes
+
+# ---- ของที่แอปไม่ได้ใช้ตอนรัน (image เล็กลง) ----
+# ตอนรันต้องมีแค่ *.py, templates/ และ requirements.txt
+# ส่วน static/ main.py สร้างเองอยู่แล้วถ้าไม่มี
+tests/
+tools/
+*.md
+Dockerfile
+.dockerignore
+
+# ---- ไฟล์ระบบ/เอดิเตอร์ ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
