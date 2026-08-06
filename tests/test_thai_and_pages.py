@@ -23,6 +23,7 @@ from checker import (
     _page_count_issue,
     ethesis_matches_book,
     _toc_continuation_pages,
+    _toc_misspelled_heading,
     _toc_page_label,
     _toc_section_kind,
     _strip_toc_page_number,
@@ -428,6 +429,34 @@ class SignatureNikhahitRepair(unittest.TestCase):
         chars += self._chars("จวงตระกูล", x0=180.0)      # เว้นระยะจริง
         texts = [w["text"] for w in _sig_words(_CharPage(chars))]
         self.assertEqual(texts, ["จำเนียร", "จวงตระกูล"])
+
+
+class MisspelledTocHeadingIsCalledATypo(unittest.TestCase):
+    """เล่มที่ 1 พิมพ์ "ประวัติผู้จัย" ตก "วิ" — ตัวจำแนกหัวข้อจึงไม่รู้จัก
+
+    เดิมฟ้องว่า "ไม่พบหัวข้อ ประวัติผู้วิจัย ในสารบัญ" ทั้งที่บรรทัดอยู่ในสารบัญ
+    เจ้าหน้าที่เห็นแล้วนึกว่าระบบอ่านไม่เจอ ทั้งที่ปัญหาจริงคือสะกดผิด
+    (วิธีแก้คนละอย่างกัน: แก้ตัวสะกด ไม่ใช่เพิ่มบรรทัดใหม่)
+    """
+
+    def test_near_miss_is_found(self):
+        lines = [(7, "บรรณานุกรม 93"), (7, "ภาคผนวก 97"), (7, "ประวัติผู้จัย 130")]
+        self.assertEqual(_toc_misspelled_heading(lines, "ประวัติผู้วิจัย"),
+                         ("ประวัติผู้จัย", 7))
+
+    def test_headings_that_are_already_recognised_are_not_borrowed(self):
+        """หัวข้ออื่นที่จำแนกได้แล้ว ต้องไม่ถูกดึงมาตอบว่าเป็นตัวสะกดผิดของหัวข้อนี้"""
+        lines = [(7, "บรรณานุกรม 93"), (7, "ภาคผนวก 97")]
+        self.assertIsNone(_toc_misspelled_heading(lines, "ประวัติผู้วิจัย"))
+
+    def test_a_totally_different_line_is_not_matched(self):
+        lines = [(7, "ตารางแสดงผลการวิเคราะห์ข้อมูลรายด้าน 45")]
+        self.assertIsNone(_toc_misspelled_heading(lines, "ประวัติผู้วิจัย"))
+
+    def test_english_list_headings_do_not_match_each_other(self):
+        """LIST OF TABLES ต้องไม่ถูกนับเป็นตัวสะกดผิดของ LIST OF FIGURES"""
+        lines = [(7, "LIST OF TABLES 9")]
+        self.assertIsNone(_toc_misspelled_heading(lines, "LIST OF FIGURES"))
 
 
 class SignatureCellKeepsNamesWhole(unittest.TestCase):

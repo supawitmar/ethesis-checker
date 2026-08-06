@@ -2391,6 +2391,28 @@ def _toc_page_label(text):
     return str(int(label)) if label.isdigit() else label.lower()
 
 
+def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
+    """บรรทัดในสารบัญที่ "น่าจะใช่หัวข้อนี้แต่สะกดผิด" — คืน (หัวข้อที่พบ, ดัชนีหน้า)
+
+    เล่มจริงพิมพ์ "ประวัติผู้จัย" ตก "วิ" จาก "ประวัติผู้วิจัย" ตัวจำแนกหัวข้อจึงไม่รู้จัก
+    แล้วระบบฟ้องว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่บรรทัดพิมพ์อยู่ในสารบัญ
+    เจ้าหน้าที่เห็นแล้วนึกว่าระบบอ่านไม่เจอ ทั้งที่ปัญหาจริงคือ "สะกดผิด"
+    ซึ่งเป็นคนละวิธีแก้กัน (แก้ตัวสะกด ไม่ใช่เพิ่มบรรทัดใหม่)
+
+    ข้ามบรรทัดที่จำแนกเป็นหัวข้ออื่นได้แล้ว เพื่อไม่ให้หัวข้อที่มีอยู่จริงถูกดึงมาตอบผิดที่
+    """
+    want_key = norm(want)
+    best, best_ratio = None, min_ratio - 1e-9
+    for page_idx, line in toc_lines:
+        head = _strip_toc_page_number(line).strip()
+        if not head or _toc_section_kind(line):
+            continue
+        ratio = difflib.SequenceMatcher(None, norm(head), want_key).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = (head, page_idx), ratio
+    return best
+
+
 def _toc_section_kind(text):
     """Classify one non-chapter TOC entry using its visible heading."""
     normalized = norm(_strip_toc_page_number(text))
@@ -3668,6 +3690,23 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             for section_kind, (section_label, actual_page_idx) in actual_toc_sections.items():
                 candidates = toc_entries_by_kind.get(section_kind, [])
                 if not candidates:
+                    # หัวข้อที่ "มีอยู่แต่สะกดผิด" ต้องบอกว่าสะกดผิด ไม่ใช่บอกว่าไม่มี
+                    # เพราะวิธีแก้คนละอย่างกัน (แก้ตัวสะกด ไม่ใช่เพิ่มบรรทัดใหม่)
+                    typo = _toc_misspelled_heading(toc_lines, section_label)
+                    if typo:
+                        head, typo_idx = typo
+                        found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
+                        diff = describe_diff(head, section_label)
+                        if diff:
+                            found_msg += f" — ต่างที่ {diff}"
+                        rep.add(
+                            "RED", "front_matter", f"สารบัญ ({page_ref(typo_idx)})",
+                            found_msg,
+                            f'หัวข้อในสารบัญต้องสะกดว่า "{section_label}"',
+                            f'แก้ตัวสะกดในสารบัญเป็น "{section_label}"',
+                            "FRONT.TOC_CONTENT",
+                        )
+                        continue
                     rep.add(
                         "RED", "front_matter", f"สารบัญ ({page_ref(toc_pages[0])})",
                         f"ไม่พบหัวข้อ {section_label} ในสารบัญ",
