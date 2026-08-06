@@ -158,6 +158,9 @@ docker run -p 8000:8000 ethesis-checker
 - `templates/report.html` — หน้าแสดงผลตรวจ (โซนสี 🔴🟠🟡) + ตารางคำแปลอังกฤษ `TR`
 - `tests/` — unittest ทั้งหมด (ไม่ต้องใช้ไฟล์ PDF)
 - `tools/` — ด่านตรวจก่อน commit: `regress_books.py`, `check_i18n.py`, `baseline.json`
+- `.claude/` — คู่มือทำงานสำหรับ Claude Code (ขั้นตอนแก้กฎ + กับดักเฉพาะโปรเจกต์)
+  กับ `launch.json` ของ dev server · **เปิด Claude Code ที่โฟลเดอร์ `code/` นี้**
+  จึงจะเจอเอง · ไม่เกี่ยวกับการรันหรือ deploy ระบบเลย (`.dockerignore` ตัดออกอยู่แล้ว)
 
 ## ข้อจำกัดเทียบกับชุด Claude Skill เดิม
 

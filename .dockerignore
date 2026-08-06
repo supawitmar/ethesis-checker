@@ -9,11 +9,13 @@
 .env.*
 
 # ---- virtualenv / cache ----
+# ต้องมี **/ นำหน้าเมื่ออยากให้ครอบโฟลเดอร์ย่อยด้วย — docker ไม่ให้ * ข้าม /
+# ต่างจาก .gitignore ที่ pattern เปล่า ๆ ครอบทุกชั้นให้เอง
 .venv/
 venv/
 env/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 
 # ---- git ----
@@ -26,7 +28,8 @@ __pycache__/
 # ส่วน static/ main.py สร้างเองอยู่แล้วถ้าไม่มี
 tests/
 tools/
-*.md
+.claude/
+**/*.md
 Dockerfile
 .dockerignore
 
