@@ -409,6 +409,10 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- หัวข้อในสารบัญสะกดผิด (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents; it reads'],
+  [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
+  [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) เขียนว่า/g, 'The programme chair box (bottom right) reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) เขียนว่า/g, 'The faculty dean box (bottom right) reads'],
