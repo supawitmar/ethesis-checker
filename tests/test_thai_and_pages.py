@@ -8,6 +8,8 @@
 """
 import unittest
 
+import pdfplumber
+
 from checker import (
     Report,
     _compose_thai_line,
@@ -426,6 +428,56 @@ class SignatureNikhahitRepair(unittest.TestCase):
         chars += self._chars("จวงตระกูล", x0=180.0)      # เว้นระยะจริง
         texts = [w["text"] for w in _sig_words(_CharPage(chars))]
         self.assertEqual(texts, ["จำเนียร", "จวงตระกูล"])
+
+
+class SignatureCellKeepsNamesWhole(unittest.TestCase):
+    """เล่มที่ 1 อ่านชื่อกรรมการได้เป็น "วันเพ็ญ แก้ว ปาน" มีช่องว่างแทรกกลางนามสกุล
+
+    เหตุคือลำดับ chars ในไฟล์วาง "้" ไว้ **หลัง** ตัว ว ที่มันเกาะอยู่
+        ก  x0=415.83 x1=422.01
+        ว  x0=421.95 x1=427.31
+        ้  x0=422.01 x1=422.01   <-- mark ตามมาทีหลัง
+        ป  x0=427.31 x1=434.17
+    extract_words วัดระยะจาก x1 ของตัวก่อนหน้า (คือ mark ที่ x1=422.01) ไปยัง ป
+    ได้ 5.30 pt เกิน x_tolerance จึงตัดเป็นคนละคำ
+    ส่วน _compose_thai_line ถอด mark ออกจากลำดับก่อน แล้ววัดระยะระหว่าง "พยัญชนะฐาน"
+    ได้ ว(x1=427.31) -> ป(x0=427.31) = 0 จึงไม่ตัด
+    """
+
+    # พิกัดจริงจากเล่มที่ 1 หน้า ก
+    GEOM = [("แ", 409.74, 415.78), ("ก", 415.83, 422.01), ("ว", 421.95, 427.31),
+            ("้", 422.01, 422.01), ("ป", 427.31, 434.17), ("า", 434.17, 439.23),
+            ("น", 439.17, 445.90)]
+
+    def _chars(self, top=112.0):
+        return [{"text": t, "x0": x0, "x1": x1, "top": top, "doctop": top,
+                 "bottom": top + 10.0, "upright": True, "size": 10.0,
+                 "non_stroking_color": (0, 0, 0), "fontname": "TH"}
+                for t, x0, x1 in self.GEOM]
+
+    def _dotted(self, top, x0=300.0, n=30):
+        out, x = [], x0
+        for _ in range(n):
+            out.append({"text": "…", "x0": x, "x1": x + 6.0, "top": top,
+                        "doctop": top, "bottom": top + 10.0, "upright": True,
+                        "size": 10.0, "non_stroking_color": (0, 0, 0),
+                        "fontname": "TH"})
+            x += 6.0
+        return out
+
+    def test_extract_words_really_does_split_it(self):
+        """ยืนยันว่าเคสนี้พังจริงถ้าเชื่อ extract_words — ไม่ใช่เทสที่ผ่านเพราะโชคดี"""
+        words = pdfplumber.utils.extract_words(self._chars())
+        self.assertGreater(len(words), 1)
+
+    def test_compose_keeps_the_surname_whole(self):
+        self.assertEqual(_compose_thai_line(self._chars()), "แก้วปาน")
+
+    def test_signature_cell_uses_the_composed_text(self):
+        chars = (self._dotted(100.0) + self._chars(112.0)
+                 + self._dotted(136.0) + self._chars(148.0))
+        members, _quals, _bottom, _raw = signature_committee_slots(_CharPage(chars))
+        self.assertEqual(members.get(1), "แก้วปาน")
 
 
 class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):

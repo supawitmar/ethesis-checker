@@ -409,6 +409,14 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) เขียนว่า/g, 'The programme chair box (bottom right) reads'],
+  [/ช่องคณบดีคณะ \(มุมล่างขวา\) เขียนว่า/g, 'The faculty dean box (bottom right) reads'],
+  [/ไม่พบชื่อสาขา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The subject "$1" was not found in the programme chair box (bottom right)'],
+  [/ไม่พบชื่อคณะ "(.+?)" ในช่องคณบดีคณะ \(มุมล่างขวา\)/g, 'The faculty name "$1" was not found in the faculty dean box (bottom right)'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา/g, 'The text under the signature must contain the subject'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ/g, 'The text under the signature must contain the faculty name'],
+  [/โปรดตรวจชื่อสาขามุมล่างขวาให้ถูกต้อง/g, 'Please verify the subject name at the bottom right'],
   // ---- ประโยคเต็มที่เคยถูกกฎเศษคำฉีกจนแปลไม่ครบ ----
   [/ชื่อบัณฑิตวิทยาลัยและมหาวิทยาลัย/g, 'Name of the Faculty of Graduate Studies and the University'],
   [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
