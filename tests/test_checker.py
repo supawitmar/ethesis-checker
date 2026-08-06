@@ -1096,6 +1096,26 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         # ชื่อคณะจาก eThesis เป็นภาษาไทย เทียบกับหน้าลงนามอังกฤษไม่ได้
         self.assertEqual(self._run("exam", "Dean Faculty of Engineering", english=True), [])
 
+    def test_near_miss_says_what_the_document_actually_printed(self):
+        """เล่มที่ 1 พิมพ์สาขาตกตัวอักษรไปตัวเดียว
+
+        เดิมฟ้องว่า "ไม่พบชื่อสาขา ..." เจ้าหน้าที่กวาดตาเห็นข้อความอยู่บนหน้ากระดาษ
+        เลยนึกว่าระบบอ่านไม่เจอ ทั้งที่ผลตรวจถูก — ต้องบอกว่าเล่มเขียนว่าอะไรและต่างตรงไหน
+        """
+        bad = self._run("advisory",
+                        "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
+                        "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม")
+        self.assertEqual(len(bad), 1)
+        self.assertIn("เขียนว่า", bad[0])
+        self.assertIn("สังคมศาสตร์สิ่งแวดล้ม", bad[0])       # ค่าที่พบจริงในเล่ม
+        self.assertNotIn("ไม่พบ", bad[0])
+
+    def test_completely_absent_subject_still_says_not_found(self):
+        """ไม่มีอะไรใกล้เคียงเลย ต้องคงข้อความ "ไม่พบ" ไว้ ไม่ใช่เดาสุ่มมาโชว์"""
+        bad = self._run("advisory", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร")
+        self.assertEqual(len(bad), 1)
+        self.assertIn("ไม่พบชื่อสาขา", bad[0])
+
 
 class SignaturePlaceholderTests(unittest.TestCase):
     """ข้อความตัวอย่างของ template ที่ถมขาวไว้ = ปกติ / ที่ยังมองเห็น = ต้องแจ้ง"""

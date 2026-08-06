@@ -411,11 +411,24 @@ def signature_committee_slots(pdf_page):
                          else None)
 
     def cell(row, left):
+        """ข้อความในช่องหนึ่งของแถว — ประกอบจาก chars ไม่ใช่ต่อ text ของ extract_words
+
+        extract_words ตัดคำจากระยะห่างแกน x ล้วน ๆ ฟอนต์ในเล่มจริงบางตัวเว้นช่องว่าง
+        ระหว่างตัวอักษรกลางคำมากพอจนถูกตัดเป็นคนละคำ ต่อกลับด้วยช่องว่างแล้วได้
+        "วันเพ็ญ แก้ว ปาน" / "แอนน์ จิร ะพงษ์สุวรรณ" / "วิจ ยัการศึกษา" (เล่มที่ 1)
+        เจ้าหน้าที่อ่านรายงานแล้วนึกว่าระบบอ่านชื่อผิดคน
+
+        _compose_thai_line คือทางเดียวกับที่ _page_text ใช้ ซึ่งอ่านหน้าเดียวกันนี้ถูก
+        อยู่แล้ว — ตัดคำจากระยะห่างของ "พยัญชนะฐาน" และผูก mark ข้ามขอบเขตคำได้
+        """
         if not row:
             return ''
-        toks = [w['text'] for w in sorted(row['words'], key=lambda w: float(w['x0']))
-                if (float(w['x0']) < mid) == left]
-        return ' '.join(toks).strip()
+        ws = [w for w in sorted(row['words'], key=lambda w: float(w['x0']))
+              if (float(w['x0']) < mid) == left]
+        chars = [c for w in ws for c in (w.get('chars') or [])]
+        if chars:
+            return _compose_thai_line(chars)
+        return ' '.join(w['text'] for w in ws).strip()      # fixture ที่ไม่มี chars
 
     members, member_quals, member_raw = {}, {}, {}
     # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
@@ -447,9 +460,18 @@ def signature_committee_slots(pdf_page):
             (name_rows[-1]['top'] if name_rows else 0)
     band = [w for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0'])))
             if float(w['top']) >= floor]
-    reading = ' '.join(w['text'] for w in band)
-    by_column = ' '.join(w['text'] for w in band if float(w['x0']) < mid) + ' ' + \
-                ' '.join(w['text'] for w in band if float(w['x0']) >= mid)
+    def band_text(ws):
+        """ประกอบจาก chars ด้วยเหตุผลเดียวกับ cell() — ชื่อสาขาที่ถูกตัดคำผิดจะหาไม่เจอ"""
+        rows = {}
+        for w in ws:
+            rows.setdefault(round(float(w['top'])), []).extend(w.get('chars') or [])
+        if not any(rows.values()):
+            return ' '.join(w['text'] for w in ws)
+        return ' '.join(_compose_thai_line(cs) for _t, cs in sorted(rows.items()) if cs)
+
+    reading = band_text(band)
+    by_column = band_text([w for w in band if float(w['x0']) < mid]) + ' ' + \
+                band_text([w for w in band if float(w['x0']) >= mid])
     return members, member_quals, (reading + '\n' + by_column).strip(), member_raw
 
 
@@ -1243,6 +1265,44 @@ def sig_visible_placeholders(pdf_page):
     return [label for key, label in _SIG_LEFTOVER_PLACEHOLDERS if key and key in visible]
 
 
+def _closest_run(text, want, min_ratio=0.6):
+    """ช่วงข้อความใน text ที่ใกล้เคียงกับ want ที่สุด ('' ถ้าไม่ใกล้พอ)
+
+    ใช้บอกเจ้าหน้าที่ว่า "เล่มเขียนว่าอะไร" แทนการฟ้องลอย ๆ ว่า "ไม่พบ" ซึ่งทำให้
+    เข้าใจผิดว่าระบบอ่านไม่เจอ ทั้งที่เห็นข้อความอยู่บนหน้ากระดาษ
+    (เล่มจริงพิมพ์ "อาชีวนามัย" ตก อ จาก "อาชีวอนามัย" — เจ้าหน้าที่กวาดตาแล้วนึกว่าตรง)
+
+    เลื่อนหน้าต่างทีละ "ตัวอักษร" ไม่ใช่ทีละคำ เพราะภาษาไทยไม่เว้นวรรคระหว่างคำ
+    """
+    flat = soft(text)
+    n = len(soft(want))
+    if not flat or n < 4:
+        return ''
+    best, best_ratio = '', min_ratio - 1e-9
+    for size in range(max(4, n - 2), n + 3):
+        for i in range(0, len(flat) - size + 1):
+            run = flat[i:i + size]
+            ratio = difflib.SequenceMatcher(None, norm(run), norm(want)).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = run, ratio
+    return best
+
+
+def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
+    """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน"""
+    near = _closest_run(bottom_text, want)
+    if near:
+        diff = describe_diff(near, want)
+        found_msg = f'{box} เขียนว่า "{near}"'
+        if diff:
+            found_msg += f' — ต่างที่ {diff}'
+    else:
+        found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
+    rep.add("ORANGE", "front_matter", loc, found_msg,
+            f'ข้อความใต้ลายเซ็นต้องมี{label} "{want}"',
+            f"โปรดตรวจ{label}มุมล่างขวาให้ถูกต้อง", rule_id)
+
+
 def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
                                  loc_prefix="", loc_suffix=""):
     """ช่องสถาบันแถวล่างสุดของหน้าลงนาม — บทบาทต่างกันในสองหน้า (ยืนยันจาก template ทางการ)
@@ -1260,18 +1320,16 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
             or approved.get("degree_cover_en", "")
         subject = _degree_subject(degree)
         if subject and norm(subject) not in found_text:
-            rep.add("ORANGE", "front_matter", f"{loc_prefix}ประธานหลักสูตร{loc_suffix}",
-                    f'ไม่พบชื่อสาขา "{subject}" ในช่องประธานหลักสูตร (มุมล่างขวา)',
-                    f'ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา "{subject}"',
-                    "โปรดตรวจชื่อหลักสูตรมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
+            _institution_mismatch(
+                rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
+                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
     faculty = approved.get("faculty", "")
     if faculty and not english_book and norm(faculty) not in found_text:
-        rep.add("ORANGE", "front_matter", f"{loc_prefix}คณบดีคณะ{loc_suffix}",
-                f'ไม่พบชื่อคณะ "{faculty}" ในช่องคณบดีคณะ (มุมล่างขวา)',
-                f'ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ "{faculty}"',
-                "โปรดตรวจชื่อคณะมุมล่างขวาให้ถูกต้อง", "FRONT.COMMITTEE")
+        _institution_mismatch(
+            rep, f"{loc_prefix}คณบดีคณะ{loc_suffix}", "ชื่อคณะ", faculty,
+            bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE")
 
 
 def _report_sig_placeholders(rep, found, loc):
