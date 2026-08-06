@@ -6,7 +6,13 @@
 
 ## 1. สิ่งที่ต้องมี
 - Python 3.10 ขึ้นไป
-- แพ็กเกจตาม `requirements.txt` (fastapi, uvicorn, pdfplumber, python-multipart, jinja2, anthropic)
+- แพ็กเกจตาม `requirements.txt` — fastapi, uvicorn, pdfplumber, python-multipart,
+  jinja2, anthropic, **pythainlp** (ถอดชื่อกรรมการไทยเป็นอังกฤษในเครื่อง)
+  และ **onnxruntime** (ทำให้ถอดชื่อแม่นขึ้น ลงไม่สำเร็จก็ยังทำงานได้ ระบบถอยไปใช้ตัวสำรองเอง)
+
+> อัปเดตจากเวอร์ชันเก่า **ต้องรัน `pip install -r requirements.txt` ใหม่** เสมอ
+> เพราะ pythainlp/onnxruntime เพิ่มเข้ามาทีหลัง ถ้าไม่ลง เล่มภาษาอังกฤษจะเทียบชื่อ
+> กรรมการไม่ได้ (ลงเป็นสีส้มให้เจ้าหน้าที่ตรวจเองแทน ไม่พัง)
 
 ## 2. ติดตั้ง
 ```bash
