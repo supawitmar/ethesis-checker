@@ -6,7 +6,13 @@
 
 ## 1. สิ่งที่ต้องมี
 - Python 3.10 ขึ้นไป
-- แพ็กเกจตาม `requirements.txt` (fastapi, uvicorn, pdfplumber, python-multipart, jinja2, anthropic)
+- แพ็กเกจตาม `requirements.txt` — fastapi, uvicorn, pdfplumber, python-multipart,
+  jinja2, anthropic, **pythainlp** (ถอดชื่อกรรมการไทยเป็นอังกฤษในเครื่อง)
+  และ **onnxruntime** (ทำให้ถอดชื่อแม่นขึ้น ลงไม่สำเร็จก็ยังทำงานได้ ระบบถอยไปใช้ตัวสำรองเอง)
+
+> อัปเดตจากเวอร์ชันเก่า **ต้องรัน `pip install -r requirements.txt` ใหม่** เสมอ
+> เพราะ pythainlp/onnxruntime เพิ่มเข้ามาทีหลัง ถ้าไม่ลง เล่มภาษาอังกฤษจะเทียบชื่อ
+> กรรมการไม่ได้ (ลงเป็นสีส้มให้เจ้าหน้าที่ตรวจเองแทน ไม่พัง)
 
 ## 2. ติดตั้ง
 ```bash
@@ -81,6 +87,13 @@ uvicorn main:app --env-file .env --host 0.0.0.0 --port 8000
   ถ้าสุ่มใหม่ คุกกี้เดิมจะใช้ไม่ได้ทันทีและเจ้าหน้าที่ที่กรอกฟอร์มค้างไว้จะกดตรวจเล่มไม่ได้
   → **เปลี่ยน `APP_PASSWORD` เมื่อไหร่ ทุกคนถูกเตะออกจากระบบทันที** (ตั้งใจให้เป็นแบบนี้)
 - ห้าม commit ไฟล์ `.env` หรือคีย์ใด ๆ ขึ้น git
+- **`.dockerignore` กัน `.env` ไม่ให้ติดเข้า image** — Dockerfile ใช้ `COPY . .` ถ้าไม่มี
+  ไฟล์นี้ การ `docker build` **ในเครื่อง** จะฝัง `.env` (มี `APP_PASSWORD` และ
+  `ANTHROPIC_API_KEY`) ลงไปใน layer ซึ่ง **ลบทีหลังไม่ได้** พอ `docker push` ขึ้น
+  registry หรือส่ง image ให้คนอื่น คีย์ก็หลุดตามไปด้วย
+  (บน Render ไม่เคยเจอปัญหานี้ เพราะ clone จาก git ซึ่งไม่มี `.env` อยู่แล้ว)
+  · ไฟล์นี้ยังตัด `tests/` `tools/` `*.md` `.git/` ออกด้วย เหลือเข้า image 12 ไฟล์
+  คือ `*.py` + `templates/` + `requirements*.txt` ซึ่งพอสำหรับรันจริงครบทุกกฎ
 
 ## 7. ทดสอบว่าระบบทำงาน
 ```bash

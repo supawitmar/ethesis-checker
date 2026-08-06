@@ -8,6 +8,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
+    _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
     _is_abstract_heading,
@@ -349,6 +350,33 @@ class ThaiBookRegressionTests(unittest.TestCase):
         self.assertEqual(expected, "RESEARCH METHODOLOGY")
         kind, _, _ = canonical_title_status("CONCLUSION AND RECOMMENDATONS", 6, 1)
         self.assertEqual(kind, "wrong")
+
+
+class EmptyFormFieldIsNotTheDocumentsFault(unittest.TestCase):
+    """ช่องข้อมูลอ้างอิงว่าง = ฟอร์มไม่ครบ ไม่ใช่เล่มผิด
+
+    เจอจริงกับเล่มที่ 6: eThesis ไม่มีบรรทัดตัวย่อปริญญาอังกฤษ ระบบเว้นช่องว่างไว้
+    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
+    """
+
+    def _run(self, approved):
+        rep = Report()
+        _report_missing_form_fields(rep, approved, ("degree_abbr_en", "degree_abbr_th"))
+        return rep
+
+    def test_missing_field_is_orange_not_red(self):
+        rep = self._run({"degree_abbr_th": "พย.ด."})
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+
+    def test_missing_field_is_not_on_the_students_fix_list(self):
+        """นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย คนกรอกฟอร์มคือเจ้าหน้าที่"""
+        rep = self._run({"degree_abbr_th": "พย.ด."})
+        self.assertTrue(rep.zones["ORANGE"][0]["system_note"])
+
+    def test_complete_form_reports_nothing(self):
+        rep = self._run({"degree_abbr_en": "D.N.S.", "degree_abbr_th": "พย.ด."})
+        self.assertEqual(rep.zones["ORANGE"], [])
 
 
 class DegreeFieldsByLocationTests(unittest.TestCase):

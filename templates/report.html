@@ -303,6 +303,9 @@
     {% endfor %}
     {% endif %}
 
+    {% set PART_LABEL = {'front_matter':'ส่วนนำ', 'body':'ส่วนเนื้อหา',
+                         'end_matter':'ส่วนท้ายเล่ม', 'body/end':'เนื้อหาและส่วนท้ายเล่ม',
+                         '-':'ทั้งเล่ม'} %}
     {% set zone_meta = [('RED','🔴 ไม่ผ่าน','🔴 Must fix'),('ORANGE','🟠 รอยืนยัน','🟠 Pending confirmation'),('YELLOW','🟡 ข้อสังเกต','🟡 Notice')] %}
     {% for zone, th_lbl, en_lbl in zone_meta %}
     <h2 class="sec"><span data-th="{{ th_lbl }}" data-en="{{ en_lbl }}">{{ th_lbl }}</span>
@@ -319,7 +322,7 @@
       <div class="issue {{ zone }}" data-zone="{{ zone }}" data-idx="{{ report.issues_by_zone[zone].index(it) }}">
         <div class="bar"></div>
         <div class="in">
-          <div class="loc"><span class="part">{{ it.part }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
+          <div class="loc"><span class="part tr-cat">{{ PART_LABEL.get(it.part, it.part) }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
@@ -399,11 +402,43 @@ var CATMAP = {
   'เลขหน้า':'Page numbering', 'จำนวนหน้าไม่ตรง':'Page count mismatch', 'เกินจำนวนหน้า':'Page limit exceeded',
   'เกินจำนวนที่กำหนด':'Limit exceeded', 'รูปแบบตัวอักษร':'Text formatting', 'คำนำหน้านาม':'Name prefix',
   'ภาษาไม่ครบตามหลักสูตร':'Language requirement', 'โครงสร้างเล่ม':'Document structure', 'อื่นๆ':'Other',
+  'ส่วนนำ':'Front matter', 'ส่วนเนื้อหา':'Body', 'ส่วนท้ายเล่ม':'End matter',
+  'เนื้อหาและส่วนท้ายเล่ม':'Body & end matter', 'ทั้งเล่ม':'Whole document',
   'สะกดผิดเล็กน้อย (typo)':'Minor typo', 'ข้อมูลนักศึกษาไม่ถูกต้อง':'Student data incorrect',
   'ชื่อปริญญาไม่ตรงข้อมูลอนุมัติ':'Degree name mismatch'
 };
 
 var TR = [
+  // ---- ประโยคเต็มที่เคยถูกกฎเศษคำฉีกจนแปลไม่ครบ ----
+  [/ชื่อบัณฑิตวิทยาลัยและมหาวิทยาลัย/g, 'Name of the Faculty of Graduate Studies and the University'],
+  [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
+  [/(\d+)\/ส่วนเนื้อหา/g, '$1 (start of the body)'],
+  // ---- ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ไม่ได้กรอกชื่อเรื่องภาษาอังกฤษ ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English thesis title filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อเรื่องภาษาไทย ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai thesis title filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อนักศึกษาภาษาอังกฤษ ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English student name filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อนักศึกษาภาษาไทย ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai student name filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกรหัสนักศึกษา ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the student ID filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาต้นฉบับจาก eThesis \(อังกฤษ\) — ใช้ตรวจหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the original English degree name from eThesis (used to check the cover) filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาต้นฉบับจาก eThesis \(ไทย\) — ใช้ตรวจหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the original Thai degree name from eThesis (used to check the cover) filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาที่ใช้ตรวจหน้าลงนาม \(อังกฤษ\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English degree name used to check the approval page filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาที่ใช้ตรวจหน้าลงนาม \(ไทย\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai degree name used to check the approval page filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาแบบย่อในบทคัดย่อ \(อังกฤษ\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the abbreviated English degree name on the abstract page filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกชื่อปริญญาแบบย่อในบทคัดย่อ \(ไทย\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the abbreviated Thai degree name on the abstract page filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกวันที่สอบผ่าน ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the examination pass date filled in, so this comparison was skipped'],
+  [/ไม่ได้กรอกปีบนหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the year on the cover filled in, so this comparison was skipped'],
+  [/กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ\./g, 'Fill in the missing form fields and run the check again, or verify this item by eye against Form บฑ.'],
+  // ---- อ่านรายชื่อกรรมการไม่ได้ / ชื่อเกือบตรง (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ระบบอ่านรายชื่อกรรมการบนหน้านี้ไม่ได้ \(อาจเป็นหน้าภาพสแกน หรือใช้ฟอนต์ที่ระบบอ่านไม่ออก\)/g, 'The system could not read the committee names on this page (it may be a scanned image, or use a font the system cannot read)'],
+  [/รายชื่อบนหน้านี้ไม่ตรงกับข้อมูลอนุมัติสักคนเดียว — ระบบอ่านได้ว่า/g, 'None of the names on this page match the approved data — the system read:'],
+  [/ตรวจว่าเป็นรายชื่อกรรมการชุดที่ถูกต้องหรือไม่ ถ้ารายชื่อในเล่มถูกแล้วแปลว่าระบบอ่านหน้านี้ไม่ตรง ให้ผ่านได้/g, 'Check whether this is the correct set of committee members. If the names in the document are correct, the system misread this page and it may be passed'],
+  [/ตรวจตัวสะกดชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ ถ้าชื่อในเล่มถูกแล้วแปลว่าระบบอ่านตัวอักษรเพี้ยน ให้ผ่านได้/g, 'Check the spelling of the committee name against the approved data. If the name in the document is correct, the system misread a character and it may be passed'],
+  [/พบชื่อ "(.+?)" ซึ่งใกล้เคียงกับ "(.+?)" ในข้อมูลอนุมัติ แต่ตัวสะกดไม่ตรงกัน/g, 'Found the name "$1", which is close to "$2" in the approved data, but the spelling does not match'],
+  [/ต้องเป็น "(.+?)" ตามข้อมูลอนุมัติ \(บฑ\.\)/g, 'Must be "$1" per the approved data (Form บฑ.)'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้าอาจารย์ที่ปรึกษา/g, 'Names the system read from the advisory committee page'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้ากรรมการสอบ/g, 'Names the system read from the examination committee page'],
+  [/รายชื่อที่ระบบอ่านได้จากหน้าลงนาม (\d+)/g, 'Names the system read from approval page $1'],
+  [/ระบบอ่านรายชื่อบนหน้านี้ไม่ได้/g, 'The system could not read the names on this page'],
   // ---- ประโยคเต็ม: ต้องอยู่บนสุด เพราะกฎด้านล่างบางข้อแทนแบบ "เศษคำ" ----
   // ถ้าปล่อยให้เศษคำยิงก่อน ประโยคจะถูกฉีกจนกฎเต็มประโยคแมตช์ไม่ได้
   // แล้วรายงานอังกฤษจะเหลือไทยปนอยู่ เช่น "Change to:เลขpage" (พบในเล่มทดสอบ)
@@ -445,6 +480,25 @@ var TR = [
   [/— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ (\d+)/g, '— the last page number read is $1'],
   [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า/g, 'The stated page count must equal the last page number of the document, and must be the same on every page that states it'],
   [/เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้/g, 'Staff to confirm the last page number from the file, then correct the figure on every page that states it'],
+  // ---- "…ในเล่มเขียนว่า …" (ข้อความแบบภาษาคน) ----
+  [/ชื่อบทในเล่มเขียนว่า/g, 'The chapter title in the document reads'],
+  [/ชื่อเรื่องในเล่มเขียนว่า/g, 'The thesis title in the document reads'],
+  [/ชื่อนักศึกษาในเล่มเขียนว่า/g, 'The student name in the document reads'],
+  [/ชื่อภาษาไทยในเล่มเขียนว่า/g, 'The Thai name in the document reads'],
+  [/ชื่อภาษาอังกฤษในเล่มเขียนว่า/g, 'The English name in the document reads'],
+  [/ชื่อปริญญาแบบย่อในเล่มเขียนว่า/g, 'The abbreviated degree name in the document reads'],
+  [/ชื่อปริญญาในเล่มเขียนว่า/g, 'The degree name in the document reads'],
+  [/หัวข้อสารบัญในเล่มเขียนว่า/g, 'The TOC heading in the document reads'],
+  [/ — พิมพ์ผิดเล็กน้อย/g, ' — a small typo'],
+  [/ — ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, ' — only the upper\/lower case differs'],
+  // ---- ด่านกันอัปโหลดไฟล์สลับคน ----
+  [/^ไฟล์ที่อัปโหลด$/g, 'Uploaded files'],
+  [/ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง \((.+?)\) น่าจะเป็นคนละคนกัน/g, 'The approved data matches the document on none of these ($1) — they look like two different students'],
+  [/ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน/g, 'The eThesis file and the document file must belong to the same student'],
+  [/ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ \(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน\)/g, 'Check whether the eThesis file matches the document, then run the check again (all approved-data comparisons were skipped for now)'],
+  [/ชื่อเรื่อง \/ /g, 'Thesis title / '],
+  [/ \/ ชื่อเรื่อง\)/g, ' / Thesis title)'],
+  [/^ชื่อเรื่อง$/g, 'Thesis title'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
   [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
   [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'Committee names on the approval pages must be in Capital Case'],
@@ -558,7 +612,11 @@ var TR = [
   [/หัวข้อในสารบัญต้องตรงกับส่วนที่มีอยู่จริงในเล่ม/g, 'TOC headings must match the sections that actually exist in the document'],
   [/ลบหัวข้อออกจากสารบัญ หรือเพิ่มส่วนดังกล่าวในเล่ม/g, 'Remove the heading from the TOC, or add that section to the document'],
   [/เลขหน้าส่วนนำของเล่มภาษาอังกฤษต้องเป็นเลขโรมัน \(i, ii, iii\) ทั้งส่วน/g, 'Front-matter pages of an English document must use roman numerals (i, ii, iii) throughout'],
-  [/เลขหน้าส่วนนำของเล่มภาษาไทยต้องเป็นพยัญชนะไทย \(ก, ข, ค\) ทั้งส่วน/g, 'Front-matter pages of a Thai document must use Thai letters (ก, ข, ค) throughout'],
+  [/เลขหน้าส่วนนำของเล่มหลักสูตรไทยต้องเป็นพยัญชนะไทย \(ก, ข, ค\) ทั้งส่วน/g, 'Front-matter pages of a Thai-program document must use Thai letters (ก, ข, ค) throughout'],
+  [/เลขหน้าส่วนนำของ(.+?)ต้องเป็น(.+?) ทั้งส่วน/g,
+   'Front-matter page numbers for $1 must all be $2'],
+  [/เลขหน้าส่วนนำต้องเป็น(.+?) ทั้งส่วน/g,
+   'Front-matter page numbers must all be $1'],
   [/บรรทัดชื่อนักศึกษาในบทคัดย่อไทยต้องมีรหัส/g, 'The student-name line in the Thai abstract must include the ID'],
   [/หลักสูตรนานาชาติต้องมีบทคัดย่อภาษาอังกฤษ/g, 'An international program must have an English abstract'],
   [/หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น/g, 'An international program uses the English abstract only'],
@@ -712,10 +770,6 @@ var TR = [
   [/เล่มหลักสูตรไทย/g, 'a Thai-program book'],
   [/เล่มภาษาอังกฤษ/g, 'an English-language book'],
   [/ส่วนนำใช้(.+?) (\d+) หน้า:/g, 'Front matter uses $1 on $2 page(s):'],
-  [/เลขหน้าส่วนนำของ(.+?)ต้องเป็น(.+?) ทั้งส่วน/g,
-   'Front-matter page numbers for $1 must all be $2'],
-  [/เลขหน้าส่วนนำต้องเป็น(.+?) ทั้งส่วน/g,
-   'Front-matter page numbers must all be $1'],
   [/แก้เลขหน้าส่วนนำให้เป็น(.+)/g, 'Renumber the front matter to $1'],
   [/เลขหน้าส่วนนำไม่ต่อเนื่อง:/g, 'Front-matter page numbers are not continuous:'],
   [/เลขหน้า "(.+?)" ถูกใช้ซ้ำ (\d+) หน้า/g, 'page label "$1" is used on $2 pages'],

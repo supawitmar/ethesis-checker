@@ -16,8 +16,10 @@ from checker import (
     _report_student_name_style,
     _strip_student_title,
     _report_thai_committee,
+    _rejoin_thai_marks,
     _sig_words,
     _page_count_issue,
+    ethesis_matches_book,
     _toc_continuation_pages,
     _toc_page_label,
     _toc_section_kind,
@@ -213,6 +215,17 @@ class AbstractNamesHaveNoAcademicTitle(unittest.TestCase):
 
 class ThaiTextRepair(unittest.TestCase):
     """ซ่อมข้อความไทยจาก PDF ให้เจ้าหน้าที่อ่านออกว่าหมายถึงตรงไหนของเล่ม"""
+
+    def test_mark_never_attaches_to_a_space(self):
+        """เล่มที่ 6 อ่าน "ทวีศักดิ์ สมานชื่น" ได้เป็น "ทวีศักดิ ์สมานชื่น"
+
+        การันต์วางห่างจาก ด เล็กน้อยจนขอบขวาของช่องว่างที่ตามมาใกล้กว่า
+        ถ้านับช่องว่างเป็นฐานได้ mark จะไปเกาะช่องว่างแล้วชื่อขาดกลาง
+        """
+        chars = [ch("ด", 10.0), {"text": " ", "x0": 16.0, "x1": 20.0, "top": 100.0},
+                 {"text": "์", "x0": 18.0, "x1": 18.0, "top": 100.0},
+                 ch("ส", 30.0)]
+        self.assertEqual(_compose_thai_line(chars), "ด์ ส")
 
     def test_zero_width_space_becomes_sara_am(self):
         """ฟอนต์ map นิคหิตของ ำ เป็นตัวเว้นวรรคกว้างศูนย์ -> "จำ" ไม่ใช่ "จา " """
@@ -458,6 +471,121 @@ class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):
                                     page_text=page), [])
 
 
+def _word(text, x0, x1, top=100.0, chars=None):
+    """word dict แบบที่ extract_words คืนมา (พร้อม chars สำหรับซ่อม mark)"""
+    w = {"text": text, "x0": x0, "x1": x1, "top": top, "bottom": top + 12}
+    if chars is not None:
+        w["chars"] = chars
+    return w
+
+
+def _char(text, x0, x1, top=100.0):
+    return {"text": text, "x0": x0, "x1": x1, "top": top, "bottom": top + 12}
+
+
+class ThaiMarksDoNotDriftOnSignaturePage(unittest.TestCase):
+    """เล่มทดสอบ 3 อ่านชื่อ "สุภาภรณ์ สงค์ประชา" ได้เป็น "สุภาภรณ ์ สงค์ประชา"
+
+    การันต์เป็นอักขระกว้างศูนย์ extract_words จึงตัดออกเป็น "คำ" ของตัวเองกลางชื่อ
+    เจ้าหน้าที่อ่านรายงานแล้วนึกว่าระบบอ่านชื่อผิดคน
+    """
+
+    def test_floating_mark_is_merged_back_into_the_name(self):
+        words = [
+            _word("สุภาภรณ", 10, 50, chars=[_char(c, 10 + i * 5, 15 + i * 5)
+                                            for i, c in enumerate("สุภาภรณ")]),
+            _word("์", 50, 50, chars=[_char("์", 50, 50)]),
+            _word("สงค์ประชา", 56, 100,
+                  chars=[_char(c, 56 + i * 5, 61 + i * 5)
+                         for i, c in enumerate("สงค์ประชา")]),
+        ]
+        got = [w["text"] for w in _rejoin_thai_marks(words)]
+        self.assertEqual(got, ["สุภาภรณ์", "สงค์ประชา"])
+
+    def test_marks_inside_a_word_are_put_back_in_the_right_order(self):
+        """เรียงตามพิกัด x เฉย ๆ ได้ "ท่ี" เพราะวรรณยุกต์วางเยื้องซ้ายกว่าสระ"""
+        chars = [_char("ท", 10, 16), _char("่", 16, 16), _char("ิ", 16, 16),
+                 _char("บ", 16, 22)]
+        got = _rejoin_thai_marks([_word("ท่ิบ", 10, 22, chars=chars)])
+        self.assertEqual(got[0]["text"], "ทิ่บ")
+
+    def test_pages_without_chars_are_left_alone(self):
+        words = [_word("ธเนศ เกษศิลป์", 10, 90)]
+        self.assertEqual(_rejoin_thai_marks(words), words)
+
+
+class NearlyIdenticalNameIsOrangeNotRed(unittest.TestCase):
+    """ชื่อที่ต่างกันแค่ตัวสะกด/ระบบอ่านเพี้ยน = คนเดียวกัน ไม่ใช่ "ขาด + คนนอก"
+
+    เดิมพลาดตัวอักษรเดียวได้แดงสองข้อ (ไม่พบคนนี้ + เจอคนแปลกหน้า) ทั้งที่เป็นคนเดียวกัน
+    """
+
+    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
+
+    def _run(self, members, page_text=None):
+        rep = Report()
+        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ",
+                               page_text=page_text)
+        return ([i["found"] for i in rep.zones["RED"]],
+                [i["found"] for i in rep.zones["ORANGE"]])
+
+    def test_one_letter_off_is_orange(self):
+        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "ศิริพร แย้มนิน"})
+        self.assertEqual(reds, [])
+        self.assertEqual(len(oranges), 1)
+        self.assertIn("ใกล้เคียง", oranges[0])
+        self.assertIn("ศิริพร แย้มนิล", oranges[0])
+
+    def test_same_surname_with_a_garbled_first_name_is_orange(self):
+        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "ศริพ แย้มนิล"})
+        self.assertEqual(reds, [])
+        self.assertEqual(len(oranges), 1)
+
+    def test_a_different_person_is_still_red(self):
+        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "สมชาย ใจดี"})
+        self.assertEqual(len(reds), 2)
+        self.assertTrue(any("ศิริพร แย้มนิล" in r for r in reds))
+        self.assertTrue(any("สมชาย ใจดี" in r for r in reds))
+
+
+class PageThatMatchesNobodyIsNotJudged(unittest.TestCase):
+    """ไม่ตรงสักคน = แยกไม่ออกว่าระบบอ่านไม่ออก หรือเล่มใส่รายชื่อผิดชุด → ส้มข้อเดียว
+
+    ถ้ารายชื่อในเล่มถูกจริง อย่างน้อยหนึ่งคนต้องแมตช์ การไม่แมตช์เลยจึงเป็นสัญญาณของ
+    การอ่านพลาดพอ ๆ กับสัญญาณว่าเล่มผิด — ปรับเล่มที่ถูกให้ตกเสียหายกว่า
+    """
+
+    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
+
+    def _run(self, members):
+        rep = Report()
+        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ")
+        return rep
+
+    def test_unreadable_page_is_one_orange_not_a_pile_of_reds(self):
+        rep = self._run({})
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        item = rep.zones["ORANGE"][0]
+        self.assertIn("อ่านรายชื่อกรรมการบนหน้านี้ไม่ได้", item["found"])
+        self.assertIn("จำเนียร จวงตระกูล", item["expected"])
+        # ระบบอ่านไม่ออก ไม่ใช่จุดที่นักศึกษาแก้ได้ด้วยการพิมพ์ใหม่
+        self.assertTrue(item["system_note"])
+
+    def test_totally_different_list_is_one_orange_naming_what_was_read(self):
+        rep = self._run({1: "สมชาย ใจดี", 2: "สมหญิง รักไทย"})
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        found = rep.zones["ORANGE"][0]["found"]
+        self.assertIn("สมชาย ใจดี", found)
+        self.assertIn("สมหญิง รักไทย", found)
+        self.assertFalse(rep.zones["ORANGE"][0]["system_note"])
+
+    def test_one_good_name_still_lets_the_rest_be_flagged(self):
+        rep = self._run({1: "จำเนียร จวงตระกูล", 2: "สมชาย ใจดี"})
+        self.assertEqual(len(rep.zones["RED"]), 2)
+
+
 class StudentNameIgnoresTitles(unittest.TestCase):
     """นโยบายเจ้าหน้าที่ (ก.ค. 2569): "ชื่อนักศึกษา ให้ตรวจแบบไม่มีคำนำหน้า ถ้ามีให้เตือนส้ม"
 
@@ -635,6 +763,50 @@ class MultiPageTableOfContents(unittest.TestCase):
                          [0])
 
 
+class EthesisAndBookMustBeTheSameStudent(unittest.TestCase):
+    """ด่านกัน "อัปโหลดไฟล์สลับคน" — เกิดขึ้นจริงหลายครั้งตอนใช้งาน
+
+    ถ้าไม่มีด่านนี้ รายงานจะแดงยาวเป็นสิบข้อโดยไม่มีข้อไหนช่วยอะไร
+    (เล่มที่ 4 คู่กับ eThesis คนอื่น: แดง 39 ข้อ)
+    """
+
+    APPROVED = {"student_id": "6538041 SHPP/D",
+                "student_name": "NUTCHANOP PETSUK",
+                "student_name_th": "พ.จ.ต. ณัชนพ เพชรสุข",
+                "title_th": "การพัฒนาการบริหารแบบความร่วมมือการคุ้มครองพยาน"}
+
+    def _match(self, *pages):
+        return ethesis_matches_book(self.APPROVED, list(pages))[0]
+
+    def test_matching_student_id_alone_is_enough(self):
+        self.assertTrue(self._match("บางอย่าง 6538041 SHPP/D"))
+
+    def test_matching_name_alone_is_enough(self):
+        self.assertTrue(self._match("ณัชนพ เพชรสุข"))
+        self.assertTrue(self._match("NUTCHANOP PETSUK"))
+
+    def test_matching_title_alone_is_enough(self):
+        """ชื่อเรื่องพิมพ์ผิดบางคำก็ยังนับว่าเป็นเล่มเดียวกัน"""
+        self.assertTrue(self._match(
+            "การพัฒนาการบริหารแบบความร่วมมือในการคุ้มครองพยานของหน่วยงาน"))
+
+    def test_completely_different_student_is_caught(self):
+        self.assertFalse(self._match(
+            "CHING TO CHUNG 6637732 TMBI/M",
+            "PREDICTING METASTASIS USING MACHINE LEARNING"))
+
+    def test_no_approved_data_never_triggers(self):
+        self.assertTrue(ethesis_matches_book({}, ["อะไรก็ได้"])[0])
+        # กรอกมาอย่างเดียวก็ยังไม่พอจะสรุปว่าสลับไฟล์
+        self.assertTrue(ethesis_matches_book(
+            {"student_id": "6538041 SHPP/D"}, ["เล่มอื่น"])[0])
+
+    def test_reports_which_signals_were_checked(self):
+        _ok, checked, found = ethesis_matches_book(self.APPROVED, ["เล่มอื่นสิ้นเชิง"])
+        self.assertEqual(checked, ["รหัสนักศึกษา", "ชื่อนักศึกษา", "ชื่อเรื่อง"])
+        self.assertEqual(found, [])
+
+
 class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
     """จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ทั้งบทคัดย่อไทยและอังกฤษ
 
@@ -743,16 +915,16 @@ class ChapterTitleIssuesAreNotReportedTwice(unittest.TestCase):
     """
 
     def test_small_and_large_differences_share_one_category(self):
-        small = {"found": 'ชื่อบทพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.98): "X"',
+        small = {"found": 'ชื่อบทในเล่มเขียนว่า "X" — พิมพ์ผิดเล็กน้อย',
                  "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 6"}
-        large = {"found": 'ชื่อบทข้อความไม่ตรง: "X"',
+        large = {"found": 'ชื่อบทในเล่มเขียนว่า "X"',
                  "expected": 'ตามประกาศ 2569 ควรเป็น "Y"', "location": "บทที่ 2"}
         self.assertEqual(classify(small), "ชื่อบทไม่ตรงประกาศ")
         self.assertEqual(classify(large), "ชื่อบทไม่ตรงประกาศ")
 
     def test_toc_vs_body_mismatch_is_a_different_category(self):
         """สารบัญ↔เนื้อหาไม่ตรงกัน (ไม่ได้อ้างประกาศ) ยังเป็นคนละหมวดตามเดิม"""
-        item = {"found": 'ชื่อบทในเนื้อหาข้อความไม่ตรง: "X"',
+        item = {"found": 'ชื่อบทในเนื้อหาในเล่มเขียนว่า "X"',
                 "expected": 'ต้องสะกดตรงกับชื่อบทในสารบัญ: "Y"',
                 "location": "บทที่ 3 (หน้า 45)"}
         self.assertEqual(classify(item), "สะกดผิด (typo)")
