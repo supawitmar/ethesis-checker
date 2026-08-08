@@ -1675,8 +1675,11 @@ def _summary_sentence(issue):
         return f'{sentence} ให้แก้ไขเป็น: "{value}"'.strip()
     # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ต่อท้าย expected/fix ตามเดิม
     # โดยไม่ตัดคำนำ "ควรเป็น/ต้องเป็น" ออก เพราะในกรณีนี้มันช่วยให้อ่านรู้เรื่อง
+    # คั่นด้วย " · " ไม่ใช่ช่องว่างเปล่า ๆ — อ่านง่ายกว่า และทำให้แยก "สิ่งที่พบ" กับ
+    # "สิ่งที่ต้องเป็น" ออกจากกันได้ (ตัวแปลอังกฤษต้องแปลทีละท่อน ถ้าต่อกันด้วย
+    # ช่องว่างจะแยกไม่ออกว่าท่อนไหนจบตรงไหน แล้วต้องตกไปใช้การแทนที่แบบเศษคำ)
     directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
-    return f"{sentence} {directive}".strip() if directive else sentence.strip()
+    return f"{sentence} · {directive}".strip() if directive else sentence.strip()
 
 
 def _dedupe_issues(items):
