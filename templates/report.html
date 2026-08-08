@@ -409,6 +409,15 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- นับจำนวนกรรมการ (ไม่เทียบชื่อแล้ว) — ประโยคเต็ม ต้องอยู่บนสุด ----
+  [/นับรายชื่อกรรมการที่ปรึกษาบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน — ระบบอ่านได้ว่า/g, 'Counted $1 advisory committee member(s) on this page, but the approved data lists $2 — the system read:'],
+  [/นับรายชื่อกรรมการบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน — ระบบอ่านได้ว่า/g, 'Counted $1 committee member(s) on this page, but the approved data lists $2 — the system read:'],
+  [/ไม่พบชื่อเลย/g, 'no names found'],
+  [/ต้องมีกรรมการที่ปรึกษา (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 advisory committee member(s) per the approved data (Form บฑ.)'],
+  [/ต้องมีกรรมการ (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 committee member(s) per the approved data (Form บฑ.)'],
+  [/ตรวจว่าจำนวนกรรมการที่ปรึกษาบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the advisory committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
+  [/ตรวจว่าจำนวนกรรมการบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
+  [/ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด — โปรดทานรายชื่อกับข้อมูลอนุมัติ \(บฑ\.\) คือ/g, 'The system counted the committee members but did not compare names or spelling — please check the list against the approved data (Form บฑ.):'],
   // ---- หัวข้อในสารบัญสะกดผิด (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents; it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
@@ -544,7 +553,9 @@ var TR = [
   [/ขนาดกระดาษ ระยะขอบ ระยะบรรทัด ชนิดและขนาดฟอนต์/g, 'Paper size, margins, line spacing, font family and size'],
   [/Plagiarism หรือเปอร์เซ็นต์ความซ้ำซ้อน/g, 'Plagiarism or similarity percentage'],
   [/มาตรฐาน PDF\/A, embedded fonts และความคมชัดของภาพ/g, 'PDF\/A compliance, embedded fonts and image quality'],
-  [/เนื้อหาของคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ \(ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน \+ ตรวจชื่อ-สกุลกรรมการ เมื่อดึงข้อมูลจาก eThesis ได้ แต่ไม่ตรวจว่าคุณวุฒิถูกต้องหรือไม่\)/g, 'The qualification (Degree\/Subject) text under each committee name (the system checks that every member has a qualification line, and checks the committee names when eThesis data is available, but not whether the qualification itself is correct)'],
+  [/เนื้อหาของคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ \(ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจว่าคุณวุฒิถูกต้องหรือไม่\)/g, 'The qualification (Degree\/Subject) text under each committee name (the system checks that every member has a qualification line, but not whether the qualification itself is correct)'],
+  [/ชื่อ-สกุลและตัวสะกดของกรรมการทั้งบนหน้าลงนามและหน้าบทคัดย่อ \(ระบบนับให้ว่าจำนวนครบตามข้อมูลอนุมัติหรือไม่ แล้วพิมพ์รายชื่อตาม บฑ\. ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง\)/g, 'Committee member names and their spelling, on both the approval pages and the abstract page (the system only counts whether the number matches the approved data, and prints the Form บฑ. list in the purple section for staff to check by eye)'],
+  [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน\)/g, 'Where each committee name sits in the signature table (every document is laid out differently)'],
   [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน ระบบดูเฉพาะว่าชื่อครบและถูกคน\)/g, 'Where each committee name sits in the table (books are laid out differently, so the system only checks that the names are complete and correct)'],
   [/การมี\/ไม่มีลายเซ็นและการตรวจความแท้จริงของลายเซ็น/g, 'Presence and authenticity of signatures'],
   [/ขั้นตอนส่งเล่ม กำหนดเวลา และสิทธิ์การเผยแพร่/g, 'Submission steps, deadlines and publication rights'],

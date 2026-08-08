@@ -17,7 +17,6 @@ from checker import (
     _report_committee_name_case,
     _report_student_name_style,
     _strip_student_title,
-    _report_thai_committee,
     _rejoin_thai_marks,
     _sig_words,
     _page_count_issue,
@@ -509,49 +508,6 @@ class SignatureCellKeepsNamesWhole(unittest.TestCase):
         self.assertEqual(members.get(1), "แก้วปาน")
 
 
-class CommitteeNamesCheckedWithoutPosition(unittest.TestCase):
-    """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ดูแค่ "ชื่อ" ว่าครบและถูกคน ไม่ดูตำแหน่งช่อง
-
-    "แต่ละเล่มทำมาไม่เหมือนกัน" — เล่มที่จัดตารางต่างจาก template จะอ่านไม่เข้าช่อง
-    ถ้าเชื่อช่องอย่างเดียวระบบจะฟ้องผิดว่าไม่พบกรรมการ ทั้งที่ชื่อพิมพ์อยู่บนหน้าครบ
-    """
-
-    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
-
-    def _reds(self, members, page_text=None):
-        rep = Report()
-        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ",
-                               page_text=page_text)
-        return [i["found"] for i in rep.zones["RED"]]
-
-    def test_names_read_into_the_wrong_cells_are_not_flagged(self):
-        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 5: "จำเนียร จวงตระกูล"}), [])
-
-    def test_name_found_on_the_page_counts_even_if_no_cell_matched(self):
-        page = ("ศาสตราจารย์พิศิษฐ์ จำเนียร จวงตระกูล\n"
-                "รองศาสตราจารย์ ศิริพร แย้มนิล\n")
-        self.assertEqual(self._reds({}, page_text=page), [])
-
-    def test_genuinely_missing_name_is_still_red(self):
-        page = "รองศาสตราจารย์ ศิริพร แย้มนิล\n"
-        reds = self._reds({1: "ศิริพร แย้มนิล"}, page_text=page)
-        self.assertEqual(len(reds), 1)
-        self.assertIn("จำเนียร จวงตระกูล", reds[0])
-
-    def test_stranger_is_still_red(self):
-        page = "ศิริพร แย้มนิล\nจำเนียร จวงตระกูล\nสมชาย ใจดี\n"
-        reds = self._reds({1: "ศิริพร แย้มนิล", 2: "จำเนียร จวงตระกูล",
-                           3: "สมชาย ใจดี"}, page_text=page)
-        self.assertEqual(len(reds), 1)
-        self.assertIn("สมชาย ใจดี", reds[0])
-
-    def test_half_a_name_read_into_a_cell_is_not_called_a_stranger(self):
-        """ระบบแบ่งช่องคร่อมคำจนได้ "จวงตระกูล" ลอยมาช่องหนึ่ง — ไม่ใช่คนนอก"""
-        page = "จำเนียร จวงตระกูล\nศิริพร แย้มนิล\n"
-        self.assertEqual(self._reds({1: "ศิริพร แย้มนิล", 2: "จวงตระกูล"},
-                                    page_text=page), [])
-
-
 def _word(text, x0, x1, top=100.0, chars=None):
     """word dict แบบที่ extract_words คืนมา (พร้อม chars สำหรับซ่อม mark)"""
     w = {"text": text, "x0": x0, "x1": x1, "top": top, "bottom": top + 12}
@@ -593,78 +549,6 @@ class ThaiMarksDoNotDriftOnSignaturePage(unittest.TestCase):
     def test_pages_without_chars_are_left_alone(self):
         words = [_word("ธเนศ เกษศิลป์", 10, 90)]
         self.assertEqual(_rejoin_thai_marks(words), words)
-
-
-class NearlyIdenticalNameIsOrangeNotRed(unittest.TestCase):
-    """ชื่อที่ต่างกันแค่ตัวสะกด/ระบบอ่านเพี้ยน = คนเดียวกัน ไม่ใช่ "ขาด + คนนอก"
-
-    เดิมพลาดตัวอักษรเดียวได้แดงสองข้อ (ไม่พบคนนี้ + เจอคนแปลกหน้า) ทั้งที่เป็นคนเดียวกัน
-    """
-
-    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
-
-    def _run(self, members, page_text=None):
-        rep = Report()
-        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ",
-                               page_text=page_text)
-        return ([i["found"] for i in rep.zones["RED"]],
-                [i["found"] for i in rep.zones["ORANGE"]])
-
-    def test_one_letter_off_is_orange(self):
-        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "ศิริพร แย้มนิน"})
-        self.assertEqual(reds, [])
-        self.assertEqual(len(oranges), 1)
-        self.assertIn("ใกล้เคียง", oranges[0])
-        self.assertIn("ศิริพร แย้มนิล", oranges[0])
-
-    def test_same_surname_with_a_garbled_first_name_is_orange(self):
-        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "ศริพ แย้มนิล"})
-        self.assertEqual(reds, [])
-        self.assertEqual(len(oranges), 1)
-
-    def test_a_different_person_is_still_red(self):
-        reds, oranges = self._run({1: "จำเนียร จวงตระกูล", 2: "สมชาย ใจดี"})
-        self.assertEqual(len(reds), 2)
-        self.assertTrue(any("ศิริพร แย้มนิล" in r for r in reds))
-        self.assertTrue(any("สมชาย ใจดี" in r for r in reds))
-
-
-class PageThatMatchesNobodyIsNotJudged(unittest.TestCase):
-    """ไม่ตรงสักคน = แยกไม่ออกว่าระบบอ่านไม่ออก หรือเล่มใส่รายชื่อผิดชุด → ส้มข้อเดียว
-
-    ถ้ารายชื่อในเล่มถูกจริง อย่างน้อยหนึ่งคนต้องแมตช์ การไม่แมตช์เลยจึงเป็นสัญญาณของ
-    การอ่านพลาดพอ ๆ กับสัญญาณว่าเล่มผิด — ปรับเล่มที่ถูกให้ตกเสียหายกว่า
-    """
-
-    EXPECTED = [{"name": "จำเนียร จวงตระกูล"}, {"name": "ศิริพร แย้มนิล"}]
-
-    def _run(self, members):
-        rep = Report()
-        _report_thai_committee(rep, self.EXPECTED, members, "หน้ากรรมการสอบ")
-        return rep
-
-    def test_unreadable_page_is_one_orange_not_a_pile_of_reds(self):
-        rep = self._run({})
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
-        item = rep.zones["ORANGE"][0]
-        self.assertIn("อ่านรายชื่อกรรมการบนหน้านี้ไม่ได้", item["found"])
-        self.assertIn("จำเนียร จวงตระกูล", item["expected"])
-        # ระบบอ่านไม่ออก ไม่ใช่จุดที่นักศึกษาแก้ได้ด้วยการพิมพ์ใหม่
-        self.assertTrue(item["system_note"])
-
-    def test_totally_different_list_is_one_orange_naming_what_was_read(self):
-        rep = self._run({1: "สมชาย ใจดี", 2: "สมหญิง รักไทย"})
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
-        found = rep.zones["ORANGE"][0]["found"]
-        self.assertIn("สมชาย ใจดี", found)
-        self.assertIn("สมหญิง รักไทย", found)
-        self.assertFalse(rep.zones["ORANGE"][0]["system_note"])
-
-    def test_one_good_name_still_lets_the_rest_be_flagged(self):
-        rep = self._run({1: "จำเนียร จวงตระกูล", 2: "สมชาย ใจดี"})
-        self.assertEqual(len(rep.zones["RED"]), 2)
 
 
 class StudentNameIgnoresTitles(unittest.TestCase):

@@ -1,10 +1,8 @@
 import sys
 
-import translit
 import unittest
 
 from checker import (
-    _COMMITTEE_TRANSLATE_MSG,
     NOT_CHECKED,
     N_APPENDIX,
     Report,
@@ -26,16 +24,12 @@ from checker import (
     reference_terms,
     signature_committee_slots,
     _committee_page_kind,
-    _committee_keyname,
-    _committee_translation,
     signature_page_kind,
     _is_white_fill,
     _report_sig_placeholders,
     _sig_clean_name,
     _strip_committee_title,
     sig_visible_placeholders,
-    _report_thai_committee,
-    _report_committee_positions,
     _check_abstract_committees,
     _check_cover_year,
     _check_exam_date,
@@ -53,7 +47,6 @@ from checker import (
     compare_values,
     cover_required_items,
     exact_reference_status,
-    fuzzy_contains,
     norm,
     plain_summary,
     person_name_sentence_case,
@@ -79,14 +72,6 @@ from ethesis_rules import (
 class NormalizationTests(unittest.TestCase):
     def test_thai_combining_mark_reordering_is_normalized(self):
         self.assertEqual(norm("บทคัดย่อ"), norm("บทคดัยอ่"))
-
-    def test_exact_fuzzy_match(self):
-        found, score = fuzzy_contains(norm("สมชาย ใจดี"), "สมชาย ใจดี")
-        self.assertTrue(found)
-        self.assertEqual(score, 1.0)
-
-    def test_empty_needle_is_not_a_match(self):
-        self.assertEqual(fuzzy_contains(norm("ข้อความ"), ""), (False, 0.0))
 
 
 class ExactReferenceTests(unittest.TestCase):
@@ -722,129 +707,6 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("No Parens Here"), "")
 
 
-class ThaiCommitteeSetDiffTests(unittest.TestCase):
-    """เล่มไทย: เทียบชื่อกรรมการแบบชุด แยก ถูกต้อง/สลับ/ขาด/เกิน โดยไม่ฟ้องเลื่อนทั้งแถว"""
-
-    def _run(self, expected_names, members):
-        rep = Report()
-        expected = [{"name": n, "role": ""} for n in expected_names]
-        loc = "หน้ากรรมการสอบ (หน้า ก)"
-        _report_thai_committee(rep, expected, members, loc, order_loc=loc)
-        return rep
-
-    def _reds(self, rep):
-        return [i["found"] for i in rep.zones["RED"]]
-
-    def test_all_correct_positions_report_nothing(self):
-        rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
-                        {1: "คนางค์ ก", 2: "สุภาภรณ์ ข", 3: "ธเนศ ค"})
-        self.assertEqual(self._reds(rep), [])
-
-    def test_honorific_prefix_is_ignored(self):
-        rep = self._run(["คนางค์ ก"], {1: "ดร. คนางค์ ก"})
-        self.assertEqual(self._reds(rep), [])
-
-    def test_swapped_names_are_not_flagged_at_all(self):
-        """นโยบายเจ้าหน้าที่ (ก.ค. 2569): ระบบดูแค่ "ชื่อครบและถูกคน"
-
-        ไม่ดูว่าใครอยู่ช่องไหน เพราะแต่ละเล่มจัดหน้าไม่เหมือนกัน — สลับช่องจึงเงียบ
-        เหลือแค่รายชื่อจาก บฑ. ไว้ให้เจ้าหน้าที่ทานเอง (สีม่วง)
-        """
-        rep = self._run(["คนางค์ ก", "สุภาภรณ์ ข", "ธเนศ ค"],
-                        {1: "คนางค์ ก", 2: "ธเนศ ค", 3: "สุภาภรณ์ ข"})
-        self.assertEqual(self._reds(rep), [])
-        self.assertEqual(rep.zones["YELLOW"], [])
-        self.assertTrue(rep.human_checklist)
-        why = rep.human_checklist[0]["why"]
-        self.assertIn("รายชื่อตามข้อมูลอนุมัติ", why)
-        self.assertNotIn("ช่องที่", why)          # ห้ามอ้างตำแหน่งช่องอีกต่อไป
-        # ต้องบอกด้วยว่าระบบเทียบให้แล้ว ไม่ใช่ "ระบบไม่ได้ตรวจ"
-        self.assertIn("ระบบเทียบชื่อให้แล้ว", why)
-
-    def test_names_listed_for_staff_even_when_all_correct(self):
-        rep = self._run(["A A", "B B"], {1: "A A", 2: "B B"})
-        self.assertEqual(self._reds(rep), [])
-        self.assertTrue(rep.human_checklist)
-        self.assertNotIn("ลำดับ", rep.human_checklist[0]["why"])
-
-    def test_missing_member_is_named_not_cascaded(self):
-        # ขาดกรรมการกลาง แล้วดันชื่อขึ้น → ต้องฟ้อง 'ไม่พบ B' + 'พบ C เกินตำแหน่ง' ไม่ใช่แดงรัวทั้งแถว
-        rep = self._run(["A A", "B B", "C C"], {1: "A A", 2: "C C"})
-        reds = self._reds(rep)
-        self.assertEqual(len(reds), 1)
-        self.assertIn("ไม่พบกรรมการ", reds[0])
-        self.assertIn("B B", reds[0])
-
-    def test_extra_name_not_in_committee_is_flagged(self):
-        rep = self._run(["A A", "B B"], {1: "A A", 2: "B B", 3: "X Stranger"})
-        reds = self._reds(rep)
-        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r and "Stranger" in r
-                            for r in reds))
-
-    def test_keyname_normalizes_prefix_and_spacing(self):
-        self.assertEqual(_committee_keyname("ดร. คนางค์  ก"),
-                         _committee_keyname("คนางค์ ก"))
-
-    def test_academic_rank_prefix_is_ignored(self):
-        # ตรวจเฉพาะชื่อ — คำนำหน้าตำแหน่งวิชาการต่างกันไม่นับว่าผิด
-        clean = _committee_keyname("คนางค์ คันธมธุรพจน์")
-        for titled in ("รองศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์",
-                       "ศาสตราจารย์ ดร. คนางค์ คันธมธุรพจน์",
-                       "ผู้ช่วยศาสตราจารย์คนางค์ คันธมธุรพจน์",
-                       "อาจารย์ คนางค์ คันธมธุรพจน์"):
-            self.assertEqual(_committee_keyname(titled), clean, titled)
-
-    def test_rank_change_between_ethesis_and_book_still_matches(self):
-        # eThesis เป็น รศ. แต่เล่มพิมพ์ ศ. (เลื่อนตำแหน่ง) → ชื่อเดียวกัน ต้องผ่าน
-        rep = self._run(["รองศาสตราจารย์ ดร. คนางค์ ก"],
-                        {1: "ศาสตราจารย์ ดร. คนางค์ ก"})
-        self.assertEqual(self._reds(rep), [])
-
-    def test_thai_name_starting_with_title_letter_is_not_eaten(self):
-        # ชื่อจริงขึ้นต้นด้วย ศ (เช่น ศศิธร) ต้องไม่ถูกตัดเพราะเข้าใจผิดว่าเป็น 'ศ.'
-        self.assertEqual(_committee_keyname("ศศิธร ก"), _committee_keyname("ศศิธร ก"))
-        self.assertIn("ศศ", _committee_keyname("ศศิธร ก"))
-
-
-class EnglishCommitteeFuzzyTests(unittest.TestCase):
-    """เล่มอังกฤษที่แปลชื่อสำเร็จ: เทียบตามลำดับเหมือนเล่มไทย (เทียบหลวมจากชื่อแปล) = สีแดง"""
-
-    def _run(self, expected_en, members):
-        rep = Report()
-        _report_committee_positions(rep, expected_en, members,
-                                    "Examination committee page (page i)", fuzzy=True)
-        return [i["found"] for i in rep.zones["RED"]]
-
-    def test_correct_order_with_spelling_variation_passes(self):
-        # ชื่อแปลสะกดต่างเล็กน้อยจากในเล่ม แต่ตำแหน่งถูก → ต้องผ่าน (ratio ≥ 0.7)
-        reds = self._run(["Narisara Chantratita", "Supaporn Songprachaa"],
-                         {1: "Narisara Chantaratid", 2: "Supaporn Songpracha"})
-        self.assertEqual(reds, [])
-
-    def test_swapped_english_names_are_left_to_staff(self):
-        reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
-                         {1: "Alice Adams", 2: "Carol Clark", 3: "Bob Brown"})
-        self.assertEqual(reds, [])          # ลำดับ = เรื่องของเจ้าหน้าที่
-
-    def test_missing_english_member_named(self):
-        reds = self._run(["Alice Adams", "Bob Brown", "Carol Clark"],
-                         {1: "Alice Adams", 2: "Carol Clark"})
-        self.assertTrue(any("ไม่พบกรรมการ" in r and "Bob Brown" in r for r in reds))
-
-    def test_stranger_english_name_flagged(self):
-        reds = self._run(["Alice Adams", "Bob Brown"],
-                         {1: "Alice Adams", 2: "Bob Brown", 3: "Zebra Zulu"})
-        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r and "Zebra" in r
-                            for r in reds))
-
-    def test_full_word_english_title_is_ignored(self):
-        # เล่มพิมพ์คำนำหน้าเต็ม 'Associate Professor Dr.' → ตรวจเฉพาะชื่อ ต้องผ่าน
-        reds = self._run(["Alice Adams", "Bob Brown"],
-                         {1: "Associate Professor Dr. Alice Adams",
-                          2: "Assistant Professor Bob Brown"})
-        self.assertEqual(reds, [])
-
-
 class AbstractCommitteeTests(unittest.TestCase):
     """หน้าบทคัดย่อ: รายชื่อคณะกรรมการที่ปรึกษา + รูปแบบ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่ง)"""
 
@@ -865,10 +727,10 @@ class AbstractCommitteeTests(unittest.TestCase):
         names, _ = split_abstract_committee(block)
         self.assertEqual(names, ["คนางค์ ก", "ธเนศ ข"])
 
-    def _run(self, committees, abs_en, abs_th, pages, name_en=None, translation_ok=False):
+    def _run(self, committees, abs_en, abs_th, pages):
         rep = Report()
         _check_abstract_committees(rep, committees, abs_en, abs_th, pages,
-                                   lambda i: f"หน้า {i}", name_en or {}, translation_ok)
+                                   lambda i: f"หน้า {i}")
         return rep
 
     def _reds(self, rep):
@@ -892,29 +754,39 @@ class AbstractCommitteeTests(unittest.TestCase):
         reds = self._reds(self._run(committees, [0], [], pages))
         self.assertTrue(any("ตำแหน่งทางวิชาการ" in r for r in reds))
 
-    def test_thai_names_matched_against_ethesis(self):
-        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
-                                    {"name": "ธเนศ ข", "role": ""}]}
-        # ชื่อครบและถูกคน ต่างแค่ลำดับ → ไม่ฟ้อง (ลำดับให้เจ้าหน้าที่ตรวจเอง)
-        pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: ธเนศ ข, ปร.ด., คนางค์ ก, พย.ด.\nบทคัดย่อ"]
-        reds = self._reds(self._run(committees, [], [0], pages))
-        self.assertEqual(reds, [])
-
-    def test_wrong_person_in_thai_abstract_is_flagged(self):
-        """"ถูกคน" ต้องยังตรวจ — ชื่อนอกรายชื่ออนุมัติต้องฟ้อง"""
+    def test_different_names_are_not_flagged_when_the_count_matches(self):
+        """นโยบาย ส.ค. 2569: ไม่เทียบชื่อ/ตัวสะกด — คนละชื่อแต่ครบจำนวนก็ไม่ฟ้อง"""
         committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
                                     {"name": "ธเนศ ข", "role": ""}]}
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด., สมชาย ใจดี, พย.ด.\nบทคัดย่อ"]
-        reds = self._reds(self._run(committees, [], [0], pages))
-        self.assertTrue(any("ไม่พบกรรมการ" in r and "ธเนศ ข" in r for r in reds))
-        self.assertTrue(any("ไม่อยู่ในรายชื่อกรรมการอนุมัติ" in r for r in reds))
+        rep = self._run(committees, [], [0], pages)
+        self.assertEqual(self._reds(rep), [])
+        self.assertEqual(rep.zones["ORANGE"], [])
 
-    def test_clean_english_abstract_passes(self):
+    def test_missing_person_is_caught_by_the_count(self):
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
+                                    {"name": "ธเนศ ข", "role": ""}]}
+        pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ"]
+        rep = self._run(committees, [], [0], pages)
+        self.assertEqual(self._reds(rep), [])          # จำนวนไม่ตรง = ส้ม ไม่ใช่แดง
+        found = [i["found"] for i in rep.zones["ORANGE"]]
+        self.assertTrue(any("ได้ 1 คน" in f and "มี 2 คน" in f for f in found))
+
+    def test_committee_list_is_printed_for_staff_to_check_by_eye(self):
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""}]}
+        pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ"]
+        rep = self._run(committees, [], [0], pages)
+        why = " ".join(h["why"] for h in rep.human_checklist)
+        self.assertIn("ไม่ได้เทียบชื่อ", why)
+        self.assertIn("คนางค์ ก", why)
+
+    def test_english_abstract_needs_no_transliteration_any_more(self):
+        """เลิกเทียบชื่อแล้ว เล่มอังกฤษจึงไม่ต้องถอดชื่อไทยก่อน และไม่ฟ้องอะไรเพิ่ม"""
         committees = {"advisory": [{"name": "นริศรา จันทราทิตย์", "role": ""}]}
         pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
-        name_en = {"นริศรา จันทราทิตย์": "Narisara Chantratita"}
-        reds = self._reds(self._run(committees, [0], [], pages, name_en, translation_ok=True))
-        self.assertEqual(reds, [])
+        rep = self._run(committees, [0], [], pages)
+        self.assertEqual(self._reds(rep), [])
+        self.assertEqual(rep.zones["ORANGE"], [])
 
     def test_format_rules_run_without_ethesis_data(self):
         # กฎรูปแบบเป็นกฎของ template ล้วน ต้องตรวจได้แม้เจ้าหน้าที่ไม่ได้อัปโหลด eThesis
@@ -939,8 +811,6 @@ class CommitteeTitleAnywhereTests(unittest.TestCase):
         # รูปแบบที่พบในเล่มจริง: "ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"
         self.assertEqual(_strip_committee_title("ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"),
                          "ธเนศ เกษศิลป์")
-        self.assertEqual(_committee_keyname("ธเนศ เกษศิลป์, ผู้ช่วยศาสตราจารย์"),
-                         _committee_keyname("ธเนศ เกษศิลป์"))
 
     def test_leading_and_trailing_rank_together(self):
         self.assertEqual(
@@ -956,21 +826,6 @@ class CommitteeTitleAnywhereTests(unittest.TestCase):
         # ช่องที่อ่านได้แต่ตำแหน่ง ไม่มีชื่อคน = ช่องว่าง ไม่ใช่ "คนที่ไม่อยู่ในรายชื่อ"
         self.assertIsNone(_sig_clean_name(", รองศาสตราจารย์"))
         self.assertIsNone(_sig_clean_name("ผู้ช่วยศาสตราจารย์"))
-
-    def test_duplicate_name_is_orange_not_red(self):
-        rep = Report()
-        expected = [{"name": "คนางค์ ก"}, {"name": "ธเนศ ข"}]
-        members = {1: "คนางค์ ก", 2: "ธเนศ ข", 9: "ธเนศ ข, ผู้ช่วยศาสตราจารย์"}
-        _report_thai_committee(rep, expected, members, "หน้าลงนาม")
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertTrue(any("ปรากฏซ้ำ" in i["found"] for i in rep.zones["ORANGE"]))
-
-    def test_real_stranger_is_still_red(self):
-        rep = Report()
-        expected = [{"name": "คนางค์ ก"}]
-        members = {1: "คนางค์ ก", 9: "สมชาย ไม่รู้จัก"}
-        _report_thai_committee(rep, expected, members, "หน้าลงนาม")
-        self.assertTrue(any("ไม่อยู่ในรายชื่อ" in i["found"] for i in rep.zones["RED"]))
 
 
 class SignaturePageKindTests(unittest.TestCase):
@@ -990,78 +845,6 @@ class SignaturePageKindTests(unittest.TestCase):
         self.assertEqual(signature_page_kind("", "Thesis Examination Committees"), "exam")
         self.assertEqual(signature_page_kind("ค", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์"), "advisory")
         self.assertEqual(signature_page_kind("iii", "Thesis Advisory Committees"), "advisory")
-
-
-class _NoTranslit:
-    """จำลองเครื่องที่ยังไม่ได้ติดตั้ง pythainlp เพื่อบังคับให้ตกไปทาง AI"""
-
-    @staticmethod
-    def romanize_names(names):
-        return []
-
-    @staticmethod
-    def match_threshold():
-        return 0.60
-
-
-class CommitteeEnglishNameSourceTests(unittest.TestCase):
-    """ชื่ออังกฤษของกรรมการได้จากการถอดชื่อไทย (ไฟล์ eThesis ไม่มีชื่ออังกฤษ)
-
-    ทางหลักคือถอดในเครื่องด้วย translit (ฟรี ไม่ต้องใช้ API)
-    ถ้าถอดในเครื่องไม่ได้จึงตกไปใช้ AI แล้วค่อยเป็น 'ไม่มีเครื่องมือ'
-    """
-
-    def test_offline_transliteration_is_the_primary_path(self):
-        committees = {"advisory": [{"name": "ยอด สุขะมงคล"}]}
-        name_en, ok, reason = _committee_translation(committees)
-        if translit.enabled():
-            self.assertTrue(ok)
-            self.assertEqual(reason, "offline")   # ไม่แตะ AI เลย
-            self.assertTrue(name_en["ยอด สุขะมงคล"].strip())
-        else:
-            self.assertFalse(ok)
-
-    def test_reports_reason_when_no_tool_available(self):
-        # ถอดในเครื่องไม่ได้ + ไม่ได้ตั้ง API key = ปัญหาการติดตั้ง ต้องบอกให้ตรงจุด
-        committees = {"advisory": [{"name": "ก ข"}], "exam": [{"name": "ค ง"}]}
-        sys.modules["translit"] = _NoTranslit
-        try:
-            name_en, ok, reason = _committee_translation(committees)
-        finally:
-            sys.modules.pop("translit", None)
-        self.assertFalse(ok)
-        self.assertEqual(name_en, {})
-        self.assertEqual(reason, "no_tool")
-        self.assertIn("pythainlp", _COMMITTEE_TRANSLATE_MSG[reason])
-
-    def test_no_committees_is_not_usable(self):
-        self.assertEqual(_committee_translation({}), ({}, False, ""))
-
-    def test_duplicate_names_are_translated_once(self):
-        committees = {"advisory": [{"name": "ก ข"}],
-                      "exam": [{"name": "ก ข"}, {"name": "ค ง"}]}
-        captured = {}
-
-        class _Stub:
-            @staticmethod
-            def enabled():
-                return True
-
-            @staticmethod
-            def translate_names(names):
-                captured["names"] = list(names)
-                return ["A B", "C D"]
-
-        sys.modules["llm_assist"] = _Stub
-        sys.modules["translit"] = _NoTranslit      # บังคับให้ตกไปทาง AI
-        try:
-            name_en, ok, reason = _committee_translation(committees)
-        finally:
-            sys.modules.pop("llm_assist", None)
-            sys.modules.pop("translit", None)
-        self.assertTrue(ok)
-        self.assertEqual(captured["names"], ["ก ข", "ค ง"])   # ไม่ส่งชื่อซ้ำไปแปล
-        self.assertEqual(name_en, {"ก ข": "A B", "ค ง": "C D"})
 
 
 class SignatureInstitutionCellTests(unittest.TestCase):
