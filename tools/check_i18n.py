@@ -133,16 +133,104 @@ def lint(block, pairs):
     print(f"escape / ซ้ำ: {len(doubled)}")
 
 
+def _py(pat):
+    return pat.replace("\n", "").replace(r"\/", "/")
+
+
+def _rep_text(rep):
+    return rep.replace("\\'", "'").replace('\\"', '"')
+
+
+_COMPILED = {}
+
+
+def _compiled(pairs):
+    """คอมไพล์ทุก pattern ครั้งเดียว — จำเป็นจริง ๆ ไม่ใช่แค่ให้เร็วขึ้นเฉย ๆ
+
+    แคชภายในของ re เก็บได้ 512 รูปแบบ ตอนนี้ TR มีมากกว่านั้น พอเรียกวนทุกข้อความ
+    แคชจึงล้นแล้วคอมไพล์ใหม่ทุกครั้ง ด่าน --corpus ช้าจนรันก่อน commit ไม่ไหว
+    """
+    key = id(pairs)
+    if key not in _COMPILED:
+        out = []
+        for pat, flags, rep in pairs:
+            f = re.I if "i" in flags else 0
+            try:
+                whole = re.compile("(?:%s)$" % _py(pat), f)
+            except re.error:
+                whole = None
+            try:
+                part = re.compile(_py(pat), f)
+            except re.error:
+                part = None
+            out.append((whole, part, rep))
+        _COMPILED[key] = out
+    return _COMPILED[key]
+
+
+def whole_rule(text, pairs):
+    """กฎที่กิน text ทั้งสตริง (ชั้น 1 ของ trEN) — คืน (ดัชนี, match) หรือ None"""
+    stripped = text.strip()
+    for i, (whole, _part, _rep) in enumerate(_compiled(pairs)):
+        if whole is None:
+            continue
+        m = whole.match(stripped)
+        if m:
+            return i, m
+    return None
+
+
+def tr_whole(text, pairs):
+    """ชั้น 1 อย่างเดียว — ไม่มีกฎไหนกินทั้งสตริงคืน None (ต้องตรงกับ trWhole ใน JS)"""
+    text = (text or "").strip()
+    if not text:
+        return text
+    hit = whole_rule(text, pairs)
+    if not hit:
+        return None
+
+    def sub(g):
+        raw = hit[1].group(int(g.group(1))) or ""
+        # ค่าที่คร่อมด้วยเครื่องหมายคำพูดทั้งก้อน = ค่าที่อ่านได้จากเล่ม คงเป็นไทยเสมอ
+        if re.fullmatch(r'"[^"]*"', raw.strip()):
+            return raw
+        return tr_en(raw, pairs)
+
+    return re.sub(r"\$(\d)", sub, _rep_text(pairs[hit[0]][2]))
+
+
 def tr_en(text, pairs):
-    for pat, flags, rep in pairs:
-        py_pat = pat.replace("\n", "").replace(r"\/", "/")
-        py_rep = (re.sub(r"\$(\d)", r"\\\1", rep)
-                  .replace("\\'", "'").replace('\\"', '"'))
+    """จำลอง trEN() ของหน้ารายงาน — ต้องเหมือนกันเป๊ะ ไม่งั้นด่านนี้ตรวจคนละอย่างกับของจริง
+
+    ชั้น 1 กฎเต็มประโยค (เจอแล้วหยุด) · ชั้น 2 เศษคำแบบสะสม (ใช้เมื่อชั้น 1 ไม่แมตช์)
+    """
+    text = (text or "").strip()
+    if not text:
+        return text
+    whole = tr_whole(text, pairs)
+    if whole is not None:
+        return whole
+    for _whole, part, rep in _compiled(pairs):
+        if part is None:
+            continue
+        py_rep = re.sub(r"\$(\d)", r"\\\1", _rep_text(rep))
         try:
-            text = re.sub(py_pat, py_rep, text, flags=re.I if "i" in flags else 0)
+            text = part.sub(py_rep, text)
         except re.error:
             pass
     return text
+
+
+def report_coverage(messages, pairs):
+    """บอกว่าข้อความจริงกี่ข้อความแปลด้วย "กฎเต็มประโยค" กี่ข้อความยังพึ่ง "เศษคำ"
+
+    ตัวเลข "พึ่งเศษคำ" คือหนี้ทางเทคนิคที่วัดได้ — ควรลดลงเรื่อย ๆ ห้ามเพิ่ม
+    เพราะข้อความกลุ่มนี้คือกลุ่มเดียวที่กฎใหม่ที่เพิ่มทีหลังยังฉีกได้อยู่
+    """
+    thai = [m for m in messages if re.search(r"[ก-๙]", m)]
+    whole = [m for m in thai if whole_rule(m, pairs)]
+    print(f"  แปลด้วยกฎเต็มประโยค: {len(whole)}/{len(thai)} "
+          f"· ยังพึ่งเศษคำ: {len(thai) - len(whole)}")
 
 
 def collect_corpus(folder):
@@ -252,6 +340,7 @@ def main():
         messages, cats = collect_corpus(folder)
         print(f"เก็บข้อความจากเล่มจริงได้ {len(messages)} ข้อความ "
               f"+ {len(cats)} ชื่อหมวด")
+        report_coverage(messages, pairs)
         bad = 0
         catmap = load_catmap()
         for cat in cats:

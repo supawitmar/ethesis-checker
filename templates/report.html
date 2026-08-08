@@ -409,6 +409,82 @@ var CATMAP = {
 };
 
 var TR = [
+  // หางบอกชนิดความต่างของ "…ในเล่มเขียนว่า …" มีหลายแบบ ต้องมีกฎเต็มประโยคให้ครบ
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") — พิมพ์ผิดเล็กน้อย แตกต่างที่ (.+)/g, '$1 in the document reads $2 — a small typo, differing at $3'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") แตกต่างที่ (.+)/g, '$1 in the document reads $2, differing at $3'],
+  // ---- บรรทัดในข้อความสรุป: "N. ใน<ตำแหน่ง>: <ที่พบ> · <ที่ควรเป็น>" ----
+  // แยกเป็นท่อน ๆ แล้วให้แต่ละท่อนแปลด้วยกฎเต็มประโยคของตัวเอง (trWhole เรียกซ้ำ)
+  // ทำให้บรรทัดสรุปไม่ต้องพึ่งการแทนที่แบบเศษคำอีกต่อไป
+  [/^(\d+)\. ใน(.+?): (.+?) ให้แก้ไขเป็น: ("[^"]*")$/g, '$1. In $2: $3 · Change to: $4'],
+  [/^(\d+)\. ใน(.+?): (.+?) · (.+)$/g, '$1. In $2: $3 · $4'],
+  [/^(\d+)\. ใน(.+?): (.+)$/g, '$1. In $2: $3'],
+  [/^(\d+)\. (.+?) ให้แก้ไขเป็น: ("[^"]*")$/g, '$1. $2 · Change to: $3'],
+  [/^(\d+)\. ใน(.+)$/g, '$1. In $2'],
+  // ---- ป้ายชื่อที่ใช้เป็น "ค่าในวงเล็บ" ของกฎเต็มประโยค ----
+  // เขียนผูกหัวท้าย ^...$ เพื่อให้เป็นกฎ "ทั้งสตริงเท่านั้น" — ชั้นเศษคำจะแตะไม่ได้เลย
+  // (ถ้าเขียนลอย ๆ คำอย่าง "ชื่อบท"/"กรรมการ" จะไปยิงกลางประโยคอื่นจนพัง)
+  [/^ชื่อบท$/g, 'The chapter title'],
+  [/^ชื่อเรื่อง$/g, 'The thesis title'],
+  [/^ชื่อนักศึกษา$/g, 'The student name'],
+  [/^ชื่อปริญญา$/g, 'The degree name'],
+  [/^ชื่อปริญญาแบบย่อ$/g, 'The abbreviated degree name'],
+  [/^หัวข้อสารบัญ$/g, 'The table-of-contents heading'],
+  [/^กรรมการ$/g, 'committee member(s)'],
+  [/^กรรมการที่ปรึกษา$/g, 'advisory committee member(s)'],
+  [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
+  // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
+  [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
+  [/บทคัดย่ออังกฤษ \(หน้า (\S+)\)/g, 'English abstract (page $1)'],
+  [/บทคัดย่อไทย \(หน้า (\S+)\)/g, 'Thai abstract (page $1)'],
+  [/ชื่อย่อในบทคัดย่ออังกฤษ \(หน้า (\S+)\)/g, 'Abbreviated degree on the English abstract (page $1)'],
+  [/ชื่อย่อในบทคัดย่อไทย \(หน้า (\S+)\)/g, 'Abbreviated degree on the Thai abstract (page $1)'],
+  [/หน้าอาจารย์ที่ปรึกษา \(หน้า (\S+)\)/g, 'Advisory committee page (page $1)'],
+  [/หน้ากรรมการสอบ \(หน้า (\S+)\)/g, 'Examination committee page (page $1)'],
+  [/หน้าอาจารย์ที่ปรึกษา — ประธานหลักสูตร \(หน้า (\S+)\)/g, 'Advisory committee page — programme chair (page $1)'],
+  [/หน้ากรรมการสอบ — คณบดีคณะ \(หน้า (\S+)\)/g, 'Examination committee page — faculty dean (page $1)'],
+  [/บทคัดย่อ \(หน้า (\S+)\) — คณะกรรมการที่ปรึกษา/g, 'Abstract (page $1) — advisory committee'],
+  [/สารบัญ \(หน้า (\S+)\) บทที่ (\d+)/g, 'Table of contents (page $1) chapter $2'],
+  [/บทที่ (\d+) — สารบัญ \(หน้า (\S+)\) และในเนื้อหา \(หน้า (\S+)\)/g, 'Chapter $1 — table of contents (page $2) and in the body (page $3)'],
+  [/สารบัญ \(หน้า (\S+)\) ↔ บทที่ (\d+) \(หน้า (\S+)\)/g, 'Table of contents (page $1) vs chapter $2 (page $3)'],
+  [/ช่วงเลขหน้า (\S+) ถึง (\S+)/g, 'Page range $1 to $2'],
+  [/หน้าลงนามหน้า (\d+) \(หน้า (\S+)\)/g, 'Approval page $1 (page $2)'],
+  [/หน้าลงนาม (\d+) \(หน้า (\S+)\)/g, 'Approval page $1 (page $2)'],
+  [/ข้อความ template หน้าลงนาม/g, 'Approval page template wording'],
+  [/ข้อความประเภทงาน/g, 'the document-type wording'],
+  [/ข้อความลิขสิทธิ์/g, 'the copyright wording'],
+  [/ไม่พบข้อความบังคับ \((.+?)\) บนหน้าปก/g, 'Required wording not found ($1) on the cover page'],
+  [/ไม่พบข้อความตาม template: ("[^"]*")/g, 'Wording required by the template not found: $1'],
+  [/หน้าลงนามต้องมีข้อความ ("[^"]*") นำหน้าชื่อปริญญา/g, 'The approval page must carry the wording $1 before the degree name'],
+  [/ข้อความที่ถูกต้อง: ("[^"]*")/g, 'The correct wording is: $1'],
+  [/ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ: ("[^"]*")/g, 'The thesis title does not match the approved data: $1'],
+  [/ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: ("[^"]*")/g, 'Must match the approved data exactly: $1'],
+  [/ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: ("[^"]*")/g, 'Must be spelled as in the approved data on every page: $1'],
+  [/ต้องเป็น ("[^"]*")/g, 'Must be $1'],
+  [/ตามประกาศ (\d+) ควรเป็น ("[^"]*")/g, 'Per the $1 regulation it should be $2'],
+  [/พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: ("[^"]*")/g, 'The examination pass date does not match the approved data: $1'],
+  [/ที่ถูกต้องตามระบบคือ ("[^"]*")/g, 'The approved data says $1'],
+  [/ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน ("[^"]*")/g, 'The acknowledgements must end with the author name $1'],
+  [/เพิ่มหรือแก้ชื่อผู้เขียนท้ายกิตติกรรมประกาศเป็น ("[^"]*")/g, 'Add or correct the author name at the end of the acknowledgements to $1'],
+  [/บรรทัดชื่อนักศึกษาในบทคัดย่ออังกฤษต้องมีรหัส ("[^"]*")/g, 'The student-name line on the English abstract must include the ID $1'],
+  [/บรรทัดชื่อนักศึกษาในบทคัดย่อไทยต้องมีรหัส ("[^"]*")/g, 'The student-name line on the Thai abstract must include the ID $1'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา ("[^"]*")/g, 'The text under the signature must contain the subject $1'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ ("[^"]*")/g, 'The text under the signature must contain the faculty name $1'],
+  [/(.+?)ของนักศึกษาในหน้าบทคัดย่อต้องสะกดตรงข้อมูลอนุมัติ: ("[^"]*")/g, 'The student\'s $1 on the abstract page must be spelled as in the approved data: $2'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*")/g, '$1 in the document reads $2'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") — พิมพ์ผิดเล็กน้อย — ต่างที่ (.+)/g, '$1 in the document reads $2 — a small typo — differs at $3'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") — ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, '$1 in the document reads $2 — only the upper/lower case differs'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") — ต่างที่ (.+)/g, '$1 in the document reads $2 — differs at $3'],
+  [/นับรายชื่อ(.+?)บนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน — ระบบอ่านได้ว่า (.+)/g, 'Counted $2 $1 on this page, but the approved data lists $3 — the system read: $4'],
+  [/แก้ไขให้เป็นไปตามข้อกำหนด: (.+)/g, 'Correct it to meet the requirement: $1'],
+  // ---- นับจำนวนกรรมการ (ไม่เทียบชื่อแล้ว) — ประโยคเต็ม ต้องอยู่บนสุด ----
+  [/นับรายชื่อกรรมการที่ปรึกษาบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน — ระบบอ่านได้ว่า/g, 'Counted $1 advisory committee member(s) on this page, but the approved data lists $2 — the system read:'],
+  [/นับรายชื่อกรรมการบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน — ระบบอ่านได้ว่า/g, 'Counted $1 committee member(s) on this page, but the approved data lists $2 — the system read:'],
+  [/ไม่พบชื่อเลย/g, 'no names found'],
+  [/ต้องมีกรรมการที่ปรึกษา (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 advisory committee member(s) per the approved data (Form บฑ.)'],
+  [/ต้องมีกรรมการ (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 committee member(s) per the approved data (Form บฑ.)'],
+  [/ตรวจว่าจำนวนกรรมการที่ปรึกษาบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the advisory committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
+  [/ตรวจว่าจำนวนกรรมการบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
+  [/ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด — โปรดทานรายชื่อกับข้อมูลอนุมัติ \(บฑ\.\) คือ/g, 'The system counted the committee members but did not compare names or spelling — please check the list against the approved data (Form บฑ.):'],
   // ---- หัวข้อในสารบัญสะกดผิด (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents; it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
@@ -544,7 +620,9 @@ var TR = [
   [/ขนาดกระดาษ ระยะขอบ ระยะบรรทัด ชนิดและขนาดฟอนต์/g, 'Paper size, margins, line spacing, font family and size'],
   [/Plagiarism หรือเปอร์เซ็นต์ความซ้ำซ้อน/g, 'Plagiarism or similarity percentage'],
   [/มาตรฐาน PDF\/A, embedded fonts และความคมชัดของภาพ/g, 'PDF\/A compliance, embedded fonts and image quality'],
-  [/เนื้อหาของคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ \(ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน \+ ตรวจชื่อ-สกุลกรรมการ เมื่อดึงข้อมูลจาก eThesis ได้ แต่ไม่ตรวจว่าคุณวุฒิถูกต้องหรือไม่\)/g, 'The qualification (Degree\/Subject) text under each committee name (the system checks that every member has a qualification line, and checks the committee names when eThesis data is available, but not whether the qualification itself is correct)'],
+  [/เนื้อหาของคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ \(ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจว่าคุณวุฒิถูกต้องหรือไม่\)/g, 'The qualification (Degree\/Subject) text under each committee name (the system checks that every member has a qualification line, but not whether the qualification itself is correct)'],
+  [/ชื่อ-สกุลและตัวสะกดของกรรมการทั้งบนหน้าลงนามและหน้าบทคัดย่อ \(ระบบนับให้ว่าจำนวนครบตามข้อมูลอนุมัติหรือไม่ แล้วพิมพ์รายชื่อตาม บฑ\. ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง\)/g, 'Committee member names and their spelling, on both the approval pages and the abstract page (the system only counts whether the number matches the approved data, and prints the Form บฑ. list in the purple section for staff to check by eye)'],
+  [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน\)/g, 'Where each committee name sits in the signature table (every document is laid out differently)'],
   [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน ระบบดูเฉพาะว่าชื่อครบและถูกคน\)/g, 'Where each committee name sits in the table (books are laid out differently, so the system only checks that the names are complete and correct)'],
   [/การมี\/ไม่มีลายเซ็นและการตรวจความแท้จริงของลายเซ็น/g, 'Presence and authenticity of signatures'],
   [/ขั้นตอนส่งเล่ม กำหนดเวลา และสิทธิ์การเผยแพร่/g, 'Submission steps, deadlines and publication rights'],
@@ -1019,9 +1097,47 @@ var TR = [
   [/หน้า (\d+)/g, 'Page $1']
 ];
 
+// แปลไทย -> อังกฤษ 2 ชั้น
+//
+// ชั้น 1 "ทั้งประโยค": หากฎที่กินข้อความ **ทั้งสตริง** เจอแล้วใช้ทันทีและหยุด
+//   ค่าที่จับได้ในวงเล็บ ($1, $2) ส่งกลับเข้า trEN ซ้ำ เพื่อให้ชื่อหัวข้อ/ชื่อส่วน
+//   ที่ฝังอยู่ข้างในถูกแปลด้วย ส่วนค่าจากเล่ม (อยู่ในเครื่องหมายคำพูด) จะไม่มีกฎไหน
+//   กินทั้งสตริงอยู่แล้ว จึงคงเป็นไทยตามที่ต้องการ
+//
+// ชั้น 2 "เศษคำ": ใช้เฉพาะเมื่อชั้น 1 ไม่มีกฎไหนแมตช์ — แทนที่สะสมแบบเดิม
+//
+// ทำไมต้องมีชั้น 1: เดิมแทนที่สะสมอย่างเดียว กฎที่แมตช์เศษคำสั้น ๆ จึงยิงกลาง
+// ประโยคที่ยังไม่มีกฎเต็มประโยค แล้วฉีกประโยคจนกฎเต็มที่อยู่ล่างกว่าแมตช์ไม่ได้อีก
+// (เจอจริงหลายรอบ: "Change to:เลขpage", "ไม่ได้กรอกDegree nameแบบย่อในAbstract",
+//  "เลขหน้าthe front matterของa Thai-program bookChange to:...")
+// ชั้น 1 ตัดปัญหานี้ทิ้งทั้งกลุ่ม เพราะผลของกฎเต็มประโยคไม่ขึ้นกับลำดับอีกต่อไป
+// ชั้น 1 อย่างเดียว — ไม่มีกฎไหนกินทั้งสตริงคืน null
+function trWhole(s){
+  var text = String(s == null ? '' : s).trim();
+  if (!text) return text;
+  for (var i = 0; i < TR.length; i++){
+    var re = new RegExp('^(?:' + TR[i][0].source + ')$', TR[i][0].flags.replace('g',''));
+    var m = text.match(re);
+    if (!m) continue;
+    return TR[i][1].replace(/\$(\d)/g, function(_all, n){
+      var v = m[Number(n)];
+      if (v === undefined) return '';
+      // ค่าที่คร่อมด้วยเครื่องหมายคำพูดทั้งก้อน = "ค่าที่อ่านได้จากเล่ม"
+      // (ชื่อเรื่อง ชื่อคน ข้อความบนหน้าปก) ต้องคงเป็นไทยเสมอ ห้ามแปลทับ
+      if (/^"[^"]*"$/.test(v.trim())) return v;
+      return trEN(v);
+    });
+  }
+  return null;
+}
+
 function trEN(s){
-  for (var i = 0; i < TR.length; i++) s = s.replace(TR[i][0], TR[i][1]);
-  return s;
+  var text = String(s == null ? '' : s).trim();
+  if (!text) return text;
+  var whole = trWhole(text);
+  if (whole !== null) return whole;
+  for (var j = 0; j < TR.length; j++) text = text.replace(TR[j][0], TR[j][1]);
+  return text;
 }
 
 function applyLang(){
