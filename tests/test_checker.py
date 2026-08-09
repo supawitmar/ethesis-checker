@@ -6,6 +6,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
+    summary_section,
     _report_missing_abstract_language,
     _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
@@ -706,6 +707,36 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("Doctor of Philosophy (Tropical Medicine)"), "Tropical Medicine")
         self.assertEqual(_degree_subject("ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)"), "อายุรศาสตร์เขตร้อน")
         self.assertEqual(_degree_subject("No Parens Here"), "")
+
+
+class SummaryGroupsByWhereToFixIt(unittest.TestCase):
+    """ข้อของหน้าลงนามต้องอยู่หมวด "หน้าลงนาม" ไม่ใช่ "อื่น ๆ"
+
+    ระบบตั้งชื่อตำแหน่งตามบทบาทของหน้า (หน้าอาจารย์ที่ปรึกษา / หน้ากรรมการสอบ)
+    ไม่ได้เขียนคำว่า "หน้าลงนาม" ตรง ๆ เสมอ เจ้าหน้าที่จึงเห็นข้อของหน้าลงนาม
+    ไปโผล่ใต้หัวข้อ "อื่น ๆ" ทั้งที่ต้องไปแก้ที่หน้าลงนามเหมือนกัน
+    """
+
+    def _sec(self, loc):
+        return summary_section({"location": loc, "part": "front_matter"})
+
+    def test_signature_pages_are_grouped_together(self):
+        for loc in ("หน้าลงนาม 1 (หน้า i)",
+                    "หน้าอาจารย์ที่ปรึกษา (หน้า i)",
+                    "หน้ากรรมการสอบ (หน้า ii)",
+                    "หน้าอาจารย์ที่ปรึกษา — ประธานหลักสูตร (หน้า ก)",
+                    "หน้ากรรมการสอบ — คณบดีคณะ (หน้า ข)",
+                    "ข้อความ template หน้าลงนาม"):
+            self.assertEqual(self._sec(loc), "หน้าลงนาม", loc)
+
+    def test_abstract_committee_stays_under_the_abstract(self):
+        """"คณะกรรมการที่ปรึกษา" บนหน้าบทคัดย่อ ต้องไม่ถูกดึงไปหมวดหน้าลงนาม"""
+        self.assertEqual(self._sec("บทคัดย่อ (หน้า ง) — คณะกรรมการที่ปรึกษา"), "บทคัดย่อ")
+
+    def test_other_sections_are_unchanged(self):
+        self.assertEqual(self._sec("หน้าปก"), "หน้าปก")
+        self.assertEqual(self._sec("สารบัญ (หน้า ช)"), "สารบัญ")
+        self.assertEqual(self._sec("บทที่ 3 (หน้า 45)"), "เนื้อหา (บท)")
 
 
 class ThaiProgramNeedsBothAbstracts(unittest.TestCase):
