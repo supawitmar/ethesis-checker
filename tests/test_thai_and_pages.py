@@ -783,7 +783,7 @@ class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
 
     def test_same_number_on_both_pages_is_one_issue_naming_both(self):
         zone, where, found = _page_count_issue([(self.TH, 171), (self.EN, 171)], 154)
-        self.assertEqual(zone, "RED")
+        self.assertEqual(zone, "ORANGE")
         self.assertIn(self.TH, where)
         self.assertIn(self.EN, where)
         self.assertIn("171", found)
@@ -795,13 +795,17 @@ class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
         self.assertIn(f"{self.EN} ระบุ 170", found)
         self.assertIn("154", found)
 
-    def test_small_difference_stays_orange(self):
-        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 155)], 154)
-        self.assertEqual(zone, "ORANGE")
+    def test_always_orange_never_red(self):
+        """นโยบายเจ้าหน้าที่ (ส.ค. 2569): ต่างมากแค่ไหนก็ยังเป็นส้ม
 
-    def test_any_large_difference_makes_it_red(self):
-        zone, _where, _found = _page_count_issue([(self.TH, 155), (self.EN, 171)], 154)
-        self.assertEqual(zone, "RED")
+        "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
+        ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม จึงห้ามฟันธงแดง
+        """
+        for numbers in (([(self.TH, 155), (self.EN, 155)], 154),
+                        ([(self.TH, 155), (self.EN, 171)], 154),
+                        ([(self.TH, 117), (self.EN, 117)], 104)):
+            zone, _where, _found = _page_count_issue(*numbers)
+            self.assertEqual(zone, "ORANGE", numbers)
 
     def test_single_page_keeps_the_plain_message(self):
         _zone, where, found = _page_count_issue([(self.TH, 171)], 154)

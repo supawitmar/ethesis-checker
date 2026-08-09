@@ -6,6 +6,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
+    _report_missing_abstract_language,
     _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
@@ -705,6 +706,40 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("Doctor of Philosophy (Tropical Medicine)"), "Tropical Medicine")
         self.assertEqual(_degree_subject("ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)"), "อายุรศาสตร์เขตร้อน")
         self.assertEqual(_degree_subject("No Parens Here"), "")
+
+
+class ThaiProgramNeedsBothAbstracts(unittest.TestCase):
+    """เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งไทยและอังกฤษ — ขาดภาษาไหนต้องบอกให้ชัด
+
+    เดิมพิมพ์สภาพภายในระบบดิบ ๆ ว่า "พบบทคัดย่อ: EN=False, TH=True"
+    เจ้าหน้าที่ต้องแปลเองว่าขาดอะไร
+    """
+
+    def _run(self, has_en, has_th, en_loc="", th_loc=""):
+        rep = Report()
+        _report_missing_abstract_language(rep, has_en, has_th, en_loc, th_loc)
+        return rep.zones["RED"]
+
+    def test_both_present_is_not_reported(self):
+        self.assertEqual(self._run(True, True, "หน้า ฉ", "หน้า ง"), [])
+
+    def test_missing_english_says_which_one_and_where_the_other_is(self):
+        red = self._run(False, True, "", "หน้า ง")
+        self.assertEqual(len(red), 1)
+        self.assertIn("ขาดบทคัดย่อภาษาอังกฤษ", red[0]["found"])
+        self.assertIn("หน้า ง", red[0]["found"])          # บอกด้วยว่าอันที่มีอยู่หน้าไหน
+        self.assertEqual(red[0]["fix"], "เพิ่มบทคัดย่อภาษาอังกฤษ")
+
+    def test_missing_thai(self):
+        red = self._run(True, False, "หน้า ฉ", "")
+        self.assertIn("ขาดบทคัดย่อภาษาไทย", red[0]["found"])
+        self.assertNotIn("ภาษาอังกฤษ", red[0]["fix"])
+
+    def test_missing_both_lists_both(self):
+        red = self._run(False, False)
+        self.assertIn("ขาดบทคัดย่อภาษาไทยและภาษาอังกฤษ", red[0]["found"])
+        self.assertEqual(red[0]["fix"], "เพิ่มบทคัดย่อภาษาไทยและภาษาอังกฤษ")
+        self.assertNotIn("พบเฉพาะ", red[0]["found"])      # ไม่มีอะไรให้บอกว่าพบ
 
 
 class AbstractCommitteeTests(unittest.TestCase):

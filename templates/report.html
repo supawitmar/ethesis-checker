@@ -409,6 +409,16 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
+  [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาอังกฤษ \(พบเฉพาะบทคัดย่อภาษาไทย \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete — the English abstract is missing (only the Thai abstract was found, page $1)'],
+  [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาไทย \(พบเฉพาะบทคัดย่อภาษาอังกฤษ \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete — the Thai abstract is missing (only the English abstract was found, page $1)'],
+  [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาอังกฤษ \(พบเฉพาะบทคัดย่อภาษาไทย\)/g, 'The abstracts are incomplete — the English abstract is missing (only the Thai abstract was found)'],
+  [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาไทย \(พบเฉพาะบทคัดย่อภาษาอังกฤษ\)/g, 'The abstracts are incomplete — the Thai abstract is missing (only the English abstract was found)'],
+  [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาไทยและภาษาอังกฤษ/g, 'The abstracts are incomplete — both the Thai and the English abstract are missing'],
+  [/เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งภาษาไทยและภาษาอังกฤษ/g, 'A Thai-programme document must have both a Thai and an English abstract'],
+  [/เพิ่มบทคัดย่อภาษาไทยและภาษาอังกฤษ/g, 'Add both a Thai and an English abstract'],
+  [/เพิ่มบทคัดย่อภาษาไทย/g, 'Add a Thai abstract'],
+  [/เพิ่มบทคัดย่อภาษาอังกฤษ/g, 'Add an English abstract'],
   // หางบอกชนิดความต่างของ "…ในเล่มเขียนว่า …" มีหลายแบบ ต้องมีกฎเต็มประโยคให้ครบ
   [/(.+?)ในเล่มเขียนว่า ("[^"]*") — พิมพ์ผิดเล็กน้อย แตกต่างที่ (.+)/g, '$1 in the document reads $2 — a small typo, differing at $3'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*") แตกต่างที่ (.+)/g, '$1 in the document reads $2, differing at $3'],
@@ -566,7 +576,7 @@ var TR = [
   [/ระบุจำนวนหน้าไม่ตรงกัน:/g, 'The stated page counts do not agree:'],
   [/ ระบุ (\d+)/g, ' states $1'],
   [/— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ (\d+)/g, '— the last page number read is $1'],
-  [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า/g, 'The stated page count must equal the last page number of the document, and must be the same on every page that states it'],
+  [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม/g, 'The stated page count must equal the last page number of the document'],
   [/เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้/g, 'Staff to confirm the last page number from the file, then correct the figure on every page that states it'],
   // ---- "…ในเล่มเขียนว่า …" (ข้อความแบบภาษาคน) ----
   [/ชื่อบทในเล่มเขียนว่า/g, 'The chapter title in the document reads'],
