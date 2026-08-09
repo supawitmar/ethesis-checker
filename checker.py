@@ -782,9 +782,11 @@ def _page_count_issue(count_wrong, last_arabic):
     """
     where = " · ".join(lbl for lbl, _num in count_wrong)
     stated = {num for _lbl, num in count_wrong}
-    # คลาดเคลื่อนเล็กน้อยอาจมาจากการอ่านเลขหน้า PDF ของระบบเอง
-    # จึงให้เจ้าหน้าที่ยืนยันจากไฟล์จริงแทนการฟันธง
-    zone = "ORANGE" if all(abs(num - last_arabic) <= 2 for num in stated) else "RED"
+    # นโยบายเจ้าหน้าที่ (ส.ค. 2569): ให้เป็น "สีส้ม" เสมอ ไม่ฟันธงแดง
+    # เพราะ "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
+    # (หน้าภาคผนวกที่เป็นภาพสแกน/หน้าที่พิมพ์เลขหน้าไม่ชัด ทำให้ระบบอ่านได้น้อยกว่าจริง)
+    # ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม จึงส่งให้เจ้าหน้าที่ตัดสิน
+    zone = "ORANGE"
     if len(stated) == 1:
         found = (f"ระบุจำนวนหน้า {stated.pop()} "
                  f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
@@ -991,6 +993,32 @@ def _report_sig_placeholders(rep, found, loc):
             "ช่องกรรมการที่ไม่ได้ใช้ต้องลบข้อความตัวอย่างออกจากไฟล์",
             "ตรวจว่าข้อความนี้มองเห็นบนหน้ากระดาษหรือไม่ ถ้าเห็นให้ลบออกจากช่องที่ไม่ได้ใช้",
             "FRONT.COMMITTEE")
+
+
+def _report_missing_abstract_language(rep, has_en, has_th, en_loc="", th_loc=""):
+    """เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งไทยและอังกฤษ — ขาดภาษาไหนต้องบอกให้ชัด
+
+    นโยบายเจ้าหน้าที่ (ส.ค. 2569): *"เวลาตรวจสอบเล่มของหลักสูตรไทย แล้วไม่พบว่ามี
+    บทคัดย่อเป็นไปตามที่กำหนด คือทั้งไทยและอังกฤษ ให้แจ้งว่าบทคัดย่อไม่ครบถ้วน
+    ขาดอะไรไป แจ้ง"*
+
+    เดิมพิมพ์สภาพภายในระบบดิบ ๆ ว่า "พบบทคัดย่อ: EN=False, TH=True" ซึ่งเจ้าหน้าที่
+    ต้องมาแปลเองว่าขาดภาษาไหน และไม่ได้บอกด้วยว่าอันที่มีอยู่อยู่หน้าไหน
+    """
+    if has_en and has_th:
+        return
+    missing = ([] if has_th else ["ภาษาไทย"]) + ([] if has_en else ["ภาษาอังกฤษ"])
+    found = []
+    if has_th:
+        found.append(f"ภาษาไทย ({th_loc})" if th_loc else "ภาษาไทย")
+    if has_en:
+        found.append(f"ภาษาอังกฤษ ({en_loc})" if en_loc else "ภาษาอังกฤษ")
+    detail = "บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อ" + "และ".join(missing)
+    if found:
+        detail += " (พบเฉพาะบทคัดย่อ" + "และ".join(found) + ")"
+    rep.add("RED", "front_matter", "บทคัดย่อ", detail,
+            "เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งภาษาไทยและภาษาอังกฤษ",
+            "เพิ่มบทคัดย่อ" + "และ".join(missing), "FRONT.ABSTRACT")
 
 
 def _report_missing_form_fields(rep, approved, required_fields):
@@ -2822,7 +2850,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if count_wrong:
         zone, where, found_count = _page_count_issue(count_wrong, last_arabic)
         rep.add(zone, "front_matter", where, found_count,
-                "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม และตรงกันทุกหน้า",
+                "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
                 "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้",
                 "FRONT.ABSTRACT")
 
@@ -3249,10 +3277,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add("RED", "front_matter", "บทคัดย่อ", "มีบทคัดย่อภาษาไทย",
                         "หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น",
                         "ลบบทคัดย่อไทย", "FRONT.ABSTRACT")
-        if prog in ("thai", "thai_english") and not (has_en_abs and has_th_abs):
-            rep.add("RED", "front_matter", "บทคัดย่อ",
-                    f"พบบทคัดย่อ: EN={has_en_abs}, TH={has_th_abs}",
-                    "หลักสูตรไทยต้องมีทั้ง 2 ภาษา", "", "FRONT.ABSTRACT")
+        if prog in ("thai", "thai_english"):
+            _report_missing_abstract_language(
+                rep, has_en_abs, has_th_abs,
+                page_ref(abs_en_idx) if abs_en_idx is not None else "",
+                page_ref(abs_th_idx) if abs_th_idx is not None else "")
 
         if toc_pages:
             actual_toc_sections = {}
