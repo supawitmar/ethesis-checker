@@ -168,6 +168,18 @@ def _compiled(pairs):
     return _COMPILED[key]
 
 
+_SUMMARY_PREFIX = re.compile(r"^\s*(?:\d+\.\s*)?")
+
+
+def summary_line_body(line):
+    """เนื้อบรรทัดของข้อความสรุป หลังถอดเลขข้อและย่อหน้าออก
+
+    ต้องตรงกับ trSummary() ใน report.html ที่แปลสรุป "ทีละบรรทัด" — ถ้าเครื่องมือนี้
+    ตรวจทั้งบรรทัดพร้อมเลขข้อ จะไม่มีกฎเต็มประโยคไหนแมตช์ แล้วรายงานผิดว่าไม่ได้แปล
+    """
+    return _SUMMARY_PREFIX.sub("", line or "")
+
+
 def whole_rule(text, pairs):
     """กฎที่กิน text ทั้งสตริง (ชั้น 1 ของ trEN) — คืน (ดัชนี, match) หรือ None"""
     stripped = text.strip()
@@ -284,7 +296,10 @@ def collect_corpus(folder):
                     # จึงเก็บแยก แล้วตรวจว่ามีคีย์ใน CATMAP ครบไหม
                     texts += [issue.get(f) or "" for f in
                               ("location", "found", "expected", "fix")]
+                    # "category" (ป้ายบนการ์ด) และ "section" (ชื่อกลุ่มการ์ด)
+                    # ไม่ได้แปลผ่าน TR แต่ใช้ CATMAP (เทียบทั้งสตริง)
                     cats.add(issue.get("category") or "")
+                    cats.add(issue.get("section") or "")
             # ตาราง "ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" ก็แสดงผ่าน trEN (class tr-dyn)
             # เก็บเฉพาะ topic/location ซึ่งเป็นข้อความของระบบ — ไม่เก็บ detail
             # เพราะ detail คือ "ค่าที่พบในเล่ม" (ชื่อเรื่อง ชื่อปริญญา วันที่) ต้องคงเป็นไทย
@@ -299,10 +314,11 @@ def collect_corpus(folder):
             for item in report.get("not_checked") or []:
                 texts.append(item.get("topic") or "" if isinstance(item, dict)
                              else str(item))
-            # ต้องตรวจ "บรรทัดในข้อความสรุป" ด้วย ไม่ใช่แค่ทีละฟิลด์
-            # เพราะสรุปเอา location ไปฝังกลางประโยค ("ในส่วนนำ:") ทำให้ TR ที่เขียน
-            # แบบยึดทั้งสตริง (^...$) ไม่แมตช์ ทั้งที่ตรวจทีละฟิลด์แล้วผ่าน
-            texts += (checker.plain_summary(report) or "").splitlines()
+            # ต้องตรวจ "บรรทัดในข้อความสรุป" ด้วย ไม่ใช่แค่ทีละฟิลด์ — สรุปมีบรรทัด
+            # ของตัวเอง (หัวข้อกลุ่ม, "ต้องแก้เป็น ...") ที่ไม่ใช่ฟิลด์ไหนตรง ๆ
+            # ถอดเลขข้อ/ย่อหน้าออกก่อนให้ตรงกับที่ trSummary ใน report.html ทำ
+            texts += [summary_line_body(line)
+                      for line in (checker.plain_summary(report) or "").splitlines()]
             # รายการสีม่วง (ให้เจ้าหน้าที่ตรวจเอง) ก็แสดงผลผ่าน trEN เหมือนกัน
             for hc in report.get("human_checklist") or []:
                 texts += [hc.get("item") or "", hc.get("why") or ""]

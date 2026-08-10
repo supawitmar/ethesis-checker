@@ -6,6 +6,7 @@ from checker import (
     NOT_CHECKED,
     N_APPENDIX,
     Report,
+    issue_sort_key,
     summary_section,
     _report_abstract_title_format,
     _report_missing_abstract_language,
@@ -230,10 +231,19 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(item["rule_id"], "FRONT.COVER")
         self.assertTrue(item["rule_references"])
 
-    def test_report_item_always_contains_a_fix_recommendation(self):
+    def test_report_item_does_not_repeat_expected_as_a_fake_fix(self):
+        """ข้อที่ไม่ได้ส่งวิธีแก้มา ต้องไม่ถูกเติมประโยคที่พูดซ้ำ "ควรเป็น" คำต่อคำ
+
+        เจ้าหน้าที่สั่งว่าคำอธิบายไม่ต้องเวิ่นเยอะ — บรรทัด "แนะนำการแก้ไข" ที่เขียนว่า
+        "แก้ไขให้เป็นไปตามข้อกำหนด: <ควรเป็น>" ไม่ได้บอกอะไรใหม่เลย
+        """
         report = Report()
         report.add("RED", "body", "หน้า 12", "พบข้อผิดพลาด", "ข้อความที่ถูกต้อง", "")
-        self.assertTrue(report.zones["RED"][0]["fix"])
+        self.assertEqual(report.zones["RED"][0]["fix"], "")
+        # ข้อที่ส่งวิธีแก้จริงมา ต้องเก็บไว้ตามเดิม
+        report.add("RED", "body", "หน้า 13", "พบข้อผิดพลาด", "ข้อความที่ถูกต้อง",
+                   "แก้เลขหน้าให้ต่อเนื่อง")
+        self.assertEqual(report.zones["RED"][1]["fix"], "แก้เลขหน้าให้ต่อเนื่อง")
 
     def test_orange_means_pending(self):
         report = Report()
@@ -788,6 +798,64 @@ class SummaryGroupsByWhereToFixIt(unittest.TestCase):
         self.assertEqual(self._sec("สารบัญ (หน้า ช)"), "สารบัญ")
         self.assertEqual(self._sec("บทที่ 3 (หน้า 45)"), "เนื้อหา (บท)")
 
+    def test_chapter_structure_belongs_to_the_body(self):
+        """"โครงบท" (เล่มใช้รูปแบบไม่ตรงที่อนุมัติ) เคยตกไปอยู่ "อื่น ๆ" """
+        self.assertEqual(summary_section({"location": "โครงบท", "part": "body"}),
+                         "เนื้อหา (บท)")
+
+    def test_location_without_a_named_section_falls_back_to_the_part(self):
+        """ตำแหน่งที่ไม่ได้เอ่ยชื่อส่วนไหน ยังรู้จาก part ว่าอยู่ช่วงไหนของเล่ม"""
+        self.assertEqual(summary_section({"location": "ทั้งเล่ม", "part": "end_matter"}),
+                         "เนื้อหา (บท)")   # "ทั้งเล่ม" อยู่ในรายการคำของหมวดเนื้อหา
+        self.assertEqual(summary_section({"location": "", "part": "end_matter"}),
+                         "ส่วนท้ายเล่ม")
+        self.assertEqual(summary_section({"location": "ส่วนนำ", "part": "front_matter"}),
+                         "ส่วนนำ")
+
+    def test_bare_arabic_page_is_body_content(self):
+        """หน้าว่างที่อ่านไม่ออก ตำแหน่งมีแค่ "หน้า 40" — เลขอารบิกแปลว่าอยู่ในเนื้อหา"""
+        self.assertEqual(summary_section({"location": "หน้า 40", "part": "-"}),
+                         "เนื้อหา (บท)")
+        self.assertEqual(summary_section({"location": "ไฟล์แนบ.zip", "part": "-"}), "อื่น ๆ")
+
+
+class IssuesAreOrderedTheWayStaffReadTheBook(unittest.TestCase):
+    """ข้อในรายงานต้องเรียงตามส่วนประกอบของเล่ม แล้วตามเลขหน้าในส่วนนั้น
+
+    เจ้าหน้าที่ไล่แก้เล่มจากหน้าแรกไปหน้าสุดท้าย ถ้าข้อสลับไปมาต้องเปิดกลับไปกลับมา
+    """
+
+    def _order(self, locations):
+        items = [{"location": loc, "part": "front_matter"} for loc in locations]
+        return [it["location"] for it in sorted(items, key=issue_sort_key)]
+
+    def test_sections_come_in_book_order(self):
+        self.assertEqual(
+            self._order(["บทที่ 3 (หน้า 45)", "สารบัญ (หน้า ฉ)", "หน้าปก",
+                         "หน้าลงนามหน้า 1 (หน้า ก)", "บทคัดย่อ (หน้า ง)"]),
+            ["หน้าปก", "หน้าลงนามหน้า 1 (หน้า ก)", "บทคัดย่อ (หน้า ง)",
+             "สารบัญ (หน้า ฉ)", "บทที่ 3 (หน้า 45)"])
+
+    def test_pages_inside_a_section_run_ascending(self):
+        self.assertEqual(
+            self._order(["บทที่ 6 (หน้า 88)", "บทที่ 3 (หน้า 45)", "บทที่ 10 (หน้า 120)"]),
+            ["บทที่ 3 (หน้า 45)", "บทที่ 6 (หน้า 88)", "บทที่ 10 (หน้า 120)"])
+
+    def test_thai_front_pages_sort_by_alphabet_not_by_code_point(self):
+        self.assertEqual(self._order(["บทคัดย่อ (หน้า ฉ)", "บทคัดย่อ (หน้า ง)"]),
+                         ["บทคัดย่อ (หน้า ง)", "บทคัดย่อ (หน้า ฉ)"])
+
+    def test_page_in_a_compound_word_is_not_read_as_the_page_number(self):
+        """"หน้าลงนามหน้า 1 (หน้า ค)" ต้องอ่านได้ ค ไม่ใช่ 1 (เลขอารบิก = เนื้อหา)"""
+        self.assertEqual(
+            self._order(["หน้าลงนามหน้า 2 (หน้า ง)", "หน้าลงนามหน้า 1 (หน้า ค)"]),
+            ["หน้าลงนามหน้า 1 (หน้า ค)", "หน้าลงนามหน้า 2 (หน้า ง)"])
+
+    def test_items_without_a_page_go_last_in_their_section(self):
+        self.assertEqual(
+            self._order(["ส่วนนำ", "บทคัดย่อ (หน้า ง)"]),
+            ["บทคัดย่อ (หน้า ง)", "ส่วนนำ"])
+
 
 class ThaiProgramNeedsBothAbstracts(unittest.TestCase):
     """เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งไทยและอังกฤษ — ขาดภาษาไหนต้องบอกให้ชัด
@@ -1267,18 +1335,38 @@ class PlainSummaryProseTests(unittest.TestCase):
         report = self._report([{
             "part": "front_matter", "location": "สารบัญ (หน้า viii) บทที่ 3",
             "found": 'ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.97): '
-                     '"RESEARCH METHODLOGY" — ต่างที่ "METHODLOGY" → "METHODOLOGY"',
+                     '"RESEARCH METHODLOGY" ต่างที่ "METHODLOGY" ต้องเป็น "METHODOLOGY"',
             "expected": 'ควรเป็น "RESEARCH METHODOLOGY"', "fix": "แก้การสะกด",
         }])
         text = plain_summary(report)
-        self.assertIn("1. ในสารบัญ (หน้า viii) บทที่ 3:", text)
-        self.assertIn('แตกต่างที่ "METHODLOGY"', text)
-        self.assertIn('ให้แก้ไขเป็น: "RESEARCH METHODOLOGY"', text)
+        # หนึ่งจุด = สามบรรทัด: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
+        self.assertIn("1. สารบัญ (หน้า viii) บทที่ 3\n", text)
+        self.assertIn('ต่างที่ "METHODLOGY"', text)
+        self.assertIn('ต้องแก้เป็น "RESEARCH METHODOLOGY"', text)
+        # ค่าที่ถูกต้องต้องบอกครั้งเดียว ไม่ใช่ทั้งในท่อน "พบ" และท่อน "ต้องแก้เป็น"
+        self.assertEqual(text.count("RESEARCH METHODOLOGY"), 1)
+        self.assertNotIn('ต้องเป็น "METHODOLOGY"', text)
         # ห้ามมีเครื่องหมายนำรายการหรือลูกศร และไม่หลงเหลือ (typo, ...)
         self.assertNotIn("- ", text)
         self.assertNotIn("→", text)
         self.assertNotIn("typo", text)
         self.assertNotIn("[", text)
+
+    def test_summary_carries_no_decorative_symbols(self):
+        """ข้อความสรุปถูกคัดลอกไปวางใน Word/อีเมล — สัญลักษณ์ตกแต่งกลายเป็นตัวประหลาด
+
+        เจ้าหน้าที่เจอ ' · ' ที่เคยใช้คั่นสองท่อน กลายเป็นรูปโทรศัพท์ตอนวางในโปรแกรมอื่น
+        (ฟอนต์ไทยไม่มี glyph นั้น จึงหยิบตัวอื่นมาแทน) จึงห้ามมีสัญลักษณ์พวกนี้เลย
+        """
+        report = self._report([{
+            "part": "front_matter", "location": "บทคัดย่อภาษาอังกฤษ (หน้า iv)",
+            "found": 'ชื่อปริญญาแบบย่อในเล่มเขียนว่า "DOCTOR OF PHILOSOPHY"',
+            "expected": 'ต้องเป็น "Ph.D. (TROPICAL MEDICINE)" ตามรูปแบบชื่อย่อ',
+            "fix": "",
+        }])
+        text = plain_summary(report)
+        for symbol in ("·", "—", "–", "→", "↔", "•", "≤", "✆"):
+            self.assertNotIn(symbol, text, f"ยังมีสัญลักษณ์ {symbol} ในข้อความสรุป")
 
     def test_same_fix_reported_twice_is_merged(self):
         # ชื่อบทเดียวกันในเนื้อหา ถูกรายงานทั้งตอนเทียบสารบัญและเทียบประกาศ = จุดเดียว
@@ -1295,7 +1383,7 @@ class PlainSummaryProseTests(unittest.TestCase):
         }]
         text = plain_summary(self._report(dup))
         self.assertIn("ทั้งหมด 1 จุด", text)
-        self.assertEqual(text.count("ในบทที่ 2 (หน้า 6)"), 1)
+        self.assertEqual(text.count("บทที่ 2 (หน้า 6)"), 1)
 
     def test_same_typo_in_toc_and_body_stays_two_points(self):
         # ตำแหน่งต่างกัน (สารบัญ vs เนื้อหา) แม้ค่าที่ต้องแก้เหมือนกัน = สองจุดจริง

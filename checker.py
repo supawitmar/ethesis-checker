@@ -672,7 +672,7 @@ def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule
     rep.add_verification("ชื่อนักศึกษา", loc,
                          "fail" if zone == "RED" else "pending", "; ".join(reasons))
     rep.add(zone, "front_matter", loc,
-            f'{label}บนหน้านี้พิมพ์ว่า "{seen}" — ' + " · ".join(reasons),
+            f'{label}บนหน้านี้พิมพ์ว่า "{seen}" ' + " และ ".join(reasons),
             f'{label}ในหน้านี้ต้องเป็น{_STYLE_LABEL[want_case]}'
             + ("" if allow_title else " และไม่มีคำนำหน้านาม")
             + f' คือ "{want_text}"',
@@ -780,7 +780,7 @@ def _page_count_issue(count_wrong, last_arabic):
     เดิมฟ้องหน้าละข้อ = ข้อความเดียวกันสองข้อ · ยุบเป็นข้อเดียวได้ แต่ต้องบอก
     ให้ครบว่าเป็นหน้าไหนบ้าง (และถ้าสองหน้าระบุคนละเลข ต้องบอกว่าหน้าไหนระบุเท่าไร)
     """
-    where = " · ".join(lbl for lbl, _num in count_wrong)
+    where = " และ ".join(lbl for lbl, _num in count_wrong)
     stated = {num for _lbl, num in count_wrong}
     # นโยบายเจ้าหน้าที่ (ส.ค. 2569): ให้เป็น "สีส้ม" เสมอ ไม่ฟันธงแดง
     # เพราะ "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
@@ -791,9 +791,9 @@ def _page_count_issue(count_wrong, last_arabic):
         found = (f"ระบุจำนวนหน้า {stated.pop()} "
                  f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
     else:
-        detail = " · ".join(f"{lbl} ระบุ {num}" for lbl, num in count_wrong)
+        detail = " และ ".join(f"{lbl} ระบุ {num}" for lbl, num in count_wrong)
         found = (f"ระบุจำนวนหน้าไม่ตรงกัน: {detail} "
-                 f"— เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
+                 f"ส่วนเลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
     return zone, where, found
 
 
@@ -833,7 +833,7 @@ def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE"):
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(_committee_names(expected), start=1))
     rep.add_human(loc, "ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด "
-                       f"— โปรดทานรายชื่อกับข้อมูลอนุมัติ (บฑ.) คือ {names}", rule_id)
+                       f"โปรดทานรายชื่อกับข้อมูลอนุมัติ (บฑ.) คือ {names}", rule_id)
 
 
 def _report_committee_count(rep, expected, found_names, loc,
@@ -860,7 +860,7 @@ def _report_committee_count(rep, expected, found_names, loc,
               or "ไม่พบชื่อเลย")
     rep.add("ORANGE", "front_matter", loc,
             f"นับรายชื่อ{label}บนหน้านี้ได้ {len(found_names)} คน "
-            f"แต่ข้อมูลอนุมัติมี {want} คน — ระบบอ่านได้ว่า {listed}",
+            f"แต่ข้อมูลอนุมัติมี {want} คน ระบบอ่านได้ว่า {listed}",
             f"ต้องมี{label} {want} คนตามข้อมูลอนุมัติ (บฑ.)",
             f"ตรวจว่าจำนวน{label}บนหน้านี้ครบหรือไม่ "
             "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
@@ -943,7 +943,7 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
         diff = describe_diff(near, want)
         found_msg = f'{box} เขียนว่า "{near}"'
         if diff:
-            found_msg += f' — ต่างที่ {diff}'
+            found_msg += f' ต่างที่ {diff}'
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     rep.add("ORANGE", "front_matter", loc, found_msg,
@@ -1013,7 +1013,7 @@ def _report_missing_abstract_language(rep, has_en, has_th, en_loc="", th_loc="")
         found.append(f"ภาษาไทย ({th_loc})" if th_loc else "ภาษาไทย")
     if has_en:
         found.append(f"ภาษาอังกฤษ ({en_loc})" if en_loc else "ภาษาอังกฤษ")
-    detail = "บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อ" + "และ".join(missing)
+    detail = "บทคัดย่อไม่ครบถ้วน ขาดบทคัดย่อ" + "และ".join(missing)
     if found:
         detail += " (พบเฉพาะบทคัดย่อ" + "และ".join(found) + ")"
     rep.add("RED", "front_matter", "บทคัดย่อ", detail,
@@ -1113,7 +1113,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
 
         _check_signature_institution(
             rep, kind, bottom_text, A, english_book,
-            f"{page_label} — ", f" ({page_ref(idx)})")
+            f"{page_label} ", f" ({page_ref(idx)})")
 
     return handled_any
 
@@ -1269,7 +1269,7 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             names, degrees = split_abstract_committee(block)
             if not names:
                 continue
-            loc = f"บทคัดย่อ ({page_ref(ai)}) — คณะกรรมการที่ปรึกษา"
+            loc = f"บทคัดย่อ ({page_ref(ai)}) รายชื่อคณะกรรมการที่ปรึกษา"
 
             # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
             if "(" in block or ")" in block:
@@ -1460,7 +1460,7 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
             rep.add("RED", "front_matter", "ส่วนนำ",
                     "เลขหน้าส่วนนำไม่ต่อเนื่อง: " + "; ".join(problems[:5]) + more,
                     f"เลขหน้าส่วนนำต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
-                    "แก้เลขหน้าส่วนนำให้เรียงต่อเนื่องทีละหน้า", "PAGE.NUMBERING")
+                    "", "PAGE.NUMBERING")
 
     if unread:
         def _after_ref(idx):
@@ -1602,10 +1602,69 @@ SUMMARY_SECTIONS = [
     ("กิตติกรรมประกาศ", "กิตติกรรม"),
     ("บทคัดย่อ", "บทคัดย่อ"),
     ("สารบัญ", "สารบัญ"),
-    ("เนื้อหา (บท)", r"บทที่|เนื้อหา|ทั้งเล่ม"),
+    # ข้อที่พูดถึงส่วนนำทั้งก้อน (เช่น ลำดับเลขหน้า ก ข ค) ไม่ได้เจาะจงหน้าใดหน้าหนึ่ง
+    # จึงมาท้ายกลุ่มส่วนนำ หลังหน้าที่เจาะจงได้ทั้งหมด
+    ("ส่วนนำ", "ส่วนนำ"),
+    ("เนื้อหา (บท)", r"บทที่|เนื้อหา|ทั้งเล่ม|โครงบท"),
     ("ส่วนท้ายเล่ม", r"บรรณานุกรม|อ้างอิง|ภาคผนวก|ประวัติ"),
 ]
 SUMMARY_SECTION_ORDER = [name for name, _ in SUMMARY_SECTIONS] + ["อื่น ๆ"]
+SUMMARY_SECTION_INDEX = {name: i for i, name in enumerate(SUMMARY_SECTION_ORDER)}
+
+# ถ้าตำแหน่งไม่ได้เอ่ยชื่อส่วนใดเลย ยังรู้จาก part ได้ว่าอยู่ช่วงไหนของเล่ม
+# (เดิมข้อพวกนี้ตกไปกอง "อื่น ๆ" ทั้งที่รู้อยู่แล้วว่าต้องไปแก้ตรงไหน)
+_PART_SECTION = {
+    "front_matter": "ส่วนนำ",
+    "body": "เนื้อหา (บท)",
+    "body/end": "เนื้อหา (บท)",
+    "end_matter": "ส่วนท้ายเล่ม",
+}
+
+# ---------- ลำดับของข้อในรายงาน ----------
+# เจ้าหน้าที่ไล่แก้เล่มจากหน้าแรกไปหน้าสุดท้าย ข้อในรายงานจึงต้องเรียงแบบเดียวกัน
+# เลขหน้าอยู่ในข้อความตำแหน่งอยู่แล้ว (page_ref เขียนเป็น "(หน้า X)") จึงอ่านกลับออกมา
+# แทนที่จะต้องไปเติมพารามิเตอร์เลขหน้าให้ rep.add ทุกจุดเรียกทั่วทั้งไฟล์
+_PAGE_BUCKET_FRONT = 1
+_PAGE_BUCKET_BODY = 2
+_PAGE_TOKEN = r"\d{1,4}|[ivxlcdm]{1,10}|[ก-ฮ]"
+# แบบมีวงเล็บมาก่อนเสมอ — เป็นรูปแบบที่ page_ref สร้าง และเป็นหน้าที่ต้องไปแก้จริง
+_LOC_PAGE_PAREN = re.compile(rf"\(หน้า\s*({_PAGE_TOKEN})\)", re.I)
+# ไม่มีวงเล็บ: ต้องไม่ใช่ "หน้า" ที่เป็นส่วนท้ายของคำอื่น (เช่น "หน้าลงนามหน้า 1")
+# มิฉะนั้นเลข 1 ของ "หน้าลงนามหน้า 1" จะถูกอ่านเป็นเลขหน้าเนื้อหา
+_LOC_PAGE_PLAIN = re.compile(rf"(?:^|[\s(:])หน้า\s*({_PAGE_TOKEN})(?![ก-๙\w])", re.I)
+_LOC_PAGE_RANGE = re.compile(r"ช่วงเลขหน้า\s*(\d{1,4})")
+
+
+def _issue_page_position(location):
+    """(กลุ่มเลขหน้า, ลำดับหน้า) ของข้อ — None ถ้าตำแหน่งไม่ได้อ้างเลขหน้า
+
+    กลุ่มแยกส่วนนำ (ก ข ค / i ii iii) ออกจากเนื้อหา (1 2 3) เพราะเลขซ้ำกันได้
+    """
+    text = location or ""
+    found = (_LOC_PAGE_PAREN.search(text) or _LOC_PAGE_PLAIN.search(text)
+             or _LOC_PAGE_RANGE.search(text))
+    if not found:
+        return None
+    style, value = _page_label_order(found.group(1))
+    if not style:
+        return None
+    bucket = _PAGE_BUCKET_BODY if style == "arabic" else _PAGE_BUCKET_FRONT
+    return bucket, value
+
+
+def issue_sort_key(issue):
+    """เรียงตามส่วนประกอบของเล่มก่อน แล้วจึงตามเลขหน้าภายในส่วนนั้น
+
+    เรียงด้วยเลขหน้าล้วนไม่ได้ เพราะบางข้ออ้างสองหน้าพร้อมกัน (เช่น ชื่อบทที่ผิด
+    ทั้งในสารบัญและในเนื้อหา) ถ้ายึดเลขหน้าอย่างเดียว ข้อของส่วนเดียวกันจะถูกแทรก
+    สลับกันจนรวมเป็นกลุ่มไม่ได้ — ยึดส่วนประกอบก่อนจึงได้ทั้ง "ตามลำดับส่วน" และ
+    "ตามลำดับหน้า" พร้อมกัน ข้อที่ไม่มีเลขหน้าให้อยู่ท้ายกลุ่มของตัวเอง
+    """
+    position = _issue_page_position(issue.get("location"))
+    section = SUMMARY_SECTION_INDEX.get(summary_section(issue), len(SUMMARY_SECTION_ORDER))
+    if position is None:
+        return (section, 9, 10 ** 6)
+    return (section, position[0], position[1])
 
 # ตัดข้อความเชิงเทคนิค/คำต่อรองออกจากข้อความสรุป (รายละเอียดในรายงานยังคงเดิมทุกตัวอักษร)
 _SUMMARY_NOISE = re.compile(
@@ -1624,15 +1683,23 @@ def summary_tidy(text):
 def summary_section(issue):
     """ส่วนของเล่มที่ต้องไปแก้ — ใช้ส่วนที่ถูกเอ่ยถึงก่อนในตำแหน่ง
 
-    เช่น "สารบัญ (หน้า viii) ↔ บทคัดย่อภาษาไทย" ต้องไปแก้ที่สารบัญ ไม่ใช่บทคัดย่อ
+    เช่น "สารบัญ (หน้า viii) กับบทคัดย่อภาษาไทย" ต้องไปแก้ที่สารบัญ ไม่ใช่บทคัดย่อ
+    ถ้าตำแหน่งไม่เอ่ยชื่อส่วนไหนเลย (เช่น "โครงบท", "หน้า 40") ใช้ part แล้วค่อยใช้
+    ชนิดเลขหน้าเป็นตัวบอก — เลขอารบิกแปลว่าอยู่ในเนื้อหา
     """
-    text = f"{issue.get('location', '')} {issue.get('part', '')}"
+    text = issue.get('location', '') or ''
     best, best_at = None, len(text) + 1
     for name, pattern in SUMMARY_SECTIONS:
         found = re.search(pattern, text)
         if found and found.start() < best_at:
             best, best_at = name, found.start()
-    return best or "อื่น ๆ"
+    if best:
+        return best
+    by_part = _PART_SECTION.get(issue.get('part') or '')
+    if by_part:
+        return by_part
+    position = _issue_page_position(text)
+    return "เนื้อหา (บท)" if position and position[0] == _PAGE_BUCKET_BODY else "อื่น ๆ"
 
 
 def issues_to_fix(report, failed=None, passed=None):
@@ -1674,17 +1741,29 @@ def _corrected_value(issue):
     return match.group(1) if match else ""
 
 
-def _prose_found(found):
-    """แปลงข้อความ "ที่พบ" ให้เป็นสำนวนคน ไม่ใช้ลูกศร
+def _nonbold_heading_text(nonbold, limit=3):
+    """ข้อความ "หัวข้อหลักไม่เป็นตัวหนา" — ไม่ไล่ชื่อทุกหัวข้อเมื่อทั้งหน้าไม่หนา
 
-    describe_diff ต่อท้ายว่า '— ต่างที่ "A" → "B"' ซึ่งมีเครื่องหมายลูกศร จึงตัดค่า
-    ที่ถูกต้อง (→ "B") ออก เพราะจะบอกครบอีกทีในท่อน "ให้แก้ไขเป็น" และเปลี่ยน
-    "— ต่างที่" เป็นคำเชื่อม "แตกต่างที่"
+    เล่มที่ไม่ได้ตั้งตัวหนาเลย จะได้รายชื่อยาว 14 หัวข้อต่อกันเป็นพืด แล้วตามด้วย
+    ประโยคกฎที่พูดเรื่องเดียวกันอีกรอบ เจ้าหน้าที่อ่านแล้ววนไปวนมา ถ้าไม่หนาแค่
+    ไม่กี่หัวข้อ การบอกชื่อยังช่วยให้หาเจอ จึงบอกครบเมื่อไม่เกิน limit หัวข้อ
+
+    ใส่เครื่องหมายคำพูดรอบชื่อหัวข้อ = "ข้อความที่คัดมาจากเล่ม" ไม่ใช่คำของระบบ
+    (รายงานอังกฤษจะได้ไม่แปลชื่อหัวข้อของเล่ม)
+    """
+    if len(nonbold) > limit:
+        return f"หัวข้อหลักในสารบัญไม่เป็นตัวหนา {len(nonbold)} หัวข้อ"
+    return "หัวข้อหลักไม่เป็นตัวหนา: " + ", ".join(f'"{t}"' for t in nonbold)
+
+
+def _prose_found(found):
+    """ข้อความ "ที่พบ" สำหรับข้อความสรุป — ตัดค่าที่ถูกต้องที่ถูกบอกซ้ำอยู่แล้วออก
+
+    describe_diff ต่อท้ายว่า 'ต่างที่ "A" ต้องเป็น "B"' ซึ่ง "B" คือค่าเดียวกับที่
+    บรรทัด "ต้องแก้เป็น" บอกอยู่แล้ว จึงตัดออกให้เหลือแค่จุดที่ผิด
     """
     found = summary_tidy(found)
-    found = re.sub(r'\s*→\s*"[^"]*"', '', found)
-    found = re.sub(r'\s*→\s*\S+', '', found)
-    found = re.sub(r'\s*[—–-]\s*ต่างที่', ' แตกต่างที่', found)
+    found = re.sub(r'\s*ต้องเป็น\s*"[^"]*"', '', found)
     return re.sub(r'\s{2,}', ' ', found).strip()
 
 
@@ -1695,24 +1774,36 @@ def _prose_location(location):
     return re.sub(r"\s{2,}", " ", loc).strip()
 
 
+SUMMARY_INDENT = "   "
+
+
 def _summary_sentence(issue):
-    """ประโยคเดียวต่อหนึ่งจุด: "ใน<ตำแหน่ง>: <ที่พบ> ให้แก้ไขเป็น: <ค่าที่ควรเป็น>" """
-    loc = _prose_location(issue.get("location"))
+    """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
+
+        3. สารบัญ (หน้า ฉ) บทที่ 3
+           ชื่อบทในเล่มเขียนว่า "ระเบียบวิธีวิจัย"
+           ต้องแก้เป็น "วิธีการดำเนินการวิจัย"
+
+    ที่ต้องแยกบรรทัด ไม่ใช่แค่ความสวยงาม — ตัวแปลอังกฤษเทียบ "ทั้งข้อความ" กับกฎ
+    ก่อนเสมอ ถ้ายัดสามท่อนไว้ในบรรทัดเดียว จะไม่มีกฎไหนตรงทั้งประโยค แล้วตกไปใช้
+    การแทนที่แบบเศษคำซึ่งให้ผลเพี้ยน (เคยได้ "page after page 93 Change to:Page 94")
+    พอแยกบรรทัด แต่ละบรรทัดกลายเป็นข้อความเดี่ยวที่มีกฎเต็มประโยครองรับอยู่แล้ว
+    """
+    lines = [_prose_location(issue.get("location"))]
     found = _prose_found(issue.get("found"))
-    if loc and found:
-        sentence = f"ใน{loc}: {found}"
-    else:
-        sentence = f"ใน{loc}" if loc else found
+    if found:
+        lines.append(found)
     value = _corrected_value(issue)
     if value:
-        return f'{sentence} ให้แก้ไขเป็น: "{value}"'.strip()
-    # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ต่อท้าย expected/fix ตามเดิม
-    # โดยไม่ตัดคำนำ "ควรเป็น/ต้องเป็น" ออก เพราะในกรณีนี้มันช่วยให้อ่านรู้เรื่อง
-    # คั่นด้วย " · " ไม่ใช่ช่องว่างเปล่า ๆ — อ่านง่ายกว่า และทำให้แยก "สิ่งที่พบ" กับ
-    # "สิ่งที่ต้องเป็น" ออกจากกันได้ (ตัวแปลอังกฤษต้องแปลทีละท่อน ถ้าต่อกันด้วย
-    # ช่องว่างจะแยกไม่ออกว่าท่อนไหนจบตรงไหน แล้วต้องตกไปใช้การแทนที่แบบเศษคำ)
-    directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
-    return f"{sentence} · {directive}".strip() if directive else sentence.strip()
+        lines.append(f'ต้องแก้เป็น "{value}"')
+    else:
+        # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ใช้ประโยค expected/fix เต็ม ๆ
+        # ซึ่งเขียนไว้ในรูป "ต้องเป็น ..." อยู่แล้ว จึงไม่ต้องเติมคำนำอะไรอีก
+        directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+        if directive:
+            lines.append(directive)
+    kept = [line for line in lines if line]
+    return f"\n{SUMMARY_INDENT}".join(kept)
 
 
 def _dedupe_issues(items):
@@ -1840,9 +1931,11 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
 def describe_diff(found, expected):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
 
-    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น "REQUIREMENT" → "REQUIREMENTS")
+    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
     - ไทย/คำเดียว: เทียบระดับตัวอักษร (เช่น ขาด "อ")
     คืน '' ถ้าต่างกันมากจนการชี้จุดไม่ช่วย (ให้ผู้ใช้ดูข้อความเต็มที่ให้ไว้แทน)
+
+    เขียนเป็นคำพูด ไม่ใช้ลูกศร — เจ้าหน้าที่สั่งว่าคำอธิบายไม่ต้องใช้สัญลักษณ์เยอะ
     """
     found_s, expected_s = soft(found), soft(expected)
     if not found_s or not expected_s or norm(found_s) == norm(expected_s):
@@ -1858,12 +1951,12 @@ def describe_diff(found, expected):
                 continue
             got, want = join(a[i1:i2]), join(b[j1:j2])
             if not want:
-                parts.append(f'"{got}" เกินมา (ควรตัดออก)')
+                parts.append(f'มี "{got}" เกินมา')
             elif not got:
                 parts.append(f'ขาด "{want}"')
             else:
-                parts.append(f'"{got}" → "{want}"')
-        return "; ".join(parts)
+                parts.append(f'"{got}" ต้องเป็น "{want}"')
+        return " และ ".join(parts)
 
     # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
     # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
@@ -1883,18 +1976,18 @@ def mismatch_detail(label, compared, expected=''):
     # เขียนให้เหมือนคนพูด: บอกว่า "ในเล่มเขียนว่าอะไร" ก่อน แล้วค่อยบอกว่าต่างยังไง
     # (ของเดิมขึ้นต้นด้วยคำตัดสินแบบระบบ เช่น "ชื่อบทข้อความไม่ตรง:" และมีคะแนน
     #  ความใกล้เคียงซึ่งเจ้าหน้าที่เอาไปใช้อะไรไม่ได้)
-    if compared['status'] == 'case':
-        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}" — ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
-    elif compared['status'] == 'typo':
-        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}" — พิมพ์ผิดเล็กน้อย'
-    else:
-        detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}"'
+    detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}"'
     # ชี้จุดต่างเฉพาะเมื่อใกล้เคียงกัน (typo/ตัวพิมพ์) — ถ้าเป็นคนละข้อความ
     # (mismatch) การไล่ทีละตัวอักษรจะรกและสับสน ให้ดูข้อความที่ถูกต้องแทน
-    if expected and compared['status'] in ('typo', 'case'):
-        diff = describe_diff(compared['actual'], expected)
-        if diff:
-            detail += f' — ต่างที่ {diff}'
+    diff = describe_diff(compared['actual'], expected) \
+        if expected and compared['status'] in ('typo', 'case') else ''
+    # ถ้าชี้จุดต่างได้แล้ว ไม่ต้องบอกซ้ำว่า "พิมพ์ผิดเล็กน้อย" — จุดต่างบอกอยู่ในตัว
+    if diff:
+        detail += f' ต่างที่ {diff}'
+    elif compared['status'] == 'case':
+        detail += ' ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
+    elif compared['status'] == 'typo':
+        detail += ' พิมพ์ผิดเล็กน้อย'
     return detail
 
 
@@ -1909,7 +2002,7 @@ def title_mismatch_detail(label, compared, expected=''):
     if expected and compared['status'] in ('typo', 'case'):
         diff = describe_diff(compared['actual'], expected)
         if diff:
-            detail += f' — ต่างที่ {diff}'
+            detail += f' ต่างที่ {diff}'
     return detail
 
 
@@ -2327,7 +2420,9 @@ class Report:
         ตั้งค่า API key — เป็นเรื่องการติดตั้งเซิร์ฟเวอร์ นักศึกษาทำอะไรกับเล่มก็ไม่หาย)
         """
         rule_id = rule_id or DEFAULT_RULE_BY_PART.get(part, "FORM.REQUIRED")
-        fix = fix or f"แก้ไขให้เป็นไปตามข้อกำหนด: {expected}"
+        # ไม่เติม "แก้ไขให้เป็นไปตามข้อกำหนด: <expected>" อัตโนมัติอีกแล้ว — มันคือการ
+        # พูดซ้ำบรรทัด "ควรเป็น" ที่อยู่เหนือมันคำต่อคำ ทำให้การ์ดยาวขึ้นโดยไม่ได้ข้อมูล
+        # เพิ่ม ข้อที่มีวิธีแก้จริงจะส่ง fix มาเอง ข้อที่ไม่ส่งก็ไม่ต้องมีบรรทัดนี้
         self.zones[zone].append({
             "part": part,
             "location": loc,
@@ -2463,7 +2558,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             a, b = seq[k-1][1], seq[k][1]
             if b != a + 1:
                 rep.add("RED", "body/end", f"ช่วงเลขหน้า {a} ถึง {b}", f"เลขหน้ากระโดดจาก {a} ไป {b}",
-                        "เลขหน้าต้องต่อเนื่อง ไม่ซ้ำ ไม่ข้าม", "", "PAGE.NUMBERING")
+                        f"หน้าถัดจากหน้า {a} ต้องเป็นหน้า {a + 1}",
+                        f"แก้เลขหน้าหลังหน้า {a} ให้เรียงต่อเนื่อง", "PAGE.NUMBERING")
     last_arabic = max(printed.values()) if printed else None
 
     # หน้าว่าง: ถ้ายืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ เป็นเพียงข้อสังเกต
@@ -2510,12 +2606,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         matched = any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines)
         if not matched:
             found_lab = _extract_page_label(pages[i2])
-            what = f'พบเลขหน้า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
+            what = f'หน้านี้พิมพ์เลขหน้าว่า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
             rep.add(FRONT_FAILURE_ZONE, "front_matter", f"หน้าลงนามหน้า {k+1} ({page_ref(i2)})",
                     what,
                     f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
-                    f"แก้เลขหน้าหน้าลงนามหน้า {k+1} ให้เป็น {lab_th} (ไทย) หรือ {lab_en} (อังกฤษ)",
-                    "PAGE.NUMBERING")
+                    "", "PAGE.NUMBERING")
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -2622,7 +2717,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "หัวข้อบทในสารบัญต้องระบุเลขหน้า", "เพิ่มเลขหน้าให้ตรงกับบทจริง", "FRONT.TOC")
                 elif BODY_RULES['check_toc_page_numbers'] and pno is not None and t_pno != pno:
                     # เลขหน้าบทในสารบัญไม่ตรงหน้าจริง = ส้ม ให้เจ้าหน้าที่ตัดสิน
-                    rep.add("ORANGE", "body", f"สารบัญ ({page_ref(toc_page_idx)}) ↔ บทที่ {cn} ({page_ref(ppage)})",
+                    rep.add("ORANGE", "body", f"สารบัญ ({page_ref(toc_page_idx)}) กับบทที่ {cn} ({page_ref(ppage)})",
                             f"สารบัญระบุหน้า {t_pno} แต่บทอยู่จริงหน้า {pno}",
                             f"เลขหน้าบทในสารบัญควรเป็น {pno}",
                             "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ", "FRONT.TOC")
@@ -2649,10 +2744,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if nonbold:
                         rep.add(
                             BOLD_FAILURE_ZONE, "front_matter", f"สารบัญ ({page_ref(toc_idx)})",
-                            # ใส่เครื่องหมายคำพูดให้ชัดว่าเป็น "ข้อความที่คัดมาจากเล่ม"
-                            # ไม่ใช่คำของระบบ (รายงานอังกฤษจะได้ไม่แปลชื่อหัวข้อของเล่ม)
-                            "หัวข้อหลักไม่เป็นตัวหนา: "
-                            + ", ".join(f'"{t}"' for t in nonbold),
+                            _nonbold_heading_text(nonbold),
                             "ACKNOWLEDGEMENTS, ABSTRACT, LIST OF ..., ชื่อบท, REFERENCE(S) และ BIOGRAPHY ต้องเป็นตัวหนา",
                             "ตั้งหัวข้อระดับหลักในสารบัญเป็นตัวหนา",
                             "FORMAT.BOLD",
@@ -2729,7 +2821,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             zone = ("ORANGE" if all(s[0] == 'variant' for s in (toc_bad, body_bad) if s)
                     else "RED")
             if both:
-                where = f"บทที่ {cn} — สารบัญ ({page_ref(toc_idx)}) และในเนื้อหา ({page_ref(body_idx)})"
+                where = f"บทที่ {cn} ในสารบัญ ({page_ref(toc_idx)}) และในเนื้อหา ({page_ref(body_idx)})"
                 part = "front_matter"
             elif toc_bad:
                 where, part = f"สารบัญ ({page_ref(toc_idx)}) บทที่ {cn}", "front_matter"
@@ -2741,7 +2833,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         f'สารบัญพิมพ์ "{toc_title}" ส่วนเนื้อหาพิมพ์ "{body_title}"')
                 rep.add("ORANGE", part, where,
                         f'ชื่อบทสะกดตามคู่มือ: {seen}',
-                        f'ประกาศใช้ "{expected_title}" แต่คู่มือแสดงแบบที่พบ — เจ้าหน้าที่ยืนยันได้',
+                        f'ประกาศใช้ "{expected_title}" แต่คู่มือแสดงแบบที่พบ เจ้าหน้าที่ยืนยันได้',
                         "ยืนยันตามคู่มือ หรือแก้ให้ตรงประกาศ", rule_id)
                 continue
 
@@ -2896,14 +2988,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if len(kws) > 5:
                         rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(sp)})",
                                 f"Keywords {len(kws)} คำ", "ไม่เกิน 5 คำตามประกาศ",
-                                "ตัดให้เหลือ ≤5", "FRONT.ABSTRACT")
+                                "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.ABSTRACT")
                     done_kw = True
                     break
             if done_kw:
                 break
 
     if count_missing:
-        rep.add(FRONT_FAILURE_ZONE, "front_matter", " · ".join(count_missing),
+        rep.add(FRONT_FAILURE_ZONE, "front_matter", " และ ".join(count_missing),
                 "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
                 "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
     if count_wrong:
@@ -2975,7 +3067,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 diff = describe_diff(snippet, expected_text)
                 found_msg = f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})"
                 if diff:
-                    found_msg += f" — ต่างที่ {diff}"
+                    found_msg += f" ต่างที่ {diff}"
             else:
                 found_msg = f"ไม่พบข้อความบังคับ ({label}) บนหน้าปก"
             rep.add(
@@ -2989,8 +3081,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             rep.add("RED", "front_matter", "หน้าปก", f"เล่มเป็น {doc_type}",
                     f"ข้อมูลอนุมัติ: {A['doc_type']}", "ตรวจว่าใช้ template ประเภทถูก", "FORM.APPROVED_MATCH")
         if chapters_mode == "strict" and A.get("format") and str(option) != str(A["format"]):
-            rep.add("RED", "body", "โครงบท", f"เล่มเป็นรูปแบบ {option}",
-                    f"ข้อมูลอนุมัติ: รูปแบบ {A['format']}", "", "FORM.APPROVED_MATCH")
+            # บอกให้ครบว่า "เล่มเป็นแบบไหน / ต้องเป็นแบบไหน / แก้ตรงไหนได้บ้าง"
+            # ของเดิมบอกแค่สองค่าเทียบกัน คนอ่านไม่รู้ว่าต้องแก้ฝั่งไหน
+            rep.add("RED", "body", "โครงบท", f"เล่มจัดบทตามรูปแบบ {option}",
+                    f"ข้อมูลอนุมัติระบุรูปแบบ {A['format']}",
+                    f"แก้เล่มให้เป็นรูปแบบ {A['format']} หรือแก้ข้อมูลอนุมัติให้เป็นรูปแบบ {option}",
+                    "FORM.APPROVED_MATCH")
 
         thai_book = A.get("program_language") == "thai"
 
@@ -3328,7 +3424,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                           "ชื่อที่ 1 (Major Advisor/Chair) แถวเดียวกับนักศึกษา คอลัมน์ขวา, ชื่อ 2-5 ไล่ลงขวา, ชื่อ 6 แถวเดียวกับชื่อ 5 ฝั่งซ้าย, 7-9 ไล่ขึ้น, ช่องที่เหลือถมขาว")
         # คุณวุฒิใต้ชื่อกรรมการ: ระบบตรวจว่า "มี" ครบทุกคนแล้ว แต่ไม่ตรวจเนื้อหาคุณวุฒิ
         rep.add_human("ความถูกต้องของเนื้อหาคุณวุฒิ (Degree/Subject) ใต้ชื่อกรรมการ",
-                      "เทียบกับ บฑ.1/บฑ.2 — ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจเนื้อหา")
+                      "เทียบกับ บฑ.1/บฑ.2 ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจเนื้อหา")
 
         prog = A.get("program_language", "")
         if prog == "international":
@@ -3389,7 +3485,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
                         diff = describe_diff(head, section_label)
                         if diff:
-                            found_msg += f" — ต่างที่ {diff}"
+                            found_msg += f" ต่างที่ {diff}"
                         rep.add(
                             "RED", "front_matter", f"สารบัญ ({page_ref(typo_idx)})",
                             found_msg,
@@ -3423,7 +3519,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         if page_terms and set(toc_terms) != set(page_terms):
                             rep.add(
                                 "RED", "front_matter",
-                                f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ "
+                                f"สารบัญ ({page_ref(entry['source_page_idx'])}) กับ"
                                 f"{section_label} ({page_ref(actual_page_idx)})",
                                 f'สารบัญใช้คำ "{toc_terms[0]}" แต่หน้าอ้างอิงจริงใช้ "{page_terms[0]}"',
                                 f'คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "{page_terms[0]}"',
@@ -3440,7 +3536,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     continue
                 actual_label = page_labels.get(actual_page_idx, "")
                 if actual_label and entry["page_label"] != actual_label:
-                    location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) ↔ "
+                    location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) กับ"
                                 f"{section_label} ({page_ref(actual_page_idx)})")
                     # เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี ให้เจ้าหน้าที่
                     # ตัดสิน (ถ้าไม่มีจุดผิดสำคัญกว่าก็ผ่านได้) กรณีภาคผนวกหลายชุดแค่ใช้
@@ -3476,11 +3572,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     )
 
     _p("สรุปผล")
-    part_order = {"front_matter": 0, "body": 1, "body/end": 2, "end_matter": 3, "-": 4}
+    # เรียงตามลำดับที่เจ้าหน้าที่ไล่แก้เล่มจริง (ส่วนประกอบตามลำดับ แล้วเลขหน้า)
+    # ไม่ใช่ตาม part กว้าง ๆ อย่างเดิมที่ข้อของหน้าเดียวกันกระจัดกระจาย
     for z in rep.zones:
-        rep.zones[z].sort(key=lambda x: part_order.get(x["part"], 9))
         for it in rep.zones[z]:
             it["category"] = classify(it)
+            it["section"] = summary_section(it)
+        rep.zones[z].sort(key=issue_sort_key)
 
     result = {
         "context": {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
@@ -3492,6 +3590,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         "human_checklist": rep.human_checklist,
         "not_checked": NOT_CHECKED,
         "verification": rep.verification,
+        # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
+        "section_order": SUMMARY_SECTION_ORDER,
     }
     result["plain_summary"] = plain_summary(result)
     return result
