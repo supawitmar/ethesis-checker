@@ -409,6 +409,10 @@ var CATMAP = {
 };
 
 var TR = [
+  // ---- การจัดวางชื่อเรื่องบนหน้าบทคัดย่อ (ประโยคเต็ม) ----
+  [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: (.+)/g, 'The thesis title on the abstract page is not left-aligned: $1'],
+  [/ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา/g, 'The thesis title on the abstract page must be left-aligned, not centred or right-aligned'],
+  [/แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย/g, 'Change the alignment of the thesis title on the abstract page to left'],
   // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
   [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาอังกฤษ \(พบเฉพาะบทคัดย่อภาษาไทย \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete — the English abstract is missing (only the Thai abstract was found, page $1)'],
   [/บทคัดย่อไม่ครบถ้วน — ขาดบทคัดย่อภาษาไทย \(พบเฉพาะบทคัดย่อภาษาอังกฤษ \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete — the Thai abstract is missing (only the English abstract was found, page $1)'],

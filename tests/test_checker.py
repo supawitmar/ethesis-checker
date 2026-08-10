@@ -7,6 +7,7 @@ from checker import (
     N_APPENDIX,
     Report,
     summary_section,
+    _report_abstract_title_format,
     _report_missing_abstract_language,
     _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
@@ -707,6 +708,55 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("Doctor of Philosophy (Tropical Medicine)"), "Tropical Medicine")
         self.assertEqual(_degree_subject("ปรัชญาดุษฎีบัณฑิต (อายุรศาสตร์เขตร้อน)"), "อายุรศาสตร์เขตร้อน")
         self.assertEqual(_degree_subject("No Parens Here"), "")
+
+
+class AbstractTitleMustBeLeftAligned(unittest.TestCase):
+    """ชื่อเรื่องบนหน้าบทคัดย่อต้องชิดซ้าย ไม่ใช่กึ่งกลาง/ชิดขวา
+
+    ระบบตรวจ PDF จึงไม่มีค่า "การจัดย่อหน้า" ให้อ่าน ต้องเทียบขอบซ้ายของบรรทัด
+    ชื่อเรื่องกับขอบซ้ายของเนื้อความในหน้าเดียวกัน (พิกัดจริงจากเล่มที่ 9)
+    """
+
+    BODY = {"text": "B" * 90, "x0": 70.9, "bold_ratio": 0.0}
+    STUDENT = {"text": "CHRISTI KUSUMA WARDANI 6238285 SHHS/D", "x0": 70.9,
+               "bold_ratio": 0.0}
+
+    def _run(self, *title_lines):
+        rep = Report()
+        lines = list(title_lines) + [self.STUDENT, self.BODY]
+        _report_abstract_title_format(rep, lines, "บทคัดย่อ (หน้า iv)")
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_left_aligned_title_passes(self):
+        self.assertEqual(
+            self._run({"text": "WOMEN'S AUTONOMY IN THE PROCESS OF SEEKING CARE FOR",
+                       "x0": 70.9, "bold_ratio": 0.0},
+                      {"text": "OBSTETRIC COMPLICATIONS", "x0": 70.9,
+                       "bold_ratio": 0.0}),
+            [])
+
+    def test_centred_line_is_reported(self):
+        found = self._run(
+            {"text": "WOMEN'S AUTONOMY IN THE PROCESS OF SEEKING CARE FOR",
+             "x0": 75.5, "bold_ratio": 1.0},
+            {"text": "OBSTETRIC COMPLICATIONS", "x0": 194.4, "bold_ratio": 1.0})
+        self.assertEqual(len(found), 1)
+        self.assertIn("OBSTETRIC COMPLICATIONS", found[0])
+        self.assertNotIn("ตัวหนา", found[0])      # ตัวหนามีกฎเหลืองของตัวเองแล้ว
+
+    def test_running_head_is_not_mistaken_for_the_title(self):
+        """เล่มที่ 4 มีหัวกระดาษ "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ..." เหนือชื่อเรื่อง"""
+        self.assertEqual(
+            self._run({"text": "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล วิทยานิพนธ์ / ง",
+                       "x0": 300.0, "bold_ratio": 0.0},
+                      {"text": "ชื่อเรื่องภาษาไทยของวิทยานิพนธ์เล่มนี้", "x0": 70.9,
+                       "bold_ratio": 0.0}),
+            [])
+
+    def test_page_without_a_student_line_is_skipped(self):
+        rep = Report()
+        _report_abstract_title_format(rep, [self.BODY], "บทคัดย่อ (หน้า iv)")
+        self.assertEqual(rep.zones["ORANGE"], [])
 
 
 class SummaryGroupsByWhereToFixIt(unittest.TestCase):

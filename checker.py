@@ -1972,8 +1972,62 @@ def _font_lines(pdf_page, tolerance=2.5):
             len(re.sub(r'\s+', '', word.get('text', '')))
             for word in heading_words if _is_bold_font(word.get('fontname'))
         )
-        results.append({'text': text, 'bold_ratio': (bold / total if total else 0.0)})
+        results.append({'text': text, 'bold_ratio': (bold / total if total else 0.0),
+                        'x0': min(float(w.get('x0', 0)) for w in line_words)})
     return results
+
+
+_ABS_STUDENT_LINE = re.compile(r'\d{7}\s*\S*\s*/\s*\S')
+# หัวกระดาษที่บางเล่มใส่ไว้เหนือชื่อเรื่องบนหน้าบทคัดย่อ (ไม่ใช่ส่วนของชื่อเรื่อง)
+_ABS_RUNNING_HEAD = re.compile(
+    r'มหาวิทยาลัยมหิดล|บัณฑิตวิทยาลัย|FACULTY OF GRADUATE|MAHIDOL UNIVERSITY', re.I)
+
+
+def _report_abstract_title_format(rep, lines, loc):
+    """ชื่อเรื่องบนหน้าบทคัดย่อต้องจัด "ชิดซ้าย"
+
+    นโยบายเจ้าหน้าที่ (ส.ค. 2569): *"ไม่ควรชิดขวาหรือกึ่งกลาง ควรจัดชิดซ้าย"*
+    ยืนยันด้วยเล่มจริง 10 เล่ม: 8 เล่มพิมพ์ชิดซ้าย · เล่มที่ 7 และ 9 ไม่ชิดซ้าย
+    (สองเล่มนี้คือที่เจ้าหน้าที่ทักมา) · template ตั้ง `right` ไว้ก็จริง แต่เป็น
+    บรรทัดจุดไข่ปลาเต็มความกว้าง ซึ่งจัดชิดไหนก็เห็นเหมือนกัน จึงไม่ใช่ข้อกำหนดจริง
+
+    **ตัวหนาไม่ตรวจที่นี่** — กฎ `FORMAT.ABSTRACT_BOLD` ฟ้องตัวหนาทั้งหน้าเป็น
+    สีเหลืองอยู่แล้ว และเจ้าหน้าที่สั่งว่า "หน้าบทคัดย่อไม่มีตัวหนา แต่ก็พอรับได้
+    เลยให้เป็นสีเหลือง" ถ้าตรวจซ้ำที่นี่จะได้สองข้อที่แก้จุดเดียวกัน
+
+    ระบบตรวจ PDF ไม่ใช่ไฟล์ Word จึงไม่มีค่า "การจัดย่อหน้า" ให้อ่านตรง ๆ ต้องอนุมาน
+    จากพิกัด: เทียบขอบซ้ายของบรรทัดชื่อเรื่องกับขอบซ้ายของ "เนื้อความ" ในหน้าเดียวกัน
+    (ใช้บรรทัดยาวเป็นตัวอ้างอิง เพราะบรรทัดยาวย่อมเริ่มที่ขอบซ้ายจริงเสมอ)
+    ลงเป็นสีส้ม ไม่ฟันธงแดง เพราะเป็นการอนุมานจากพิกัด ไม่ใช่ค่าที่อ่านได้ตรง ๆ
+    """
+    # ชื่อเรื่อง = บรรทัดที่อยู่ "ก่อนบรรทัดชื่อ-รหัสนักศึกษา" ตามโครงสร้างของ template
+    # หาแบบนี้แทนการเทียบกับข้อมูลอนุมัติ เพราะเป็นกฎรูปแบบของ template ล้วน
+    # ต้องตรวจได้แม้ยังไม่มีข้อมูล eThesis (หลักการเดียวกับกฎรูปแบบข้ออื่น)
+    stop = next((i for i, l in enumerate(lines)
+                 if _ABS_STUDENT_LINE.search(l['text'])), None)
+    if stop is None:
+        return
+    # ไล่ขึ้นจากบรรทัดชื่อ-รหัสนักศึกษา เก็บเฉพาะบรรทัดที่ติดกันขึ้นไป (สูงสุด 4 บรรทัด)
+    # แล้วหยุดเมื่อเจอหัวกระดาษ/เลขหน้า — บางเล่มมี running head ที่ไม่ใช่ชื่อเรื่อง
+    # (เล่มที่ 4: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล วิทยานิพนธ์ / ง")
+    title_lines = []
+    for l in reversed(lines[:stop][-4:]):
+        if len(norm(l['text'])) < 8 or _ABS_RUNNING_HEAD.search(l['text']):
+            break
+        title_lines.append(l)
+    body = [l for l in lines[stop:] if len(l['text']) > 60]
+    if not title_lines or not body:
+        return
+    margin = min(l['x0'] for l in body)
+    off = [l['text'] for l in title_lines if l['x0'] - margin > 6]
+    if not off:
+        return
+    shown = ", ".join(f'"{t}"' for t in dict.fromkeys(off))
+    rep.add("ORANGE", "front_matter", loc,
+            f"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: {shown}",
+            "ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา",
+            "แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย",
+            "FORMAT.ABSTRACT_LAYOUT")
 
 
 def _is_toc_major_heading(text):
@@ -2865,8 +2919,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             with pdfplumber.open(pdf_path) as _pl:
                 for ai in abstract_idxs:
                     for abs_page_idx in range(ai, min(ai + span_of(ai), n)):
+                        lines = _font_lines(_pl.pages[abs_page_idx])
+                        # ชื่อเรื่องบนหน้านี้ต้องชิดซ้ายและไม่หนา (แยกจากข้อสังเกตตัวหนาทั่วไป
+                        # เพราะเป็นกฎเฉพาะของบรรทัดชื่อเรื่อง ไม่ใช่ทั้งหน้า)
+                        _report_abstract_title_format(
+                            rep, lines, f"บทคัดย่อ ({page_ref(abs_page_idx)})")
                         bold_lines = [
-                            line['text'] for line in _font_lines(_pl.pages[abs_page_idx])
+                            line['text'] for line in lines
                             if line['bold_ratio'] > 0 and len(norm(line['text'])) >= 2
                             and not _is_abstract_heading(line['text'])
                         ]
