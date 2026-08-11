@@ -433,8 +433,7 @@ var TR = [
   [/เพิ่มบทคัดย่อภาษาไทย/g, 'Add a Thai abstract'],
   [/เพิ่มบทคัดย่อภาษาอังกฤษ/g, 'Add an English abstract'],
   // หางบอกชนิดความต่างของ "…ในเล่มเขียนว่า …" มีหลายแบบ ต้องมีกฎเต็มประโยคให้ครบ
-  [/(.+?)ในเล่มเขียนว่า ("[^"]*") ต่างที่ (.+)/g, '$1 in the document reads $2, differing at $3'],
-  [/(.+?)ในเล่มเขียนว่า ("[^"]*") แตกต่างที่ (.+)/g, '$1 in the document reads $2, differing at $3'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*") (.+)/g, '$1 in the document reads $2, $3'],
   // ---- บรรทัดในข้อความสรุป: "N. ใน<ตำแหน่ง>: <ที่พบ> · <ที่ควรเป็น>" ----
   // แยกเป็นท่อน ๆ แล้วให้แต่ละท่อนแปลด้วยกฎเต็มประโยคของตัวเอง (trWhole เรียกซ้ำ)
   // ทำให้บรรทัดสรุปไม่ต้องพึ่งการแทนที่แบบเศษคำอีกต่อไป
@@ -452,8 +451,8 @@ var TR = [
   [/^ชื่อปริญญา$/g, 'The degree name'],
   [/^ชื่อปริญญาแบบย่อ$/g, 'The abbreviated degree name'],
   [/^หัวข้อสารบัญ$/g, 'The table-of-contents heading'],
-  [/^กรรมการ$/g, 'committee member(s)'],
-  [/^กรรมการที่ปรึกษา$/g, 'advisory committee member(s)'],
+  [/^กรรมการ$/g, 'committee members'],
+  [/^กรรมการที่ปรึกษา$/g, 'advisory committee members'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
@@ -484,6 +483,9 @@ var TR = [
   [/ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: ("[^"]*")/g, 'Must match the approved data exactly: $1'],
   [/ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: ("[^"]*")/g, 'Must be spelled as in the approved data on every page: $1'],
   [/ต้องเป็น ("[^"]*")/g, 'Must be $1'],
+  // ประกาศฉบับนี้เป็น พ.ศ. 2569 = ค.ศ. 2026 — ฝั่งอังกฤษต้องใช้ ค.ศ.
+  // กฎทั่วไปข้างล่างจับปีเป็นตัวแปรแล้วใส่กลับดิบ ๆ จึงได้ "the 2569 regulation"
+  [/ตามประกาศ 2569 ควรเป็น ("[^"]*")/g, 'Per the 2026 regulation it should be $1'],
   [/ตามประกาศ (\d+) ควรเป็น ("[^"]*")/g, 'Per the $1 regulation it should be $2'],
   [/พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: ("[^"]*")/g, 'The examination pass date does not match the approved data: $1'],
   [/ที่ถูกต้องตามระบบคือ ("[^"]*")/g, 'The approved data says $1'],
@@ -494,23 +496,24 @@ var TR = [
   [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา ("[^"]*")/g, 'The text under the signature must contain the subject $1'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ ("[^"]*")/g, 'The text under the signature must contain the faculty name $1'],
   [/(.+?)ของนักศึกษาในหน้าบทคัดย่อต้องสะกดตรงข้อมูลอนุมัติ: ("[^"]*")/g, 'The student\'s $1 on the abstract page must be spelled as in the approved data: $2'],
-  [/(.+?)ในเล่มเขียนว่า ("[^"]*")/g, '$1 in the document reads $2'],
+  [/(.+?)ในเล่มเขียนว่า ("[^"]*")$/g, '$1 in the document reads $2'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*") พิมพ์ผิดเล็กน้อย/g, '$1 in the document reads $2, a small typo'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*") ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, '$1 in the document reads $2, only the upper/lower case differs'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*")$/g, '$1 in the document reads $2'],
   [/นับรายชื่อ(.+?)บนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน ระบบอ่านได้ว่า (.+)/g, 'Counted $2 $1 on this page, but the approved data lists $3; the system read: $4'],
   [/แก้ไขให้เป็นไปตามข้อกำหนด: (.+)/g, 'Correct it to meet the requirement: $1'],
   // ---- นับจำนวนกรรมการ (ไม่เทียบชื่อแล้ว) — ประโยคเต็ม ต้องอยู่บนสุด ----
-  [/นับรายชื่อกรรมการที่ปรึกษาบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน ระบบอ่านได้ว่า/g, 'Counted $1 advisory committee member(s) on this page, but the approved data lists $2 — the system read:'],
-  [/นับรายชื่อกรรมการบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน ระบบอ่านได้ว่า/g, 'Counted $1 committee member(s) on this page, but the approved data lists $2; the system read:'],
+  [/นับรายชื่อกรรมการที่ปรึกษาบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน ระบบอ่านได้ว่า/g, 'Counted $1 advisory committee members on this page, but the approved data lists $2 — the system read:'],
+  [/นับรายชื่อกรรมการบนหน้านี้ได้ (\d+) คน แต่ข้อมูลอนุมัติมี (\d+) คน ระบบอ่านได้ว่า/g, 'Counted $1 committee members on this page, but the approved data lists $2; the system read:'],
   [/ไม่พบชื่อเลย/g, 'no names found'],
-  [/ต้องมีกรรมการที่ปรึกษา (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 advisory committee member(s) per the approved data (Form บฑ.)'],
-  [/ต้องมีกรรมการ (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 committee member(s) per the approved data (Form บฑ.)'],
+  [/ต้องมีกรรมการที่ปรึกษา (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 advisory committee members per the approved data (Form บฑ.)'],
+  [/ต้องมีกรรมการ (\d+) คนตามข้อมูลอนุมัติ \(บฑ\.\)$/g, 'There must be $1 committee members per the approved data (Form บฑ.)'],
   [/ตรวจว่าจำนวนกรรมการที่ปรึกษาบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the advisory committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
   [/ตรวจว่าจำนวนกรรมการบนหน้านี้ครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the committee on this page is complete. If it is, the system simply could not read some cells and it may be passed'],
   [/ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด โปรดทานรายชื่อกับข้อมูลอนุมัติ \(บฑ\.\) คือ/g, 'The system counted the committee members but did not compare names or spelling — please check the list against the approved data (Form บฑ.):'],
   // ---- หัวข้อในสารบัญสะกดผิด (ประโยคเต็ม ต้องอยู่บนสุด) ----
-  [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents; it reads'],
+  [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า ("[^"]*") (.+)/g, 'This heading is misspelled in the table of contents: it reads $1, $2'],
+  [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents: it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
   [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
@@ -601,8 +604,10 @@ var TR = [
   [/ชื่อปริญญาแบบย่อในเล่มเขียนว่า/g, 'The abbreviated degree name in the document reads'],
   [/ชื่อปริญญาในเล่มเขียนว่า/g, 'The degree name in the document reads'],
   [/หัวข้อสารบัญในเล่มเขียนว่า/g, 'The TOC heading in the document reads'],
+  [/^พิมพ์ผิดเล็กน้อย$/g, 'a small typo'],
+  [/^ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่$/g, 'only the upper/lower case differs'],
   [/ พิมพ์ผิดเล็กน้อย/g, ', a small typo'],
-  [/ ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, ', only the upper\/lower case differs'],
+  [/ ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, ', only the upper/lower case differs'],
   // ---- ด่านกันอัปโหลดไฟล์สลับคน ----
   [/^ไฟล์ที่อัปโหลด$/g, 'Uploaded files'],
   [/ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง \((.+?)\) น่าจะเป็นคนละคนกัน/g, 'The approved data matches the document on none of these ($1) — they look like two different students'],
@@ -810,11 +815,19 @@ var TR = [
   [/ข้อความที่ถูกต้อง/g, 'the correct wording'],
   [/ชื่อมหาวิทยาลัย/g, 'University name'],
   [/บนหน้าปก/g, 'on the cover page'],
+  [/หน้าปกพิมพ์ ("[^"]*") ไม่ตรงข้อความบังคับ \((.+?)\) (.+)/g, 'The cover page prints $1, which does not match the required wording ($2), $3'],
+  [/หน้าปกพิมพ์ ("[^"]*") ไม่ตรงข้อความบังคับ \((.+?)\)/g, 'The cover page prints $1, which does not match the required wording ($2)'],
   [/หน้าปกพิมพ์/g, 'The cover page prints'],
   [/แก้ข้อความบน/g, 'Correct the wording on '],
   [/ตามประกาศ 2569 ควรเป็น/g, 'Per the 2026 regulation it should be'],
   [/ชื่อบทใน/g, 'Chapter title in the '],
-  [/ ต่างที่ /g, ' differing at '],
+  // จุดต่างจาก describe_diff — แต่ละแบบมีคำเชื่อมของตัวเอง ต้องแปลทั้งวลี
+  // ไม่ใช่แปล "ต่างที่" แยกจากท่อนหลัง ไม่งั้นได้ "differing at there is an extra S"
+  [/ต่างที่ ("[^"]*") ต้องเป็น ("[^"]*")/g, 'the difference is $1, which should be $2'],
+  [/มี ("[^"]*") เกินมา/g, 'there is an extra $1'],
+  // ข้อความสรุปตัดค่าที่ถูกต้องออก (บอกอีกทีบรรทัด "ต้องแก้เป็น") เหลือแค่จุดที่ผิด
+  [/^ต่างที่ ("[^"]*")$/g, 'the difference is $1'],
+  [/ ต่างที่ /g, ' the difference is '],
   [/หน้านี้พิมพ์เลขหน้าว่า ("[^"]*")/g, 'This page prints the page label $1'],
   // describe_diff ต่อหลายจุดต่างด้วย " และ " (ไม่ใช้ ; หรือลูกศรแล้ว) — ผูกกับ
   // เครื่องหมายคำพูดปิดข้างหน้า จะได้ไม่ไปแทน "และ" ที่เป็นคำเชื่อมในประโยคอื่น
@@ -824,9 +837,7 @@ var TR = [
   // "ส่วนนำ" ยืนเดี่ยวเป็นหัวข้อกลุ่มและเป็นตำแหน่ง ต้องขึ้นต้นด้วยตัวใหญ่
   // (กฎเศษคำด้านล่างแปลเป็น 'the front matter' ไว้ใช้กลางประโยค)
   [/^ส่วนนำ$/g, 'Front matter'],
-  [/แตกต่างที่/g, 'differs at'],
-  [/ต่างที่/g, 'differs at'],
-  [/ เกินมา \(ควรตัดออก\)/g, ' is extra (remove it)'],
+  [/แตกต่างที่/g, 'the difference is'],
   [/ขาด \(ควรเพิ่ม\)/g, 'is missing (add it)'],
   [/ขาด /g, 'missing '],
   [/ส่วนนำใช้พยัญชนะไทย/g, 'The front matter uses Thai letters'],
@@ -942,14 +953,14 @@ var TR = [
   [/ ประธานหลักสูตร \(หน้า/g, ' programme chair box (page'],
   [/ คณบดีคณะ \(หน้า/g, ' faculty dean box (page'],
   [/ — คณบดี/g, ' — Dean'],
-  [/พบกรรมการที่มีชื่อ (\d+) คนบนหน้าลงนาม/g, 'Found $1 named committee member(s) on the approval page'],
+  [/พบกรรมการที่มีชื่อ (\d+) คนบนหน้าลงนาม/g, 'Found $1 named committee members on the approval page'],
   [/ต้องมี (\d+) คนตามข้อมูลอนุมัติ/g, 'There must be $1 per the approved data'],
   [/พบ "(.+?)"/g, 'found "$1"'],
   [/ช่องว่าง\/ไม่มีชื่อ/g, 'empty / no name'],
   [/ควรเป็น "(.+?)" \(ระบบแปลจาก "(.+?)"\)/g, 'should be "$1" (system translated from "$2")'],
   // ---- เทียบชื่อกรรมการแบบชุด (เล่มไทย): สลับ / เรียงผิด / ขาด / เกิน ----
   [/ต้องมีกรรมการชื่อ "(.+?)" ตามข้อมูลอนุมัติ \(บฑ\.\)/g, 'There must be a committee member "$1" per the approved data (Form)'],
-  [/เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ/g, 'Add the missing committee member(s) to match the approved data'],
+  [/เพิ่มกรรมการที่ขาดให้ครบตามข้อมูลอนุมัติ/g, 'Add the missing committee members to match the approved data'],
   [/พบชื่อ "(.+?)" ที่ไม่อยู่ในรายชื่อกรรมการอนุมัติ/g, 'Found the name "$1", which is not in the approved committee list'],
   [/รายชื่อกรรมการต้องตรงกับข้อมูลอนุมัติ \(บฑ\.\)/g, 'The committee names must match the approved data (Form)'],
   [/ตรวจชื่อกรรมการให้ตรงกับข้อมูลอนุมัติ/g, 'Check the committee names against the approved data'],
@@ -1090,7 +1101,7 @@ var TR = [
   [/ไม่พบจุดที่ต้องแก้ไข/g, 'No items to fix'],
   [/(\d+)\. ใน/g, '$1. In '],
   [/ให้แก้ไขเป็น: /g, 'Change to: '],
-  [/ แตกต่างที่ /g, ' differs at '],
+  [/ แตกต่างที่ /g, ' the difference is '],
   [/ เทียบกับ /g, ' vs '],
   [/ชื่อบทในสารบัญข้อความไม่ตรง: /g, 'Chapter title in the TOC does not match: '],
   [/ชื่อบทในเนื้อหาข้อความไม่ตรง: /g, 'Chapter title in the content does not match: '],

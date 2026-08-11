@@ -943,7 +943,7 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
         diff = describe_diff(near, want)
         found_msg = f'{box} เขียนว่า "{near}"'
         if diff:
-            found_msg += f' ต่างที่ {diff}'
+            found_msg += f' {diff}'
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     rep.add("ORANGE", "front_matter", loc, found_msg,
@@ -1931,11 +1931,14 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
 def describe_diff(found, expected):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
 
-    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
+    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น ต่างที่ "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
     - ไทย/คำเดียว: เทียบระดับตัวอักษร (เช่น ขาด "อ")
     คืน '' ถ้าต่างกันมากจนการชี้จุดไม่ช่วย (ให้ผู้ใช้ดูข้อความเต็มที่ให้ไว้แทน)
 
     เขียนเป็นคำพูด ไม่ใช้ลูกศร — เจ้าหน้าที่สั่งว่าคำอธิบายไม่ต้องใช้สัญลักษณ์เยอะ
+    ข้อความที่คืนมา "ต่อท้ายประโยคได้เลย" คือมีคำเชื่อมของตัวเองมาพร้อม เพราะคำเชื่อม
+    ที่เหมาะกับแต่ละกรณีไม่เหมือนกัน ("ต่างที่ ก ต้องเป็น ข" แต่ "ขาด ก" / "มี ก เกินมา"
+    ซึ่งถ้าเอา "ต่างที่" ไปนำหน้าจะกลายเป็น "ต่างที่ มี S เกินมา" ที่อ่านไม่เป็นภาษาคน)
     """
     found_s, expected_s = soft(found), soft(expected)
     if not found_s or not expected_s or norm(found_s) == norm(expected_s):
@@ -1955,7 +1958,7 @@ def describe_diff(found, expected):
             elif not got:
                 parts.append(f'ขาด "{want}"')
             else:
-                parts.append(f'"{got}" ต้องเป็น "{want}"')
+                parts.append(f'ต่างที่ "{got}" ต้องเป็น "{want}"')
         return " และ ".join(parts)
 
     # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
@@ -1983,7 +1986,7 @@ def mismatch_detail(label, compared, expected=''):
         if expected and compared['status'] in ('typo', 'case') else ''
     # ถ้าชี้จุดต่างได้แล้ว ไม่ต้องบอกซ้ำว่า "พิมพ์ผิดเล็กน้อย" — จุดต่างบอกอยู่ในตัว
     if diff:
-        detail += f' ต่างที่ {diff}'
+        detail += f' {diff}'
     elif compared['status'] == 'case':
         detail += ' ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
     elif compared['status'] == 'typo':
@@ -2002,7 +2005,7 @@ def title_mismatch_detail(label, compared, expected=''):
     if expected and compared['status'] in ('typo', 'case'):
         diff = describe_diff(compared['actual'], expected)
         if diff:
-            detail += f' ต่างที่ {diff}'
+            detail += f' {diff}'
     return detail
 
 
@@ -3067,7 +3070,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 diff = describe_diff(snippet, expected_text)
                 found_msg = f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})"
                 if diff:
-                    found_msg += f" ต่างที่ {diff}"
+                    found_msg += f" {diff}"
             else:
                 found_msg = f"ไม่พบข้อความบังคับ ({label}) บนหน้าปก"
             rep.add(
@@ -3485,7 +3488,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
                         diff = describe_diff(head, section_label)
                         if diff:
-                            found_msg += f" ต่างที่ {diff}"
+                            found_msg += f" {diff}"
                         rep.add(
                             "RED", "front_matter", f"สารบัญ ({page_ref(typo_idx)})",
                             found_msg,

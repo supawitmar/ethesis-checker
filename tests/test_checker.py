@@ -1,8 +1,11 @@
+import re
 import sys
 
 import unittest
+from pathlib import Path
 
 from checker import (
+    describe_diff,
     NOT_CHECKED,
     N_APPENDIX,
     Report,
@@ -1434,6 +1437,76 @@ class PlainSummaryProseTests(unittest.TestCase):
         }]}}
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
         self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
+
+
+class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
+    """ประโยคที่ระบบ "ประกอบขึ้นเอง" ต้องแปลอังกฤษได้ครบ ไม่มีไทยปน
+
+    ด่าน check_i18n --corpus ตรวจจากเล่มทดสอบ 3 เล่ม ซึ่งไม่เคยผลิตข้อความบางแบบเลย
+    เจ้าหน้าที่จึงเจอของจริงว่า 'ชื่อบท in the document reads "DISCUSSIONS"' และ
+    'Counted 5 กรรมการที่ปรึกษา on this page' บนเล่มที่ไม่ได้อยู่ในชุดทดสอบ
+
+    ชุดนี้จึงไม่พึ่งเล่ม แต่เรียก describe_diff จริงเพื่อสร้าง "รูปประโยคทุกแบบ"
+    ที่มันผลิตได้ (แทนที่ / ขาด / เกิน) แล้วยัดเข้าประโยคของผู้เรียกทุกตัว
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        tools = Path(__file__).resolve().parents[1] / "tools"
+        sys.path.insert(0, str(tools))
+        import check_i18n
+        cls.i18n = check_i18n
+        _block, cls.pairs = check_i18n.load_tr()
+
+    def _thai_left(self, thai):
+        english = self.i18n.tr_en(thai, self.pairs)
+        # ค่าที่อยู่ในเครื่องหมายคำพูดคือข้อความจากเล่มจริง ต้องคงเป็นไทยอยู่แล้ว
+        stripped = re.sub(r'"[^"]*"', "", english)
+        return [w for w in re.findall(r"[ก-๙]+", stripped)
+                if w not in self.i18n.THAI_PAGE_LETTERS and w not in self.i18n.KEEP_THAI]
+
+    # (ข้อความที่พบ, ข้อความที่ถูกต้อง) ครอบ opcode ของ difflib ครบทุกแบบ
+    DIFFS = [
+        ("DISCUSSIONS", "DISCUSSION"),                       # เกินมา
+        ("SUBMITTED IN PARTIAL", "A THESIS SUBMITTED IN PARTIAL"),   # ขาด
+        ("CONCLUSIONS AND RECOMMENDATIONS",
+         "CONCLUSION AND RECOMMENDATIONS"),                  # แทนที่
+        ("ประวัติผู้จัย", "ประวัติผู้วิจัย"),                          # ขาด (ไทย)
+        ("REQUIREMENT FOR THE DEGREE", "REQUIREMENTS FOR THE DEGREE"),
+    ]
+
+    def test_every_diff_phrase_has_an_english_rule(self):
+        for found, expected in self.DIFFS:
+            diff = describe_diff(found, expected)
+            self.assertTrue(diff, f"describe_diff ว่างสำหรับ {found!r}")
+            self.assertEqual(self._thai_left(diff), [],
+                             f'แปลไม่ครบ: {diff!r} -> {self.i18n.tr_en(diff, self.pairs)!r}')
+
+    def test_diff_phrases_read_naturally_inside_their_sentences(self):
+        """ผู้เรียก describe_diff ทุกตัวต่อท้ายประโยคของตัวเอง ต้องแปลได้ทั้งประโยค"""
+        for found, expected in self.DIFFS:
+            diff = describe_diff(found, expected)
+            for sentence in (
+                f'ชื่อบทในเล่มเขียนว่า "{found}" {diff}',
+                f'ชื่อเรื่องในเล่มเขียนว่า "{found}" {diff}',
+                f'หน้าปกพิมพ์ "{found}" ไม่ตรงข้อความบังคับ (ข้อความประเภทงาน) {diff}',
+                f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{found}" {diff}',
+                f'ช่องประธานหลักสูตร (มุมล่างขวา) เขียนว่า "{found}" {diff}',
+            ):
+                self.assertEqual(
+                    self._thai_left(sentence), [],
+                    f'แปลไม่ครบ: {sentence!r} -> {self.i18n.tr_en(sentence, self.pairs)!r}')
+
+    def test_committee_count_sentence_translates_both_labels(self):
+        """ป้าย "กรรมการ"/"กรรมการที่ปรึกษา" ถูกยัดเป็นตัวแปรกลางประโยค ต้องแปลด้วย"""
+        for label in ("กรรมการ", "กรรมการที่ปรึกษา"):
+            for thai in (
+                f'นับรายชื่อ{label}บนหน้านี้ได้ 5 คน แต่ข้อมูลอนุมัติมี 4 คน '
+                f'ระบบอ่านได้ว่า 1. "INGA THORSDOTTIR"',
+                f'ต้องมี{label} 4 คนตามข้อมูลอนุมัติ (บฑ.)',
+            ):
+                self.assertEqual(self._thai_left(thai), [],
+                                 f'แปลไม่ครบ: {thai!r} -> {self.i18n.tr_en(thai, self.pairs)!r}')
 
 
 if __name__ == "__main__":
