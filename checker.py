@@ -1391,7 +1391,7 @@ def _expected_front_label_style(program_language):
 
 
 def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
-                              expected_style=None):
+                              expected_style=None, page_texts=None):
     """เลขหน้าส่วนนำ: ชนิดต้องตรงภาษาเล่ม และเรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
 
     เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
@@ -1434,19 +1434,18 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 
     seq = [e for e in entries if e[2] == main_style]
     if len(seq) > 1:
-        # หน้าที่อ่านเลขไม่ได้/ใช้ชนิดผิด ถูกฟ้องแยกไปแล้ว และทำให้ยืนยันความต่อเนื่อง
-        # ข้ามหน้านั้นไม่ได้ จึงไม่ฟ้อง "กระโดด" คร่อมหน้าเหล่านี้ (กันฟ้องซ้ำ/ฟ้องผิด)
-        broken = set(unread) | {i for i, _lab, _s in off_style}
+        # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้/ใช้ชนิดผิด ยังนับเป็นหน้าของเล่ม
+        # เดิมเจอหน้าพวกนี้แล้ว "ข้ามไปเลย" (continue) การตรวจความต่อเนื่องจึงเงียบ
+        # ทั้งช่วง เล่มที่เลขหน้าผิดจริงเลยรอดไปได้ — ตอนนี้นับจำนวนหน้าที่คั่นแทน
+        # จึงยังฟันธงได้ว่าต่อเนื่องหรือไม่ โดยไม่ต้องเดาว่าหน้าที่อ่านไม่ออกพิมพ์เลขอะไร
         problems, dup_run = [], 1
         for k in range(1, len(seq)):
             prev_i, prev_lab, _ps, prev_v = seq[k - 1]
             cur_i, cur_lab, _cs, cur_v = seq[k]
-            if any(j in broken for j in range(prev_i + 1, cur_i)):
-                dup_run = 1
-                continue
+            gap = cur_i - prev_i - 1
             if cur_v != prev_v:
                 dup_run = 1
-                if cur_v != prev_v + 1:
+                if cur_v != prev_v + gap + 1:
                     problems.append(f'กระโดดจาก "{prev_lab}" ไป "{cur_lab}"')
                 continue
             # หลายหน้าใช้เลขเดียวกัน — รวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
@@ -1463,17 +1462,33 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                     "", "PAGE.NUMBERING")
 
     if unread:
-        def _after_ref(idx):
-            for j in range(idx - 1, start_idx - 1, -1):
-                if page_labels.get(j):
-                    return f"หน้าถัดจาก{page_ref(j)}"
-            return "หน้าไม่ระบุเลข"
-        shown = ", ".join(_after_ref(i) for i in unread[:5])
-        more = f" และอีก {len(unread) - 5} หน้า" if len(unread) > 5 else ""
-        rep.add(UNCERTAIN_ZONE, "front_matter", "ส่วนนำ",
-                f"ระบบอ่านเลขหน้าส่วนนำไม่ได้ {len(unread)} หน้า: {shown}{more}",
-                f"ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น{want}",
-                "ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง", "UNCERTAIN.REVIEW")
+        # แยกสองแบบ เพราะวิธีแก้คนละอย่าง
+        #   หน้าที่ดึงข้อความได้ แต่ไม่มีบรรทัดเลขหน้า = เล่มไม่ได้ใส่เลขหน้ามาจริง
+        #     ฟันธงได้ และบอกได้ว่าต้องเพิ่มเลขหน้า
+        #   หน้าที่ดึงข้อความไม่ได้เลย = หน้าภาพ/สแกน ระบบไม่มีทางรู้ว่าพิมพ์เลขไว้ไหม
+        #     จึงยังส่งให้เจ้าหน้าที่ดู ไม่ฟันธง
+        # ทั้งสองแบบต้องบอก "แผ่นที่เท่าไรของไฟล์" (page_ref ใส่ให้แล้ว) เจ้าหน้าที่
+        # จะได้เปิดไปดูหน้านั้นได้ ไม่ใช่รู้แค่ว่า "มีหน้าที่อ่านไม่ออกอยู่ที่ไหนสักแห่ง"
+        def _has_text(idx):
+            if page_texts is None or idx >= len(page_texts):
+                return False
+            return bool((page_texts[idx] or "").strip())
+
+        no_number = [i for i in unread if _has_text(i)]
+        unreadable = [i for i in unread if i not in no_number]
+        for group, zone, detail, rule_id, fix in (
+            (no_number, "RED", "ไม่ได้พิมพ์เลขหน้าไว้", "PAGE.NUMBERING",
+             "เพิ่มเลขหน้าให้ครบทุกหน้าของส่วนนำ"),
+            (unreadable, UNCERTAIN_ZONE, "ระบบอ่านเลขหน้าไม่ได้ (อาจเป็นหน้าภาพ/สแกน)",
+             "UNCERTAIN.REVIEW", "ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง"),
+        ):
+            if not group:
+                continue
+            shown = ", ".join(page_ref(i) for i in group[:5])
+            more = f" และอีก {len(group) - 5} หน้า" if len(group) > 5 else ""
+            rep.add(zone, "front_matter", "ส่วนนำ",
+                    f"ส่วนนำ {len(group)} หน้า{detail}: {shown}{more}",
+                    f"ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น{want}", fix, rule_id)
 
 
 def strip_name_prefix(name):
@@ -2546,8 +2561,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     printed = {i: int(label) for i, label in page_labels.items() if label.isdigit()}
 
     def page_ref(page_index):
+        """ตำแหน่งที่เจ้าหน้าที่เปิดไปดูได้จริง
+
+        ถ้าอ่านเลขหน้าที่พิมพ์ในเล่มไม่ได้ ห้ามเดาเลขจากลำดับหน้าใน PDF เพราะจะกลาย
+        เป็นการรายงานเลขที่ไม่มีอยู่จริง แต่ต้องบอก "แผ่นที่เท่าไรของไฟล์" กำกับไว้
+        ไม่งั้นเจ้าหน้าที่หาหน้านั้นไม่เจอ แล้วข้อนั้นก็ตรวจต่อไม่ได้ทั้งข้อ
+        """
         label = page_labels.get(page_index, "")
-        return f"หน้า {label}" if label else "หน้าไม่ระบุเลข"
+        if label:
+            return f"หน้า {label}"
+        return f"หน้าไม่ระบุเลข (แผ่นที่ {page_index + 1} ของไฟล์)"
 
     seq = sorted(printed.items())
     arabic_sequence_ok = bool(seq) and seq[0][1] == 1 and all(
@@ -2558,11 +2581,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             rep.add("RED", "body", page_ref(seq[0][0]), f"เลขหน้าอารบิกแรกที่พบคือ {seq[0][1]}",
                     "เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1", "แก้การตั้งเลขหน้า", "PAGE.NUMBERING")
         for k in range(1, len(seq)):
-            a, b = seq[k-1][1], seq[k][1]
-            if b != a + 1:
-                rep.add("RED", "body/end", f"ช่วงเลขหน้า {a} ถึง {b}", f"เลขหน้ากระโดดจาก {a} ไป {b}",
-                        f"หน้าถัดจากหน้า {a} ต้องเป็นหน้า {a + 1}",
-                        f"แก้เลขหน้าหลังหน้า {a} ให้เรียงต่อเนื่อง", "PAGE.NUMBERING")
+            prev_idx, a = seq[k - 1]
+            cur_idx, b = seq[k]
+            # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้ ยังนับเป็นหน้าของเล่ม — ถ้าไม่นับ
+            # เล่มที่พิมพ์ 71, (อ่านไม่ออก), 73 จะถูกฟ้องผิดว่า "กระโดด 71 ไป 73"
+            # ทั้งที่หน้าที่คั่นคือ 72 พอดี (การตรวจเพี้ยนเพราะหาเลขหน้าไม่เจอ)
+            gap = cur_idx - prev_idx - 1
+            want = a + gap + 1
+            if b != want:
+                # ตำแหน่งคือหน้าที่พิมพ์เลขผิด ส่วน "พบ" บอกว่าหน้าก่อนหน้าเป็นเลขอะไร
+                # (เดิมตำแหน่งเขียนว่า "ช่วงเลขหน้า 71 ถึง 70" ซึ่งพูดเรื่องเดียวกับ
+                #  ข้อความ "เลขหน้ากระโดดจาก 71 ไป 70" ซ้ำสองรอบ)
+                rep.add("RED", "body/end", page_ref(cur_idx),
+                        f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}",
+                        f"หน้านี้ต้องเป็นหน้า {want}", "", "PAGE.NUMBERING")
     last_arabic = max(printed.values()) if printed else None
 
     # หน้าว่าง: ถ้ายืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ เป็นเพียงข้อสังเกต
@@ -2940,7 +2972,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         sig_pages[0] if sig_pages else 1,
         body_ch[0][2] if body_ch else None,
         _expected_front_label_style(
-            (approved or {}).get("program_language", "") if same_student else ""))
+            (approved or {}).get("program_language", "") if same_student else ""),
+        page_texts=pages)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]

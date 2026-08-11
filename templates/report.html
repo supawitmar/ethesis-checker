@@ -326,7 +326,10 @@
       <div class="issue {{ zone }}" data-zone="{{ zone }}" data-idx="{{ report.issues_by_zone[zone].index(it) }}">
         <div class="bar"></div>
         <div class="in">
-          <div class="loc"><span class="part tr-cat">{{ PART_LABEL.get(it.part, it.part) }}</span>{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
+          {# ไม่แสดงป้ายส่วนของเล่ม (ส่วนนำ/ส่วนเนื้อหา) แล้ว — การ์ดอยู่ในกลุ่มของส่วนนั้น
+             อยู่แล้ว และตำแหน่งข้างล่างบอกหน้าชัดเจนกว่า บางข้อป้ายยังขัดกับชื่อกลุ่มด้วย
+             (ข้อของ "บทที่ 6" ที่ต้องไปแก้ในสารบัญ ป้ายขึ้นว่า "ส่วนนำ" แต่กลุ่มคือ "สารบัญ") #}
+          <div class="loc">{% if it.category %}<span class="cat tr-cat">{{ it.category }}</span>{% endif %} <span class="tr-dyn">{{ it.location }}</span></div>
           <div class="found"><span class="lbl" data-th="พบ: " data-en="Found: ">พบ: </span><span class="tr-dyn">{{ it.found }}</span></div>
           <div class="expected"><span class="lbl" data-th="ควรเป็น: " data-en="Expected: ">ควรเป็น: </span><b class="tr-dyn">{{ it.expected }}</b></div>
           {% if it.fix %}<div class="fix"><strong data-th="แนะนำการแก้ไข:" data-en="Suggested fix:">แนะนำการแก้ไข:</strong> <span class="tr-dyn">{{ it.fix }}</span></div>{% endif %}
@@ -658,6 +661,9 @@ var TR = [
   [/การสะกด ไวยากรณ์ หรือความถูกต้องเชิงวิชาการของเนื้อหาแต่ละย่อหน้า/g, 'Spelling, grammar or academic correctness of the body text'],
   [/สารบัญรูปภาพ/g, 'List of Figures'],
   [/สารบัญตาราง/g, 'List of Tables'],
+  [/ส่วนนำ (\d+) หน้าไม่ได้พิมพ์เลขหน้าไว้:/g, '$1 front-matter page(s) carry no page number:'],
+  [/ส่วนนำ (\d+) หน้าระบบอ่านเลขหน้าไม่ได้ \(อาจเป็นหน้าภาพ\/สแกน\):/g, 'The page number could not be read on $1 front-matter page(s) (possibly image or scanned pages):'],
+  [/เพิ่มเลขหน้าให้ครบทุกหน้าของส่วนนำ/g, 'Add a page number to every front-matter page'],
   [/ระบบอ่านเลขหน้าส่วนนำไม่ได้ (\d+) หน้า:/g, 'Could not read the page label on $1 front-matter page(s):'],
   [/ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น/g, 'Every front-matter page must carry a page number in '],
   [/ต้องเป็นเลขหน้า "(.+?)" \(ไทย\) หรือ "(.+?)" \(อังกฤษ\)/g, 'Must be page label "$1" (Thai) or "$2" (English)'],
@@ -893,6 +899,8 @@ var TR = [
   [/เลขหน้าอารบิกแรกที่พบคือ (\d+)/g, 'First Arabic page number found is $1'],
   [/เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1/g, 'Arabic numbering must start at 1 on Chapter 1'],
   [/แก้การตั้งเลขหน้า/g, 'Fix the page numbering'],
+  [/เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข (\d+)/g, 'The page numbering breaks here: the previous page is numbered $1'],
+  [/หน้านี้ต้องเป็นหน้า (\d+)/g, 'This page must be page $1'],
   [/เลขหน้ากระโดดจาก (\d+) ไป (\d+)/g, 'Page number jumps from $1 to $2'],
   [/เลขหน้าต้องต่อเนื่อง ไม่ซ้ำ ไม่ข้าม/g, 'Page numbers must run continuously without gaps or repeats'],
   [/หน้าถัดจากหน้า (\d+) ต้องเป็นหน้า (\d+)/g, 'The page after page $1 must be page $2'],
@@ -1140,6 +1148,7 @@ var TR = [
   [/ตรวจการสะกด/g, 'Check the spelling'],
   [/ตรวจด้วยตา/g, 'Check manually'],
   [/\(หน้า (\w+)\)/g, '(page $1)'],
+  [/หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)/g, 'page with no page number (sheet $1 of the file)'],
   [/หน้าไม่ระบุเลข/g, 'page label unreadable'],
   [/หน้า ([ivxlcdm]+)/gi, 'page $1'],
   [/หน้า ([ก-ฮ])/g, 'page $1'],

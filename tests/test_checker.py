@@ -1127,12 +1127,14 @@ class SignaturePlaceholderTests(unittest.TestCase):
 class FrontPageNumberTests(unittest.TestCase):
     """เลขหน้าส่วนนำ: เล่มอังกฤษ=โรมัน เล่มไทย=พยัญชนะ และต้องเรียงต่อเนื่อง"""
 
-    def _run(self, labels, style=None, start=1, stop=None):
+    def _run(self, labels, style=None, start=1, stop=None, texts=None):
         rep = Report()
         page_labels = {i: lab for i, lab in enumerate(labels) if lab}
-        _check_front_page_numbers(rep, page_labels,
-                                  lambda i: f"หน้า {page_labels.get(i, '?')}",
-                                  start, len(labels) if stop is None else stop, style)
+        _check_front_page_numbers(
+            rep, page_labels,
+            lambda i: (f"หน้า {page_labels[i]}" if page_labels.get(i)
+                       else f"หน้าไม่ระบุเลข (แผ่นที่ {i + 1} ของไฟล์)"),
+            start, len(labels) if stop is None else stop, style, page_texts=texts)
         return rep
 
     def test_label_order_by_style(self):
@@ -1202,10 +1204,42 @@ class FrontPageNumberTests(unittest.TestCase):
         self.assertIn("พยัญชนะไทย", reds[0]["found"])
 
     def test_unreadable_label_is_orange_not_red(self):
-        rep = self._run(["", "i", "ii", "", "iv"], style="roman")
+        """หน้าที่ดึงข้อความไม่ได้เลย = หน้าภาพ/สแกน ระบบไม่รู้ว่าพิมพ์เลขไว้ไหม"""
+        rep = self._run(["", "i", "ii", "", "iv"], style="roman",
+                        texts=["ปก", "หน้า i", "หน้า ii", "", "หน้า iv"])
         self.assertEqual(rep.zones["RED"], [])
-        self.assertTrue(any("อ่านเลขหน้าส่วนนำไม่ได้" in i["found"]
+        self.assertTrue(any("ระบบอ่านเลขหน้าไม่ได้" in i["found"]
                             for i in rep.zones["ORANGE"]))
+
+    def test_page_with_text_but_no_number_is_a_defect(self):
+        """หน้าที่มีข้อความแต่ไม่มีบรรทัดเลขหน้า = เล่มไม่ได้ใส่เลขหน้ามาจริง ฟันธงได้
+
+        เจ้าหน้าที่สั่งว่า "อย่าทำให้การตรวจเพี้ยนเพราะหาเลขหน้าไม่เจอ ให้บอกว่า
+        เลขหน้าผิด และดำเนินการตามกฎ"
+        """
+        rep = self._run(["", "i", "ii", "", "iv"], style="roman",
+                        texts=["ปก", "หน้า i", "หน้า ii", "มีเนื้อความแต่ไม่มีเลขหน้า", "หน้า iv"])
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("ไม่ได้พิมพ์เลขหน้าไว้", reds[0])
+        # ต้องบอกแผ่นที่ในไฟล์ ไม่งั้นเจ้าหน้าที่เปิดไปดูหน้านั้นไม่ถูก
+        self.assertIn("แผ่นที่ 4 ของไฟล์", reds[0])
+
+    def test_unreadable_page_does_not_silence_the_sequence_check(self):
+        """หน้าที่คั่นอยู่ยังนับเป็นหนึ่งหน้า จึงยังฟันธงความต่อเนื่องได้
+
+        เดิมเจอหน้าที่อ่านเลขไม่ได้แล้ว "ข้ามไปเลย" ทั้งช่วง เล่มที่เลขหน้าผิดจริง
+        เลยรอดไปได้ทั้งที่ควรฟ้อง
+        """
+        # i, (อ่านไม่ออก), iii -> หน้าที่คั่นคือ ii พอดี ไม่ใช่การกระโดด
+        ok = self._run(["", "i", "", "iii", "iv"], style="roman",
+                       texts=["ปก", "หน้า i", "", "หน้า iii", "หน้า iv"])
+        self.assertEqual([i["found"] for i in ok.zones["RED"]], [])
+        # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
+        bad = self._run(["", "i", "", "v", "vi"], style="roman",
+                        texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
+        self.assertTrue(any('กระโดดจาก "i" ไป "v"' in i["found"]
+                            for i in bad.zones["RED"]))
 
     def test_skipped_when_body_start_unknown(self):
         # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ
