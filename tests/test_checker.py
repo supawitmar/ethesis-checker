@@ -1,11 +1,17 @@
+import re
 import sys
 
 import unittest
+from pathlib import Path
 
 from checker import (
+    describe_diff,
     NOT_CHECKED,
     N_APPENDIX,
     Report,
+    issue_sort_key,
+    summary_section,
+    _report_abstract_title_format,
     _report_missing_abstract_language,
     _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
@@ -228,10 +234,19 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(item["rule_id"], "FRONT.COVER")
         self.assertTrue(item["rule_references"])
 
-    def test_report_item_always_contains_a_fix_recommendation(self):
+    def test_report_item_does_not_repeat_expected_as_a_fake_fix(self):
+        """ข้อที่ไม่ได้ส่งวิธีแก้มา ต้องไม่ถูกเติมประโยคที่พูดซ้ำ "ควรเป็น" คำต่อคำ
+
+        เจ้าหน้าที่สั่งว่าคำอธิบายไม่ต้องเวิ่นเยอะ — บรรทัด "แนะนำการแก้ไข" ที่เขียนว่า
+        "แก้ไขให้เป็นไปตามข้อกำหนด: <ควรเป็น>" ไม่ได้บอกอะไรใหม่เลย
+        """
         report = Report()
         report.add("RED", "body", "หน้า 12", "พบข้อผิดพลาด", "ข้อความที่ถูกต้อง", "")
-        self.assertTrue(report.zones["RED"][0]["fix"])
+        self.assertEqual(report.zones["RED"][0]["fix"], "")
+        # ข้อที่ส่งวิธีแก้จริงมา ต้องเก็บไว้ตามเดิม
+        report.add("RED", "body", "หน้า 13", "พบข้อผิดพลาด", "ข้อความที่ถูกต้อง",
+                   "แก้เลขหน้าให้ต่อเนื่อง")
+        self.assertEqual(report.zones["RED"][1]["fix"], "แก้เลขหน้าให้ต่อเนื่อง")
 
     def test_orange_means_pending(self):
         report = Report()
@@ -708,6 +723,143 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("No Parens Here"), "")
 
 
+class AbstractTitleMustBeLeftAligned(unittest.TestCase):
+    """ชื่อเรื่องบนหน้าบทคัดย่อต้องชิดซ้าย ไม่ใช่กึ่งกลาง/ชิดขวา
+
+    ระบบตรวจ PDF จึงไม่มีค่า "การจัดย่อหน้า" ให้อ่าน ต้องเทียบขอบซ้ายของบรรทัด
+    ชื่อเรื่องกับขอบซ้ายของเนื้อความในหน้าเดียวกัน (พิกัดจริงจากเล่มที่ 9)
+    """
+
+    BODY = {"text": "B" * 90, "x0": 70.9, "bold_ratio": 0.0}
+    STUDENT = {"text": "CHRISTI KUSUMA WARDANI 6238285 SHHS/D", "x0": 70.9,
+               "bold_ratio": 0.0}
+
+    def _run(self, *title_lines):
+        rep = Report()
+        lines = list(title_lines) + [self.STUDENT, self.BODY]
+        _report_abstract_title_format(rep, lines, "บทคัดย่อ (หน้า iv)")
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_left_aligned_title_passes(self):
+        self.assertEqual(
+            self._run({"text": "WOMEN'S AUTONOMY IN THE PROCESS OF SEEKING CARE FOR",
+                       "x0": 70.9, "bold_ratio": 0.0},
+                      {"text": "OBSTETRIC COMPLICATIONS", "x0": 70.9,
+                       "bold_ratio": 0.0}),
+            [])
+
+    def test_centred_line_is_reported(self):
+        found = self._run(
+            {"text": "WOMEN'S AUTONOMY IN THE PROCESS OF SEEKING CARE FOR",
+             "x0": 75.5, "bold_ratio": 1.0},
+            {"text": "OBSTETRIC COMPLICATIONS", "x0": 194.4, "bold_ratio": 1.0})
+        self.assertEqual(len(found), 1)
+        self.assertIn("OBSTETRIC COMPLICATIONS", found[0])
+        self.assertNotIn("ตัวหนา", found[0])      # ตัวหนามีกฎเหลืองของตัวเองแล้ว
+
+    def test_running_head_is_not_mistaken_for_the_title(self):
+        """เล่มที่ 4 มีหัวกระดาษ "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ..." เหนือชื่อเรื่อง"""
+        self.assertEqual(
+            self._run({"text": "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล วิทยานิพนธ์ / ง",
+                       "x0": 300.0, "bold_ratio": 0.0},
+                      {"text": "ชื่อเรื่องภาษาไทยของวิทยานิพนธ์เล่มนี้", "x0": 70.9,
+                       "bold_ratio": 0.0}),
+            [])
+
+    def test_page_without_a_student_line_is_skipped(self):
+        rep = Report()
+        _report_abstract_title_format(rep, [self.BODY], "บทคัดย่อ (หน้า iv)")
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+
+class SummaryGroupsByWhereToFixIt(unittest.TestCase):
+    """ข้อของหน้าลงนามต้องอยู่หมวด "หน้าลงนาม" ไม่ใช่ "อื่น ๆ"
+
+    ระบบตั้งชื่อตำแหน่งตามบทบาทของหน้า (หน้าอาจารย์ที่ปรึกษา / หน้ากรรมการสอบ)
+    ไม่ได้เขียนคำว่า "หน้าลงนาม" ตรง ๆ เสมอ เจ้าหน้าที่จึงเห็นข้อของหน้าลงนาม
+    ไปโผล่ใต้หัวข้อ "อื่น ๆ" ทั้งที่ต้องไปแก้ที่หน้าลงนามเหมือนกัน
+    """
+
+    def _sec(self, loc):
+        return summary_section({"location": loc, "part": "front_matter"})
+
+    def test_signature_pages_are_grouped_together(self):
+        for loc in ("หน้าลงนาม 1 (หน้า i)",
+                    "หน้าอาจารย์ที่ปรึกษา (หน้า i)",
+                    "หน้ากรรมการสอบ (หน้า ii)",
+                    "หน้าอาจารย์ที่ปรึกษา — ประธานหลักสูตร (หน้า ก)",
+                    "หน้ากรรมการสอบ — คณบดีคณะ (หน้า ข)",
+                    "ข้อความ template หน้าลงนาม"):
+            self.assertEqual(self._sec(loc), "หน้าลงนาม", loc)
+
+    def test_abstract_committee_stays_under_the_abstract(self):
+        """"คณะกรรมการที่ปรึกษา" บนหน้าบทคัดย่อ ต้องไม่ถูกดึงไปหมวดหน้าลงนาม"""
+        self.assertEqual(self._sec("บทคัดย่อ (หน้า ง) — คณะกรรมการที่ปรึกษา"), "บทคัดย่อ")
+
+    def test_other_sections_are_unchanged(self):
+        self.assertEqual(self._sec("หน้าปก"), "หน้าปก")
+        self.assertEqual(self._sec("สารบัญ (หน้า ช)"), "สารบัญ")
+        self.assertEqual(self._sec("บทที่ 3 (หน้า 45)"), "เนื้อหา (บท)")
+
+    def test_chapter_structure_belongs_to_the_body(self):
+        """"โครงบท" (เล่มใช้รูปแบบไม่ตรงที่อนุมัติ) เคยตกไปอยู่ "อื่น ๆ" """
+        self.assertEqual(summary_section({"location": "โครงบท", "part": "body"}),
+                         "เนื้อหา (บท)")
+
+    def test_location_without_a_named_section_falls_back_to_the_part(self):
+        """ตำแหน่งที่ไม่ได้เอ่ยชื่อส่วนไหน ยังรู้จาก part ว่าอยู่ช่วงไหนของเล่ม"""
+        self.assertEqual(summary_section({"location": "ทั้งเล่ม", "part": "end_matter"}),
+                         "เนื้อหา (บท)")   # "ทั้งเล่ม" อยู่ในรายการคำของหมวดเนื้อหา
+        self.assertEqual(summary_section({"location": "", "part": "end_matter"}),
+                         "ส่วนท้ายเล่ม")
+        self.assertEqual(summary_section({"location": "ส่วนนำ", "part": "front_matter"}),
+                         "ส่วนนำ")
+
+    def test_bare_arabic_page_is_body_content(self):
+        """หน้าว่างที่อ่านไม่ออก ตำแหน่งมีแค่ "หน้า 40" — เลขอารบิกแปลว่าอยู่ในเนื้อหา"""
+        self.assertEqual(summary_section({"location": "หน้า 40", "part": "-"}),
+                         "เนื้อหา (บท)")
+        self.assertEqual(summary_section({"location": "ไฟล์แนบ.zip", "part": "-"}), "อื่น ๆ")
+
+
+class IssuesAreOrderedTheWayStaffReadTheBook(unittest.TestCase):
+    """ข้อในรายงานต้องเรียงตามส่วนประกอบของเล่ม แล้วตามเลขหน้าในส่วนนั้น
+
+    เจ้าหน้าที่ไล่แก้เล่มจากหน้าแรกไปหน้าสุดท้าย ถ้าข้อสลับไปมาต้องเปิดกลับไปกลับมา
+    """
+
+    def _order(self, locations):
+        items = [{"location": loc, "part": "front_matter"} for loc in locations]
+        return [it["location"] for it in sorted(items, key=issue_sort_key)]
+
+    def test_sections_come_in_book_order(self):
+        self.assertEqual(
+            self._order(["บทที่ 3 (หน้า 45)", "สารบัญ (หน้า ฉ)", "หน้าปก",
+                         "หน้าลงนามหน้า 1 (หน้า ก)", "บทคัดย่อ (หน้า ง)"]),
+            ["หน้าปก", "หน้าลงนามหน้า 1 (หน้า ก)", "บทคัดย่อ (หน้า ง)",
+             "สารบัญ (หน้า ฉ)", "บทที่ 3 (หน้า 45)"])
+
+    def test_pages_inside_a_section_run_ascending(self):
+        self.assertEqual(
+            self._order(["บทที่ 6 (หน้า 88)", "บทที่ 3 (หน้า 45)", "บทที่ 10 (หน้า 120)"]),
+            ["บทที่ 3 (หน้า 45)", "บทที่ 6 (หน้า 88)", "บทที่ 10 (หน้า 120)"])
+
+    def test_thai_front_pages_sort_by_alphabet_not_by_code_point(self):
+        self.assertEqual(self._order(["บทคัดย่อ (หน้า ฉ)", "บทคัดย่อ (หน้า ง)"]),
+                         ["บทคัดย่อ (หน้า ง)", "บทคัดย่อ (หน้า ฉ)"])
+
+    def test_page_in_a_compound_word_is_not_read_as_the_page_number(self):
+        """"หน้าลงนามหน้า 1 (หน้า ค)" ต้องอ่านได้ ค ไม่ใช่ 1 (เลขอารบิก = เนื้อหา)"""
+        self.assertEqual(
+            self._order(["หน้าลงนามหน้า 2 (หน้า ง)", "หน้าลงนามหน้า 1 (หน้า ค)"]),
+            ["หน้าลงนามหน้า 1 (หน้า ค)", "หน้าลงนามหน้า 2 (หน้า ง)"])
+
+    def test_items_without_a_page_go_last_in_their_section(self):
+        self.assertEqual(
+            self._order(["ส่วนนำ", "บทคัดย่อ (หน้า ง)"]),
+            ["บทคัดย่อ (หน้า ง)", "ส่วนนำ"])
+
+
 class ThaiProgramNeedsBothAbstracts(unittest.TestCase):
     """เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งไทยและอังกฤษ — ขาดภาษาไหนต้องบอกให้ชัด
 
@@ -975,12 +1127,14 @@ class SignaturePlaceholderTests(unittest.TestCase):
 class FrontPageNumberTests(unittest.TestCase):
     """เลขหน้าส่วนนำ: เล่มอังกฤษ=โรมัน เล่มไทย=พยัญชนะ และต้องเรียงต่อเนื่อง"""
 
-    def _run(self, labels, style=None, start=1, stop=None):
+    def _run(self, labels, style=None, start=1, stop=None, texts=None):
         rep = Report()
         page_labels = {i: lab for i, lab in enumerate(labels) if lab}
-        _check_front_page_numbers(rep, page_labels,
-                                  lambda i: f"หน้า {page_labels.get(i, '?')}",
-                                  start, len(labels) if stop is None else stop, style)
+        _check_front_page_numbers(
+            rep, page_labels,
+            lambda i: (f"หน้า {page_labels[i]}" if page_labels.get(i)
+                       else f"หน้าไม่ระบุเลข (แผ่นที่ {i + 1} ของไฟล์)"),
+            start, len(labels) if stop is None else stop, style, page_texts=texts)
         return rep
 
     def test_label_order_by_style(self):
@@ -1050,10 +1204,42 @@ class FrontPageNumberTests(unittest.TestCase):
         self.assertIn("พยัญชนะไทย", reds[0]["found"])
 
     def test_unreadable_label_is_orange_not_red(self):
-        rep = self._run(["", "i", "ii", "", "iv"], style="roman")
+        """หน้าที่ดึงข้อความไม่ได้เลย = หน้าภาพ/สแกน ระบบไม่รู้ว่าพิมพ์เลขไว้ไหม"""
+        rep = self._run(["", "i", "ii", "", "iv"], style="roman",
+                        texts=["ปก", "หน้า i", "หน้า ii", "", "หน้า iv"])
         self.assertEqual(rep.zones["RED"], [])
-        self.assertTrue(any("อ่านเลขหน้าส่วนนำไม่ได้" in i["found"]
+        self.assertTrue(any("ระบบอ่านเลขหน้าไม่ได้" in i["found"]
                             for i in rep.zones["ORANGE"]))
+
+    def test_page_with_text_but_no_number_is_a_defect(self):
+        """หน้าที่มีข้อความแต่ไม่มีบรรทัดเลขหน้า = เล่มไม่ได้ใส่เลขหน้ามาจริง ฟันธงได้
+
+        เจ้าหน้าที่สั่งว่า "อย่าทำให้การตรวจเพี้ยนเพราะหาเลขหน้าไม่เจอ ให้บอกว่า
+        เลขหน้าผิด และดำเนินการตามกฎ"
+        """
+        rep = self._run(["", "i", "ii", "", "iv"], style="roman",
+                        texts=["ปก", "หน้า i", "หน้า ii", "มีเนื้อความแต่ไม่มีเลขหน้า", "หน้า iv"])
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(len(reds), 1)
+        self.assertIn("ไม่ได้พิมพ์เลขหน้าไว้", reds[0])
+        # ต้องบอกแผ่นที่ในไฟล์ ไม่งั้นเจ้าหน้าที่เปิดไปดูหน้านั้นไม่ถูก
+        self.assertIn("แผ่นที่ 4 ของไฟล์", reds[0])
+
+    def test_unreadable_page_does_not_silence_the_sequence_check(self):
+        """หน้าที่คั่นอยู่ยังนับเป็นหนึ่งหน้า จึงยังฟันธงความต่อเนื่องได้
+
+        เดิมเจอหน้าที่อ่านเลขไม่ได้แล้ว "ข้ามไปเลย" ทั้งช่วง เล่มที่เลขหน้าผิดจริง
+        เลยรอดไปได้ทั้งที่ควรฟ้อง
+        """
+        # i, (อ่านไม่ออก), iii -> หน้าที่คั่นคือ ii พอดี ไม่ใช่การกระโดด
+        ok = self._run(["", "i", "", "iii", "iv"], style="roman",
+                       texts=["ปก", "หน้า i", "", "หน้า iii", "หน้า iv"])
+        self.assertEqual([i["found"] for i in ok.zones["RED"]], [])
+        # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
+        bad = self._run(["", "i", "", "v", "vi"], style="roman",
+                        texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
+        self.assertTrue(any('กระโดดจาก "i" ไป "v"' in i["found"]
+                            for i in bad.zones["RED"]))
 
     def test_skipped_when_body_start_unknown(self):
         # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ
@@ -1186,18 +1372,38 @@ class PlainSummaryProseTests(unittest.TestCase):
         report = self._report([{
             "part": "front_matter", "location": "สารบัญ (หน้า viii) บทที่ 3",
             "found": 'ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย (typo, ความใกล้เคียง 0.97): '
-                     '"RESEARCH METHODLOGY" — ต่างที่ "METHODLOGY" → "METHODOLOGY"',
+                     '"RESEARCH METHODLOGY" ต่างที่ "METHODLOGY" ต้องเป็น "METHODOLOGY"',
             "expected": 'ควรเป็น "RESEARCH METHODOLOGY"', "fix": "แก้การสะกด",
         }])
         text = plain_summary(report)
-        self.assertIn("1. ในสารบัญ (หน้า viii) บทที่ 3:", text)
-        self.assertIn('แตกต่างที่ "METHODLOGY"', text)
-        self.assertIn('ให้แก้ไขเป็น: "RESEARCH METHODOLOGY"', text)
+        # หนึ่งจุด = สามบรรทัด: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
+        self.assertIn("1. สารบัญ (หน้า viii) บทที่ 3\n", text)
+        self.assertIn('ต่างที่ "METHODLOGY"', text)
+        self.assertIn('ต้องแก้เป็น "RESEARCH METHODOLOGY"', text)
+        # ค่าที่ถูกต้องต้องบอกครั้งเดียว ไม่ใช่ทั้งในท่อน "พบ" และท่อน "ต้องแก้เป็น"
+        self.assertEqual(text.count("RESEARCH METHODOLOGY"), 1)
+        self.assertNotIn('ต้องเป็น "METHODOLOGY"', text)
         # ห้ามมีเครื่องหมายนำรายการหรือลูกศร และไม่หลงเหลือ (typo, ...)
         self.assertNotIn("- ", text)
         self.assertNotIn("→", text)
         self.assertNotIn("typo", text)
         self.assertNotIn("[", text)
+
+    def test_summary_carries_no_decorative_symbols(self):
+        """ข้อความสรุปถูกคัดลอกไปวางใน Word/อีเมล — สัญลักษณ์ตกแต่งกลายเป็นตัวประหลาด
+
+        เจ้าหน้าที่เจอ ' · ' ที่เคยใช้คั่นสองท่อน กลายเป็นรูปโทรศัพท์ตอนวางในโปรแกรมอื่น
+        (ฟอนต์ไทยไม่มี glyph นั้น จึงหยิบตัวอื่นมาแทน) จึงห้ามมีสัญลักษณ์พวกนี้เลย
+        """
+        report = self._report([{
+            "part": "front_matter", "location": "บทคัดย่อภาษาอังกฤษ (หน้า iv)",
+            "found": 'ชื่อปริญญาแบบย่อในเล่มเขียนว่า "DOCTOR OF PHILOSOPHY"',
+            "expected": 'ต้องเป็น "Ph.D. (TROPICAL MEDICINE)" ตามรูปแบบชื่อย่อ',
+            "fix": "",
+        }])
+        text = plain_summary(report)
+        for symbol in ("·", "—", "–", "→", "↔", "•", "≤", "✆"):
+            self.assertNotIn(symbol, text, f"ยังมีสัญลักษณ์ {symbol} ในข้อความสรุป")
 
     def test_same_fix_reported_twice_is_merged(self):
         # ชื่อบทเดียวกันในเนื้อหา ถูกรายงานทั้งตอนเทียบสารบัญและเทียบประกาศ = จุดเดียว
@@ -1214,7 +1420,7 @@ class PlainSummaryProseTests(unittest.TestCase):
         }]
         text = plain_summary(self._report(dup))
         self.assertIn("ทั้งหมด 1 จุด", text)
-        self.assertEqual(text.count("ในบทที่ 2 (หน้า 6)"), 1)
+        self.assertEqual(text.count("บทที่ 2 (หน้า 6)"), 1)
 
     def test_same_typo_in_toc_and_body_stays_two_points(self):
         # ตำแหน่งต่างกัน (สารบัญ vs เนื้อหา) แม้ค่าที่ต้องแก้เหมือนกัน = สองจุดจริง
@@ -1265,6 +1471,76 @@ class PlainSummaryProseTests(unittest.TestCase):
         }]}}
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
         self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
+
+
+class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
+    """ประโยคที่ระบบ "ประกอบขึ้นเอง" ต้องแปลอังกฤษได้ครบ ไม่มีไทยปน
+
+    ด่าน check_i18n --corpus ตรวจจากเล่มทดสอบ 3 เล่ม ซึ่งไม่เคยผลิตข้อความบางแบบเลย
+    เจ้าหน้าที่จึงเจอของจริงว่า 'ชื่อบท in the document reads "DISCUSSIONS"' และ
+    'Counted 5 กรรมการที่ปรึกษา on this page' บนเล่มที่ไม่ได้อยู่ในชุดทดสอบ
+
+    ชุดนี้จึงไม่พึ่งเล่ม แต่เรียก describe_diff จริงเพื่อสร้าง "รูปประโยคทุกแบบ"
+    ที่มันผลิตได้ (แทนที่ / ขาด / เกิน) แล้วยัดเข้าประโยคของผู้เรียกทุกตัว
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        tools = Path(__file__).resolve().parents[1] / "tools"
+        sys.path.insert(0, str(tools))
+        import check_i18n
+        cls.i18n = check_i18n
+        _block, cls.pairs = check_i18n.load_tr()
+
+    def _thai_left(self, thai):
+        english = self.i18n.tr_en(thai, self.pairs)
+        # ค่าที่อยู่ในเครื่องหมายคำพูดคือข้อความจากเล่มจริง ต้องคงเป็นไทยอยู่แล้ว
+        stripped = re.sub(r'"[^"]*"', "", english)
+        return [w for w in re.findall(r"[ก-๙]+", stripped)
+                if w not in self.i18n.THAI_PAGE_LETTERS and w not in self.i18n.KEEP_THAI]
+
+    # (ข้อความที่พบ, ข้อความที่ถูกต้อง) ครอบ opcode ของ difflib ครบทุกแบบ
+    DIFFS = [
+        ("DISCUSSIONS", "DISCUSSION"),                       # เกินมา
+        ("SUBMITTED IN PARTIAL", "A THESIS SUBMITTED IN PARTIAL"),   # ขาด
+        ("CONCLUSIONS AND RECOMMENDATIONS",
+         "CONCLUSION AND RECOMMENDATIONS"),                  # แทนที่
+        ("ประวัติผู้จัย", "ประวัติผู้วิจัย"),                          # ขาด (ไทย)
+        ("REQUIREMENT FOR THE DEGREE", "REQUIREMENTS FOR THE DEGREE"),
+    ]
+
+    def test_every_diff_phrase_has_an_english_rule(self):
+        for found, expected in self.DIFFS:
+            diff = describe_diff(found, expected)
+            self.assertTrue(diff, f"describe_diff ว่างสำหรับ {found!r}")
+            self.assertEqual(self._thai_left(diff), [],
+                             f'แปลไม่ครบ: {diff!r} -> {self.i18n.tr_en(diff, self.pairs)!r}')
+
+    def test_diff_phrases_read_naturally_inside_their_sentences(self):
+        """ผู้เรียก describe_diff ทุกตัวต่อท้ายประโยคของตัวเอง ต้องแปลได้ทั้งประโยค"""
+        for found, expected in self.DIFFS:
+            diff = describe_diff(found, expected)
+            for sentence in (
+                f'ชื่อบทในเล่มเขียนว่า "{found}" {diff}',
+                f'ชื่อเรื่องในเล่มเขียนว่า "{found}" {diff}',
+                f'หน้าปกพิมพ์ "{found}" ไม่ตรงข้อความบังคับ (ข้อความประเภทงาน) {diff}',
+                f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{found}" {diff}',
+                f'ช่องประธานหลักสูตร (มุมล่างขวา) เขียนว่า "{found}" {diff}',
+            ):
+                self.assertEqual(
+                    self._thai_left(sentence), [],
+                    f'แปลไม่ครบ: {sentence!r} -> {self.i18n.tr_en(sentence, self.pairs)!r}')
+
+    def test_committee_count_sentence_translates_both_labels(self):
+        """ป้าย "กรรมการ"/"กรรมการที่ปรึกษา" ถูกยัดเป็นตัวแปรกลางประโยค ต้องแปลด้วย"""
+        for label in ("กรรมการ", "กรรมการที่ปรึกษา"):
+            for thai in (
+                f'นับรายชื่อ{label}บนหน้านี้ได้ 5 คน แต่ข้อมูลอนุมัติมี 4 คน '
+                f'ระบบอ่านได้ว่า 1. "INGA THORSDOTTIR"',
+                f'ต้องมี{label} 4 คนตามข้อมูลอนุมัติ (บฑ.)',
+            ):
+                self.assertEqual(self._thai_left(thai), [],
+                                 f'แปลไม่ครบ: {thai!r} -> {self.i18n.tr_en(thai, self.pairs)!r}')
 
 
 if __name__ == "__main__":
