@@ -2579,18 +2579,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             blank_runs.append([blank_idx])
     for run in blank_runs:
         run_ref = page_ref(run[0]) if len(run) == 1 else \
-            f"{page_ref(run[0])}–{page_ref(run[-1])} ({len(run)} หน้า)"
+            f"{page_ref(run[0])} ถึง {page_ref(run[-1])} ({len(run)} หน้า)"
         image_like = any(not (pages[i] or '').strip() for i in run)
         kind = ("ไม่มีข้อความให้ดึงเลย อาจเป็นหน้ารูปภาพ/สแกน เช่น ภาคผนวก"
                 if image_like else "มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น")
         if all(i in printed for i in run) and arabic_sequence_ok:
             rep.add(BLANK_PAGE_ZONE, "body/end", run_ref,
-                    f"พบหน้าที่ระบบดึงข้อความไม่ได้ ({kind}) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง",
+                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง",
                     "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
                     "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "PAGE.BLANK")
         else:
             rep.add(UNCERTAIN_ZONE, "-", run_ref,
-                    f"พบหน้าที่ระบบดึงข้อความไม่ได้ ({kind}) และยืนยันลำดับเลขหน้าไม่ได้",
+                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) และยืนยันลำดับเลขหน้าไม่ได้",
                     "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
                     "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
@@ -3029,7 +3029,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             more = f" และอีก {len(bold_lines) - 5} บรรทัด" if len(bold_lines) > 5 else ""
                             rep.add(ABSTRACT_BOLD_ZONE, "front_matter",
                                     f"บทคัดย่อ ({page_ref(abs_page_idx)})",
-                                    f"พบข้อความตัวหนา: {examples}{more}",
+                                    f"มีข้อความตัวหนา: {examples}{more}",
                                     "แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้",
                                     "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่", "FORMAT.ABSTRACT_BOLD")
         except Exception:
