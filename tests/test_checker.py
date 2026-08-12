@@ -7,6 +7,8 @@ from pathlib import Path
 from checker import (
     describe_diff,
     _closest_student_id,
+    _check_student_line_pairs_name_with_id,
+    student_id_line,
     _looks_like_degree_line,
     NOT_CHECKED,
     N_APPENDIX,
@@ -1605,6 +1607,45 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class StudentNameAndIdMustShareOneLine(unittest.TestCase):
+    """template กำหนดบรรทัดเดียวว่า "ชื่อ นามสกุล  รหัส  รหัสหลักสูตร/ระดับ"
+
+    เจ้าหน้าที่สั่งว่า "ช่วงนี้มันต้องตรวจทั้งชื่อและรหัสนะ" — เดิมค้นชื่อกับรหัสแยกกัน
+    ทั้งหน้า เล่มที่พิมพ์ชื่อไว้คนละบรรทัดกับรหัสจึงผ่านได้ทั้งที่ผิดรูปแบบ
+    """
+
+    def _run(self, page, name="เอมิกา หงสชั้น", student_id="6526627 NSMY/M"):
+        rep = Report()
+        _check_student_line_pairs_name_with_id(
+            rep, page, name, student_id, "บทคัดย่อไทย (หน้า ง)", "ชื่อภาษาไทย")
+        return rep
+
+    def test_same_line_passes(self):
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น 6526627 NSMY/M\nพย.ม. (การพยาบาล)")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_name_on_another_line_is_flagged(self):
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น\n6526627 NSMY/M\nพย.ม. (การพยาบาล)")
+        oranges = [it["found"] for it in rep.zones["ORANGE"]]
+        self.assertEqual(len(oranges), 1)
+        self.assertIn("ไม่มีชื่อภาษาไทยอยู่ด้วย", oranges[0])
+        self.assertIn("6526627 NSMY/M", oranges[0])
+
+    def test_page_without_an_id_line_is_left_to_the_id_rule(self):
+        """ไม่มีบรรทัดรหัสเลย = กฎรหัสนักศึกษาฟ้องไปแล้ว ห้ามฟ้องซ้ำ"""
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น\nพย.ม. (การพยาบาล)")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_wrong_id_is_left_to_the_id_rule(self):
+        rep = self._run("เอมิกา หงสชั้น\n6536627 NSMY/M", student_id="6526627 NSMY/M")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_finds_the_line_that_carries_the_id(self):
+        page = "ชื่อเรื่อง\nEMIKA HONGCHAN 6526627 NSMY/M\nบทคัดยอ"
+        self.assertEqual(student_id_line(page), "EMIKA HONGCHAN 6526627 NSMY/M")
+        self.assertEqual(student_id_line("ชื่อเรื่อง\nบทคัดยอ"), "")
 
 
 class AbstractCommitteeBlockStopsAtTheAbstractHeading(unittest.TestCase):
