@@ -1122,6 +1122,27 @@ _ABS_COMMITTEE_HEADING = re.compile(
     r'(?:ADVISORY\s+COMMITTEE|คณะกรรมการที่ปรึกษา\S*)\s*:', re.I)
 
 
+# รหัสนักศึกษาตามรูปแบบของบัณฑิตวิทยาลัย: เลข 7 หลัก + รหัสหลักสูตร + / + ระดับ
+# เช่น "6526627 NSMY/M" — ยอมให้ช่องว่างเพี้ยนได้ เพราะการดึงข้อความจาก PDF
+# แทรก/ตัดช่องว่างรอบเครื่องหมายทับได้
+_STUDENT_ID_SHAPE = re.compile(
+    r'\d{6,9}\s*[A-Z]{2,8}\s*/\s*[A-Z0-9]{1,3}', re.I)
+
+
+def _closest_student_id(page_text, expected):
+    """รหัสนักศึกษาที่ "พิมพ์อยู่จริง" บนหน้านี้ — คืน '' ถ้าหน้านี้ไม่มีรหัสเลย
+
+    ใช้แยก "เล่มพิมพ์รหัสผิดตัวเลข" ออกจาก "เล่มไม่มีรหัส" ซึ่งวิธีแก้คนละอย่าง
+    และทำให้รายงานบอกได้ว่าเล่มพิมพ์ว่าอะไร แทนที่จะบอกลอย ๆ ว่า "ไม่พบรหัสนักศึกษา"
+    """
+    found = [soft(m.group(0)) for m in _STUDENT_ID_SHAPE.finditer(page_text or "")]
+    if not found:
+        return ""
+    target = norm(expected)
+    return max(found,
+               key=lambda s: difflib.SequenceMatcher(None, target, norm(s)).ratio())
+
+
 def _committee_entry_complete(line):
     """บรรทัดนี้จบ "ชื่อ, คุณวุฒิ" ของคนล่าสุดครบแล้วหรือยัง
 
@@ -3422,13 +3443,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if norm(student_id) in norm(pages[abs_idx]):
                     rep.add_verification("รหัสนักศึกษา", loc, "pass")
                 else:
-                    rep.add_verification("รหัสนักศึกษา", loc, "fail",
-                                         f"ไม่พบรหัส {student_id}")
-                    rep.add("RED", "front_matter", loc,
-                            f"ไม่พบรหัสนักศึกษา \"{student_id}\" (ต้องมีทั้งตัวเลขและรหัสหลักสูตร)",
+                    # เล่มพิมพ์รหัสมาแต่ผิดตัวเลข กับเล่มไม่มีรหัสเลย เป็นคนละเรื่องกัน
+                    # ถ้าเจอรหัสบนหน้า ต้องบอกว่าเล่มพิมพ์ว่าอะไรและต่างตรงไหน ไม่ใช่
+                    # บอกลอย ๆ ว่า "ไม่พบรหัสนักศึกษา" ซึ่งอ่านแล้วนึกว่าระบบหาไม่เจอ
+                    printed = _closest_student_id(pages[abs_idx], student_id)
+                    if printed:
+                        # ชี้จุดต่างเฉพาะตอนที่ต่างกันจุดเดียว (พิมพ์ผิดหลักเดียว)
+                        # ถ้าเป็นคนละรหัสกันคนละเรื่อง การไล่ทีละตัวอักษรจะได้
+                        # "ต่างที่ 1 และ ขาด 35 และ มี 17 เกินมา" ซึ่งอ่านไม่รู้เรื่อง
+                        # กว่าการดูรหัสเต็มสองอันเทียบกันเอง
+                        diff = describe_diff(printed, student_id)
+                        found_msg = f'บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า "{printed}"'
+                        if diff and " และ " not in diff:
+                            found_msg += f" {diff}"
+                        detail = printed
+                    else:
+                        found_msg = ("ไม่พบรหัสนักศึกษาบนหน้านี้ "
+                                     "(ต้องมีทั้งตัวเลขและรหัสหลักสูตร)")
+                        detail = f"ไม่พบรหัส {student_id}"
+                    rep.add_verification("รหัสนักศึกษา", loc, "fail", detail)
+                    rep.add("RED", "front_matter", loc, found_msg,
                             f"บรรทัดชื่อนักศึกษาใน{abs_label}ต้องมีรหัส \"{student_id}\"",
-                            "เพิ่ม/แก้รหัสนักศึกษาให้ครบทั้งตัวเลขและรหัสหลักสูตร",
-                            "FORM.APPROVED_MATCH")
+                            "", "FORM.APPROVED_MATCH")
 
         # ชื่อปริญญาแยกตามตำแหน่งที่ใช้ตรวจ (ตามข้อมูลอนุมัติจาก eThesis):
         #   หน้าปก      = ต้นฉบับ eThesis ตรง ๆ (อังกฤษเป็นตัวพิมพ์ใหญ่)

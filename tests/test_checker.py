@@ -6,6 +6,7 @@ from pathlib import Path
 
 from checker import (
     describe_diff,
+    _closest_student_id,
     _looks_like_degree_line,
     NOT_CHECKED,
     N_APPENDIX,
@@ -1571,6 +1572,39 @@ class DegreeLineIsNotConfusedWithCommitteeQualifications(unittest.TestCase):
         for line in ("PHOTSAWI SIRISARANLAK 6637642 EGLE/D", "ABSTRACT",
                      "TRANSFORMATION IN THAILAND", ""):
             self.assertFalse(_looks_like_degree_line(line), line)
+
+
+class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
+    """รหัสนักศึกษาผิดตัวเลข ต้องบอกว่าเล่มพิมพ์ว่าอะไร ไม่ใช่ "ไม่พบรหัสนักศึกษา"
+
+    เล่มจริงพิมพ์ 6526627 แต่ข้อมูลอนุมัติเป็น 6536627 ต่างกันหลักเดียว ระบบเดิม
+    บอกแค่ "ไม่พบรหัสนักศึกษา" เจ้าหน้าที่อ่านแล้วนึกว่าระบบหาไม่เจอ ทั้งที่รหัสพิมพ์
+    อยู่ชัด ๆ แค่ผิดหนึ่งตัว — คนละเรื่องกับเล่มที่ไม่ได้ใส่รหัสมาเลย
+    """
+
+    THAI_PAGE = "\n".join([
+        "ง",
+        "อิทธิพลของความรอบรูในการเลี้ยงลูกดวยนมแม ระยะเวลาที่ลาคลอด",
+        "เอมิกา หงสชั้น 6526627 NSMY/M",
+        "พย.ม. (การพยาบาลเวชปฏิบัติชุมชน)",
+    ])
+
+    def test_finds_the_id_actually_printed(self):
+        self.assertEqual(_closest_student_id(self.THAI_PAGE, "6536627 NSMY/M"),
+                         "6526627 NSMY/M")
+
+    def test_points_at_the_wrong_digits(self):
+        printed = _closest_student_id(self.THAI_PAGE, "6536627 NSMY/M")
+        self.assertIn('"6526627" ต้องเป็น "6536627"',
+                      describe_diff(printed, "6536627 NSMY/M"))
+
+    def test_page_without_any_id_returns_empty(self):
+        """หน้าที่ไม่มีรหัสเลย ต้องคืนค่าว่าง เพื่อให้ยังบอกได้ว่า "ไม่พบ" ตามจริง"""
+        self.assertEqual(_closest_student_id("เอมิกา หงสชั้น\nบทคัดยอ", "6536627 NSMY/M"), "")
+
+    def test_picks_the_nearest_id_when_the_page_has_several(self):
+        page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
+        self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
 
 
 class AbstractCommitteeBlockStopsAtTheAbstractHeading(unittest.TestCase):
