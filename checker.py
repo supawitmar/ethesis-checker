@@ -1133,10 +1133,17 @@ def abstract_committee_block(page_text):
     if not m:
         return None
     is_english = "ADVISORY" in (page_text[m.start():m.end()].upper())
-    tail = page_text[m.end():]
-    stop = re.search(r'\n\s*(?:ABSTRACT|บทคัดย่อ)\b', tail)
-    block = tail[:stop.start()] if stop else "\n".join(tail.split("\n")[:4])
-    return is_english, re.sub(r'\s*\n\s*', ' ', block).strip()
+    lines = page_text[m.end():].split("\n")
+    # หาหัวข้อ "บทคัดย่อ/ABSTRACT" จากข้อความที่ normalize แล้ว ไม่ใช่เทียบตรงตัว
+    # การดึงข้อความจาก PDF ไทยทำวรรณยุกต์/การันต์หายได้ เล่มจริงได้ "บทคัดยอ" (ไม่มี ่)
+    # การเทียบตรงตัวจึงหาไม่เจอ แล้วบล็อกรายชื่อกรรมการลากยาวกินเนื้อความบทคัดย่อ
+    # เข้ามา 4 บรรทัด ระบบเลยฟ้องผิดสองข้อรวด
+    #   "มีสาขาวิชาในวงเล็บ"      <- จริง ๆ คือเลขข้อ "1)" "2)" ในบทคัดย่อ
+    #   "ไม่มีจุลภาคคั่นหน้าชื่อ"  <- จริง ๆ คือย่อหน้าแรกของบทคัดย่อทั้งย่อหน้า
+    stop_at = next((k for k, line in enumerate(lines[1:], start=1)
+                    if _is_abstract_heading(line)), None)
+    block_lines = lines[:stop_at] if stop_at is not None else lines[:4]
+    return is_english, re.sub(r'\s*\n\s*', ' ', "\n".join(block_lines)).strip()
 
 
 # คุณวุฒิที่ขึ้นต้นก้อนข้อความ เช่น "ปร.ด." "วศ.ด." "Ph.D." "PhD." "Ed.D." "P.hD."
