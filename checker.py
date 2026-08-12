@@ -1429,8 +1429,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         shown = ", ".join(f'{page_ref(i)} ("{lab}")' for i, lab, _s in off_style[:5])
         more = f" และอีก {len(off_style) - 5} หน้า" if len(off_style) > 5 else ""
         rep.add("RED", "front_matter", "ส่วนนำ",
-                f"ส่วนนำใช้{found_names} {len(off_style)} หน้า: {shown}{more}",
-                want_sentence, f"แก้เลขหน้าส่วนนำให้เป็น{want}", "PAGE.NUMBERING")
+                f"มีเลขหน้าเป็น{found_names} {len(off_style)} หน้า: {shown}{more}",
+                want_sentence, f"แก้เลขหน้าให้เป็น{want}", "PAGE.NUMBERING")
 
     seq = [e for e in entries if e[2] == main_style]
     if len(seq) > 1:
@@ -1457,8 +1457,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
             more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
             observed = ", ".join(lab for _i, lab, _s, _v in seq)
             rep.add("RED", "front_matter", "ส่วนนำ",
-                    "เลขหน้าส่วนนำไม่ต่อเนื่อง: " + "; ".join(problems[:5]) + more,
-                    f"เลขหน้าส่วนนำต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
+                    "เลขหน้าไม่ต่อเนื่อง: " + " และ ".join(problems[:5]) + more,
+                    f"เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
                     "", "PAGE.NUMBERING")
 
     if unread:
@@ -1467,8 +1467,10 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         #     ฟันธงได้ และบอกได้ว่าต้องเพิ่มเลขหน้า
         #   หน้าที่ดึงข้อความไม่ได้เลย = หน้าภาพ/สแกน ระบบไม่มีทางรู้ว่าพิมพ์เลขไว้ไหม
         #     จึงยังส่งให้เจ้าหน้าที่ดู ไม่ฟันธง
-        # ทั้งสองแบบต้องบอก "แผ่นที่เท่าไรของไฟล์" (page_ref ใส่ให้แล้ว) เจ้าหน้าที่
-        # จะได้เปิดไปดูหน้านั้นได้ ไม่ใช่รู้แค่ว่า "มีหน้าที่อ่านไม่ออกอยู่ที่ไหนสักแห่ง"
+        # ทั้งสองแบบต้องบอก "แผ่นที่เท่าไรของไฟล์" เจ้าหน้าที่จะได้เปิดไปดูหน้านั้นได้
+        # ไม่ใช่รู้แค่ว่า "มีหน้าที่อ่านไม่ออกอยู่ที่ไหนสักแห่ง"
+        # ในรายการนี้ไม่ใช้ page_ref เพราะทุกหน้าในกลุ่ม "ไม่มีเลขหน้า" อยู่แล้ว
+        # การขึ้นต้นทุกตัวด้วยคำว่า "หน้าไม่ระบุเลข" จึงเป็นการพูดซ้ำประโยคหลัก
         def _has_text(idx):
             if page_texts is None or idx >= len(page_texts):
                 return False
@@ -1478,17 +1480,19 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         unreadable = [i for i in unread if i not in no_number]
         for group, zone, detail, rule_id, fix in (
             (no_number, "RED", "ไม่ได้พิมพ์เลขหน้าไว้", "PAGE.NUMBERING",
-             "เพิ่มเลขหน้าให้ครบทุกหน้าของส่วนนำ"),
+             "เพิ่มเลขหน้าให้ครบทุกหน้า"),
             (unreadable, UNCERTAIN_ZONE, "ระบบอ่านเลขหน้าไม่ได้ (อาจเป็นหน้าภาพ/สแกน)",
              "UNCERTAIN.REVIEW", "ตรวจด้วยตาว่าหน้าเหล่านี้มีเลขหน้าถูกต้องและต่อเนื่อง"),
         ):
             if not group:
                 continue
-            shown = ", ".join(page_ref(i) for i in group[:5])
+            sheets = [str(i + 1) for i in group[:5]]
+            shown = " และ ".join([", ".join(sheets[:-1]), sheets[-1]]) if len(sheets) > 1 \
+                else sheets[0]
             more = f" และอีก {len(group) - 5} หน้า" if len(group) > 5 else ""
             rep.add(zone, "front_matter", "ส่วนนำ",
-                    f"ส่วนนำ {len(group)} หน้า{detail}: {shown}{more}",
-                    f"ทุกหน้าของส่วนนำต้องมีเลขหน้าเป็น{want}", fix, rule_id)
+                    f"{len(group)} หน้า{detail} คือแผ่นที่ {shown} ของไฟล์{more}",
+                    f"ทุกหน้าต้องมีเลขหน้าเป็น{want}", fix, rule_id)
 
 
 def strip_name_prefix(name):
@@ -1792,7 +1796,7 @@ def _prose_location(location):
 SUMMARY_INDENT = "   "
 
 
-def _summary_sentence(issue):
+def _summary_sentence(issue, skip_location=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
         3. สารบัญ (หน้า ฉ) บทที่ 3
@@ -1804,7 +1808,7 @@ def _summary_sentence(issue):
     การแทนที่แบบเศษคำซึ่งให้ผลเพี้ยน (เคยได้ "page after page 93 Change to:Page 94")
     พอแยกบรรทัด แต่ละบรรทัดกลายเป็นข้อความเดี่ยวที่มีกฎเต็มประโยครองรับอยู่แล้ว
     """
-    lines = [_prose_location(issue.get("location"))]
+    lines = [] if skip_location else [_prose_location(issue.get("location"))]
     found = _prose_found(issue.get("found"))
     if found:
         lines.append(found)
@@ -1864,7 +1868,10 @@ def plain_summary(report, failed=None, passed=None):
         lines.append(f"\n{section}")
         for issue in section_items:
             number += 1
-            lines.append(f"{number}. {_summary_sentence(issue)}")
+            # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
+            # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
+            skip_loc = _prose_location(issue.get("location")) == section
+            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
     return "\n".join(lines).strip()
 
 
@@ -1879,6 +1886,49 @@ def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
     return section_kind == "appendix" and toc_label in appendix_labels
 
 
+# จุดเริ่มของ "โซนรายชื่อกรรมการ" บนหน้าลงนามและหน้าบทคัดย่อ
+# ใต้จุดนี้มีแต่ชื่อคนกับคุณวุฒิ ซึ่งเป็นตัวย่อชุดเดียวกับชื่อปริญญา (Ph.D. / ปร.ด.)
+# ตำแหน่งนี้ตายตัวตาม template ทุกเล่ม จึงใช้เป็นขอบเขตได้โดยไม่ต้องเดา
+_DEGREE_SEARCH_STOP = re.compile(
+    r'^[ \t]*(?:'
+    r'[…]{3,}|\.{6,}'                                    # เส้นประสำหรับลงนาม
+    r'|(?:THESIS\s+|THEMATIC\s+PAPER\s+)?(?:ADVISORY|EXAMINATION)\s+COMMITTEE'
+    r'|คณะกรรมการที่ปรึกษา|คณะกรรมการสอบ'
+    r')', re.I | re.M)
+
+
+# ตัวย่อคุณวุฒิที่มีจุดคั่นตั้งแต่สองท่อน เช่น Ph.D. / M.Sc. / ปร.ด. / วท.ม.
+_DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2,}')
+
+
+def _looks_like_degree_line(line):
+    """บรรทัดนี้หน้าตาเป็น "ชื่อปริญญาแบบย่อ" หรือไม่
+
+    ใช้แยก "เล่มพิมพ์ชื่อปริญญาผิด" ออกจาก "เล่มไม่มีบรรทัดชื่อปริญญาเลย" ซึ่งวิธีแก้
+    คนละอย่างกัน — ถ้าไม่แยก ระบบจะยกบรรทัดที่ใกล้เคียงที่สุดบนหน้ามาอ้างว่าเป็น
+    ชื่อปริญญา (เคยได้บรรทัดชื่อ-รหัสนักศึกษา) แล้วเจ้าหน้าที่นึกว่าระบบอ่านเพี้ยน
+    """
+    text = soft(line)
+    return bool(text) and bool(_ABS_DEGREE_HEAD.match(text)
+                               or _DEGREE_ABBR_TOKEN.search(text))
+
+
+def _degree_search_text(page_text):
+    """ตัดโซนรายชื่อกรรมการทิ้งก่อนหาบรรทัดชื่อปริญญา
+
+    คุณวุฒิใต้ชื่อกรรมการเขียนด้วยตัวย่อชุดเดียวกับชื่อปริญญา และมักมีสาขาในวงเล็บครบ
+    ตัวกรอง "วงเล็บครบ" ข้างล่างจึงเลือกบรรทัดของกรรมการแทนบรรทัดปริญญาจริง โดยเฉพาะ
+    เล่มที่บรรทัดปริญญาลืมปิดวงเล็บ (เจอในเล่มจริง: "for the degree of Doctor of
+    Philosophy (Logistics and Engineering Management" ไม่มีวงเล็บปิด) ผลคือรายงาน
+    ฟ้องว่าชื่อปริญญาในเล่มเขียนว่า "LIANGROKAPART, Ph.D., THANANYA WASUSRI, Ph.D."
+    ซึ่งเป็นชื่ออาจารย์ ไม่ใช่ชื่อปริญญา
+    """
+    text = page_text or ""
+    stop = _DEGREE_SEARCH_STOP.search(text)
+    head = text[:stop.start()] if stop else text
+    return head if soft(head) else text
+
+
 def closest_degree_line(page_text, expected):
     """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
 
@@ -1888,6 +1938,7 @@ def closest_degree_line(page_text, expected):
     จึงสร้างตัวเลือกจาก "หน้าต่างบรรทัดต่อเนื่อง 1-3 บรรทัด" รอบบรรทัดที่มีคำบ่งชี้
     แล้วเลือกอันที่ใกล้เคียงข้อมูลอนุมัติที่สุด (เล่มไทยต้องมีคำบ่งชี้ไทยด้วย)
     """
+    page_text = _degree_search_text(page_text)
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     markers = ('DEGREE', 'MASTER', 'DOCTOR', 'BACHELOR', 'MENG', 'MSC', 'PHD',
                norm('ปริญญา'), norm('มหาบัณฑิต'), norm('ดุษฎีบัณฑิต'))
@@ -1905,7 +1956,20 @@ def closest_degree_line(page_text, expected):
     if balanced:
         candidates = balanced
     target = norm(expected)
-    return max(candidates, key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
+    best = max(candidates,
+               key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
+    return _strip_degree_lead_in(best)
+
+
+# คำนำหน้าชื่อปริญญาในประโยค template ของหน้าลงนาม — ไม่ใช่ส่วนหนึ่งของชื่อปริญญา
+# ถ้าไม่ตัดออก ข้อความที่ยกมาจะเป็น "for the degree of Doctor of Philosophy (..."
+# แล้วเจ้าหน้าที่ต้องไล่เทียบเองว่าต่างจากข้อมูลอนุมัติตรงไหน
+_DEGREE_LEAD_IN = re.compile(
+    r'^\s*(?:for\s+the\s+degree\s+of|เพื่อรับปริญญา|ปริญญา)\s*', re.I)
+
+
+def _strip_degree_lead_in(line):
+    return _DEGREE_LEAD_IN.sub('', soft(line)).strip()
 
 
 def compare_values(actual, expected, rule_name):
@@ -3419,6 +3483,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                         f"ข้อมูลอนุมัติ: \"{abbr}\"",
                         "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+            elif not _looks_like_degree_line(compared['actual']):
+                # หน้านี้ไม่มีบรรทัดชื่อปริญญาแบบย่อเลย (เจอในเล่มจริง: ข้ามจากบรรทัด
+                # ชื่อ-รหัสนักศึกษาไป THESIS ADVISORY COMMITTEE เลย) ห้ามยกบรรทัดอื่น
+                # มาอ้างว่า "ในเล่มเขียนว่า ..." เพราะเจ้าหน้าที่อ่านแล้วนึกว่าระบบอ่านเพี้ยน
+                # ทั้งที่ของจริงคือบรรทัดนี้หายไป ซึ่งเป็นคนละวิธีแก้กัน (ต้องเพิ่มบรรทัด)
+                rep.add_verification("ชื่อปริญญา", vloc, "fail", "ไม่พบบรรทัดชื่อปริญญาแบบย่อ")
+                rep.add("RED", "front_matter", box,
+                        "ไม่พบบรรทัดชื่อปริญญาแบบย่อในหน้านี้",
+                        f'ต้องมีบรรทัด "{abbr}" อยู่ใต้บรรทัดชื่อและรหัสนักศึกษา',
+                        "", "FORM.APPROVED_MATCH")
             else:
                 rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
                 rep.add("RED", "front_matter", box,

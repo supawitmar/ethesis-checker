@@ -6,6 +6,7 @@ from pathlib import Path
 
 from checker import (
     describe_diff,
+    _looks_like_degree_line,
     NOT_CHECKED,
     N_APPENDIX,
     Report,
@@ -1389,6 +1390,34 @@ class PlainSummaryProseTests(unittest.TestCase):
         self.assertNotIn("typo", text)
         self.assertNotIn("[", text)
 
+    def test_summary_does_not_repeat_the_section_name(self):
+        """ข้อที่ตำแหน่งเป็นชื่อส่วนเปล่า ๆ ต้องไม่พิมพ์ชื่อส่วนซ้ำกับหัวข้อกลุ่มบรรทัดบน
+
+        เจ้าหน้าที่ทักว่า "คำมันดูซ้ำซ้อนไหม" จากข้อที่ขึ้นว่า
+            ส่วนนำ
+            6. ส่วนนำ
+               เลขหน้าส่วนนำไม่ต่อเนื่อง: ...
+               เลขหน้าส่วนนำต้องเรียงต่อเนื่อง...
+        คำว่า "ส่วนนำ" โผล่ 4 ครั้งในข้อเดียว
+        """
+        report = self._report([{
+            "part": "front_matter", "location": "ส่วนนำ",
+            "found": 'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "iv" ไป "iii"',
+            "expected": "เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม", "fix": "",
+        }])
+        text = plain_summary(report)
+        self.assertEqual(text.count("ส่วนนำ"), 1, f"ชื่อส่วนซ้ำ:\n{text}")
+        self.assertIn('1. เลขหน้าไม่ต่อเนื่อง', text)
+
+    def test_summary_keeps_the_location_when_it_adds_information(self):
+        """ตำแหน่งที่บอกหน้าเจาะจง ต้องยังพิมพ์ไว้ ไม่ใช่ตัดทิ้งเพราะอยู่ในกลุ่มเดียวกัน"""
+        report = self._report([{
+            "part": "front_matter", "location": "สารบัญ (หน้า viii) บทที่ 6",
+            "found": 'ชื่อบทในเล่มเขียนว่า "CONCLUSION AND RECOMMENDATONS"',
+            "expected": 'ตามประกาศ 2569 ควรเป็น "CONCLUSION AND RECOMMENDATIONS"', "fix": "",
+        }])
+        self.assertIn("1. สารบัญ (หน้า viii) บทที่ 6\n", plain_summary(report))
+
     def test_summary_carries_no_decorative_symbols(self):
         """ข้อความสรุปถูกคัดลอกไปวางใน Word/อีเมล — สัญลักษณ์ตกแต่งกลายเป็นตัวประหลาด
 
@@ -1471,6 +1500,77 @@ class PlainSummaryProseTests(unittest.TestCase):
         }]}}
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
         self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
+
+
+class DegreeLineIsNotConfusedWithCommitteeQualifications(unittest.TestCase):
+    """ชื่อปริญญาต้องไม่ถูกอ่านเป็นคุณวุฒิของอาจารย์
+
+    คุณวุฒิใต้ชื่อกรรมการใช้ตัวย่อชุดเดียวกับชื่อปริญญา (Ph.D. / ปร.ด.) และมักมี
+    สาขาในวงเล็บครบ ตัวกรอง "วงเล็บครบ" จึงเคยเลือกบรรทัดของกรรมการแทน โดยเฉพาะ
+    เล่มที่บรรทัดปริญญาลืมปิดวงเล็บ ข้อความจากเล่มจริงที่เจ้าหน้าที่ทักมา:
+        ชื่อปริญญาแบบย่อในเล่มเขียนว่า "LIANGROKAPART, Ph.D., THANANYA WASUSRI, Ph.D."
+    """
+
+    # หน้าลงนาม 2 ของเล่มจริง — บรรทัดปริญญาลืมปิดวงเล็บ ส่วนคุณวุฒิกรรมการวงเล็บครบ
+    SIGNATURE_PAGE = "\n".join([
+        "ii", "Thesis", "entitled",
+        "ANALYZING BARRIERS AND STRATEGIES FOR RAIL FREIGHT DIGITAL",
+        "was submitted to the Faculty of Graduate Studies, Mahidol University",
+        "for the degree of Doctor of Philosophy (Logistics and Engineering Management",
+        "on 20 July 2026",
+        "Thesis Examination Committees",
+        "Chair",
+        "…………………………………………………… ……………………………………………………",
+        "Photsawi Sirisaranlak, Assoc. Prof. Walilak Atthirawong,",
+        "Candidate Ph.D. (Manufacturing Engineering and Operations",
+        "Management)",
+    ])
+
+    # หน้าบทคัดย่อของเล่มจริง — ไม่มีบรรทัดชื่อปริญญาแบบย่อเลย
+    ABSTRACT_PAGE_WITHOUT_DEGREE = "\n".join([
+        "iv",
+        "ANALYZING BARRIERS AND STRATEGIES FOR RAIL FREIGHT DIGITAL",
+        "TRANSFORMATION IN THAILAND",
+        "PHOTSAWI SIRISARANLAK 6637642 EGLE/D",
+        "THESIS ADVISORY COMMITTEE: DUANGPUN KRITCHANCHAI, Ph.D., JIRAPAN",
+        "LIANGROKAPART, Ph.D., THANANYA WASUSRI, Ph.D.",
+        "ABSTRACT",
+        "Railways around the world are increasingly adopting digital technologies.",
+    ])
+
+    ABSTRACT_PAGE_WITH_DEGREE = ABSTRACT_PAGE_WITHOUT_DEGREE.replace(
+        "THESIS ADVISORY COMMITTEE:",
+        "Ph.D. (LOGISTICS AND ENGINEERING MANAGEMENT)\nTHESIS ADVISORY COMMITTEE:")
+
+    def test_signature_page_reads_the_degree_line_not_a_member_qualification(self):
+        got = closest_degree_line(
+            self.SIGNATURE_PAGE,
+            "Doctor of Philosophy (Logistics and Engineering Management)")
+        self.assertIn("Doctor of Philosophy", got)
+        self.assertNotIn("Manufacturing", got)
+
+    def test_abstract_page_does_not_borrow_the_committee_line(self):
+        got = closest_degree_line(self.ABSTRACT_PAGE_WITH_DEGREE,
+                                  "Ph.D. (LOGISTICS AND ENGINEERING MANAGEMENT)")
+        self.assertIn("LOGISTICS AND ENGINEERING MANAGEMENT", got)
+        self.assertNotIn("LIANGROKAPART", got)
+
+    def test_missing_degree_line_is_not_quoted_as_a_wrong_one(self):
+        """ไม่มีบรรทัดชื่อปริญญา ต้องไม่ยกบรรทัดอื่นมาอ้างว่าเป็นชื่อปริญญา"""
+        got = closest_degree_line(self.ABSTRACT_PAGE_WITHOUT_DEGREE,
+                                  "Ph.D. (LOGISTICS AND ENGINEERING MANAGEMENT)")
+        self.assertNotIn("LIANGROKAPART", got)
+        self.assertFalse(_looks_like_degree_line(got),
+                         f"ต้องรู้ว่าไม่ใช่บรรทัดชื่อปริญญา แต่ได้ {got!r}")
+
+    def test_degree_line_shapes_are_recognised(self):
+        for line in ("Ph.D. (LOGISTICS AND ENGINEERING MANAGEMENT)",
+                     "M.Sc. (ORTHODONTICS)", "ปร.ด. (การพยาบาล)",
+                     "Ph.D (TROPICAL MEDICINE)", "DEGREE M.Sc. (NURSING)"):
+            self.assertTrue(_looks_like_degree_line(line), line)
+        for line in ("PHOTSAWI SIRISARANLAK 6637642 EGLE/D", "ABSTRACT",
+                     "TRANSFORMATION IN THAILAND", ""):
+            self.assertFalse(_looks_like_degree_line(line), line)
 
 
 class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
