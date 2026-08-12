@@ -1122,6 +1122,19 @@ _ABS_COMMITTEE_HEADING = re.compile(
     r'(?:ADVISORY\s+COMMITTEE|คณะกรรมการที่ปรึกษา\S*)\s*:', re.I)
 
 
+def _committee_entry_complete(line):
+    """บรรทัดนี้จบ "ชื่อ, คุณวุฒิ" ของคนล่าสุดครบแล้วหรือยัง
+
+    ใช้ตัดสินว่าบรรทัดถัดไปเป็น "ชื่อที่ห่อคำมา" หรือเป็นเนื้อความที่ไม่เกี่ยวแล้ว
+    โดยดูจากตัวข้อความเอง ไม่ใช่นับบรรทัด — ท่อนสุดท้ายเป็นคุณวุฒิ = ครบ,
+    เป็นชื่อคน = ยังค้าง (คุณวุฒิของคนนั้นถูกห่อไปบรรทัดถัดไป)
+    """
+    tail = soft(line).rstrip()
+    if tail.endswith(","):
+        return False
+    return _is_degree_only(tail.split(",")[-1].strip())
+
+
 def abstract_committee_block(page_text):
     """ดึงบรรทัดรายชื่อคณะกรรมการที่ปรึกษาบนหน้าบทคัดย่อ (รวมบรรทัดที่ห่อคำ)
 
@@ -1133,10 +1146,24 @@ def abstract_committee_block(page_text):
     if not m:
         return None
     is_english = "ADVISORY" in (page_text[m.start():m.end()].upper())
-    tail = page_text[m.end():]
-    stop = re.search(r'\n\s*(?:ABSTRACT|บทคัดย่อ)\b', tail)
-    block = tail[:stop.start()] if stop else "\n".join(tail.split("\n")[:4])
-    return is_english, re.sub(r'\s*\n\s*', ' ', block).strip()
+    lines = page_text[m.end():].split("\n")
+    # รายชื่อกรรมการห่อคำกี่บรรทัดก็ได้ ขึ้นกับความยาวชื่อของแต่ละเล่ม จึงห้ามนับบรรทัด
+    # ตัดสิน — ต้องดูว่า "ข้อความในบรรทัดนั้นคืออะไร" แล้วหยุดเมื่อมันไม่ใช่รายชื่อแล้ว
+    # (ของเดิมหาหัวข้อ "บทคัดย่อ" ไม่เจอเมื่อไร ก็เดาเอาดื้อ ๆ ว่าเป็น 4 บรรทัดถัดไป
+    #  เล่มจริงที่วรรณยุกต์หายตอนดึงข้อความจึงลากย่อหน้าแรกของบทคัดย่อเข้ามาทั้งย่อหน้า
+    #  แล้วกฎรูปแบบไปทำงานกับเนื้อความบทคัดย่อ ฟ้องผิดสองข้อบนเล่มที่พิมพ์ถูกต้อง)
+    block_lines = [lines[0]]
+    for line in lines[1:]:
+        if _is_abstract_heading(line):
+            break
+        # ยังอยู่ในรายชื่อได้สองแบบ: บรรทัดนี้มีคุณวุฒิอยู่ในตัว หรือบรรทัดก่อนหน้า
+        # ยังค้างอยู่กลางรายการ (ยังไม่จบด้วยคุณวุฒิ) แปลว่าบรรทัดนี้คือส่วนที่ห่อคำมา
+        continues = (_DEGREE_ABBR_TOKEN.search(soft(line))
+                     or not _committee_entry_complete(block_lines[-1]))
+        if not continues:
+            break
+        block_lines.append(line)
+    return is_english, re.sub(r'\s*\n\s*', ' ', "\n".join(block_lines)).strip()
 
 
 # คุณวุฒิที่ขึ้นต้นก้อนข้อความ เช่น "ปร.ด." "วศ.ด." "Ph.D." "PhD." "Ed.D." "P.hD."

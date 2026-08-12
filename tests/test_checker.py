@@ -1573,6 +1573,82 @@ class DegreeLineIsNotConfusedWithCommitteeQualifications(unittest.TestCase):
             self.assertFalse(_looks_like_degree_line(line), line)
 
 
+class AbstractCommitteeBlockStopsAtTheAbstractHeading(unittest.TestCase):
+    """บล็อกรายชื่อกรรมการต้องหยุดที่หัวข้อบทคัดย่อ แม้วรรณยุกต์จะหายตอนดึงข้อความ
+
+    การดึงข้อความจาก PDF ไทยทำวรรณยุกต์/การันต์หายได้ เล่มจริงได้ "บทคัดยอ" (ไม่มี ่)
+    ตัวหยุดเดิมเทียบตรงตัวกับ "บทคัดย่อ" จึงหาไม่เจอ แล้วบล็อกลากยาวกินเนื้อความ
+    บทคัดย่อเข้ามา 4 บรรทัด ระบบเลยฟ้องผิดสองข้อรวดบนเล่มที่รูปแบบถูกต้อง
+        รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ      <- คือเลขข้อ "1)" ในบทคัดย่อ
+        ไม่มีจุลภาคคั่นหน้าชื่อ "บทคัดยอ การศึกษาวิจัย..."  <- คือย่อหน้าแรกทั้งย่อหน้า
+    """
+
+    # ข้อความตามที่ระบบดึงได้จริงจากเล่มที่เจ้าหน้าที่ส่งมา (วรรณยุกต์หายหลายตัว)
+    PAGE = "\n".join([
+        "ง",
+        "การศึกษาความพรอมในการปรับเปลี่ยนเปนองคกรดิจิทัลของกำลังพล",
+        "วรรณคดี มณฑลจรัส 6537481 SHPP/ M",
+        "รป.ม. (นโยบายสาธารณะและการจัดการภาครัฐ)",
+        "คณะกรรมการที่ปรึกษาวิทยานิพนธ: บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.",
+        "บทคัดยอ",
+        "การศึกษาวิจัยครั้งนี้มีวัตถุประสงคเพื่อ 1) ศึกษาระดับความพรอมตอการปรับเปลี่ยน",
+        "ดิจิทัลของกำลังพล 2) เปรียบเทียบความแตกตางของระดับความพรอม",
+    ])
+
+    def test_block_holds_only_the_committee_line(self):
+        is_english, block = abstract_committee_block(self.PAGE)
+        self.assertFalse(is_english)
+        self.assertEqual(block, "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.")
+        self.assertNotIn("การศึกษาวิจัย", block)
+
+    def test_correct_page_is_not_reported(self):
+        rep = Report()
+        _check_abstract_committees(rep, {}, [], [0], [self.PAGE], lambda i: "หน้า ง")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0,
+                         [it["found"] for v in rep.zones.values() for it in v])
+
+    def test_block_stops_even_when_the_heading_is_unreadable(self):
+        """ไม่มีหัวข้อบทคัดย่อให้จับเลย ก็ยังต้องหยุดถูก
+
+        เจ้าหน้าที่ทักว่า "ระบบควรดูที่คำ และพิจารณาว่าคืออะไร ไม่ใช่จำบรรทัด
+        ถ้าดูที่บรรทัดแล้วแต่ละเล่มไม่เท่ากัน ก็ตรวจเพี้ยน" — รายชื่อกรรมการห่อคำ
+        กี่บรรทัดก็ได้ตามความยาวชื่อ จึงห้ามนับบรรทัดตัดสิน
+        """
+        page = "\n".join([
+            "คณะกรรมการที่ปรึกษาวิทยานิพนธ: บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.",
+            "การศึกษาวิจัยครั้งนี้มีวัตถุประสงคเพื่อ 1) ศึกษาระดับความพรอมตอการปรับเปลี่ยน",
+            "ดิจิทัลของกำลังพล 2) เปรียบเทียบความแตกตางของระดับความพรอม",
+        ])
+        _is_english, block = abstract_committee_block(page)
+        self.assertEqual(block, "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.")
+
+    def test_a_name_wrapped_without_its_degree_is_still_joined(self):
+        """ชื่อถูกห่อคำไปบรรทัดถัดไปโดยบรรทัดแรกไม่มีคุณวุฒิเลย ต้องต่อให้ครบ"""
+        page = "\n".join([
+            "ADVISORY COMMITTEE: SOMCHAI",
+            "JAIDEE, Ph.D.",
+            "ABSTRACT",
+            "Body text here.",
+        ])
+        _is_english, block = abstract_committee_block(page)
+        self.assertEqual(block, "SOMCHAI JAIDEE, Ph.D.")
+
+    def test_english_page_still_stops_at_ABSTRACT(self):
+        page = "\n".join([
+            "iv", "TITLE OF THE THESIS",
+            "PIYAORN CHORNCHOEM 6136017 TMTM/D",
+            "Ph.D. (TROPICAL MEDICINE)",
+            "THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D., NITAYA",
+            "INDRAWATTANA, Ph.D.",
+            "ABSTRACT",
+            "Probiotics are widely marketed as dietary supplements (1) and dairy products.",
+        ])
+        is_english, block = abstract_committee_block(page)
+        self.assertTrue(is_english)
+        self.assertNotIn("Probiotics", block)
+        self.assertIn("INDRAWATTANA", block)
+
+
 class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
     """ประโยคที่ระบบ "ประกอบขึ้นเอง" ต้องแปลอังกฤษได้ครบ ไม่มีไทยปน
 
