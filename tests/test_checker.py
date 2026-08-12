@@ -1607,6 +1607,32 @@ class AbstractCommitteeBlockStopsAtTheAbstractHeading(unittest.TestCase):
         self.assertEqual(sum(len(v) for v in rep.zones.values()), 0,
                          [it["found"] for v in rep.zones.values() for it in v])
 
+    def test_block_stops_even_when_the_heading_is_unreadable(self):
+        """ไม่มีหัวข้อบทคัดย่อให้จับเลย ก็ยังต้องหยุดถูก
+
+        เจ้าหน้าที่ทักว่า "ระบบควรดูที่คำ และพิจารณาว่าคืออะไร ไม่ใช่จำบรรทัด
+        ถ้าดูที่บรรทัดแล้วแต่ละเล่มไม่เท่ากัน ก็ตรวจเพี้ยน" — รายชื่อกรรมการห่อคำ
+        กี่บรรทัดก็ได้ตามความยาวชื่อ จึงห้ามนับบรรทัดตัดสิน
+        """
+        page = "\n".join([
+            "คณะกรรมการที่ปรึกษาวิทยานิพนธ: บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.",
+            "การศึกษาวิจัยครั้งนี้มีวัตถุประสงคเพื่อ 1) ศึกษาระดับความพรอมตอการปรับเปลี่ยน",
+            "ดิจิทัลของกำลังพล 2) เปรียบเทียบความแตกตางของระดับความพรอม",
+        ])
+        _is_english, block = abstract_committee_block(page)
+        self.assertEqual(block, "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ, ปร.ด.")
+
+    def test_a_name_wrapped_without_its_degree_is_still_joined(self):
+        """ชื่อถูกห่อคำไปบรรทัดถัดไปโดยบรรทัดแรกไม่มีคุณวุฒิเลย ต้องต่อให้ครบ"""
+        page = "\n".join([
+            "ADVISORY COMMITTEE: SOMCHAI",
+            "JAIDEE, Ph.D.",
+            "ABSTRACT",
+            "Body text here.",
+        ])
+        _is_english, block = abstract_committee_block(page)
+        self.assertEqual(block, "SOMCHAI JAIDEE, Ph.D.")
+
     def test_english_page_still_stops_at_ABSTRACT(self):
         page = "\n".join([
             "iv", "TITLE OF THE THESIS",
