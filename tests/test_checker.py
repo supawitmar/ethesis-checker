@@ -6,6 +6,9 @@ from pathlib import Path
 
 from checker import (
     describe_diff,
+    _closest_student_id,
+    _check_student_line_pairs_name_with_id,
+    student_id_line,
     _looks_like_degree_line,
     NOT_CHECKED,
     N_APPENDIX,
@@ -1571,6 +1574,78 @@ class DegreeLineIsNotConfusedWithCommitteeQualifications(unittest.TestCase):
         for line in ("PHOTSAWI SIRISARANLAK 6637642 EGLE/D", "ABSTRACT",
                      "TRANSFORMATION IN THAILAND", ""):
             self.assertFalse(_looks_like_degree_line(line), line)
+
+
+class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
+    """รหัสนักศึกษาผิดตัวเลข ต้องบอกว่าเล่มพิมพ์ว่าอะไร ไม่ใช่ "ไม่พบรหัสนักศึกษา"
+
+    เล่มจริงพิมพ์ 6526627 แต่ข้อมูลอนุมัติเป็น 6536627 ต่างกันหลักเดียว ระบบเดิม
+    บอกแค่ "ไม่พบรหัสนักศึกษา" เจ้าหน้าที่อ่านแล้วนึกว่าระบบหาไม่เจอ ทั้งที่รหัสพิมพ์
+    อยู่ชัด ๆ แค่ผิดหนึ่งตัว — คนละเรื่องกับเล่มที่ไม่ได้ใส่รหัสมาเลย
+    """
+
+    THAI_PAGE = "\n".join([
+        "ง",
+        "อิทธิพลของความรอบรูในการเลี้ยงลูกดวยนมแม ระยะเวลาที่ลาคลอด",
+        "เอมิกา หงสชั้น 6526627 NSMY/M",
+        "พย.ม. (การพยาบาลเวชปฏิบัติชุมชน)",
+    ])
+
+    def test_finds_the_id_actually_printed(self):
+        self.assertEqual(_closest_student_id(self.THAI_PAGE, "6536627 NSMY/M"),
+                         "6526627 NSMY/M")
+
+    def test_points_at_the_wrong_digits(self):
+        printed = _closest_student_id(self.THAI_PAGE, "6536627 NSMY/M")
+        self.assertIn('"6526627" ต้องเป็น "6536627"',
+                      describe_diff(printed, "6536627 NSMY/M"))
+
+    def test_page_without_any_id_returns_empty(self):
+        """หน้าที่ไม่มีรหัสเลย ต้องคืนค่าว่าง เพื่อให้ยังบอกได้ว่า "ไม่พบ" ตามจริง"""
+        self.assertEqual(_closest_student_id("เอมิกา หงสชั้น\nบทคัดยอ", "6536627 NSMY/M"), "")
+
+    def test_picks_the_nearest_id_when_the_page_has_several(self):
+        page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
+        self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class StudentNameAndIdMustShareOneLine(unittest.TestCase):
+    """template กำหนดบรรทัดเดียวว่า "ชื่อ นามสกุล  รหัส  รหัสหลักสูตร/ระดับ"
+
+    เจ้าหน้าที่สั่งว่า "ช่วงนี้มันต้องตรวจทั้งชื่อและรหัสนะ" — เดิมค้นชื่อกับรหัสแยกกัน
+    ทั้งหน้า เล่มที่พิมพ์ชื่อไว้คนละบรรทัดกับรหัสจึงผ่านได้ทั้งที่ผิดรูปแบบ
+    """
+
+    def _run(self, page, name="เอมิกา หงสชั้น", student_id="6526627 NSMY/M"):
+        rep = Report()
+        _check_student_line_pairs_name_with_id(
+            rep, page, name, student_id, "บทคัดย่อไทย (หน้า ง)", "ชื่อภาษาไทย")
+        return rep
+
+    def test_same_line_passes(self):
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น 6526627 NSMY/M\nพย.ม. (การพยาบาล)")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_name_on_another_line_is_flagged(self):
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น\n6526627 NSMY/M\nพย.ม. (การพยาบาล)")
+        oranges = [it["found"] for it in rep.zones["ORANGE"]]
+        self.assertEqual(len(oranges), 1)
+        self.assertIn("ไม่มีชื่อภาษาไทยอยู่ด้วย", oranges[0])
+        self.assertIn("6526627 NSMY/M", oranges[0])
+
+    def test_page_without_an_id_line_is_left_to_the_id_rule(self):
+        """ไม่มีบรรทัดรหัสเลย = กฎรหัสนักศึกษาฟ้องไปแล้ว ห้ามฟ้องซ้ำ"""
+        rep = self._run("ชื่อเรื่อง\nเอมิกา หงสชั้น\nพย.ม. (การพยาบาล)")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_wrong_id_is_left_to_the_id_rule(self):
+        rep = self._run("เอมิกา หงสชั้น\n6536627 NSMY/M", student_id="6526627 NSMY/M")
+        self.assertEqual(sum(len(v) for v in rep.zones.values()), 0)
+
+    def test_finds_the_line_that_carries_the_id(self):
+        page = "ชื่อเรื่อง\nEMIKA HONGCHAN 6526627 NSMY/M\nบทคัดยอ"
+        self.assertEqual(student_id_line(page), "EMIKA HONGCHAN 6526627 NSMY/M")
+        self.assertEqual(student_id_line("ชื่อเรื่อง\nบทคัดยอ"), "")
 
 
 class AbstractCommitteeBlockStopsAtTheAbstractHeading(unittest.TestCase):
