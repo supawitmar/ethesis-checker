@@ -7,6 +7,7 @@ from pathlib import Path
 from checker import (
     describe_diff,
     _closest_student_id,
+    bold_is_undetectable,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1607,6 +1608,39 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class BoldCannotBeJudgedWhenFontNamesAreAnonymous(unittest.TestCase):
+    """ไฟล์ที่ไม่ได้เก็บชื่อฟอนต์ไว้ ห้ามสรุปว่า "ไม่เป็นตัวหนา"
+
+    โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ
+    ในหน้านั้น ๆ ไม่ใช่ชื่อฟอนต์จริง — เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา
+    แต่ CIDFont+F1 บนหน้าเนื้อหาเป็นตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์
+    เล่มที่หัวข้อสารบัญหนาครบทุกหัวข้อจึงเคยถูกฟ้องว่า "ไม่เป็นตัวหนา 13 หัวข้อ"
+    """
+
+    class _Page:
+        def __init__(self, fonts):
+            self.chars = [{"text": "A", "fontname": f} for f in fonts]
+
+    def test_anonymous_subset_names_mean_undetectable(self):
+        page = self._Page(["CIDFont+F1", "CIDFont+F2", "CIDFont+F3"])
+        self.assertTrue(bold_is_undetectable(page))
+
+    def test_real_font_names_stay_detectable(self):
+        for fonts in (
+            ["TimesNewRomanPSMT", "TimesNewRomanPS-BoldMT"],
+            ["BCDIEE+THSarabunNew", "BCDEEE+THSarabunNew-Bold"],
+            ["TimesNewRomanPSMT"],          # ไม่มีตัวหนาเลย แต่ชื่อบอกวงศ์ฟอนต์ = ตัดสินได้
+        ):
+            self.assertFalse(bold_is_undetectable(self._Page(fonts)), fonts)
+
+    def test_page_without_text_is_not_treated_as_undetectable(self):
+        self.assertFalse(bold_is_undetectable(self._Page([])))
+
+    def test_anonymous_name_with_a_bold_marker_is_still_detectable(self):
+        page = self._Page(["CIDFont+F1", "ABCDEF+ArialBold"])
+        self.assertFalse(bold_is_undetectable(page))
 
 
 class StudentNameAndIdMustShareOneLine(unittest.TestCase):

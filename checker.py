@@ -2193,6 +2193,28 @@ def _is_bold_font(fontname):
     return any(marker in font for marker in ('BOLD', 'BLACK', 'SEMIBOLD', 'DEMI'))
 
 
+# ชื่อฟอนต์ที่ไม่ได้บอกอะไรเลยว่าเป็นน้ำหนักไหน — โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์
+# ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ "ในหน้านั้น ๆ" ไม่ใช่ชื่อฟอนต์จริง
+# (เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา แต่ CIDFont+F1 บนหน้าเนื้อหาเป็น
+#  ตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์) จึงดูจากชื่อไม่ได้เลยว่าหนาหรือไม่
+_ANONYMOUS_FONT = re.compile(r'^(?:CIDFont\+)?F\d+$', re.I)
+
+
+def bold_is_undetectable(pdf_page):
+    """หน้านี้บอก "ตัวหนา" จากชื่อฟอนต์ไม่ได้เลยหรือไม่
+
+    ถ้าบอกไม่ได้ ห้ามสรุปว่า "ไม่เป็นตัวหนา" — เล่มจริงที่หัวข้อสารบัญหนาครบทุกหัวข้อ
+    เคยถูกฟ้องว่า "หัวข้อหลักในสารบัญไม่เป็นตัวหนา 13 หัวข้อ" ด้วยเหตุนี้
+    """
+    names = {(c.get('fontname') or '') for c in (pdf_page.chars or [])
+             if (c.get('text') or '').strip()}
+    if not names:
+        return False
+    if any(_is_bold_font(name) for name in names):
+        return False        # มีฟอนต์ที่บอกน้ำหนักในชื่อ = เทียบได้ตามปกติ
+    return all(_ANONYMOUS_FONT.match(name.split('+')[-1]) for name in names)
+
+
 def _font_lines(pdf_page, tolerance=2.5):
     """Group extracted PDF words into visual lines and calculate their bold ratio."""
     words = sorted(
@@ -2918,6 +2940,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         try:
             with pdfplumber.open(pdf_path) as _pl:
                 for toc_idx in toc_scan_pages:
+                    if bold_is_undetectable(_pl.pages[toc_idx]):
+                        rep.add(UNCERTAIN_ZONE, "front_matter",
+                                f"สารบัญ ({page_ref(toc_idx)})",
+                                "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
+                                "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                                "ตรวจด้วยตา", "FORMAT.BOLD")
+                        continue
                     nonbold = []
                     for line in _font_lines(_pl.pages[toc_idx]):
                         if _is_toc_major_heading(line['text']) and line['bold_ratio'] < 0.8:
