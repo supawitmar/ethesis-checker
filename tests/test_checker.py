@@ -1615,6 +1615,42 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
 
 
+class AcademicTitleIsNotCountedAsALowercaseName(unittest.TestCase):
+    """ตำแหน่งวิชาการมีตัวพิมพ์เล็กเป็นปกติ ต้องไม่ทำให้ชื่อถูกฟ้องว่าพิมพ์เล็ก
+
+    เล่มจริงพิมพ์ "Asst. Prof. SAOWALEE KAEWCHUAY, Ed.D." ชื่อพิมพ์ใหญ่ครบ ผิดแค่
+    มีตำแหน่งวิชาการนำหน้า ซึ่งถูกฟ้องเป็นข้อของตัวเองอยู่แล้ว แต่กฎตัวพิมพ์ใหญ่
+    เอาตำแหน่งมานับด้วย จึงได้สองข้อจากความผิดเดียว แถมข้อหลังยังบอกผิดว่าชื่อพิมพ์เล็ก
+    """
+
+    PAGE = "\n".join([
+        "ฉ", "FACILITY MANAGEMENT OF EXERCISE FOR THE ELDERLY",
+        "PAKKAWAT KONGKAEN 6637922 SHSM/M",
+        "M.A. (SPORT MANAGEMENT)",
+        "THESIS ADVISORY COMMITTEE: Asst. Prof. SAOWALEE KAEWCHUAY, Ed.D., "
+        "Asst. Prof. SIWAPORN PHUPAN, Ed.D.",
+        "ABSTRACT",
+        "This study aimed to examine the opinions of the elderly.",
+    ])
+
+    def _founds(self, page):
+        rep = Report()
+        _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า ฉ")
+        return [it["found"] for it in rep.zones["RED"]]
+
+    def test_only_the_academic_title_is_reported(self):
+        founds = self._founds(self.PAGE)
+        self.assertTrue(any("ตำแหน่งทางวิชาการนำหน้า" in f for f in founds), founds)
+        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+
+    def test_a_genuinely_lowercase_name_is_still_reported(self):
+        page = self.PAGE.replace("SAOWALEE KAEWCHUAY", "Saowalee Kaewchuay")
+        founds = self._founds(page)
+        self.assertTrue(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+        # ต้องยกเฉพาะชื่อ ไม่ใช่ตำแหน่งวิชาการที่ตัดออกไปแล้ว
+        self.assertTrue(any('"Saowalee Kaewchuay"' in f for f in founds), founds)
+
+
 class BrokenFontMarksAreNotReadAsLetters(unittest.TestCase):
     """ฟอนต์ที่ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น ต้องไม่โผล่ในรายงาน
 

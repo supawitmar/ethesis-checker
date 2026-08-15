@@ -824,6 +824,9 @@ var TR = [
   [/หัวข้อหลักไม่เป็นตัวหนา/g, 'Top-level headings are not bold'],
   [/มีข้อความตัวหนา/g, 'Bold text'],
   // ชื่อกับคุณวุฒิของคนเดียวกันไม่ได้คั่นด้วยจุลภาค (เล่มจริงใช้จุดแทน)
+  // ประโยค template หน้าลงนามผิดคำ (คนละเรื่องกับหน้าที่ไม่มีประโยคนี้เลย)
+  [/หน้าลงนามพิมพ์ว่า ("[^"]*") (.+)/g, 'The approval page reads $1, $2'],
+  [/หน้าลงนามพิมพ์ว่า ("[^"]*")$/g, 'The approval page reads $1'],
   [/ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ ("[^"]*")/g, 'The committee member name and qualification are not separated by a comma: $1'],
   [/ชื่อกรรมการกับคุณวุฒิต้องคั่นด้วยจุลภาค คือ 'ชื่อ นามสกุล, คุณวุฒิ'/g, "The committee member name and qualification must be separated by a comma: 'First Last, Degree'"],
   [/^ต้องเป็น ("[^"]*")$/g, 'Must be $1'],

@@ -930,16 +930,18 @@ def _closest_run(text, want, min_ratio=0.6):
     เข้าใจผิดว่าระบบอ่านไม่เจอ ทั้งที่เห็นข้อความอยู่บนหน้ากระดาษ
     (เล่มจริงพิมพ์ "อาชีวนามัย" ตก อ จาก "อาชีวอนามัย" — เจ้าหน้าที่กวาดตาแล้วนึกว่าตรง)
 
-    เลื่อนหน้าต่างทีละ "ตัวอักษร" ไม่ใช่ทีละคำ เพราะภาษาไทยไม่เว้นวรรคระหว่างคำ
+    เลื่อนหน้าต่างทีละ "ตัวอักษรที่คนมองเห็น" ไม่ใช่ทีละคำ เพราะภาษาไทยไม่เว้นวรรค
+    ระหว่างคำ และไม่ใช่ทีละ code point เพราะขอบหน้าต่างจะตัดกลางพยางค์ ได้ข้อความ
+    ขึ้นต้นด้วยวรรณยุกต์ลอย ๆ อย่าง "้เป็นส่วนหนึ่งของ..." ซึ่งอ่านไม่ออก
     """
-    flat = soft(text)
-    n = len(soft(want))
-    if not flat or n < 4:
+    cells = _graphemes(soft(text))
+    n = len(_graphemes(soft(want)))
+    if not cells or n < 4:
         return ''
     best, best_ratio = '', min_ratio - 1e-9
     for size in range(max(4, n - 2), n + 3):
-        for i in range(0, len(flat) - size + 1):
-            run = flat[i:i + size]
+        for i in range(0, len(cells) - size + 1):
+            run = ''.join(cells[i:i + size])
             ratio = difflib.SequenceMatcher(None, norm(run), norm(want)).ratio()
             if ratio > best_ratio:
                 best, best_ratio = run, ratio
@@ -1445,7 +1447,11 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า: {shown}',
                         "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
                         "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
-            lower = [nm for nm in (n.strip() for n in names)
+            # ตรวจตัวพิมพ์จาก "ชื่อล้วน" หลังตัดตำแหน่งวิชาการออกแล้ว เพราะตำแหน่ง
+            # วิชาการมีตัวพิมพ์เล็กเป็นปกติ ("Asst. Prof.") และถูกฟ้องเป็นข้อของตัวเอง
+            # ไปแล้วข้างบน ถ้าไม่ตัดออกจะได้สองข้อจากความผิดเดียว แถมข้อหลังยังบอกผิด
+            # ว่า "ชื่อไม่เป็นตัวพิมพ์ใหญ่" ทั้งที่ชื่อพิมพ์ใหญ่ครบ
+            lower = [nm for nm in (_strip_committee_title(n.strip()) for n in names)
                      if heading_en and re.search(r'[a-z]', nm)]
             if lower:
                 shown = ", ".join(f'"{nm}"' for nm in lower)
@@ -3635,12 +3641,24 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if norm(sig_template) in norm(pages[idx]):
                 rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
             else:
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail",
-                                     "ไม่พบข้อความตาม template")
-                rep.add("RED", "front_matter", spot,
-                        f'ไม่พบข้อความตาม template: "{sig_template}"',
+                # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
+                # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
+                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความตาม template" เจ้าหน้าที่จะนึกว่าระบบ
+                # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
+                near = _closest_run(pages[idx], sig_template)
+                if near:
+                    diff = describe_diff(near, sig_template)
+                    found_msg = f'หน้าลงนามพิมพ์ว่า "{near}"'
+                    if diff:
+                        found_msg += f" {diff}"
+                    detail = near
+                else:
+                    found_msg = f'ไม่พบข้อความตาม template: "{sig_template}"'
+                    detail = "ไม่พบข้อความตาม template"
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail", detail)
+                rep.add("RED", "front_matter", spot, found_msg,
                         f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
-                        "ใส่ข้อความตาม template ให้ครบ", "FRONT.APPROVAL")
+                        "", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
