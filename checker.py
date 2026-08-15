@@ -96,8 +96,18 @@ def _thai_chars(chars):
     """
     out = []
     for c in chars:
-        if c.get('text') == ' ' and (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5:
-            c = {**c, 'text': 'ํ'}     # NIKHAHIT
+        text = c.get('text') or ''
+        zero_width = (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5
+        if zero_width and text == ' ':
+            out.append({**c, 'text': 'ํ'})     # NIKHAHIT
+            continue
+        # กว้างศูนย์แต่ไม่ใช่สระ/วรรณยุกต์ = ฟอนต์ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น
+        # เล่มจริงเล่มหนึ่งได้ "พรีซีซั่น" ออกมาเป็น "พรีซีซั8น" และ "ที่ปรึกษา" เป็น
+        # "ที8ปรึกษา" (่ กลายเป็น 8, 4, K แล้วแต่ฟอนต์ย่อย) เจ้าหน้าที่อ่านแล้วนึกว่า
+        # เล่มพิมพ์ผิด ทั้งที่เล่มถูก — ทิ้งไปเพราะเดาไม่ได้ว่าเป็นวรรณยุกต์ตัวไหน
+        # และ norm() ตัดวรรณยุกต์ทิ้งก่อนเทียบอยู่แล้ว ผลตัดสินจึงถูกต้องกว่าเดิมด้วย
+        if zero_width and text and not _TH_MARKS.match(text):
+            continue
         out.append(c)
     return out
 

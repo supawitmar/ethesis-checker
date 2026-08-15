@@ -4,6 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import checker as checker_module
+
 from checker import (
     describe_diff,
     _closest_student_id,
@@ -1611,6 +1613,44 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class BrokenFontMarksAreNotReadAsLetters(unittest.TestCase):
+    """ฟอนต์ที่ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น ต้องไม่โผล่ในรายงาน
+
+    เล่มจริงเล่มหนึ่งได้ "พรีซีซั่น" ออกมาเป็น "พรีซีซั8น" และ "ที่ปรึกษา" เป็น
+    "ที8ปรึกษา" เจ้าหน้าที่อ่านแล้วนึกว่าเล่มพิมพ์ผิด ทั้งที่เล่มถูก
+    แยกออกจากตัวเลขจริงได้ด้วยความกว้าง: วรรณยุกต์กว้างศูนย์ ตัวเลขจริงมีความกว้าง
+    """
+
+    @staticmethod
+    def _char(text, width):
+        return {"text": text, "x0": 100.0, "x1": 100.0 + width}
+
+    def _kept(self, *chars):
+        return [c["text"] for c in checker_module._thai_chars(list(chars))]
+
+    def test_zero_width_letter_is_dropped(self):
+        """"8" กว้างศูนย์ = วรรณยุกต์ที่ฟอนต์ map ผิด ต้องไม่หลุดไปอยู่ในข้อความ"""
+        self.assertEqual(
+            self._kept(self._char("ซ", 7.0), self._char("ั", 0.0),
+                       self._char("8", 0.0), self._char("น", 7.4)),
+            ["ซ", "ั", "น"])
+
+    def test_real_digits_are_kept(self):
+        """ตัวเลขจริงมีความกว้าง ห้ามทิ้ง (รหัสนักศึกษา เลขหน้า ปี)"""
+        self.assertEqual(
+            self._kept(self._char("6", 7.0), self._char("8", 7.0),
+                       self._char("7", 7.0)),
+            ["6", "8", "7"])
+
+    def test_zero_width_space_still_becomes_nikhahit(self):
+        self.assertEqual(self._kept(self._char("จ", 7.0), self._char(" ", 0.0)),
+                         ["จ", "ํ"])
+
+    def test_zero_width_thai_mark_is_kept(self):
+        self.assertEqual(self._kept(self._char("ก", 7.0), self._char("ี", 0.0)),
+                         ["ก", "ี"])
 
 
 class ThaiDiffPointsAtWholeSyllables(unittest.TestCase):
