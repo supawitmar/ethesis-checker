@@ -3,6 +3,7 @@ import sys
 
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import checker as checker_module
 
@@ -1642,6 +1643,26 @@ class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
     def test_both_matching_gives_no_winner(self):
         self.assertIsNone(
             _correctly_spelled_side("LITERATURE REVIEW", "LITERATURE REVIEW", 2, 1))
+
+    def test_exact_beats_a_handbook_variant(self):
+        """ตรงประกาศเป๊ะ ชนะตัวสะกดที่คู่มือยอมรับ — ยึดประกาศเป็นตัวชี้ขาด"""
+        variants = dict(checker_module.CANONICAL_ACCEPTED_VARIANTS)
+        variants[(1, 2)] = ("LITERATURE REVIEWS",)
+        with mock.patch.object(checker_module, "CANONICAL_ACCEPTED_VARIANTS", variants):
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEW", "LITERATURE REVIEWS", 2, 1),
+                "body")
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEWS", "LITERATURE REVIEW", 2, 1),
+                "toc")
+
+    def test_a_handbook_variant_beats_a_typo(self):
+        variants = dict(checker_module.CANONICAL_ACCEPTED_VARIANTS)
+        variants[(1, 2)] = ("LITERATURE REVIEWS",)
+        with mock.patch.object(checker_module, "CANONICAL_ACCEPTED_VARIANTS", variants):
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEWS", "LITURATURE REVIEW", 2, 1),
+                "body")
 
     def test_out_of_range_chapter_is_safe(self):
         self.assertIsNone(_correctly_spelled_side("A", "B", 99, 1))

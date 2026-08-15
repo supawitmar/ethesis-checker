@@ -2579,6 +2579,10 @@ def canonical_title_status(actual_title, chapter_no, option):
     return 'wrong', compared, expected
 
 
+# ระดับความตรงกับประกาศ — ตรงเป๊ะ > ตัวสะกดที่คู่มือยอมรับ > ไม่ตรงเลย
+_TITLE_RANK = {'exact': 2, 'variant': 1, 'wrong': 0}
+
+
 def _correctly_spelled_side(body_title, toc_title, chapter_no, option):
     """ฝั่งไหนสะกดชื่อบทถูกตามประกาศ — คืน 'body' | 'toc' | None ถ้าบอกไม่ได้
 
@@ -2587,16 +2591,20 @@ def _correctly_spelled_side(body_title, toc_title, chapter_no, option):
     ของเดิมยึดสารบัญเป็นหลักเสมอ จึงบอกให้แก้เนื้อหาเป็นคำที่สะกดผิด
 
     ใช้ได้แม้ในโหมดยกเว้นบท เพราะโหมดนั้นแค่ไม่บังคับว่าต้อง "ใช้ชื่อตามประกาศ"
-    ไม่ได้แปลว่าปล่อยให้สะกดผิดได้ — ถ้าฝั่งหนึ่งตรงประกาศพอดี อีกฝั่งคือฝั่งที่ผิด
+    ไม่ได้แปลว่าปล่อยให้สะกดผิดได้ — ถ้าฝั่งหนึ่งตรงประกาศมากกว่า อีกฝั่งคือฝั่งที่ผิด
+
+    เทียบกันด้วย "ระดับความตรงกับประกาศ" ไม่ใช่แค่ผ่าน/ไม่ผ่าน จึงตัดสินได้ด้วยว่า
+    ฝั่งที่ตรงประกาศเป๊ะ ชนะฝั่งที่เป็นเพียงตัวสะกดที่คู่มือยอมรับ
+    ถ้าทั้งสองฝั่งอยู่ระดับเดียวกัน = ประกาศชี้ขาดไม่ได้ จึงไม่ชี้ว่าฝั่งไหนผิด
     """
     try:
-        body_ok = canonical_title_status(body_title, chapter_no, option)[0] != 'wrong'
-        toc_ok = canonical_title_status(toc_title, chapter_no, option)[0] != 'wrong'
+        body_rank = _TITLE_RANK[canonical_title_status(body_title, chapter_no, option)[0]]
+        toc_rank = _TITLE_RANK[canonical_title_status(toc_title, chapter_no, option)[0]]
     except (IndexError, KeyError):
         return None
-    if body_ok == toc_ok:
+    if body_rank == toc_rank:
         return None
-    return 'body' if body_ok else 'toc'
+    return 'body' if body_rank > toc_rank else 'toc'
 
 
 def _roman_to_int(text):
