@@ -824,6 +824,13 @@ var TR = [
   [/หัวข้อหลักไม่เป็นตัวหนา/g, 'Top-level headings are not bold'],
   [/มีข้อความตัวหนา/g, 'Bold text'],
   // ชื่อกับคุณวุฒิของคนเดียวกันไม่ได้คั่นด้วยจุลภาค (เล่มจริงใช้จุดแทน)
+  // สารบัญกับเนื้อหาไม่ตรงกัน (ชี้ฝั่งที่ผิดเมื่อรู้ว่าฝั่งไหนตรงประกาศ)
+  [/ชื่อบทในสารบัญกับในเนื้อหาไม่ตรงกัน: สารบัญพิมพ์ ("[^"]*") ส่วนเนื้อหาพิมพ์ ("[^"]*")/g, 'The chapter title differs between the table of contents and the body: the TOC has $1 while the body has $2'],
+  [/ชื่อบทในสารบัญกับในเนื้อหาต้องสะกดตรงกัน/g, 'The chapter title must be spelled identically in the table of contents and in the body'],
+  [/ชื่อบทในสารบัญเขียนว่า ("[^"]*") (.+)/g, 'The chapter title in the table of contents reads $1, $2'],
+  [/ชื่อบทในสารบัญเขียนว่า ("[^"]*")$/g, 'The chapter title in the table of contents reads $1'],
+  [/ชื่อบทในเนื้อหาเขียนว่า ("[^"]*") (.+)/g, 'The chapter title in the body reads $1, $2'],
+  [/ชื่อบทในเนื้อหาเขียนว่า ("[^"]*")$/g, 'The chapter title in the body reads $1'],
   // ประโยค template หน้าลงนามผิดคำ (คนละเรื่องกับหน้าที่ไม่มีประโยคนี้เลย)
   [/หน้าลงนามพิมพ์ว่า ("[^"]*") (.+)/g, 'The approval page reads $1, $2'],
   [/หน้าลงนามพิมพ์ว่า ("[^"]*")$/g, 'The approval page reads $1'],

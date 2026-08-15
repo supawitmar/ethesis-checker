@@ -13,6 +13,7 @@ from checker import (
     abstract_committee_missing_degree_commas,
     _drop_separator_dot,
     _graphemes,
+    _correctly_spelled_side,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1613,6 +1614,37 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
+    """สารบัญกับเนื้อหาไม่ตรงกัน ต้องไม่ยึดสารบัญเป็นถูกเสมอ
+
+    เล่มจริงพิมพ์สารบัญว่า "LITURATURE REVIEW" ส่วนเนื้อหาว่า "LITERATURE REVIEW"
+    ระบบเดิมยึดสารบัญเป็นหลัก จึงสั่งให้แก้เนื้อหาที่ถูกอยู่แล้วให้กลายเป็นคำที่ผิด
+    เจ้าหน้าที่สั่งว่า "บทที่ 2 ถึงจะไม่ต้องตรวจเข้ม แต่ก็ควรให้ชื่อบทสะกดถูก"
+    """
+
+    def test_body_matching_the_regulation_wins(self):
+        self.assertEqual(
+            _correctly_spelled_side("LITERATURE REVIEW", "LITURATURE REVIEW", 2, 1),
+            "body")
+
+    def test_toc_matching_the_regulation_wins(self):
+        self.assertEqual(
+            _correctly_spelled_side("LITURATURE REVIEW", "LITERATURE REVIEW", 2, 1),
+            "toc")
+
+    def test_neither_matching_gives_no_winner(self):
+        """ทั้งสองฝั่งไม่ตรงประกาศ = บอกไม่ได้ว่าใครถูก ห้ามชี้ให้แก้ฝั่งใดฝั่งหนึ่ง"""
+        self.assertIsNone(
+            _correctly_spelled_side("MY OWN TITLE", "ANOTHER TITLE", 2, 1))
+
+    def test_both_matching_gives_no_winner(self):
+        self.assertIsNone(
+            _correctly_spelled_side("LITERATURE REVIEW", "LITERATURE REVIEW", 2, 1))
+
+    def test_out_of_range_chapter_is_safe(self):
+        self.assertIsNone(_correctly_spelled_side("A", "B", 99, 1))
 
 
 class AcademicTitleIsNotCountedAsALowercaseName(unittest.TestCase):

@@ -2579,6 +2579,26 @@ def canonical_title_status(actual_title, chapter_no, option):
     return 'wrong', compared, expected
 
 
+def _correctly_spelled_side(body_title, toc_title, chapter_no, option):
+    """ฝั่งไหนสะกดชื่อบทถูกตามประกาศ — คืน 'body' | 'toc' | None ถ้าบอกไม่ได้
+
+    ใช้ตอนสารบัญกับเนื้อหาไม่ตรงกัน เพื่อไม่ให้ระบบสั่งแก้ฝั่งที่ถูกอยู่แล้ว
+    เล่มจริงพิมพ์สารบัญว่า "LITURATURE REVIEW" ส่วนเนื้อหาว่า "LITERATURE REVIEW"
+    ของเดิมยึดสารบัญเป็นหลักเสมอ จึงบอกให้แก้เนื้อหาเป็นคำที่สะกดผิด
+
+    ใช้ได้แม้ในโหมดยกเว้นบท เพราะโหมดนั้นแค่ไม่บังคับว่าต้อง "ใช้ชื่อตามประกาศ"
+    ไม่ได้แปลว่าปล่อยให้สะกดผิดได้ — ถ้าฝั่งหนึ่งตรงประกาศพอดี อีกฝั่งคือฝั่งที่ผิด
+    """
+    try:
+        body_ok = canonical_title_status(body_title, chapter_no, option)[0] != 'wrong'
+        toc_ok = canonical_title_status(toc_title, chapter_no, option)[0] != 'wrong'
+    except (IndexError, KeyError):
+        return None
+    if body_ok == toc_ok:
+        return None
+    return 'body' if body_ok else 'toc'
+
+
 def _roman_to_int(text):
     """แปลงเลขโรมัน (I–XLIX) เป็นจำนวนเต็ม คืน None ถ้าไม่ใช่/เกินช่วงเลขบท
 
@@ -2999,11 +3019,31 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb \
                         and not enforced_title:
                     toc_title = _toc_chapter_title(t_raw)
-                    compared = compare_values(title, toc_title, 'toc_heading')
-                    rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
-                            mismatch_detail("ชื่อบทในเนื้อหา", compared, toc_title),
-                            f'ต้องสะกดตรงกับชื่อบทในสารบัญ: "{toc_title}"',
-                            "แก้ชื่อบทในเนื้อหาหรือสารบัญให้ตรงกัน", "FRONT.TOC")
+                    right = _correctly_spelled_side(title, toc_title, cn, option)
+                    if right is None:
+                        # ไม่รู้ว่าฝั่งไหนถูก จึงห้ามชี้ว่า "ต้องเป็นเหมือนอีกฝั่ง"
+                        # เพราะอาจไปสั่งให้แก้ฝั่งที่ถูกอยู่แล้ว
+                        rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
+                                f'ชื่อบทในสารบัญกับในเนื้อหาไม่ตรงกัน: '
+                                f'สารบัญพิมพ์ "{toc_title}" ส่วนเนื้อหาพิมพ์ "{title}"',
+                                "ชื่อบทในสารบัญกับในเนื้อหาต้องสะกดตรงกัน",
+                                "", "FRONT.TOC")
+                    else:
+                        # ฝั่งหนึ่งสะกดตรงประกาศ อีกฝั่งจึงเป็นฝั่งที่ต้องแก้ — แม้อยู่ใน
+                        # โหมดยกเว้นบท (ไม่บังคับ "ชื่อ" ตามประกาศ) ก็ยังต้องสะกดให้ถูก
+                        # ของเดิมยึดสารบัญเป็นหลักเสมอ เล่มที่สารบัญพิมพ์ผิดจึงถูกสั่งให้
+                        # แก้เนื้อหาที่ถูกอยู่แล้วให้กลายเป็นคำที่ผิดตาม
+                        wrong_side, wrong_text, loc = (
+                            ("สารบัญ", toc_title, f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}")
+                            if right == "body" else
+                            ("เนื้อหา", title, f"บทที่ {cn} ({page_ref(ppage)})"))
+                        correct = title if right == "body" else toc_title
+                        diff = describe_diff(wrong_text, correct)
+                        found_msg = f'ชื่อบทใน{wrong_side}เขียนว่า "{wrong_text}"'
+                        if diff:
+                            found_msg += f" {diff}"
+                        rep.add("RED", "body", loc, found_msg,
+                                f'ต้องแก้เป็น "{correct}"', "", "FRONT.TOC")
                 if BODY_RULES['check_toc_page_numbers'] and t_pno is None:
                     rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
                             f"หัวข้อ \"{t_raw}\" ไม่มีเลขหน้า",
