@@ -1291,11 +1291,24 @@ def _looks_like_person_name(text):
     return not s[:1].islower()
 
 
+# คุณวุฒิที่ห้อยท้ายก้อนเดียวกับชื่อ (ลืมใส่จุลภาคคั่น) เช่น "SOMCHAI JAIDEE D. Eng."
+# ยอมให้มีช่องว่างระหว่างท่อนได้ เพราะเล่มจริงพิมพ์ "D. Eng." แยกช่องว่าง
+_ABS_DEGREE_TAIL = re.compile(
+    r'\s+(?:'
+    r'(?=[A-Za-z]*\.)[A-Za-z]{1,4}(?:\.\s*[A-Za-z]{1,4})*\.?'
+    r'|[ก-๙]{1,4}\.(?:\s*[ก-๙]{1,4}\.)*'
+    r')\s*(?:\([^)]*\))?\s*$')
+
+
 def _scan_abstract_committee(block):
     """ไล่อ่านก้อนรายชื่อกรรมการทีละช่อง — yield (kind, text, missing_comma)
 
     kind = 'name' | 'degree'
-    missing_comma = True เมื่อชื่อนี้ติดมากับคุณวุฒิของคนก่อนหน้าโดยไม่มีจุลภาคคั่น
+    missing_comma บอกว่าท่อนนี้ติดมากับท่อนก่อนหน้าโดยไม่มีจุลภาคคั่น
+      kind='name'   -> True ถ้าชื่อติดมากับคุณวุฒิของคนก่อนหน้า
+      kind='degree' -> ข้อความก้อนเต็ม "ชื่อ+คุณวุฒิ" ตามที่พิมพ์จริง ถ้าคุณวุฒิติดมา
+                       กับชื่อของตัวเอง (ต้องคืนก้อนเต็มเพราะรายงานต้องบอกว่าเป็นของใคร
+                       และเล่มคั่นด้วยอะไรอยู่ — เล่มจริงใช้จุดแทนจุลภาค)
     """
     expect_name = True
     seen_name = False
@@ -1305,6 +1318,17 @@ def _scan_abstract_committee(block):
             # ไม่ใช่ชื่อคนใหม่ ถ้านับผิดจะเลื่อนสลับ ชื่อ/คุณวุฒิ ไปทั้งชุด
             if seen_name and _is_degree_only(tok):
                 yield "degree", tok, False
+                continue
+            # ลืมจุลภาคระหว่าง "ชื่อ" กับ "คุณวุฒิของตัวเอง" เช่น
+            # "WATCHARAPONG CHOOKAEW D. Eng." — ถ้าไม่แยก คุณวุฒิจะถูกนับเป็นส่วน
+            # หนึ่งของชื่อ แล้วกฎตัวพิมพ์ใหญ่ฟ้องผิดว่า "ชื่อไม่ได้เป็นตัวพิมพ์ใหญ่"
+            # ทั้งที่ชื่อพิมพ์ใหญ่ครบ ของจริงคือขาดจุลภาค ซึ่งแก้คนละอย่างกัน
+            tail = _ABS_DEGREE_TAIL.search(tok)
+            if tail and _looks_like_person_name(tok[:tail.start()].strip()):
+                yield "name", tok[:tail.start()].strip(), False
+                yield "degree", tok[tail.start():].strip(), tok
+                seen_name = True
+                expect_name = True
                 continue
             yield "name", tok, False
             seen_name = True
@@ -1325,6 +1349,16 @@ def abstract_committee_missing_commas(block):
     """คืนรายชื่อกรรมการที่ไม่มีจุลภาคคั่นจากคุณวุฒิของคนก่อนหน้า"""
     return [text for kind, text, missing in _scan_abstract_committee(block)
             if kind == "name" and missing]
+
+
+def abstract_committee_missing_degree_commas(block):
+    """คืนก้อน "ชื่อ+คุณวุฒิ" ที่ไม่ได้คั่นด้วยจุลภาค ตามที่พิมพ์จริงในเล่ม
+
+    คืนทั้งก้อน (เช่น "ADISORN LEELASANTITHAM. Ph.D.") ไม่ใช่เฉพาะคุณวุฒิ เพราะ
+    เจ้าหน้าที่ต้องรู้ว่าเป็นของใคร และต้องเห็นว่าเล่มคั่นด้วยอะไรอยู่ (เล่มจริงใช้จุด)
+    """
+    return [missing for kind, _text, missing in _scan_abstract_committee(block)
+            if kind == "degree" and missing]
 
 
 def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
@@ -1370,6 +1404,11 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
                         f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
+            for entry in abstract_committee_missing_degree_commas(block):
+                rep.add("RED", "front_matter", loc,
+                        f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{entry}"',
+                        "ชื่อกรรมการกับคุณวุฒิต้องคั่นด้วยจุลภาค คือ 'ชื่อ นามสกุล, คุณวุฒิ'",
+                        "", "FRONT.ABSTRACT")
             # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
             # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
             stripped = [nm for nm in (n.strip() for n in names)

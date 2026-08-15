@@ -823,6 +823,9 @@ var TR = [
   [/บทคัดย่ออังกฤษ/g, 'English abstract'],
   [/หัวข้อหลักไม่เป็นตัวหนา/g, 'Top-level headings are not bold'],
   [/มีข้อความตัวหนา/g, 'Bold text'],
+  // ชื่อกับคุณวุฒิของคนเดียวกันไม่ได้คั่นด้วยจุลภาค (เล่มจริงใช้จุดแทน)
+  [/ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ ("[^"]*")/g, 'The committee member name and qualification are not separated by a comma: $1'],
+  [/ชื่อกรรมการกับคุณวุฒิต้องคั่นด้วยจุลภาค คือ 'ชื่อ นามสกุล, คุณวุฒิ'/g, "The committee member name and qualification must be separated by a comma: 'First Last, Degree'"],
   [/ไม่มีจุลภาคคั่นหน้าชื่อ/g, 'No comma before the name'],
   [/เติมจุลภาคหน้าชื่อ/g, 'Add a comma before the name'],
   [/แก้ไขให้เป็นไปตามข้อกำหนด/g, 'Correct it to meet the requirement'],

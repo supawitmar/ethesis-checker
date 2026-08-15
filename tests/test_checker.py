@@ -8,6 +8,7 @@ from checker import (
     describe_diff,
     _closest_student_id,
     bold_is_undetectable,
+    abstract_committee_missing_degree_commas,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1608,6 +1609,64 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class MissingCommaBetweenNameAndDegree(unittest.TestCase):
+    """ลืมจุลภาคระหว่างชื่อกับคุณวุฒิของตัวเอง ต้องฟ้องว่าขาดจุลภาค ไม่ใช่ว่าชื่อพิมพ์เล็ก
+
+    เล่มจริงพิมพ์ "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW D. Eng."
+    คนที่สองลืมจุลภาคหลังชื่อ ระบบเดิมอ่านทั้งก้อนเป็น "ชื่อ" แล้วฟ้องว่า
+    "ชื่อกรรมการไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด" ทั้งที่ชื่อพิมพ์ใหญ่ครบ
+    ของจริงคือขาดจุลภาค ซึ่งแก้คนละอย่างกัน
+    """
+
+    BLOCK = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW D. Eng."
+
+    def test_name_and_degree_are_separated(self):
+        names, degrees = split_abstract_committee(self.BLOCK)
+        self.assertEqual(names, ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
+        self.assertEqual(degrees, ["D.Eng.", "D. Eng."])
+
+    def test_the_missing_comma_is_reported_with_the_whole_entry(self):
+        """ต้องยกทั้งก้อนตามที่พิมพ์จริง เจ้าหน้าที่จะได้รู้ว่าเป็นของใคร"""
+        self.assertEqual(abstract_committee_missing_degree_commas(self.BLOCK),
+                         ["WATCHARAPONG CHOOKAEW D. Eng."])
+
+    def test_case_rule_no_longer_fires_on_a_correct_name(self):
+        rep = Report()
+        page = "THESIS ADVISORY COMMITTEE: " + self.BLOCK + "\nABSTRACT\nBody."
+        _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า iv")
+        founds = [it["found"] for it in rep.zones["RED"]]
+        self.assertTrue(any("ไม่ได้คั่นด้วยจุลภาค" in f for f in founds), founds)
+        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+
+    def test_a_full_stop_used_instead_of_a_comma(self):
+        """เล่มจริงคั่นด้วยจุดแทนจุลภาค: "ADISORN LEELASANTITHAM. Ph.D." """
+        block = "SUPAPORN KIATTISIN, Ph.D.., ADISORN LEELASANTITHAM. Ph.D."
+        self.assertEqual(abstract_committee_missing_degree_commas(block),
+                         ["ADISORN LEELASANTITHAM. Ph.D."])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["SUPAPORN KIATTISIN", "ADISORN LEELASANTITHAM."])
+
+    def test_properly_punctuated_block_is_untouched(self):
+        block = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW, D.Eng."
+        self.assertEqual(abstract_committee_missing_degree_commas(block), [])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
+
+    def test_thai_block_without_a_comma(self):
+        block = "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ ปร.ด."
+        self.assertEqual(abstract_committee_missing_degree_commas(block),
+                         ["กฤษณ รักษาชีวจริญ ปร.ด."])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["บุรัสกร โตรัตน", "กฤษณ รักษาชีวจริญ"])
+
+    def test_a_plain_name_is_not_split(self):
+        """ชื่อธรรมดาที่ไม่มีคุณวุฒิห้อยท้าย ต้องไม่ถูกตัด"""
+        block = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW"
+        self.assertEqual(abstract_committee_missing_degree_commas(block), [])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
 
 
 class BoldCannotBeJudgedWhenFontNamesAreAnonymous(unittest.TestCase):
