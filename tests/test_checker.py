@@ -9,6 +9,7 @@ from checker import (
     _closest_student_id,
     bold_is_undetectable,
     abstract_committee_missing_degree_commas,
+    _drop_separator_dot,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1628,9 +1629,10 @@ class MissingCommaBetweenNameAndDegree(unittest.TestCase):
         self.assertEqual(degrees, ["D.Eng.", "D. Eng."])
 
     def test_the_missing_comma_is_reported_with_the_whole_entry(self):
-        """ต้องยกทั้งก้อนตามที่พิมพ์จริง เจ้าหน้าที่จะได้รู้ว่าเป็นของใคร"""
+        """ยกทั้งก้อนตามที่พิมพ์จริง พร้อมข้อความที่แก้แล้วของคนนั้นให้ก๊อปไปใช้ได้เลย"""
         self.assertEqual(abstract_committee_missing_degree_commas(self.BLOCK),
-                         ["WATCHARAPONG CHOOKAEW D. Eng."])
+                         [("WATCHARAPONG CHOOKAEW D. Eng.",
+                           "WATCHARAPONG CHOOKAEW, D. Eng.")])
 
     def test_case_rule_no_longer_fires_on_a_correct_name(self):
         rep = Report()
@@ -1641,12 +1643,21 @@ class MissingCommaBetweenNameAndDegree(unittest.TestCase):
         self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
 
     def test_a_full_stop_used_instead_of_a_comma(self):
-        """เล่มจริงคั่นด้วยจุดแทนจุลภาค: "ADISORN LEELASANTITHAM. Ph.D." """
+        """เล่มจริงคั่นด้วยจุดแทนจุลภาค — ที่ควรเป็นต้องเปลี่ยนจุดเป็นจุลภาค ไม่ใช่เติมจุลภาค"""
         block = "SUPAPORN KIATTISIN, Ph.D.., ADISORN LEELASANTITHAM. Ph.D."
         self.assertEqual(abstract_committee_missing_degree_commas(block),
-                         ["ADISORN LEELASANTITHAM. Ph.D."])
+                         [("ADISORN LEELASANTITHAM. Ph.D.",
+                           "ADISORN LEELASANTITHAM, Ph.D.")])
         self.assertEqual(split_abstract_committee(block)[0],
                          ["SUPAPORN KIATTISIN", "ADISORN LEELASANTITHAM."])
+
+    def test_only_a_separator_dot_is_dropped_not_an_initial(self):
+        """จุดที่เล่มใช้แทนจุลภาคต้องตัด แต่จุดของอักษรย่อในชื่อห้ามตัด"""
+        self.assertEqual(_drop_separator_dot("ADISORN LEELASANTITHAM."),
+                         "ADISORN LEELASANTITHAM")
+        self.assertEqual(_drop_separator_dot("SOMCHAI J."), "SOMCHAI J.")
+        self.assertEqual(_drop_separator_dot("WATCHARAPONG CHOOKAEW"),
+                         "WATCHARAPONG CHOOKAEW")
 
     def test_properly_punctuated_block_is_untouched(self):
         block = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW, D.Eng."
@@ -1657,7 +1668,7 @@ class MissingCommaBetweenNameAndDegree(unittest.TestCase):
     def test_thai_block_without_a_comma(self):
         block = "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ ปร.ด."
         self.assertEqual(abstract_committee_missing_degree_commas(block),
-                         ["กฤษณ รักษาชีวจริญ ปร.ด."])
+                         [("กฤษณ รักษาชีวจริญ ปร.ด.", "กฤษณ รักษาชีวจริญ, ปร.ด.")])
         self.assertEqual(split_abstract_committee(block)[0],
                          ["บุรัสกร โตรัตน", "กฤษณ รักษาชีวจริญ"])
 

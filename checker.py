@@ -1300,6 +1300,19 @@ _ABS_DEGREE_TAIL = re.compile(
     r')\s*(?:\([^)]*\))?\s*$')
 
 
+def _drop_separator_dot(name):
+    """ตัด "จุด" ที่เล่มใช้แทนจุลภาคท้ายชื่อออก (เช่น "ADISORN LEELASANTITHAM.")
+
+    ตัดเฉพาะเมื่อคำสุดท้ายไม่ใช่อักษรย่อ (ยาวเกิน 2 ตัว) เพราะชื่อที่ลงท้ายด้วย
+    อักษรย่อจริง ๆ จุดนั้นเป็นส่วนหนึ่งของชื่อ ไม่ใช่ตัวคั่นที่พิมพ์ผิด
+    """
+    text = (name or "").strip()
+    if not text.endswith("."):
+        return text
+    last = text[:-1].split()[-1] if text[:-1].split() else ""
+    return text[:-1].strip() if len(last) > 2 else text
+
+
 def _scan_abstract_committee(block):
     """ไล่อ่านก้อนรายชื่อกรรมการทีละช่อง — yield (kind, text, missing_comma)
 
@@ -1325,8 +1338,10 @@ def _scan_abstract_committee(block):
             # ทั้งที่ชื่อพิมพ์ใหญ่ครบ ของจริงคือขาดจุลภาค ซึ่งแก้คนละอย่างกัน
             tail = _ABS_DEGREE_TAIL.search(tok)
             if tail and _looks_like_person_name(tok[:tail.start()].strip()):
-                yield "name", tok[:tail.start()].strip(), False
-                yield "degree", tok[tail.start():].strip(), tok
+                nm = tok[:tail.start()].strip()
+                dg = tok[tail.start():].strip()
+                yield "name", nm, False
+                yield "degree", dg, (tok, f"{_drop_separator_dot(nm)}, {dg}")
                 seen_name = True
                 expect_name = True
                 continue
@@ -1352,10 +1367,12 @@ def abstract_committee_missing_commas(block):
 
 
 def abstract_committee_missing_degree_commas(block):
-    """คืนก้อน "ชื่อ+คุณวุฒิ" ที่ไม่ได้คั่นด้วยจุลภาค ตามที่พิมพ์จริงในเล่ม
+    """คืน [(ที่พิมพ์จริง, ที่ควรเป็น), ...] ของคนที่ชื่อกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค
 
     คืนทั้งก้อน (เช่น "ADISORN LEELASANTITHAM. Ph.D.") ไม่ใช่เฉพาะคุณวุฒิ เพราะ
     เจ้าหน้าที่ต้องรู้ว่าเป็นของใคร และต้องเห็นว่าเล่มคั่นด้วยอะไรอยู่ (เล่มจริงใช้จุด)
+    พร้อมข้อความที่แก้แล้วของคนนั้นจริง ๆ ("ADISORN LEELASANTITHAM, Ph.D.")
+    ไม่ใช่รูปแบบกลาง ๆ นักศึกษาจะได้ก๊อปไปแก้ได้เลย
     """
     return [missing for kind, _text, missing in _scan_abstract_committee(block)
             if kind == "degree" and missing]
@@ -1404,11 +1421,10 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
                         f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
-            for entry in abstract_committee_missing_degree_commas(block):
+            for printed, correct in abstract_committee_missing_degree_commas(block):
                 rep.add("RED", "front_matter", loc,
-                        f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{entry}"',
-                        "ชื่อกรรมการกับคุณวุฒิต้องคั่นด้วยจุลภาค คือ 'ชื่อ นามสกุล, คุณวุฒิ'",
-                        "", "FRONT.ABSTRACT")
+                        f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{printed}"',
+                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT")
             # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
             # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
             stripped = [nm for nm in (n.strip() for n in names)
