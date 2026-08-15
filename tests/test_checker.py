@@ -10,6 +10,7 @@ from checker import (
     bold_is_undetectable,
     abstract_committee_missing_degree_commas,
     _drop_separator_dot,
+    _graphemes,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1610,6 +1611,41 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class ThaiDiffPointsAtWholeSyllables(unittest.TestCase):
+    """จุดต่างของข้อความไทยต้องเป็นคำที่อ่านออก ไม่ใช่เศษพยางค์
+
+    ตัวชี้จุดต่างเคยไล่ทีละ code point จึงตัดกลางพยางค์ เล่มจริงที่ชื่อเรื่องขาดคำว่า
+    "กีฬา" รายงานออกมาว่า ขาด "ีฬาก" (สระอียกไปไว้หน้า แล้วลาก ก ของคำถัดไปมาด้วย)
+    เจ้าหน้าที่อ่านแล้วไม่รู้ว่าต้องเติมอะไร
+    """
+
+    def test_missing_word_is_reported_whole(self):
+        self.assertEqual(
+            describe_diff(
+                "แนวทางการพัฒนาสิ่งอำนวยความสะดวกสนามกรีฑาสำหรับนักกีฬาคนพิการ",
+                "แนวทางการพัฒนาสิ่งอำนวยความสะดวกสนามกีฬากรีฑาสำหรับนักกีฬาคนพิการ"),
+            'ขาด "กีฬา"')
+
+    def test_vowel_stays_with_its_consonant(self):
+        self.assertEqual(describe_diff("ประวัติผู้จัย", "ประวัติผู้วิจัย"), 'ขาด "วิ"')
+
+    def test_missing_syllable_in_the_middle(self):
+        self.assertEqual(describe_diff("ระเบียบวิธีวิจัย", "ระเบียบวิธีการวิจัย"),
+                         'ขาด "การ"')
+
+    def test_single_missing_letter(self):
+        self.assertEqual(describe_diff("อาชีวนามัย", "อาชีวอนามัย"), 'ขาด "อ"')
+
+    def test_english_word_level_diff_is_unchanged(self):
+        self.assertEqual(describe_diff("RESEARCH METHODLOGY", "RESEARCH METHODOLOGY"),
+                         'ต่างที่ "METHODLOGY" ต้องเป็น "METHODOLOGY"')
+
+    def test_graphemes_keep_marks_with_their_base(self):
+        self.assertEqual(_graphemes("กีฬา"), ["กี", "ฬ", "า"])
+        self.assertEqual(_graphemes("เชียงใหม่"), ["เชี", "ย", "ง", "ให", "ม่"])
+        self.assertEqual(_graphemes("ABC"), ["A", "B", "C"])
 
 
 class MissingCommaBetweenNameAndDegree(unittest.TestCase):

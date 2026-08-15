@@ -2144,6 +2144,25 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
     return compared
 
 
+# "ตัวอักษรที่คนมองเห็นหนึ่งตัว" ของภาษาไทย = พยัญชนะพร้อมสระบน/ล่างและวรรณยุกต์ของมัน
+# (สระหน้าอย่าง เ แ โ ใ ไ พิมพ์ก่อนพยัญชนะ จึงนับรวมไปข้างหน้าด้วย)
+_TH_ABOVE_BELOW = 'ัิ-ฺ็-๎'
+_TH_LEAD_VOWEL = 'เ-ไ'
+_GRAPHEME = re.compile(
+    rf'[{_TH_LEAD_VOWEL}]?[^{_TH_ABOVE_BELOW}][{_TH_ABOVE_BELOW}]*'
+    rf'|[{_TH_ABOVE_BELOW}]+')
+
+
+def _graphemes(text):
+    """แยกข้อความเป็นตัวอักษรที่คนมองเห็น ไม่ใช่ code point ทีละตัว
+
+    ถ้าไล่ทีละ code point ตัวชี้จุดต่างจะตัดกลางพยางค์ไทย เล่มจริงที่ชื่อเรื่องขาดคำว่า
+    "กีฬา" เคยรายงานว่า ขาด "ีฬาก" (สระอียกไปไว้หน้า และลาก ก ของคำถัดไปมาด้วย)
+    ซึ่งอ่านไม่ออกว่าต้องเติมอะไร
+    """
+    return _GRAPHEME.findall(text or "")
+
+
 def describe_diff(found, expected):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
 
@@ -2184,7 +2203,7 @@ def describe_diff(found, expected):
                         lambda xs: [x.upper() for x in xs], ' '.join)
         if by_word:
             return by_word
-    return _diff(list(found_s), list(expected_s), lambda xs: xs, ''.join)
+    return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
 
 
 def mismatch_detail(label, compared, expected=''):
