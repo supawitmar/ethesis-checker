@@ -96,8 +96,18 @@ def _thai_chars(chars):
     """
     out = []
     for c in chars:
-        if c.get('text') == ' ' and (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5:
-            c = {**c, 'text': 'ํ'}     # NIKHAHIT
+        text = c.get('text') or ''
+        zero_width = (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5
+        if zero_width and text == ' ':
+            out.append({**c, 'text': 'ํ'})     # NIKHAHIT
+            continue
+        # กว้างศูนย์แต่ไม่ใช่สระ/วรรณยุกต์ = ฟอนต์ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น
+        # เล่มจริงเล่มหนึ่งได้ "พรีซีซั่น" ออกมาเป็น "พรีซีซั8น" และ "ที่ปรึกษา" เป็น
+        # "ที8ปรึกษา" (่ กลายเป็น 8, 4, K แล้วแต่ฟอนต์ย่อย) เจ้าหน้าที่อ่านแล้วนึกว่า
+        # เล่มพิมพ์ผิด ทั้งที่เล่มถูก — ทิ้งไปเพราะเดาไม่ได้ว่าเป็นวรรณยุกต์ตัวไหน
+        # และ norm() ตัดวรรณยุกต์ทิ้งก่อนเทียบอยู่แล้ว ผลตัดสินจึงถูกต้องกว่าเดิมด้วย
+        if zero_width and text and not _TH_MARKS.match(text):
+            continue
         out.append(c)
     return out
 
@@ -920,16 +930,18 @@ def _closest_run(text, want, min_ratio=0.6):
     เข้าใจผิดว่าระบบอ่านไม่เจอ ทั้งที่เห็นข้อความอยู่บนหน้ากระดาษ
     (เล่มจริงพิมพ์ "อาชีวนามัย" ตก อ จาก "อาชีวอนามัย" — เจ้าหน้าที่กวาดตาแล้วนึกว่าตรง)
 
-    เลื่อนหน้าต่างทีละ "ตัวอักษร" ไม่ใช่ทีละคำ เพราะภาษาไทยไม่เว้นวรรคระหว่างคำ
+    เลื่อนหน้าต่างทีละ "ตัวอักษรที่คนมองเห็น" ไม่ใช่ทีละคำ เพราะภาษาไทยไม่เว้นวรรค
+    ระหว่างคำ และไม่ใช่ทีละ code point เพราะขอบหน้าต่างจะตัดกลางพยางค์ ได้ข้อความ
+    ขึ้นต้นด้วยวรรณยุกต์ลอย ๆ อย่าง "้เป็นส่วนหนึ่งของ..." ซึ่งอ่านไม่ออก
     """
-    flat = soft(text)
-    n = len(soft(want))
-    if not flat or n < 4:
+    cells = _graphemes(soft(text))
+    n = len(_graphemes(soft(want)))
+    if not cells or n < 4:
         return ''
     best, best_ratio = '', min_ratio - 1e-9
     for size in range(max(4, n - 2), n + 3):
-        for i in range(0, len(flat) - size + 1):
-            run = flat[i:i + size]
+        for i in range(0, len(cells) - size + 1):
+            run = ''.join(cells[i:i + size])
             ratio = difflib.SequenceMatcher(None, norm(run), norm(want)).ratio()
             if ratio > best_ratio:
                 best, best_ratio = run, ratio
@@ -1291,11 +1303,37 @@ def _looks_like_person_name(text):
     return not s[:1].islower()
 
 
+# คุณวุฒิที่ห้อยท้ายก้อนเดียวกับชื่อ (ลืมใส่จุลภาคคั่น) เช่น "SOMCHAI JAIDEE D. Eng."
+# ยอมให้มีช่องว่างระหว่างท่อนได้ เพราะเล่มจริงพิมพ์ "D. Eng." แยกช่องว่าง
+_ABS_DEGREE_TAIL = re.compile(
+    r'\s+(?:'
+    r'(?=[A-Za-z]*\.)[A-Za-z]{1,4}(?:\.\s*[A-Za-z]{1,4})*\.?'
+    r'|[ก-๙]{1,4}\.(?:\s*[ก-๙]{1,4}\.)*'
+    r')\s*(?:\([^)]*\))?\s*$')
+
+
+def _drop_separator_dot(name):
+    """ตัด "จุด" ที่เล่มใช้แทนจุลภาคท้ายชื่อออก (เช่น "ADISORN LEELASANTITHAM.")
+
+    ตัดเฉพาะเมื่อคำสุดท้ายไม่ใช่อักษรย่อ (ยาวเกิน 2 ตัว) เพราะชื่อที่ลงท้ายด้วย
+    อักษรย่อจริง ๆ จุดนั้นเป็นส่วนหนึ่งของชื่อ ไม่ใช่ตัวคั่นที่พิมพ์ผิด
+    """
+    text = (name or "").strip()
+    if not text.endswith("."):
+        return text
+    last = text[:-1].split()[-1] if text[:-1].split() else ""
+    return text[:-1].strip() if len(last) > 2 else text
+
+
 def _scan_abstract_committee(block):
     """ไล่อ่านก้อนรายชื่อกรรมการทีละช่อง — yield (kind, text, missing_comma)
 
     kind = 'name' | 'degree'
-    missing_comma = True เมื่อชื่อนี้ติดมากับคุณวุฒิของคนก่อนหน้าโดยไม่มีจุลภาคคั่น
+    missing_comma บอกว่าท่อนนี้ติดมากับท่อนก่อนหน้าโดยไม่มีจุลภาคคั่น
+      kind='name'   -> True ถ้าชื่อติดมากับคุณวุฒิของคนก่อนหน้า
+      kind='degree' -> ข้อความก้อนเต็ม "ชื่อ+คุณวุฒิ" ตามที่พิมพ์จริง ถ้าคุณวุฒิติดมา
+                       กับชื่อของตัวเอง (ต้องคืนก้อนเต็มเพราะรายงานต้องบอกว่าเป็นของใคร
+                       และเล่มคั่นด้วยอะไรอยู่ — เล่มจริงใช้จุดแทนจุลภาค)
     """
     expect_name = True
     seen_name = False
@@ -1305,6 +1343,19 @@ def _scan_abstract_committee(block):
             # ไม่ใช่ชื่อคนใหม่ ถ้านับผิดจะเลื่อนสลับ ชื่อ/คุณวุฒิ ไปทั้งชุด
             if seen_name and _is_degree_only(tok):
                 yield "degree", tok, False
+                continue
+            # ลืมจุลภาคระหว่าง "ชื่อ" กับ "คุณวุฒิของตัวเอง" เช่น
+            # "WATCHARAPONG CHOOKAEW D. Eng." — ถ้าไม่แยก คุณวุฒิจะถูกนับเป็นส่วน
+            # หนึ่งของชื่อ แล้วกฎตัวพิมพ์ใหญ่ฟ้องผิดว่า "ชื่อไม่ได้เป็นตัวพิมพ์ใหญ่"
+            # ทั้งที่ชื่อพิมพ์ใหญ่ครบ ของจริงคือขาดจุลภาค ซึ่งแก้คนละอย่างกัน
+            tail = _ABS_DEGREE_TAIL.search(tok)
+            if tail and _looks_like_person_name(tok[:tail.start()].strip()):
+                nm = tok[:tail.start()].strip()
+                dg = tok[tail.start():].strip()
+                yield "name", nm, False
+                yield "degree", dg, (tok, f"{_drop_separator_dot(nm)}, {dg}")
+                seen_name = True
+                expect_name = True
                 continue
             yield "name", tok, False
             seen_name = True
@@ -1325,6 +1376,18 @@ def abstract_committee_missing_commas(block):
     """คืนรายชื่อกรรมการที่ไม่มีจุลภาคคั่นจากคุณวุฒิของคนก่อนหน้า"""
     return [text for kind, text, missing in _scan_abstract_committee(block)
             if kind == "name" and missing]
+
+
+def abstract_committee_missing_degree_commas(block):
+    """คืน [(ที่พิมพ์จริง, ที่ควรเป็น), ...] ของคนที่ชื่อกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค
+
+    คืนทั้งก้อน (เช่น "ADISORN LEELASANTITHAM. Ph.D.") ไม่ใช่เฉพาะคุณวุฒิ เพราะ
+    เจ้าหน้าที่ต้องรู้ว่าเป็นของใคร และต้องเห็นว่าเล่มคั่นด้วยอะไรอยู่ (เล่มจริงใช้จุด)
+    พร้อมข้อความที่แก้แล้วของคนนั้นจริง ๆ ("ADISORN LEELASANTITHAM, Ph.D.")
+    ไม่ใช่รูปแบบกลาง ๆ นักศึกษาจะได้ก๊อปไปแก้ได้เลย
+    """
+    return [missing for kind, _text, missing in _scan_abstract_committee(block)
+            if kind == "degree" and missing]
 
 
 def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
@@ -1370,6 +1433,10 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
                         f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
+            for printed, correct in abstract_committee_missing_degree_commas(block):
+                rep.add("RED", "front_matter", loc,
+                        f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{printed}"',
+                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT")
             # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
             # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
             stripped = [nm for nm in (n.strip() for n in names)
@@ -1380,7 +1447,11 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า: {shown}',
                         "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
                         "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
-            lower = [nm for nm in (n.strip() for n in names)
+            # ตรวจตัวพิมพ์จาก "ชื่อล้วน" หลังตัดตำแหน่งวิชาการออกแล้ว เพราะตำแหน่ง
+            # วิชาการมีตัวพิมพ์เล็กเป็นปกติ ("Asst. Prof.") และถูกฟ้องเป็นข้อของตัวเอง
+            # ไปแล้วข้างบน ถ้าไม่ตัดออกจะได้สองข้อจากความผิดเดียว แถมข้อหลังยังบอกผิด
+            # ว่า "ชื่อไม่เป็นตัวพิมพ์ใหญ่" ทั้งที่ชื่อพิมพ์ใหญ่ครบ
+            lower = [nm for nm in (_strip_committee_title(n.strip()) for n in names)
                      if heading_en and re.search(r'[a-z]', nm)]
             if lower:
                 shown = ", ".join(f'"{nm}"' for nm in lower)
@@ -2089,6 +2160,25 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
     return compared
 
 
+# "ตัวอักษรที่คนมองเห็นหนึ่งตัว" ของภาษาไทย = พยัญชนะพร้อมสระบน/ล่างและวรรณยุกต์ของมัน
+# (สระหน้าอย่าง เ แ โ ใ ไ พิมพ์ก่อนพยัญชนะ จึงนับรวมไปข้างหน้าด้วย)
+_TH_ABOVE_BELOW = 'ัิ-ฺ็-๎'
+_TH_LEAD_VOWEL = 'เ-ไ'
+_GRAPHEME = re.compile(
+    rf'[{_TH_LEAD_VOWEL}]?[^{_TH_ABOVE_BELOW}][{_TH_ABOVE_BELOW}]*'
+    rf'|[{_TH_ABOVE_BELOW}]+')
+
+
+def _graphemes(text):
+    """แยกข้อความเป็นตัวอักษรที่คนมองเห็น ไม่ใช่ code point ทีละตัว
+
+    ถ้าไล่ทีละ code point ตัวชี้จุดต่างจะตัดกลางพยางค์ไทย เล่มจริงที่ชื่อเรื่องขาดคำว่า
+    "กีฬา" เคยรายงานว่า ขาด "ีฬาก" (สระอียกไปไว้หน้า และลาก ก ของคำถัดไปมาด้วย)
+    ซึ่งอ่านไม่ออกว่าต้องเติมอะไร
+    """
+    return _GRAPHEME.findall(text or "")
+
+
 def describe_diff(found, expected):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
 
@@ -2129,7 +2219,7 @@ def describe_diff(found, expected):
                         lambda xs: [x.upper() for x in xs], ' '.join)
         if by_word:
             return by_word
-    return _diff(list(found_s), list(expected_s), lambda xs: xs, ''.join)
+    return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
 
 
 def mismatch_detail(label, compared, expected=''):
@@ -2191,6 +2281,28 @@ def find_signature_date(text):
 def _is_bold_font(fontname):
     font = (fontname or '').upper()
     return any(marker in font for marker in ('BOLD', 'BLACK', 'SEMIBOLD', 'DEMI'))
+
+
+# ชื่อฟอนต์ที่ไม่ได้บอกอะไรเลยว่าเป็นน้ำหนักไหน — โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์
+# ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ "ในหน้านั้น ๆ" ไม่ใช่ชื่อฟอนต์จริง
+# (เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา แต่ CIDFont+F1 บนหน้าเนื้อหาเป็น
+#  ตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์) จึงดูจากชื่อไม่ได้เลยว่าหนาหรือไม่
+_ANONYMOUS_FONT = re.compile(r'^(?:CIDFont\+)?F\d+$', re.I)
+
+
+def bold_is_undetectable(pdf_page):
+    """หน้านี้บอก "ตัวหนา" จากชื่อฟอนต์ไม่ได้เลยหรือไม่
+
+    ถ้าบอกไม่ได้ ห้ามสรุปว่า "ไม่เป็นตัวหนา" — เล่มจริงที่หัวข้อสารบัญหนาครบทุกหัวข้อ
+    เคยถูกฟ้องว่า "หัวข้อหลักในสารบัญไม่เป็นตัวหนา 13 หัวข้อ" ด้วยเหตุนี้
+    """
+    names = {(c.get('fontname') or '') for c in (pdf_page.chars or [])
+             if (c.get('text') or '').strip()}
+    if not names:
+        return False
+    if any(_is_bold_font(name) for name in names):
+        return False        # มีฟอนต์ที่บอกน้ำหนักในชื่อ = เทียบได้ตามปกติ
+    return all(_ANONYMOUS_FONT.match(name.split('+')[-1]) for name in names)
 
 
 def _font_lines(pdf_page, tolerance=2.5):
@@ -2465,6 +2577,34 @@ def canonical_title_status(actual_title, chapter_no, option):
         if norm(actual_title) == norm(variant):
             return 'variant', compared, expected
     return 'wrong', compared, expected
+
+
+# ระดับความตรงกับประกาศ — ตรงเป๊ะ > ตัวสะกดที่คู่มือยอมรับ > ไม่ตรงเลย
+_TITLE_RANK = {'exact': 2, 'variant': 1, 'wrong': 0}
+
+
+def _correctly_spelled_side(body_title, toc_title, chapter_no, option):
+    """ฝั่งไหนสะกดชื่อบทถูกตามประกาศ — คืน 'body' | 'toc' | None ถ้าบอกไม่ได้
+
+    ใช้ตอนสารบัญกับเนื้อหาไม่ตรงกัน เพื่อไม่ให้ระบบสั่งแก้ฝั่งที่ถูกอยู่แล้ว
+    เล่มจริงพิมพ์สารบัญว่า "LITURATURE REVIEW" ส่วนเนื้อหาว่า "LITERATURE REVIEW"
+    ของเดิมยึดสารบัญเป็นหลักเสมอ จึงบอกให้แก้เนื้อหาเป็นคำที่สะกดผิด
+
+    ใช้ได้แม้ในโหมดยกเว้นบท เพราะโหมดนั้นแค่ไม่บังคับว่าต้อง "ใช้ชื่อตามประกาศ"
+    ไม่ได้แปลว่าปล่อยให้สะกดผิดได้ — ถ้าฝั่งหนึ่งตรงประกาศมากกว่า อีกฝั่งคือฝั่งที่ผิด
+
+    เทียบกันด้วย "ระดับความตรงกับประกาศ" ไม่ใช่แค่ผ่าน/ไม่ผ่าน จึงตัดสินได้ด้วยว่า
+    ฝั่งที่ตรงประกาศเป๊ะ ชนะฝั่งที่เป็นเพียงตัวสะกดที่คู่มือยอมรับ
+    ถ้าทั้งสองฝั่งอยู่ระดับเดียวกัน = ประกาศชี้ขาดไม่ได้ จึงไม่ชี้ว่าฝั่งไหนผิด
+    """
+    try:
+        body_rank = _TITLE_RANK[canonical_title_status(body_title, chapter_no, option)[0]]
+        toc_rank = _TITLE_RANK[canonical_title_status(toc_title, chapter_no, option)[0]]
+    except (IndexError, KeyError):
+        return None
+    if body_rank == toc_rank:
+        return None
+    return 'body' if body_rank > toc_rank else 'toc'
 
 
 def _roman_to_int(text):
@@ -2887,11 +3027,31 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if BODY_RULES['check_toc_title_against_body'] and t_title_n != nb \
                         and not enforced_title:
                     toc_title = _toc_chapter_title(t_raw)
-                    compared = compare_values(title, toc_title, 'toc_heading')
-                    rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
-                            mismatch_detail("ชื่อบทในเนื้อหา", compared, toc_title),
-                            f'ต้องสะกดตรงกับชื่อบทในสารบัญ: "{toc_title}"',
-                            "แก้ชื่อบทในเนื้อหาหรือสารบัญให้ตรงกัน", "FRONT.TOC")
+                    right = _correctly_spelled_side(title, toc_title, cn, option)
+                    if right is None:
+                        # ไม่รู้ว่าฝั่งไหนถูก จึงห้ามชี้ว่า "ต้องเป็นเหมือนอีกฝั่ง"
+                        # เพราะอาจไปสั่งให้แก้ฝั่งที่ถูกอยู่แล้ว
+                        rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})",
+                                f'ชื่อบทในสารบัญกับในเนื้อหาไม่ตรงกัน: '
+                                f'สารบัญพิมพ์ "{toc_title}" ส่วนเนื้อหาพิมพ์ "{title}"',
+                                "ชื่อบทในสารบัญกับในเนื้อหาต้องสะกดตรงกัน",
+                                "", "FRONT.TOC")
+                    else:
+                        # ฝั่งหนึ่งสะกดตรงประกาศ อีกฝั่งจึงเป็นฝั่งที่ต้องแก้ — แม้อยู่ใน
+                        # โหมดยกเว้นบท (ไม่บังคับ "ชื่อ" ตามประกาศ) ก็ยังต้องสะกดให้ถูก
+                        # ของเดิมยึดสารบัญเป็นหลักเสมอ เล่มที่สารบัญพิมพ์ผิดจึงถูกสั่งให้
+                        # แก้เนื้อหาที่ถูกอยู่แล้วให้กลายเป็นคำที่ผิดตาม
+                        wrong_side, wrong_text, loc = (
+                            ("สารบัญ", toc_title, f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}")
+                            if right == "body" else
+                            ("เนื้อหา", title, f"บทที่ {cn} ({page_ref(ppage)})"))
+                        correct = title if right == "body" else toc_title
+                        diff = describe_diff(wrong_text, correct)
+                        found_msg = f'ชื่อบทใน{wrong_side}เขียนว่า "{wrong_text}"'
+                        if diff:
+                            found_msg += f" {diff}"
+                        rep.add("RED", "body", loc, found_msg,
+                                f'ต้องแก้เป็น "{correct}"', "", "FRONT.TOC")
                 if BODY_RULES['check_toc_page_numbers'] and t_pno is None:
                     rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
                             f"หัวข้อ \"{t_raw}\" ไม่มีเลขหน้า",
@@ -2918,6 +3078,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         try:
             with pdfplumber.open(pdf_path) as _pl:
                 for toc_idx in toc_scan_pages:
+                    if bold_is_undetectable(_pl.pages[toc_idx]):
+                        rep.add(UNCERTAIN_ZONE, "front_matter",
+                                f"สารบัญ ({page_ref(toc_idx)})",
+                                "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
+                                "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                                "ตรวจด้วยตา", "FORMAT.BOLD")
+                        continue
                     nonbold = []
                     for line in _font_lines(_pl.pages[toc_idx]):
                         if _is_toc_major_heading(line['text']) and line['bold_ratio'] < 0.8:
@@ -3522,12 +3689,24 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if norm(sig_template) in norm(pages[idx]):
                 rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
             else:
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail",
-                                     "ไม่พบข้อความตาม template")
-                rep.add("RED", "front_matter", spot,
-                        f'ไม่พบข้อความตาม template: "{sig_template}"',
+                # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
+                # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
+                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความตาม template" เจ้าหน้าที่จะนึกว่าระบบ
+                # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
+                near = _closest_run(pages[idx], sig_template)
+                if near:
+                    diff = describe_diff(near, sig_template)
+                    found_msg = f'หน้าลงนามพิมพ์ว่า "{near}"'
+                    if diff:
+                        found_msg += f" {diff}"
+                    detail = near
+                else:
+                    found_msg = f'ไม่พบข้อความตาม template: "{sig_template}"'
+                    detail = "ไม่พบข้อความตาม template"
+                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail", detail)
+                rep.add("RED", "front_matter", spot, found_msg,
                         f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
-                        "ใส่ข้อความตาม template ให้ครบ", "FRONT.APPROVAL")
+                        "", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:

@@ -720,6 +720,9 @@ var TR = [
   [/บรรทัดชื่อนักศึกษาในบทคัดย่ออังกฤษต้องมีรหัส/g, 'The student-name line in the English abstract must include the ID'],
   [/เพิ่ม\/แก้รหัสนักศึกษาให้ครบทั้งตัวเลขและรหัสหลักสูตร/g, 'Add or correct the student ID so it has both the number and the program code'],
   // เล่มพิมพ์รหัสมาแต่ผิด กับเล่มไม่มีรหัสเลย เป็นคนละข้อความ
+  // ไฟล์ที่ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบตัดสินตัวหนาไม่ได้
+  [/ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่/g, 'This file does not record font names, so the system cannot tell whether the headings are bold'],
+  [/หัวข้อหลักในสารบัญต้องเป็นตัวหนา/g, 'Major headings in the table of contents must be bold'],
   // ป้ายชื่อที่ถูกจับเป็นตัวแปรกลางประโยค ต้องมีกฎแบบยืนเดี่ยว
   // เขียนพร้อม "The" ให้เข้าชุดกับ /^ชื่อนักศึกษา$/ ที่มีอยู่แล้ว
   [/^ชื่อภาษาไทย$/g, 'The Thai name'],
@@ -820,6 +823,20 @@ var TR = [
   [/บทคัดย่ออังกฤษ/g, 'English abstract'],
   [/หัวข้อหลักไม่เป็นตัวหนา/g, 'Top-level headings are not bold'],
   [/มีข้อความตัวหนา/g, 'Bold text'],
+  // ชื่อกับคุณวุฒิของคนเดียวกันไม่ได้คั่นด้วยจุลภาค (เล่มจริงใช้จุดแทน)
+  // สารบัญกับเนื้อหาไม่ตรงกัน (ชี้ฝั่งที่ผิดเมื่อรู้ว่าฝั่งไหนตรงประกาศ)
+  [/ชื่อบทในสารบัญกับในเนื้อหาไม่ตรงกัน: สารบัญพิมพ์ ("[^"]*") ส่วนเนื้อหาพิมพ์ ("[^"]*")/g, 'The chapter title differs between the table of contents and the body: the TOC has $1 while the body has $2'],
+  [/ชื่อบทในสารบัญกับในเนื้อหาต้องสะกดตรงกัน/g, 'The chapter title must be spelled identically in the table of contents and in the body'],
+  [/ชื่อบทในสารบัญเขียนว่า ("[^"]*") (.+)/g, 'The chapter title in the table of contents reads $1, $2'],
+  [/ชื่อบทในสารบัญเขียนว่า ("[^"]*")$/g, 'The chapter title in the table of contents reads $1'],
+  [/ชื่อบทในเนื้อหาเขียนว่า ("[^"]*") (.+)/g, 'The chapter title in the body reads $1, $2'],
+  [/ชื่อบทในเนื้อหาเขียนว่า ("[^"]*")$/g, 'The chapter title in the body reads $1'],
+  // ประโยค template หน้าลงนามผิดคำ (คนละเรื่องกับหน้าที่ไม่มีประโยคนี้เลย)
+  [/หน้าลงนามพิมพ์ว่า ("[^"]*") (.+)/g, 'The approval page reads $1, $2'],
+  [/หน้าลงนามพิมพ์ว่า ("[^"]*")$/g, 'The approval page reads $1'],
+  [/ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ ("[^"]*")/g, 'The committee member name and qualification are not separated by a comma: $1'],
+  [/ชื่อกรรมการกับคุณวุฒิต้องคั่นด้วยจุลภาค คือ 'ชื่อ นามสกุล, คุณวุฒิ'/g, "The committee member name and qualification must be separated by a comma: 'First Last, Degree'"],
+  [/^ต้องเป็น ("[^"]*")$/g, 'Must be $1'],
   [/ไม่มีจุลภาคคั่นหน้าชื่อ/g, 'No comma before the name'],
   [/เติมจุลภาคหน้าชื่อ/g, 'Add a comma before the name'],
   [/แก้ไขให้เป็นไปตามข้อกำหนด/g, 'Correct it to meet the requirement'],

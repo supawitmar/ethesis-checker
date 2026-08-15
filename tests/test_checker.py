@@ -3,10 +3,18 @@ import sys
 
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import checker as checker_module
 
 from checker import (
     describe_diff,
     _closest_student_id,
+    bold_is_undetectable,
+    abstract_committee_missing_degree_commas,
+    _drop_separator_dot,
+    _graphemes,
+    _correctly_spelled_side,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1607,6 +1615,267 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
+    """สารบัญกับเนื้อหาไม่ตรงกัน ต้องไม่ยึดสารบัญเป็นถูกเสมอ
+
+    เล่มจริงพิมพ์สารบัญว่า "LITURATURE REVIEW" ส่วนเนื้อหาว่า "LITERATURE REVIEW"
+    ระบบเดิมยึดสารบัญเป็นหลัก จึงสั่งให้แก้เนื้อหาที่ถูกอยู่แล้วให้กลายเป็นคำที่ผิด
+    เจ้าหน้าที่สั่งว่า "บทที่ 2 ถึงจะไม่ต้องตรวจเข้ม แต่ก็ควรให้ชื่อบทสะกดถูก"
+    """
+
+    def test_body_matching_the_regulation_wins(self):
+        self.assertEqual(
+            _correctly_spelled_side("LITERATURE REVIEW", "LITURATURE REVIEW", 2, 1),
+            "body")
+
+    def test_toc_matching_the_regulation_wins(self):
+        self.assertEqual(
+            _correctly_spelled_side("LITURATURE REVIEW", "LITERATURE REVIEW", 2, 1),
+            "toc")
+
+    def test_neither_matching_gives_no_winner(self):
+        """ทั้งสองฝั่งไม่ตรงประกาศ = บอกไม่ได้ว่าใครถูก ห้ามชี้ให้แก้ฝั่งใดฝั่งหนึ่ง"""
+        self.assertIsNone(
+            _correctly_spelled_side("MY OWN TITLE", "ANOTHER TITLE", 2, 1))
+
+    def test_both_matching_gives_no_winner(self):
+        self.assertIsNone(
+            _correctly_spelled_side("LITERATURE REVIEW", "LITERATURE REVIEW", 2, 1))
+
+    def test_exact_beats_a_handbook_variant(self):
+        """ตรงประกาศเป๊ะ ชนะตัวสะกดที่คู่มือยอมรับ — ยึดประกาศเป็นตัวชี้ขาด"""
+        variants = dict(checker_module.CANONICAL_ACCEPTED_VARIANTS)
+        variants[(1, 2)] = ("LITERATURE REVIEWS",)
+        with mock.patch.object(checker_module, "CANONICAL_ACCEPTED_VARIANTS", variants):
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEW", "LITERATURE REVIEWS", 2, 1),
+                "body")
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEWS", "LITERATURE REVIEW", 2, 1),
+                "toc")
+
+    def test_a_handbook_variant_beats_a_typo(self):
+        variants = dict(checker_module.CANONICAL_ACCEPTED_VARIANTS)
+        variants[(1, 2)] = ("LITERATURE REVIEWS",)
+        with mock.patch.object(checker_module, "CANONICAL_ACCEPTED_VARIANTS", variants):
+            self.assertEqual(
+                _correctly_spelled_side("LITERATURE REVIEWS", "LITURATURE REVIEW", 2, 1),
+                "body")
+
+    def test_out_of_range_chapter_is_safe(self):
+        self.assertIsNone(_correctly_spelled_side("A", "B", 99, 1))
+
+
+class AcademicTitleIsNotCountedAsALowercaseName(unittest.TestCase):
+    """ตำแหน่งวิชาการมีตัวพิมพ์เล็กเป็นปกติ ต้องไม่ทำให้ชื่อถูกฟ้องว่าพิมพ์เล็ก
+
+    เล่มจริงพิมพ์ "Asst. Prof. SAOWALEE KAEWCHUAY, Ed.D." ชื่อพิมพ์ใหญ่ครบ ผิดแค่
+    มีตำแหน่งวิชาการนำหน้า ซึ่งถูกฟ้องเป็นข้อของตัวเองอยู่แล้ว แต่กฎตัวพิมพ์ใหญ่
+    เอาตำแหน่งมานับด้วย จึงได้สองข้อจากความผิดเดียว แถมข้อหลังยังบอกผิดว่าชื่อพิมพ์เล็ก
+    """
+
+    PAGE = "\n".join([
+        "ฉ", "FACILITY MANAGEMENT OF EXERCISE FOR THE ELDERLY",
+        "PAKKAWAT KONGKAEN 6637922 SHSM/M",
+        "M.A. (SPORT MANAGEMENT)",
+        "THESIS ADVISORY COMMITTEE: Asst. Prof. SAOWALEE KAEWCHUAY, Ed.D., "
+        "Asst. Prof. SIWAPORN PHUPAN, Ed.D.",
+        "ABSTRACT",
+        "This study aimed to examine the opinions of the elderly.",
+    ])
+
+    def _founds(self, page):
+        rep = Report()
+        _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า ฉ")
+        return [it["found"] for it in rep.zones["RED"]]
+
+    def test_only_the_academic_title_is_reported(self):
+        founds = self._founds(self.PAGE)
+        self.assertTrue(any("ตำแหน่งทางวิชาการนำหน้า" in f for f in founds), founds)
+        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+
+    def test_a_genuinely_lowercase_name_is_still_reported(self):
+        page = self.PAGE.replace("SAOWALEE KAEWCHUAY", "Saowalee Kaewchuay")
+        founds = self._founds(page)
+        self.assertTrue(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+        # ต้องยกเฉพาะชื่อ ไม่ใช่ตำแหน่งวิชาการที่ตัดออกไปแล้ว
+        self.assertTrue(any('"Saowalee Kaewchuay"' in f for f in founds), founds)
+
+
+class BrokenFontMarksAreNotReadAsLetters(unittest.TestCase):
+    """ฟอนต์ที่ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น ต้องไม่โผล่ในรายงาน
+
+    เล่มจริงเล่มหนึ่งได้ "พรีซีซั่น" ออกมาเป็น "พรีซีซั8น" และ "ที่ปรึกษา" เป็น
+    "ที8ปรึกษา" เจ้าหน้าที่อ่านแล้วนึกว่าเล่มพิมพ์ผิด ทั้งที่เล่มถูก
+    แยกออกจากตัวเลขจริงได้ด้วยความกว้าง: วรรณยุกต์กว้างศูนย์ ตัวเลขจริงมีความกว้าง
+    """
+
+    @staticmethod
+    def _char(text, width):
+        return {"text": text, "x0": 100.0, "x1": 100.0 + width}
+
+    def _kept(self, *chars):
+        return [c["text"] for c in checker_module._thai_chars(list(chars))]
+
+    def test_zero_width_letter_is_dropped(self):
+        """"8" กว้างศูนย์ = วรรณยุกต์ที่ฟอนต์ map ผิด ต้องไม่หลุดไปอยู่ในข้อความ"""
+        self.assertEqual(
+            self._kept(self._char("ซ", 7.0), self._char("ั", 0.0),
+                       self._char("8", 0.0), self._char("น", 7.4)),
+            ["ซ", "ั", "น"])
+
+    def test_real_digits_are_kept(self):
+        """ตัวเลขจริงมีความกว้าง ห้ามทิ้ง (รหัสนักศึกษา เลขหน้า ปี)"""
+        self.assertEqual(
+            self._kept(self._char("6", 7.0), self._char("8", 7.0),
+                       self._char("7", 7.0)),
+            ["6", "8", "7"])
+
+    def test_zero_width_space_still_becomes_nikhahit(self):
+        self.assertEqual(self._kept(self._char("จ", 7.0), self._char(" ", 0.0)),
+                         ["จ", "ํ"])
+
+    def test_zero_width_thai_mark_is_kept(self):
+        self.assertEqual(self._kept(self._char("ก", 7.0), self._char("ี", 0.0)),
+                         ["ก", "ี"])
+
+
+class ThaiDiffPointsAtWholeSyllables(unittest.TestCase):
+    """จุดต่างของข้อความไทยต้องเป็นคำที่อ่านออก ไม่ใช่เศษพยางค์
+
+    ตัวชี้จุดต่างเคยไล่ทีละ code point จึงตัดกลางพยางค์ เล่มจริงที่ชื่อเรื่องขาดคำว่า
+    "กีฬา" รายงานออกมาว่า ขาด "ีฬาก" (สระอียกไปไว้หน้า แล้วลาก ก ของคำถัดไปมาด้วย)
+    เจ้าหน้าที่อ่านแล้วไม่รู้ว่าต้องเติมอะไร
+    """
+
+    def test_missing_word_is_reported_whole(self):
+        self.assertEqual(
+            describe_diff(
+                "แนวทางการพัฒนาสิ่งอำนวยความสะดวกสนามกรีฑาสำหรับนักกีฬาคนพิการ",
+                "แนวทางการพัฒนาสิ่งอำนวยความสะดวกสนามกีฬากรีฑาสำหรับนักกีฬาคนพิการ"),
+            'ขาด "กีฬา"')
+
+    def test_vowel_stays_with_its_consonant(self):
+        self.assertEqual(describe_diff("ประวัติผู้จัย", "ประวัติผู้วิจัย"), 'ขาด "วิ"')
+
+    def test_missing_syllable_in_the_middle(self):
+        self.assertEqual(describe_diff("ระเบียบวิธีวิจัย", "ระเบียบวิธีการวิจัย"),
+                         'ขาด "การ"')
+
+    def test_single_missing_letter(self):
+        self.assertEqual(describe_diff("อาชีวนามัย", "อาชีวอนามัย"), 'ขาด "อ"')
+
+    def test_english_word_level_diff_is_unchanged(self):
+        self.assertEqual(describe_diff("RESEARCH METHODLOGY", "RESEARCH METHODOLOGY"),
+                         'ต่างที่ "METHODLOGY" ต้องเป็น "METHODOLOGY"')
+
+    def test_graphemes_keep_marks_with_their_base(self):
+        self.assertEqual(_graphemes("กีฬา"), ["กี", "ฬ", "า"])
+        self.assertEqual(_graphemes("เชียงใหม่"), ["เชี", "ย", "ง", "ให", "ม่"])
+        self.assertEqual(_graphemes("ABC"), ["A", "B", "C"])
+
+
+class MissingCommaBetweenNameAndDegree(unittest.TestCase):
+    """ลืมจุลภาคระหว่างชื่อกับคุณวุฒิของตัวเอง ต้องฟ้องว่าขาดจุลภาค ไม่ใช่ว่าชื่อพิมพ์เล็ก
+
+    เล่มจริงพิมพ์ "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW D. Eng."
+    คนที่สองลืมจุลภาคหลังชื่อ ระบบเดิมอ่านทั้งก้อนเป็น "ชื่อ" แล้วฟ้องว่า
+    "ชื่อกรรมการไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด" ทั้งที่ชื่อพิมพ์ใหญ่ครบ
+    ของจริงคือขาดจุลภาค ซึ่งแก้คนละอย่างกัน
+    """
+
+    BLOCK = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW D. Eng."
+
+    def test_name_and_degree_are_separated(self):
+        names, degrees = split_abstract_committee(self.BLOCK)
+        self.assertEqual(names, ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
+        self.assertEqual(degrees, ["D.Eng.", "D. Eng."])
+
+    def test_the_missing_comma_is_reported_with_the_whole_entry(self):
+        """ยกทั้งก้อนตามที่พิมพ์จริง พร้อมข้อความที่แก้แล้วของคนนั้นให้ก๊อปไปใช้ได้เลย"""
+        self.assertEqual(abstract_committee_missing_degree_commas(self.BLOCK),
+                         [("WATCHARAPONG CHOOKAEW D. Eng.",
+                           "WATCHARAPONG CHOOKAEW, D. Eng.")])
+
+    def test_case_rule_no_longer_fires_on_a_correct_name(self):
+        rep = Report()
+        page = "THESIS ADVISORY COMMITTEE: " + self.BLOCK + "\nABSTRACT\nBody."
+        _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า iv")
+        founds = [it["found"] for it in rep.zones["RED"]]
+        self.assertTrue(any("ไม่ได้คั่นด้วยจุลภาค" in f for f in founds), founds)
+        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+
+    def test_a_full_stop_used_instead_of_a_comma(self):
+        """เล่มจริงคั่นด้วยจุดแทนจุลภาค — ที่ควรเป็นต้องเปลี่ยนจุดเป็นจุลภาค ไม่ใช่เติมจุลภาค"""
+        block = "SUPAPORN KIATTISIN, Ph.D.., ADISORN LEELASANTITHAM. Ph.D."
+        self.assertEqual(abstract_committee_missing_degree_commas(block),
+                         [("ADISORN LEELASANTITHAM. Ph.D.",
+                           "ADISORN LEELASANTITHAM, Ph.D.")])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["SUPAPORN KIATTISIN", "ADISORN LEELASANTITHAM."])
+
+    def test_only_a_separator_dot_is_dropped_not_an_initial(self):
+        """จุดที่เล่มใช้แทนจุลภาคต้องตัด แต่จุดของอักษรย่อในชื่อห้ามตัด"""
+        self.assertEqual(_drop_separator_dot("ADISORN LEELASANTITHAM."),
+                         "ADISORN LEELASANTITHAM")
+        self.assertEqual(_drop_separator_dot("SOMCHAI J."), "SOMCHAI J.")
+        self.assertEqual(_drop_separator_dot("WATCHARAPONG CHOOKAEW"),
+                         "WATCHARAPONG CHOOKAEW")
+
+    def test_properly_punctuated_block_is_untouched(self):
+        block = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW, D.Eng."
+        self.assertEqual(abstract_committee_missing_degree_commas(block), [])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
+
+    def test_thai_block_without_a_comma(self):
+        block = "บุรัสกร โตรัตน, ปร.ด., กฤษณ รักษาชีวจริญ ปร.ด."
+        self.assertEqual(abstract_committee_missing_degree_commas(block),
+                         [("กฤษณ รักษาชีวจริญ ปร.ด.", "กฤษณ รักษาชีวจริญ, ปร.ด.")])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["บุรัสกร โตรัตน", "กฤษณ รักษาชีวจริญ"])
+
+    def test_a_plain_name_is_not_split(self):
+        """ชื่อธรรมดาที่ไม่มีคุณวุฒิห้อยท้าย ต้องไม่ถูกตัด"""
+        block = "CHAKRIT SUVANJUMRAT, D.Eng., WATCHARAPONG CHOOKAEW"
+        self.assertEqual(abstract_committee_missing_degree_commas(block), [])
+        self.assertEqual(split_abstract_committee(block)[0],
+                         ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
+
+
+class BoldCannotBeJudgedWhenFontNamesAreAnonymous(unittest.TestCase):
+    """ไฟล์ที่ไม่ได้เก็บชื่อฟอนต์ไว้ ห้ามสรุปว่า "ไม่เป็นตัวหนา"
+
+    โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ
+    ในหน้านั้น ๆ ไม่ใช่ชื่อฟอนต์จริง — เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา
+    แต่ CIDFont+F1 บนหน้าเนื้อหาเป็นตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์
+    เล่มที่หัวข้อสารบัญหนาครบทุกหัวข้อจึงเคยถูกฟ้องว่า "ไม่เป็นตัวหนา 13 หัวข้อ"
+    """
+
+    class _Page:
+        def __init__(self, fonts):
+            self.chars = [{"text": "A", "fontname": f} for f in fonts]
+
+    def test_anonymous_subset_names_mean_undetectable(self):
+        page = self._Page(["CIDFont+F1", "CIDFont+F2", "CIDFont+F3"])
+        self.assertTrue(bold_is_undetectable(page))
+
+    def test_real_font_names_stay_detectable(self):
+        for fonts in (
+            ["TimesNewRomanPSMT", "TimesNewRomanPS-BoldMT"],
+            ["BCDIEE+THSarabunNew", "BCDEEE+THSarabunNew-Bold"],
+            ["TimesNewRomanPSMT"],          # ไม่มีตัวหนาเลย แต่ชื่อบอกวงศ์ฟอนต์ = ตัดสินได้
+        ):
+            self.assertFalse(bold_is_undetectable(self._Page(fonts)), fonts)
+
+    def test_page_without_text_is_not_treated_as_undetectable(self):
+        self.assertFalse(bold_is_undetectable(self._Page([])))
+
+    def test_anonymous_name_with_a_bold_marker_is_still_detectable(self):
+        page = self._Page(["CIDFont+F1", "ABCDEF+ArialBold"])
+        self.assertFalse(bold_is_undetectable(page))
 
 
 class StudentNameAndIdMustShareOneLine(unittest.TestCase):
