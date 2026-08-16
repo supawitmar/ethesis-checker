@@ -2245,6 +2245,62 @@ def mismatch_detail(label, compared, expected=''):
     return detail
 
 
+# คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้
+_TITLE_LEAD_IN = re.compile(r'^(?:entitled|เรื่อง)$', re.I)
+# บรรทัดที่บอกว่าบล็อกชื่อเรื่องจบแล้ว (ข้อความ template ที่ตามหลังชื่อเรื่องเสมอ)
+_TITLE_STOP = re.compile(
+    r'^(?:was\s+submitted\s+to'
+    r'|A\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|MASTER|DOCTOR)'
+    r'|ได้รับการพิจารณา|วิทยานิพนธ์นี้เป็นส่วนหนึ่ง|สารนิพนธ์นี้เป็นส่วนหนึ่ง'
+    r'|ABSTRACT|บทคัดย่อ|FACULTY\s+OF|บัณฑิตวิทยาลัย)', re.I)
+
+
+def printed_title(page_text, student_name=""):
+    """ชื่อเรื่อง "ตามที่พิมพ์จริง" บนหน้านั้น รวมบรรทัดที่ห่อคำมาให้ครบ
+
+    ต้องหาจากโครงสร้างของหน้า ไม่ใช่หาช่วงที่ "ใกล้เคียงข้อมูลอนุมัติที่สุด" เพราะถ้า
+    ชื่อในเล่มกับในระบบเป็นคนละเรื่องกันจริง ๆ การหาช่วงที่ใกล้เคียงจะได้เศษข้อความมั่ว
+    เล่มจริงเคยได้บรรทัดเนื้อความบทคัดย่อ ("suitable for future implementation of
+    Robotic Process Automation (RPA), and to establish a") มาอ้างว่าเป็นชื่อเรื่อง
+
+    ขอบเขต: เริ่มหลังคำว่า "entitled"/"เรื่อง" (หน้าลงนาม) หรือบรรทัดแรกที่ยาวพอ
+    (หน้าปก/หน้าบทคัดย่อ) จบเมื่อเจอข้อความ template ที่ตามหลังชื่อเรื่อง ชื่อนักศึกษา
+    หรือบรรทัดชื่อ-รหัสนักศึกษา
+    """
+    lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
+    start = None
+    for i, line in enumerate(lines):
+        if _TITLE_LEAD_IN.match(line.strip()):
+            start = i + 1
+            break
+    if start is None:
+        start = next((i for i, line in enumerate(lines)
+                      if len(norm(line)) >= 8 and not _ABS_RUNNING_HEAD.search(line)), None)
+    if start is None:
+        return ""
+    want_name = norm(_strip_student_title(student_name)) if student_name else ""
+    out = []
+    for line in lines[start:start + 6]:
+        if _TITLE_STOP.match(line.strip()) or _ABS_STUDENT_LINE.search(line):
+            break
+        if want_name and want_name in norm(line):
+            break
+        out.append(line)
+    return ' '.join(out).strip()
+
+
+def _title_as_printed(compared, page_text, expected, student_name=""):
+    """แทน "ช่วงที่ใกล้เคียงที่สุด" ด้วยชื่อเรื่องตามที่พิมพ์จริง เมื่อหาบล็อกชื่อเรื่องเจอ
+
+    ใช้เฉพาะตอนที่ยังไม่ตรง — ถ้าตรงอยู่แล้วไม่ต้องแตะ
+    ถ้าหาบล็อกไม่เจอ คงค่าเดิมไว้ ดีกว่าไม่มีอะไรให้เจ้าหน้าที่ดูเลย
+    """
+    printed = printed_title(page_text, student_name)
+    if not printed:
+        return compared
+    return compare_values(printed, expected, 'title')
+
+
 def title_mismatch_detail(label, compared, expected=''):
     """ข้อความชื่อเรื่องที่ไม่ตรงข้อมูลในระบบ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
 
@@ -2523,7 +2579,13 @@ def _toc_chapter_title(text):
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
-N_TOC = [norm('สารบัญ'), 'TABLEOFCONTENTS', 'CONTENTS']
+# หัวข้อสารบัญตาม template คือ "TABLE OF CONTENTS" / "สารบัญ" เท่านั้น
+# ส่วน CONTENT / CONTENTS เป็นคำที่เล่มจริงพิมพ์ผิดมา ต้องรู้จักไว้เพื่อ "หาหน้าสารบัญเจอ"
+# (ไม่งั้นการตรวจสารบัญทั้งชุดเงียบไปทั้งเล่ม แล้วยังฟ้องผิดว่า "ไม่พบหน้าสารบัญ")
+# แล้วค่อยฟ้องแยกว่าให้แก้หัวข้อเป็น TABLE OF CONTENTS
+TOC_HEADING_CANONICAL = 'TABLE OF CONTENTS'
+N_TOC_WRONG = ['CONTENTS', 'CONTENT']
+N_TOC = [norm('สารบัญ'), 'TABLEOFCONTENTS'] + N_TOC_WRONG
 N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญรูป'), norm('สารบัญรูปภาพ'), norm('สารบัญภาพ'),
            norm('คำย่อ'), norm('คำอธิบายสัญลักษณ์/คำย่อ'),
            'LISTOFTABLES', 'LISTOFFIGURES', 'LISTOFABBREVIATIONS', 'LISTOFILLUSTRATIONS']
@@ -2806,6 +2868,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("ระบุตำแหน่ง section ส่วนนำ")
     front_limit = min(n, 20)
     sig_pages, abs_th_pages, abs_en_pages, ack_pages, toc_pages, list_pages = [], [], [], [], [], []
+    toc_heading_wrong = []      # (ดัชนีหน้า, หัวข้อที่เล่มพิมพ์) เมื่อไม่ใช่ TABLE OF CONTENTS
     for i in range(front_limit):
         tls = top_lines(pages[i], 12)
         nls = [norm(l) for l in tls]
@@ -2822,7 +2885,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if nl in N_ACK:
                 ack_pages.append(i); break
             if nl in N_TOC:
-                toc_pages.append(i); break
+                toc_pages.append(i)
+                if nl in N_TOC_WRONG:
+                    toc_heading_wrong.append((i, soft(tls[j])))
+                break
             if nl in N_LISTS:
                 list_pages.append(i); break
 
@@ -3072,18 +3138,29 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 toc_problem, "ส่วนนำต้องมีสารบัญและระบุบททุกบทพร้อมเลขหน้า",
                 "เพิ่มหรืออัปเดตสารบัญให้ครบ", "FRONT.TOC_CONTENT")
 
+    # หัวข้อหน้าสารบัญต้องเป็น "TABLE OF CONTENTS" ตาม template
+    # เล่มจริงพิมพ์ "CONTENT" ซึ่งทำให้ระบบหาหน้าสารบัญไม่เจอทั้งชุด (ตอนนี้รู้จักแล้ว)
+    for toc_idx, printed_heading in toc_heading_wrong:
+        rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_idx)})",
+                f'หัวข้อหน้าสารบัญเขียนว่า "{printed_heading}"',
+                f'ต้องแก้เป็น "{TOC_HEADING_CANONICAL}"', "", "FRONT.TOC")
+
     # หัวข้อระดับหลักในสารบัญต้องเป็นตัวหนา (ไม่บังคับหัวข้อย่อย 1.1, 1.2, ...)
     toc_scan_pages = toc_page_indices
     if toc_scan_pages:
         try:
             with pdfplumber.open(pdf_path) as _pl:
+                # สารบัญยาวหลายหน้า แต่ฟอนต์เป็นของทั้งไฟล์ ถ้าบอกน้ำหนักไม่ได้ก็บอก
+                # ไม่ได้ทุกหน้าเหมือนกัน จึงฟ้องข้อเดียว ไม่ใช่ซ้ำทีละหน้า
+                if all(bold_is_undetectable(_pl.pages[i]) for i in toc_scan_pages):
+                    rep.add(UNCERTAIN_ZONE, "front_matter",
+                            f"สารบัญ ({page_ref(toc_scan_pages[0])})",
+                            "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
+                            "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                            "ตรวจด้วยตา", "FORMAT.BOLD")
+                    toc_scan_pages = []
                 for toc_idx in toc_scan_pages:
                     if bold_is_undetectable(_pl.pages[toc_idx]):
-                        rep.add(UNCERTAIN_ZONE, "front_matter",
-                                f"สารบัญ ({page_ref(toc_idx)})",
-                                "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
-                                "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
-                                "ตรวจด้วยตา", "FORMAT.BOLD")
                         continue
                     nonbold = []
                     for line in _font_lines(_pl.pages[toc_idx]):
@@ -3476,6 +3553,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "FRONT.ORDER",
             )
 
+        # ต้องรู้ชื่อนักศึกษาก่อนตรวจชื่อเรื่อง — printed_title ใช้ชื่อนักศึกษาเป็น
+        # ขอบล่างของบล็อกชื่อเรื่องบนหน้าปก (บรรทัดถัดจากชื่อเรื่องคือชื่อผู้เขียน)
+        student_name = strip_name_prefix(A.get("student_name", ""))
+        student_name_th = strip_name_prefix(A.get("student_name_th", ""))
+        primary_student_name = student_name_th if thai_book else student_name
+
         main_title = (A.get("title_th") if thai_book else A.get("title_en")) or ""
         alt_title = "" if A.get("program_language") == "international" else \
             ((A.get("title_en") if thai_book else A.get("title_th")) or "")
@@ -3489,6 +3572,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 spots.append((f"บทคัดย่อ ({page_ref(main_abs)})", pages[main_abs]))
             for spot_name, spot_text in spots:
                 compared = compare_reference_text(spot_text, main_title, 'title')
+                if compared['status'] != 'exact':
+                    compared = _title_as_printed(compared, spot_text,
+                                                 main_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", spot_name,
                                      "pass" if compared['status'] == 'exact' else "fail",
                                      "" if compared['status'] == 'exact' else compared['actual'])
@@ -3502,6 +3588,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             alt_lbl = "บทคัดย่อภาษาอังกฤษ" if thai_book else "บทคัดย่อภาษาไทย"
             if alt_abs is not None:
                 compared = compare_reference_text(pages[alt_abs], alt_title, 'title')
+                if compared['status'] != 'exact':
+                    compared = _title_as_printed(compared, pages[alt_abs],
+                                                 alt_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(alt_abs)})",
                                      "pass" if compared['status'] == 'exact' else "fail",
                                      "" if compared['status'] == 'exact' else compared['actual'])
@@ -3515,10 +3604,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # อยู่แล้ว จึงไม่ฟ้องซ้ำด้วยข้อความที่ฟังเหมือนระบบอ่านไม่ได้
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "เล่มไม่มีหน้าบทคัดย่อภาษานี้")
-
-        student_name = strip_name_prefix(A.get("student_name", ""))
-        student_name_th = strip_name_prefix(A.get("student_name_th", ""))
-        primary_student_name = student_name_th if thai_book else student_name
 
         if ack_pages and (student_name_th if thai_book else student_name):
             ack_start = ack_pages[0]

@@ -15,6 +15,7 @@ from checker import (
     _drop_separator_dot,
     _graphemes,
     _correctly_spelled_side,
+    printed_title,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -1615,6 +1616,81 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
     def test_picks_the_nearest_id_when_the_page_has_several(self):
         page = "ที่ปรึกษา 6412345 SHSS/D\nเอมิกา หงสชั้น 6526627 NSMY/M"
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
+
+
+class TitleIsQuotedAsPrintedNotAsTheClosestFragment(unittest.TestCase):
+    """ชื่อเรื่องที่ยกมาต้องเป็นชื่อเรื่องตามที่พิมพ์จริง ไม่ใช่ช่วงที่ใกล้เคียงที่สุด
+
+    ถ้าชื่อในเล่มกับในระบบเป็นคนละเรื่องกันจริง ๆ การหา "ช่วงที่ใกล้เคียงที่สุด"
+    จะได้เศษข้อความมั่ว เล่มจริงเคยได้บรรทัดเนื้อความบทคัดย่อมาอ้างว่าเป็นชื่อเรื่อง
+    """
+
+    COVER = "\n".join([
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC",
+        "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI-",
+        "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK",
+        "CHANATASA MOUNGKHAODAENG",
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "OF THE REQUIREMENTS FOR THE DEGREE OF",
+    ])
+    SIGNATURE = "\n".join([
+        "i", "Thesis", "entitled",
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC",
+        "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI-",
+        "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK",
+        "was submitted to the Faculty of Graduate Studies, Mahidol University",
+    ])
+    ABSTRACT = "\n".join([
+        "iv",
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC PROCESS",
+        "AUTOMATION IMPLEMENTATION: A HYBRID MULTI-CRITERIA DECISION-",
+        "MAKING BASED ON BOCR FRAMEWORK",
+        "CHANATASA MOUNGKHAODAENG 6537062 EGIE/M",
+        "M.Eng. (LOGISTICS AND SUPPLY CHAIN)",
+        "ABSTRACT",
+        "This study aims to identify warehouse processes suitable for future",
+        "implementation of Robotic Process Automation (RPA), and to establish a",
+    ])
+    FULL = ("SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC "
+            "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI- "
+            "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK")
+
+    def test_cover_title_stops_at_the_author_name(self):
+        self.assertEqual(printed_title(self.COVER, "CHANATASA MOUNGKHAODAENG"),
+                         self.FULL)
+
+    def test_signature_title_starts_after_entitled(self):
+        got = printed_title(self.SIGNATURE, "CHANATASA MOUNGKHAODAENG")
+        self.assertEqual(got, self.FULL)
+        self.assertNotIn("Thesis", got)
+        self.assertNotIn("was submitted", got)
+
+    def test_abstract_title_does_not_take_a_body_sentence(self):
+        got = printed_title(self.ABSTRACT, "CHANATASA MOUNGKHAODAENG")
+        self.assertTrue(got.startswith("SELECTION OF SMART WAREHOUSE"), got)
+        self.assertNotIn("This study aims", got)
+        self.assertNotIn("6537062", got)
+
+    def test_page_without_a_title_returns_empty_so_the_old_value_is_kept(self):
+        self.assertEqual(printed_title("iv\nABSTRACT\nBody text here."), "")
+
+
+class TocHeadingMustBeTableOfContents(unittest.TestCase):
+    """หัวข้อหน้าสารบัญที่พิมพ์ผิด ต้องยังหาหน้าสารบัญเจอ แล้วฟ้องแยกว่าให้แก้หัวข้อ
+
+    เล่มจริงพิมพ์ "CONTENT" ระบบจึงหาหน้าสารบัญไม่เจอทั้งชุด แล้วฟ้องผิดพ่วงมาอีก
+    ("ไม่พบหน้าสารบัญ", "ภาคผนวกไม่อยู่ในสารบัญ", "บทคัดย่อไทยเกิน 2 หน้า")
+    """
+
+    def test_wrong_headings_are_still_recognised_as_a_toc(self):
+        for heading in ("CONTENT", "CONTENTS"):
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+    def test_canonical_headings_are_not_flagged(self):
+        for heading in ("TABLE OF CONTENTS", "สารบัญ"):
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
+            self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
 
 
 class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
