@@ -38,6 +38,7 @@ BLANK_PAGE_ZONE = rule_zone("PAGE.BLANK", "YELLOW")
 UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
 TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
+DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -863,74 +864,31 @@ def committee_name_list(members):
             if members.get(k) and _NAME_HAS_LETTER.search(members[k])]
 
 
-def _committee_name_key(name):
-    """กุญแจเทียบชื่ออาจารย์ — เหลือเฉพาะชื่อ-สกุล ตัดตำแหน่งวิชาการ/คำนำหน้าออกก่อน"""
-    return norm(strip_name_prefix(_strip_committee_title(name or "")))
-
-
-def committee_name_script(names):
-    """อักษรที่ใช้เขียนรายชื่อชุดนี้ — 'th', 'en' หรือ '' ถ้าปนกัน/บอกไม่ได้"""
-    text = "".join(names or [])
-    thai = bool(re.search(r'[ก-๙]', text))
-    latin = bool(re.search(r'[A-Za-z]', text))
-    if thai and not latin:
-        return 'th'
-    if latin and not thai:
-        return 'en'
-    return ''
-
-
 def committee_read_is_trustworthy(names):
     """รายชื่อที่อ่านมาหน้าตาน่าเชื่อพอจะเอาไปเทียบหรือไม่
 
-    ตารางลายเซ็นเป็นตาราง 2 คอลัมน์คั่นด้วยเส้นประ ซึ่งอ่านพลาดได้หลายแบบและเคยพลาด
-    มาแล้วทุกแบบในเล่มจริง:
+    ใช้ตัดสินว่า "นับจำนวนได้ไหม" — ตารางลายเซ็นเป็นตาราง 2 คอลัมน์คั่นด้วยเส้นประ
+    ซึ่งอ่านพลาดได้หลายแบบและเคยพลาดมาแล้วทุกแบบในเล่มจริง:
       - เส้นแบ่งคอลัมน์คลาดไป 0.13 pt  ชื่อขาดครึ่ง ("มยุรี หอมสนิท" -> "หอมสนิท")
       - ฟอนต์เว้นช่องกลางคำ            ชื่อถูกตัดเป็นหลายคำ ("วันเพ็ญ แก้ว ปาน")
       - วรรณยุกต์หลุดเป็นคำของตัวเอง    ("สุภาภรณ ์ สงค์ประชา")
       - ข้อความชั้นเก่าที่ถมขาวไว้        ชื่อซ้ำหรือไปโผล่ผิดช่อง
       - อ่านเส้นประไม่ครบ               แถวคณบดีเลื่อนขึ้นมาเป็นกรรมการ
 
-    ทุกแบบให้ผลเป็น "ชื่อที่ไม่ใช่ชื่อคน" — ท่อนเดียวโดด ๆ หรือเศษข้อความ ถ้าเอาไป
-    เทียบดื้อ ๆ จะฟ้องว่าเล่มผิดทั้งที่ระบบอ่านผิดเอง จึงต้องเช็คก่อนว่าทุกช่องที่นับได้
-    หน้าตาเป็น "ชื่อ นามสกุล" จริง
+    ทุกแบบให้ผลเป็น "ชื่อที่ไม่ใช่ชื่อคน" — ท่อนเดียวโดด ๆ หรือเศษข้อความ และทำให้
+    **จำนวนที่นับได้ผิดไปด้วย** (ชื่อแตกครึ่งกลายเป็นสองคน) ถ้าฟ้องดื้อ ๆ จะกลายเป็น
+    บอกว่าเล่มที่ถูกอยู่แล้วมีรายชื่อไม่ครบ จึงต้องเช็คก่อนว่าทุกช่องหน้าตาเป็น
+    "ชื่อ นามสกุล" จริง
     """
     return bool(names) and all(
         _looks_like_person_name(_strip_committee_title(n) or n) for n in names)
 
 
-def committee_names_match(expected, found):
-    """เทียบชื่ออาจารย์สองชุดแบบไม่สนลำดับ — คืน (ที่ขาดไป, ที่เกินมา)
-
-    เทียบ **เฉพาะชื่อ-สกุล** ตัดตำแหน่งวิชาการออกก่อนทั้งสองฝั่ง ตามที่เจ้าหน้าที่
-    สั่งไว้ ("ให้อาจารย์เฉพาะชื่ออาจารย์" ส.ค. 2569) เพราะตำแหน่งวิชาการในเล่มกับใน
-    บฑ. ต่างกันได้โดยไม่ผิด — ตำแหน่งเปลี่ยนหลังยื่นเรื่องเป็นเรื่องปกติ ถ้าเอาตำแหน่ง
-    มาเทียบด้วยจะได้ข้อฟ้องที่ต้องปัดทิ้งเองแทบทุกเล่ม
-
-    ไม่สนลำดับ เพราะลำดับช่องบนหน้าลงนามไม่ได้ตรงกับลำดับใน บฑ. เสมอไป
-    """
-    want = [(_committee_name_key(n), n) for n in expected]
-    got = [(_committee_name_key(n), n) for n in found]
-    left = [(k, n) for k, n in want if k]
-    extra = []
-    for key, raw in got:
-        if not key:
-            continue
-        hit = next((i for i, (wk, _) in enumerate(left) if wk == key), None)
-        if hit is None:
-            extra.append(raw)
-        else:
-            left.pop(hit)
-    return [n for _, n in left], extra
-
-
-# เหตุผลที่เขียนในรายการสีม่วง ตามสถานะที่ _report_committee_names คืนมา
+# เหตุผลที่เขียนในรายการสีม่วง ตามว่าระบบนับจำนวนให้ได้หรือไม่
 _COMMITTEE_NOTE_LEAD = {
-    "compared": "ระบบนับจำนวนและเทียบชื่ออาจารย์กับ {form} ให้แล้ว "
-                "เหลือคุณวุฒิและตำแหน่งทางวิชาการที่ต้องทานเอง",
-    "script": "ระบบนับจำนวนอาจารย์ให้แล้ว แต่เทียบชื่อไม่ได้เพราะ {form} เก็บชื่อเป็นภาษาไทย "
-              "ส่วนหน้านี้พิมพ์เป็นภาษาอังกฤษ โปรดทานรายชื่อเอง",
-    "unclear": "ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัดพอจะเทียบกับ {form} "
+    "counted": "ระบบนับจำนวนอาจารย์เทียบกับ {form} ให้แล้ว แต่ไม่ได้เทียบชื่อ "
+               "โปรดทานรายชื่อเอง",
+    "unclear": "ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ {form} ไม่ได้ "
                "โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ",
 }
 
@@ -939,9 +897,9 @@ def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE",
                               form="บฑ.1", status="unclear"):
     """รายชื่ออาจารย์ตามข้อมูลต้นทาง = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
 
-    เหตุผลต้องตรงกับสิ่งที่ระบบทำได้จริง ไม่ใช่เขียนกลาง ๆ ว่า "โปรดทานเอง" เฉย ๆ
-    เจ้าหน้าที่จะได้รู้ว่ายังต้องทานอะไรบ้าง และรู้ว่าเมื่อไรที่ผลตรวจเชื่อไม่ได้
-    (ดู _report_committee_names และ committee_read_is_trustworthy)
+    ระบบไม่เทียบชื่อให้ (ดู _report_committee_count) รายการนี้จึงเป็นที่เดียวที่
+    เจ้าหน้าที่จะเห็นรายชื่อตามฟอร์ม เหตุผลต้องตรงกับสิ่งที่ระบบทำได้จริง เจ้าหน้าที่
+    จะได้รู้ว่าเมื่อไรที่แม้แต่ "จำนวน" ก็เชื่อไม่ได้ (committee_read_is_trustworthy)
     """
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(_committee_names(expected), start=1))
@@ -949,79 +907,37 @@ def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE",
     rep.add_human(loc, f"{lead.format(form=form)} รายชื่อตาม {form} คือ {names}", rule_id)
 
 
-def _report_committee_names(rep, expected, found_names, loc, form,
-                            rule_id="FRONT.COMMITTEE", label="อาจารย์"):
-    """เทียบ "ชื่ออาจารย์" บนหน้ากับรายชื่อจากต้นทาง — คืน True ถ้าเทียบได้จริง
-
-    เจ้าหน้าที่สั่ง (ส.ค. 2569): *"ให้อาจารย์เฉพาะชื่ออาจารย์ และนับว่าตรงกันกับที่ระบบ
-    ดึงมาจากต้นทาง ซึ่งถ้าไม่ตรง ให้แจ้ง"*
-
-    เทียบได้เฉพาะเมื่อทั้งสองฝั่งเขียนด้วยอักษรชุดเดียวกัน — ต้นทางเก็บชื่อเป็นภาษาไทย
-    เสมอ ส่วนเล่มหลักสูตรนานาชาติพิมพ์ชื่อเป็นภาษาอังกฤษ ("นริศรา จันทราทิตย์" กับ
-    "Narisara Chantratita" เป็นคนเดียวกัน) การจับคู่ตัวอักษรจึงทำไม่ได้ ต้องบอกตรง ๆ
-    ว่าเทียบไม่ได้ ไม่ใช่ฟ้องว่าชื่อไม่ตรง
-
-    ผลเป็น **ส้ม ไม่ใช่แดง** เพราะชื่อต่างกันได้โดยเล่มไม่ผิด (เปลี่ยนนามสกุล ใช้ชื่อ
-    คนละแบบ) และระบบอ่านตารางเพี้ยนได้ เจ้าหน้าที่เป็นคนตัดสิน
-
-    คืนสถานะ (ไม่ใช่แค่ True/False) ให้รายการสีม่วงบอกเหตุผลได้ตรงกับความจริง:
-      "compared" เทียบแล้ว · "script" คนละอักษรกับต้นทาง · "unclear" อ่านตารางไม่ชัด
-    """
-    names = _committee_names(expected)
-    if not names or not found_names:
-        return "unclear"
-    if committee_name_script(names) != committee_name_script(found_names):
-        return "script"
-    # จำนวนไม่เท่ากัน = ข้อของ _report_committee_count ไปแล้ว และแปลว่าอ่านตารางได้
-    # ไม่ครบ/เกิน การไล่ชื่อทีละคนบนรายชื่อที่ไม่ครบมีแต่จะได้รายการยาว ๆ ที่ผิดทั้งแถว
-    if len(found_names) != len(names):
-        return "unclear"
-    if not committee_read_is_trustworthy(found_names):
-        return "unclear"
-    missing, extra = committee_names_match(names, found_names)
-    if not missing and not extra:
-        return "compared"
-    # ใส่เครื่องหมายคำพูดรอบชื่อ = "ค่าที่อ่านได้จากเล่ม/จากต้นทาง" ต้องคงเป็นไทย
-    # ในรายงานอังกฤษ (ด่าน check_i18n ใช้เครื่องหมายนี้แยกออกจากข้อความของระบบ)
-    def quoted(names):
-        return ", ".join('"%s"' % n for n in names)
-    lead = f"ชื่อ{label}บนหน้านี้ไม่ตรงกับ {form}:"
-    if missing and extra:
-        found = (f"{lead} ขาด {quoted(_display_committee_name(n) for n in missing)}"
-                 f" และเกิน {quoted(extra)}")
-    elif missing:
-        found = f"{lead} ขาด {quoted(_display_committee_name(n) for n in missing)}"
-    else:
-        found = f"{lead} เกิน {quoted(extra)}"
-    rep.add("ORANGE", "front_matter", loc, found,
-            f"ชื่อ{label}บนหน้านี้ต้องตรงกับ {form}",
-            f"ตรวจว่าเป็นคนเดียวกันหรือไม่ ถ้าใช่ให้ผ่านได้ ถ้าไม่ใช่ให้แก้ชื่อบนหน้านี้ให้ตรงกับ {form}",
-            rule_id)
-    return "compared"
-
-
 def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
-                            rule_id="FRONT.COMMITTEE", label="อาจารย์"):
-    """นับจำนวนอาจารย์ให้ครบ — นับเฉพาะช่องที่เป็นชื่ออาจารย์ (ดู committee_name_list)
+                            rule_id="FRONT.COMMITTEE"):
+    """จำนวนรายชื่อบนหน้าต้องเท่ากับที่ได้รับอนุมัติในฟอร์มต้นทาง (บฑ.1 / บฑ.2)
 
-    ชื่อที่นับได้จะถูกเทียบตัวสะกดต่อใน _report_committee_names เมื่ออักษรทั้งสองฝั่ง
-    ตรงชุดกัน ข้อนี้จึงเหลือหน้าที่เดียวคือ "จำนวนไม่เท่ากัน"
+    เจ้าหน้าที่สั่ง (ส.ค. 2569): *"ทั้งไทยและอังกฤษ ไม่ต้องเทียบชื่อ สมมุติว่าใน บฑ.1
+    หรือ บฑ.2 เป็น 3 ชื่อ ในเล่มมี 2 หรือ 4 ชื่อ ... แจ้งว่ารายชื่อไม่ครบตามที่ได้รับ
+    อนุมัติใน บฑ.1 หรือ 2 แล้วแต่หน้า และก็บอกว่าควรมีชื่ออะไรบ้าง"*
+
+    **ไม่เทียบชื่อเลย** เพราะชื่อในเล่มกับในฟอร์มต่างกันได้โดยเล่มไม่ผิด — เล่มหลักสูตร
+    นานาชาติพิมพ์ชื่ออังกฤษขณะที่ฟอร์มเก็บชื่อไทย และคนไทยสะกดชื่อตัวเองตามพาสปอร์ต
+    ไม่ได้ตามหลักถอดเสียง (วัดจากคู่ชื่อจริง 9 คนในเล่มทดสอบ: ถอดเสียงตามหลัก
+    ราชบัณฑิตฯ แล้วตรงกับที่เล่มพิมพ์ 0 คน — "จันทราทิตย์" ถอดได้ "Chanthrathit"
+    แต่เจ้าตัวสะกด "Chantratita")
+
+    "ควรมีชื่ออะไรบ้าง" อยู่ในบรรทัดที่ควรเป็น ดึงจากฟอร์มต้นทางโดยตรง
 
     จำนวนไม่ตรง = **ส้ม ไม่ใช่แดง** เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม
     ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม
     """
-    want = len(expected)
-    if not want or len(found_names) == want:
+    want = _committee_names(expected)
+    if not want or len(found_names) == len(want):
         return
-    # ใส่เครื่องหมายคำพูดรอบชื่อ — เป็น "ค่าที่อ่านได้จากเล่ม" ไม่ใช่ข้อความของระบบ
-    # จึงต้องคงเป็นภาษาไทยในรายงานอังกฤษ (ด่าน check_i18n ใช้เครื่องหมายนี้แยก)
-    listed = ("  ".join(f'{k}. "{n}"' for k, n in enumerate(found_names, start=1))
-              or "ไม่พบชื่อเลย")
+    listed = "  ".join(f'{k}. {_display_committee_name(n)}'
+                       for k, n in enumerate(want, start=1))
+    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}"
+            if len(found_names) < len(want) else
+            f"รายชื่อเกินจากที่ได้รับอนุมัติใน {form}")
     rep.add("ORANGE", "front_matter", loc,
-            f"นับชื่อ{label}บนหน้านี้ได้ {len(found_names)} คน "
-            f"แต่ {form} มี {want} คน ระบบอ่านได้ว่า {listed}",
-            f"ต้องมี{label} {want} คนตาม {form}",
-            f"ตรวจว่าจำนวน{label}บนหน้านี้ครบหรือไม่ "
+            f"{lead}: หน้านี้มี {len(found_names)} ชื่อ แต่อนุมัติไว้ {len(want)} ชื่อ",
+            f"ต้องมีรายชื่อครบตาม {form} คือ {listed}",
+            "ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ "
             "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
             rule_id)
 
@@ -1209,10 +1125,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
 
     หน้าไหนเป็นของใครยึดเลขหน้าก่อน (i/ก = ที่ปรึกษา, ii/ข = กรรมการสอบ)
 
-    ตรวจ "จำนวน" แล้วเทียบ "ชื่ออาจารย์" กับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2)
-    แต่เทียบเฉพาะเมื่อรายชื่อที่อ่านมาเชื่อถือได้ — ดู _report_committee_names และ
-    committee_read_is_trustworthy ส่วนที่เทียบไม่ได้ พิมพ์รายชื่อไว้ในรายการสีม่วง
-    พร้อมเหตุผลว่าเทียบไม่ได้เพราะอะไร
+    ตรวจ **จำนวน** รายชื่อเทียบกับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2) เท่านั้น
+    ไม่เทียบชื่อทั้งเล่มไทยและเล่มอังกฤษ (ดู _report_committee_count) รายชื่อตามฟอร์ม
+    พิมพ์ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง
 
     กฎรูปแบบยังตรวจตามเดิม (เป็นกฎของ template ไม่ใช่การเทียบชื่อ):
       ตัวพิมพ์ของชื่อ, ข้อความตัวอย่างที่ค้างอยู่, คุณวุฒิใต้ชื่อต้องมี, ชื่อสาขา/คณะ
@@ -1258,13 +1173,15 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         handled_any = True
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
-        # นับจำนวน แล้วเทียบชื่ออาจารย์กับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2)
-        # เทียบได้เฉพาะเล่มที่พิมพ์ชื่อเป็นภาษาไทยเหมือนต้นทาง — เล่มหลักสูตร
-        # นานาชาติพิมพ์ชื่ออังกฤษ จับคู่ตัวอักษรกับต้นทางที่เป็นไทยไม่ได้
+        # นับจำนวนเทียบกับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2) ไม่เทียบชื่อ
+        # นับได้ก็ต่อเมื่ออ่านตารางออกเป็นชื่อคนจริงทุกช่อง ไม่งั้นจำนวนก็เชื่อไม่ได้
+        # (ตารางลายเซ็นอ่านพลาดได้หลายแบบ ดู committee_read_is_trustworthy)
         form = committee_source_form(kind)
-        _report_committee_count(rep, expected, read_names, loc, form)
-        status = _report_committee_names(rep, expected, read_names, loc, form)
-        _note_committee_reference(rep, expected, loc, form=form, status=status)
+        countable = committee_read_is_trustworthy(read_names)
+        if countable:
+            _report_committee_count(rep, expected, read_names, loc, form)
+        _note_committee_reference(rep, expected, loc, form=form,
+                                  status="counted" if countable else "unclear")
 
         # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
@@ -1619,12 +1536,13 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                 continue
             read_names = [n.strip() for n in names]
             form = committee_source_form("advisory")
-            _report_committee_count(rep, advisory, read_names, loc, form,
-                                    "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
-            status = _report_committee_names(rep, advisory, read_names, loc, form,
-                                             "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
+            countable = committee_read_is_trustworthy(read_names)
+            if countable:
+                _report_committee_count(rep, advisory, read_names, loc, form,
+                                        "FRONT.ABSTRACT")
             _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT",
-                                      form=form, status=status)
+                                      form=form,
+                                      status="counted" if countable else "unclear")
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
@@ -2876,8 +2794,6 @@ def resolve_option(body_ch, approved, chapters_mode):
     return inferred
 
 
-
-
 def classify(issue):
     f, e, loc = issue.get("found", ""), issue.get("expected", ""), issue.get("location", "")
     text = f + " " + e + " " + loc
@@ -3968,13 +3884,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     continue
                 if norm(expected_degree) in norm(spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
-                    # (เช่น comma ในวงเล็บสาขา) — ส้มให้เจ้าหน้าที่ยืนยัน
+                    # (เช่น "M.Sc. ()" กับ "M.Sc.()") = ข้อสังเกตสีเหลือง ผ่านได้
+                    # ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
                     rep.add_verification("ชื่อปริญญา", spot_name, "pending",
                                          "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                    rep.add("ORANGE", "front_matter", spot_name,
+                    rep.add(DEGREE_SPACING_ZONE, "front_matter", spot_name,
                             f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                             f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
-                            "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FORM.DEGREE_SPACING")
                 else:
                     rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
@@ -4005,12 +3922,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 else:
                     rep.add_verification("ชื่อปริญญา", vloc, "pass")
             elif norm(abbr) in norm(abstract_text):
-                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง — ส้มให้เจ้าหน้าที่ยืนยัน
+                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                rep.add("ORANGE", "front_matter", box,
+                rep.add(DEGREE_SPACING_ZONE, "front_matter", box,
                         f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                         f"ข้อมูลอนุมัติ: \"{abbr}\"",
-                        "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FORM.DEGREE_SPACING")
             elif not _looks_like_degree_line(compared['actual']):
                 # หน้านี้ไม่มีบรรทัดชื่อปริญญาแบบย่อเลย (เจอในเล่มจริง: ข้ามจากบรรทัด
                 # ชื่อ-รหัสนักศึกษาไป THESIS ADVISORY COMMITTEE เลย) ห้ามยกบรรทัดอื่น
