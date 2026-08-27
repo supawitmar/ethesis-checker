@@ -880,6 +880,25 @@ def committee_name_script(names):
     return ''
 
 
+def committee_read_is_trustworthy(names):
+    """รายชื่อที่อ่านมาหน้าตาน่าเชื่อพอจะเอาไปเทียบหรือไม่
+
+    ตารางลายเซ็นเป็นตาราง 2 คอลัมน์คั่นด้วยเส้นประ ซึ่งอ่านพลาดได้หลายแบบและเคยพลาด
+    มาแล้วทุกแบบในเล่มจริง:
+      - เส้นแบ่งคอลัมน์คลาดไป 0.13 pt  ชื่อขาดครึ่ง ("มยุรี หอมสนิท" -> "หอมสนิท")
+      - ฟอนต์เว้นช่องกลางคำ            ชื่อถูกตัดเป็นหลายคำ ("วันเพ็ญ แก้ว ปาน")
+      - วรรณยุกต์หลุดเป็นคำของตัวเอง    ("สุภาภรณ ์ สงค์ประชา")
+      - ข้อความชั้นเก่าที่ถมขาวไว้        ชื่อซ้ำหรือไปโผล่ผิดช่อง
+      - อ่านเส้นประไม่ครบ               แถวคณบดีเลื่อนขึ้นมาเป็นกรรมการ
+
+    ทุกแบบให้ผลเป็น "ชื่อที่ไม่ใช่ชื่อคน" — ท่อนเดียวโดด ๆ หรือเศษข้อความ ถ้าเอาไป
+    เทียบดื้อ ๆ จะฟ้องว่าเล่มผิดทั้งที่ระบบอ่านผิดเอง จึงต้องเช็คก่อนว่าทุกช่องที่นับได้
+    หน้าตาเป็น "ชื่อ นามสกุล" จริง
+    """
+    return bool(names) and all(
+        _looks_like_person_name(_strip_committee_title(n) or n) for n in names)
+
+
 def committee_names_match(expected, found):
     """เทียบชื่ออาจารย์สองชุดแบบไม่สนลำดับ — คืน (ที่ขาดไป, ที่เกินมา)
 
@@ -905,23 +924,29 @@ def committee_names_match(expected, found):
     return [n for _, n in left], extra
 
 
+# เหตุผลที่เขียนในรายการสีม่วง ตามสถานะที่ _report_committee_names คืนมา
+_COMMITTEE_NOTE_LEAD = {
+    "compared": "ระบบนับจำนวนและเทียบชื่ออาจารย์กับ {form} ให้แล้ว "
+                "เหลือคุณวุฒิและตำแหน่งทางวิชาการที่ต้องทานเอง",
+    "script": "ระบบนับจำนวนอาจารย์ให้แล้ว แต่เทียบชื่อไม่ได้เพราะ {form} เก็บชื่อเป็นภาษาไทย "
+              "ส่วนหน้านี้พิมพ์เป็นภาษาอังกฤษ โปรดทานรายชื่อเอง",
+    "unclear": "ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัดพอจะเทียบกับ {form} "
+               "โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ",
+}
+
+
 def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE",
-                              form="บฑ.1", compared=False):
+                              form="บฑ.1", status="unclear"):
     """รายชื่ออาจารย์ตามข้อมูลต้นทาง = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
 
-    ข้อความต่างกันตามว่าระบบเทียบชื่อให้ได้หรือไม่ (ดู _report_committee_names):
-      เทียบได้    — บอกว่าเทียบชื่อให้แล้ว เหลือคุณวุฒิ/ตำแหน่งวิชาการที่ต้องทานเอง
-      เทียบไม่ได้ — บอกเหตุผลตรง ๆ ว่าฟอร์มต้นทางเก็บชื่อเป็นภาษาไทย แต่หน้านี้พิมพ์อังกฤษ
-                    ระบบจึงจับคู่ตัวอักษรไม่ได้ ต้องทานเองทั้งชุด
+    เหตุผลต้องตรงกับสิ่งที่ระบบทำได้จริง ไม่ใช่เขียนกลาง ๆ ว่า "โปรดทานเอง" เฉย ๆ
+    เจ้าหน้าที่จะได้รู้ว่ายังต้องทานอะไรบ้าง และรู้ว่าเมื่อไรที่ผลตรวจเชื่อไม่ได้
+    (ดู _report_committee_names และ committee_read_is_trustworthy)
     """
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(_committee_names(expected), start=1))
-    lead = (f"ระบบนับจำนวนและเทียบชื่ออาจารย์กับ {form} ให้แล้ว "
-            "เหลือคุณวุฒิและตำแหน่งทางวิชาการที่ต้องทานเอง"
-            if compared else
-            f"ระบบนับจำนวนอาจารย์ให้แล้ว แต่เทียบชื่อไม่ได้เพราะ {form} เก็บชื่อเป็นภาษาไทย "
-            "ส่วนหน้านี้พิมพ์เป็นภาษาอังกฤษ โปรดทานรายชื่อเอง")
-    rep.add_human(loc, f"{lead} รายชื่อตาม {form} คือ {names}", rule_id)
+    lead = _COMMITTEE_NOTE_LEAD.get(status, _COMMITTEE_NOTE_LEAD["unclear"])
+    rep.add_human(loc, f"{lead.format(form=form)} รายชื่อตาม {form} คือ {names}", rule_id)
 
 
 def _report_committee_names(rep, expected, found_names, loc, form,
@@ -938,15 +963,24 @@ def _report_committee_names(rep, expected, found_names, loc, form,
 
     ผลเป็น **ส้ม ไม่ใช่แดง** เพราะชื่อต่างกันได้โดยเล่มไม่ผิด (เปลี่ยนนามสกุล ใช้ชื่อ
     คนละแบบ) และระบบอ่านตารางเพี้ยนได้ เจ้าหน้าที่เป็นคนตัดสิน
+
+    คืนสถานะ (ไม่ใช่แค่ True/False) ให้รายการสีม่วงบอกเหตุผลได้ตรงกับความจริง:
+      "compared" เทียบแล้ว · "script" คนละอักษรกับต้นทาง · "unclear" อ่านตารางไม่ชัด
     """
     names = _committee_names(expected)
     if not names or not found_names:
-        return False
+        return "unclear"
     if committee_name_script(names) != committee_name_script(found_names):
-        return False
+        return "script"
+    # จำนวนไม่เท่ากัน = ข้อของ _report_committee_count ไปแล้ว และแปลว่าอ่านตารางได้
+    # ไม่ครบ/เกิน การไล่ชื่อทีละคนบนรายชื่อที่ไม่ครบมีแต่จะได้รายการยาว ๆ ที่ผิดทั้งแถว
+    if len(found_names) != len(names):
+        return "unclear"
+    if not committee_read_is_trustworthy(found_names):
+        return "unclear"
     missing, extra = committee_names_match(names, found_names)
     if not missing and not extra:
-        return True
+        return "compared"
     # ใส่เครื่องหมายคำพูดรอบชื่อ = "ค่าที่อ่านได้จากเล่ม/จากต้นทาง" ต้องคงเป็นไทย
     # ในรายงานอังกฤษ (ด่าน check_i18n ใช้เครื่องหมายนี้แยกออกจากข้อความของระบบ)
     def quoted(names):
@@ -963,7 +997,7 @@ def _report_committee_names(rep, expected, found_names, loc, form,
             f"ชื่อ{label}บนหน้านี้ต้องตรงกับ {form}",
             f"ตรวจว่าเป็นคนเดียวกันหรือไม่ ถ้าใช่ให้ผ่านได้ ถ้าไม่ใช่ให้แก้ชื่อบนหน้านี้ให้ตรงกับ {form}",
             rule_id)
-    return True
+    return "compared"
 
 
 def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
@@ -1228,8 +1262,8 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         # นานาชาติพิมพ์ชื่ออังกฤษ จับคู่ตัวอักษรกับต้นทางที่เป็นไทยไม่ได้
         form = committee_source_form(kind)
         _report_committee_count(rep, expected, read_names, loc, form)
-        compared = _report_committee_names(rep, expected, read_names, loc, form)
-        _note_committee_reference(rep, expected, loc, form=form, compared=compared)
+        status = _report_committee_names(rep, expected, read_names, loc, form)
+        _note_committee_reference(rep, expected, loc, form=form, status=status)
 
         # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
@@ -1586,10 +1620,10 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             form = committee_source_form("advisory")
             _report_committee_count(rep, advisory, read_names, loc, form,
                                     "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
-            compared = _report_committee_names(rep, advisory, read_names, loc, form,
-                                               "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
+            status = _report_committee_names(rep, advisory, read_names, loc, form,
+                                             "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
             _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT",
-                                      form=form, compared=compared)
+                                      form=form, status=status)
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)

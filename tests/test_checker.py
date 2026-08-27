@@ -1746,10 +1746,10 @@ class CommitteeNamesAreCheckedAgainstTheSourceForm(unittest.TestCase):
 
     def test_mismatch_is_orange_and_says_which_form(self):
         rep = Report()
-        compared = checker_module._report_committee_names(
+        status = checker_module._report_committee_names(
             rep, [{"name": "คนางค์ ก"}, {"name": "ธเนศ ข"}],
             ["คนางค์ ก", "สมชาย ใจดี"], "หน้ากรรมการสอบ (หน้า ข)", "บฑ.2")
-        self.assertTrue(compared)
+        self.assertEqual(status, "compared")
         self.assertFalse(rep.zones["RED"])
         issue = rep.zones["ORANGE"][0]
         self.assertIn("บฑ.2", issue["found"])
@@ -1762,20 +1762,77 @@ class CommitteeNamesAreCheckedAgainstTheSourceForm(unittest.TestCase):
         ถ้าเทียบดื้อ ๆ จะฟ้องว่าชื่อผิดทุกคนทั้งที่เล่มถูก
         """
         rep = Report()
-        compared = checker_module._report_committee_names(
+        status = checker_module._report_committee_names(
             rep, [{"name": "นริศรา จันทราทิตย์"}], ["Narisara Chantratita"],
             "หน้าอาจารย์ที่ปรึกษา (หน้า i)", "บฑ.1")
-        self.assertFalse(compared)
+        self.assertEqual(status, "script")
         self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_a_broken_read_never_becomes_an_accusation(self):
+        """ตารางลายเซ็นอ่านพลาดได้หลายแบบ ทุกแบบต้องไม่กลายเป็นข้อฟ้องว่าเล่มผิด
+
+        แต่ละเคสคือความพลาดที่เคยเจอในเล่มจริง และถูกบันทึกไว้ในคอมเมนต์ของ
+        signature_committee_slots / _rejoin_thai_marks
+        """
+        form = [{"name": "มยุรี หอมสนิท"}, {"name": "ธเนศ เกษศิลป์"}]
+        broken = {
+            "เส้นแบ่งคอลัมน์เพี้ยน ชื่อแตกเป็นสองคน":
+                ["หอมสนิท", "มยุรี", "ธเนศ เกษศิลป์"],
+            "ชื่อขาดครึ่ง แต่จำนวนบังเอิญเท่ากัน":
+                ["หอมสนิท", "ธเนศ เกษศิลป์"],
+            "อ่านได้ไม่ครบทุกช่อง":
+                ["มยุรี หอมสนิท"],
+        }
+        for label, read in broken.items():
+            rep = Report()
+            status = checker_module._report_committee_names(
+                rep, form, read, "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
+            self.assertEqual(status, "unclear", label)
+            self.assertEqual(rep.zones["ORANGE"], [], label)
+
+    def test_a_clean_read_of_the_wrong_person_is_still_caught(self):
+        """ด่านกันการอ่านเพี้ยนต้องไม่กลืนเคสที่ควรฟ้องจริงไปด้วย"""
+        rep = Report()
+        status = checker_module._report_committee_names(
+            rep, [{"name": "มยุรี หอมสนิท"}, {"name": "ธเนศ เกษศิลป์"}],
+            ["มยุรี หอมสนิท", "สมชาย ใจดี"], "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
+        self.assertEqual(status, "compared")
+        self.assertIn('เกิน "สมชาย ใจดี"', rep.zones["ORANGE"][0]["found"])
+
+    def test_a_name_shaped_read_is_what_makes_it_trustworthy(self):
+        self.assertTrue(checker_module.committee_read_is_trustworthy(
+            ["มยุรี หอมสนิท", "รศ.ดร. ธเนศ เกษศิลป์"]))
+        self.assertFalse(checker_module.committee_read_is_trustworthy(["หอมสนิท"]))
+        self.assertFalse(checker_module.committee_read_is_trustworthy([]))
+
+    def test_count_mismatch_is_reported_once_not_twice(self):
+        """จำนวนไม่ตรงมีข้อของตัวเองแล้ว ไม่ต้องไล่ชื่อซ้ำอีกข้อ"""
+        rep = Report()
+        form = [{"name": "มยุรี หอมสนิท"}, {"name": "ธเนศ เกษศิลป์"}]
+        read = ["มยุรี หอมสนิท"]
+        checker_module._report_committee_count(
+            rep, form, read, "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
+        checker_module._report_committee_names(
+            rep, form, read, "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        self.assertIn("แต่ บฑ.1 มี 2 คน", rep.zones["ORANGE"][0]["found"])
+
+    def test_purple_note_says_the_read_was_unclear(self):
+        rep = Report()
+        checker_module._note_committee_reference(
+            rep, [{"name": "มยุรี หอมสนิท"}], "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
+            form="บฑ.1", status="unclear")
+        self.assertIn("อ่านรายชื่อบนหน้านี้ได้ไม่ชัดพอจะเทียบกับ บฑ.1",
+                      rep.human_checklist[0]["why"])
 
     def test_purple_note_says_whether_names_were_compared(self):
         compared_rep, skipped_rep = Report(), Report()
         checker_module._note_committee_reference(
             compared_rep, [{"name": "คนางค์ ก"}], "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
-            form="บฑ.1", compared=True)
+            form="บฑ.1", status="compared")
         checker_module._note_committee_reference(
             skipped_rep, [{"name": "นริศรา จันทราทิตย์"}], "หน้ากรรมการสอบ (หน้า ii)",
-            form="บฑ.2", compared=False)
+            form="บฑ.2", status="script")
         self.assertIn("เทียบชื่ออาจารย์กับ บฑ.1 ให้แล้ว",
                       compared_rep.human_checklist[0]["why"])
         self.assertIn("เทียบชื่อไม่ได้เพราะ บฑ.2 เก็บชื่อเป็นภาษาไทย",
@@ -1806,10 +1863,13 @@ class CommitteeNamesAreCheckedAgainstTheSourceForm(unittest.TestCase):
             "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
         checker_module._note_committee_reference(
             rep, [{"name": "คนางค์ ก"}], "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
-            form="บฑ.1", compared=True)
+            form="บฑ.1", status="compared")
         checker_module._note_committee_reference(
             rep, [{"name": "คนางค์ ก"}], "หน้ากรรมการสอบ (หน้า ข)",
-            form="บฑ.2", compared=False)
+            form="บฑ.2", status="script")
+        checker_module._note_committee_reference(
+            rep, [{"name": "คนางค์ ก"}], "หน้ากรรมการสอบ (หน้า ข)",
+            form="บฑ.2", status="unclear")
         texts = [f for it in rep.zones["ORANGE"]
                  for f in (it["found"], it["expected"], it["fix"])]
         texts += [i18n.re.sub(r"(บฑ\.\d?\)?) คือ.*$", r"\1 คือ", h["why"])

@@ -1147,6 +1147,7 @@ var TR = [
   [/ แตกต่างที่ /g, ' the difference is '],
   [/ เทียบกับ /g, ' vs '],
   [/ชื่อบทในสารบัญข้อความไม่ตรง: /g, 'Chapter title in the TOC does not match: '],
+  [/ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัดพอจะเทียบกับ (บฑ\.\d) โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม (บฑ\.\d) คือ/g, 'The system could not read the names on this page clearly enough to compare them with $1 — please check the list by eye, and see what the system did read under supporting information. The $2 list is:'],
   [/ระบบนับจำนวนและเทียบชื่ออาจารย์กับ (บฑ\.\d) ให้แล้ว เหลือคุณวุฒิและตำแหน่งทางวิชาการที่ต้องทานเอง รายชื่อตาม (บฑ\.\d) คือ/g, 'The system counted the professors and matched their names against $1; the qualifications and academic ranks still have to be checked by eye. The $2 list is:'],
   [/ระบบนับจำนวนอาจารย์ให้แล้ว แต่เทียบชื่อไม่ได้เพราะ (บฑ\.\d) เก็บชื่อเป็นภาษาไทย ส่วนหน้านี้พิมพ์เป็นภาษาอังกฤษ โปรดทานรายชื่อเอง รายชื่อตาม (บฑ\.\d) คือ/g, 'The system counted the professors but could not match their names, because $1 stores them in Thai while this page prints them in English — please check the list by eye. The $2 list is:'],
   [/นับชื่อ(.+?)บนหน้านี้ได้ (\d+) คน แต่ (บฑ\.\d) มี (\d+) คน ระบบอ่านได้ว่า (.+)/g, 'Counted $2 $1 on this page, but $3 lists $4 — the system read: $5'],
