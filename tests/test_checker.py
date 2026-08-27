@@ -1699,6 +1699,63 @@ class TocHeadingMustBeTableOfContents(unittest.TestCase):
             self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
 
 
+class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
+    """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
+
+    เจ้าหน้าที่ย้ำว่า "เลขหน้า ก ข i ii ยังต้องตรวจนะ" — สองเลขนี้ไม่ใช่แค่การเรียงเลข
+    แต่เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการที่ปรึกษา หน้าไหนเป็นของคณะกรรมการสอบ
+    ซึ่งกำหนดว่าหน้านั้นจะถูกเทียบกับ บฑ.1 หรือ บฑ.2
+    """
+
+    def _run(self, first, second):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}", "RED")
+        return [(it["location"], it["found"]) for it in rep.zones["RED"]]
+
+    def test_correct_labels_pass(self):
+        self.assertEqual(self._run("Thesis entitled X\ni", "Thesis entitled X\nii"), [])
+        self.assertEqual(self._run("วิทยานิพนธ์ เรื่อง X\nก", "วิทยานิพนธ์ เรื่อง X\nข"), [])
+
+    def test_the_same_number_on_both_pages_is_caught(self):
+        """เล่มจริง (เล่มทดสอบ 3) พิมพ์ "ค" ทั้งสองหน้า ต้องฟ้องทั้งคู่"""
+        bad = self._run("วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค")
+        self.assertEqual(len(bad), 2)
+        self.assertTrue(all('พิมพ์เลขหน้าว่า "ค"' in f for _loc, f in bad), bad)
+
+    def test_swapped_pages_are_caught(self):
+        """สลับหน้ากันแปลว่าหน้าที่ปรึกษากับหน้ากรรมการสอบสลับที่ ต้องไม่ปล่อยผ่าน"""
+        bad = self._run("Thesis entitled X\nii", "Thesis entitled X\ni")
+        self.assertEqual(len(bad), 2)
+
+    def test_a_page_with_no_number_says_so(self):
+        """ไม่มีเลขหน้ากับพิมพ์เลขผิด เป็นคนละเรื่อง วิธีแก้ต่างกัน"""
+        bad = self._run("Thesis entitled X", "Thesis entitled X")
+        self.assertEqual([f for _loc, f in bad],
+                         ["ไม่พบเลขหน้าบนหน้า", "ไม่พบเลขหน้าบนหน้า"])
+
+    def test_the_number_does_not_have_to_be_on_the_first_line(self):
+        """บางเล่มมีหัวเรื่องนำหน้า เลขหน้าจึงไม่ได้อยู่บรรทัดแรก"""
+        page = "วิทยานิพนธ์\nก\nเรื่อง ...\nได้รับการพิจารณา..."
+        self.assertEqual(self._run(page, "วิทยานิพนธ์ เรื่อง X\nข"), [])
+
+    def test_the_expected_label_is_stated_in_both_scripts(self):
+        """เจ้าหน้าที่ต้องรู้ทันทีว่าหน้านั้นต้องเป็นเลขอะไร ไม่ต้องเปิดคู่มือ"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["Thesis entitled X\nz", "Thesis entitled X\nz"],
+            lambda i: f"แผ่นที่ {i + 1}", "RED")
+        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["RED"][0]["expected"])
+        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["RED"][1]["expected"])
+
+    def test_the_page_number_decides_which_form_the_page_is_checked_against(self):
+        """เหตุผลที่กฎนี้ยังต้องอยู่ — เลขหน้าคือตัวเลือกฟอร์ม"""
+        for label, form in (("i", "บฑ.1"), ("ii", "บฑ.2"),
+                            ("ก", "บฑ.1"), ("ข", "บฑ.2")):
+            kind = checker_module.signature_page_kind(label, "")
+            self.assertEqual(checker_module.committee_source_form(kind), form, label)
+
+
 class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
     """หน้าลงนาม/หน้าบทคัดย่อ: ตรวจ "จำนวน" รายชื่อเทียบฟอร์มต้นทาง ไม่เทียบชื่อ
 

@@ -957,6 +957,35 @@ def signature_page_kind(page_label, page_text):
         or _committee_page_kind(page_text)
 
 
+# เลขหน้าที่หน้าลงนามแต่ละหน้าต้องพิมพ์ไว้ ตามลำดับหน้า (อังกฤษ, ไทย)
+SIGNATURE_PAGE_LABELS = (("i", "ก"), ("ii", "ข"))
+
+
+def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone):
+    """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
+
+    เลขหน้าสองหน้านี้ไม่ใช่แค่การเรียงเลข — เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการ
+    ที่ปรึกษา หน้าไหนเป็นของคณะกรรมการสอบ (ดู signature_page_kind) ซึ่งกำหนดว่า
+    หน้านั้นจะถูกเทียบกับ บฑ.1 หรือ บฑ.2 ถ้าเลขหน้าผิด การตรวจทั้งหน้าเพี้ยนตาม
+
+    ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่บรรทัดแรก
+    เสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่เป็นเลขหน้าล้วน
+    จึงไม่ชนกับข้อความในเนื้อหน้า
+    """
+    for k, idx in enumerate(sig_pages[:2]):
+        lab_en, lab_th = SIGNATURE_PAGE_LABELS[k]
+        page_lines = [l.strip() for l in pages[idx].split('\n') if l.strip()]
+        if any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines):
+            continue
+        found_lab = _extract_page_label(pages[idx])
+        what = (f'หน้านี้พิมพ์เลขหน้าว่า "{found_lab}"' if found_lab
+                else "ไม่พบเลขหน้าบนหน้า")
+        rep.add(zone, "front_matter", f"หน้าลงนามหน้า {k + 1} ({page_ref(idx)})",
+                what,
+                f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                "", "PAGE.NUMBERING")
+
+
 def _is_white_fill(color):
     """สีตัวอักษรเป็นสีขาว (ถมขาว = มองไม่เห็นบนหน้ากระดาษ) หรือไม่"""
     if color is None:
@@ -3057,21 +3086,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    expected_labels = [("i", "ก"), ("ii", "ข")]
-    for k, i2 in enumerate(sig_pages[:2]):
-        lab_en, lab_th = expected_labels[k]
-        # ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่
-        # บรรทัดแรกเสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่
-        # เป็นเลขหน้าล้วน (สั้น) จึงไม่ชนกับข้อความในเนื้อหน้า
-        page_lines = [l.strip() for l in pages[i2].split('\n') if l.strip()]
-        matched = any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines)
-        if not matched:
-            found_lab = _extract_page_label(pages[i2])
-            what = f'หน้านี้พิมพ์เลขหน้าว่า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
-            rep.add(FRONT_FAILURE_ZONE, "front_matter", f"หน้าลงนามหน้า {k+1} ({page_ref(i2)})",
-                    what,
-                    f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
-                    "", "PAGE.NUMBERING")
+    _report_signature_page_labels(rep, sig_pages, pages, page_ref, FRONT_FAILURE_ZONE)
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
