@@ -36,6 +36,7 @@ BOLD_FAILURE_ZONE = rule_zone("FORMAT.BOLD", "ORANGE")
 ABSTRACT_BOLD_ZONE = rule_zone("FORMAT.ABSTRACT_BOLD", "YELLOW")
 BLANK_PAGE_ZONE = rule_zone("PAGE.BLANK", "YELLOW")
 UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
+TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -2031,10 +2032,10 @@ def plain_summary(report, failed=None, passed=None):
 def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
     """เลขหน้าภาคผนวกในสารบัญชี้ไปหน้าเริ่มของภาคผนวก 'อีกชุด' ที่มีอยู่จริงในเล่ม
 
-    ใช้เลือก 'ข้อความอธิบาย' เท่านั้น ไม่ได้ใช้ตัดสินสี — นโยบายใหม่: เลขหน้าของ
-    หัวข้อหลักในสารบัญไม่ตรงหน้าจริง ให้เป็น 'ส้ม' (รอเจ้าหน้าที่ยืนยัน) ทุกกรณี
-    ถ้าไม่มีจุดผิดที่สำคัญกว่า เจ้าหน้าที่ให้ผ่านได้ กรณีภาคผนวกหลายชุดนี้แค่
-    ต้องอธิบายให้ชัดว่า 87 เป็นหน้าเริ่มของภาคผนวกอีกชุด ไม่ใช่เลขมั่ว
+    ใช้เลือก 'ข้อความอธิบาย' เท่านั้น ไม่ได้ใช้ตัดสินสี — กติกา ส.ค. 2569 เลิกตรวจ
+    เลขหน้าที่สารบัญอ้างถึงแล้ว ทุกกรณีเป็น 'เหลือง' (ข้อสังเกต ผ่านได้) กรณี
+    ภาคผนวกหลายชุดนี้แค่ต้องอธิบายให้ชัดว่า 87 เป็นหน้าเริ่มของภาคผนวกอีกชุด
+    ไม่ใช่เลขมั่ว
     """
     return section_kind == "appendix" and toc_label in appendix_labels
 
@@ -3118,16 +3119,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             found_msg += f" {diff}"
                         rep.add("RED", "body", loc, found_msg,
                                 f'ต้องแก้เป็น "{correct}"', "", "FRONT.TOC")
+                # เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569) — ยังบันทึก
+                # ไว้เป็นข้อสังเกตสีเหลืองให้เจ้าหน้าที่เห็น แต่ไม่ทำให้เล่มไม่ผ่าน
                 if BODY_RULES['check_toc_page_numbers'] and t_pno is None:
-                    rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
+                    rep.add(TOC_PAGE_ZONE, "front_matter",
+                            f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
                             f"หัวข้อ \"{t_raw}\" ไม่มีเลขหน้า",
-                            "หัวข้อบทในสารบัญต้องระบุเลขหน้า", "เพิ่มเลขหน้าให้ตรงกับบทจริง", "FRONT.TOC")
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FRONT.TOC_PAGE_REF")
                 elif BODY_RULES['check_toc_page_numbers'] and pno is not None and t_pno != pno:
-                    # เลขหน้าบทในสารบัญไม่ตรงหน้าจริง = ส้ม ให้เจ้าหน้าที่ตัดสิน
-                    rep.add("ORANGE", "body", f"สารบัญ ({page_ref(toc_page_idx)}) กับบทที่ {cn} ({page_ref(ppage)})",
+                    rep.add(TOC_PAGE_ZONE, "body",
+                            f"สารบัญ ({page_ref(toc_page_idx)}) กับบทที่ {cn} ({page_ref(ppage)})",
                             f"สารบัญระบุหน้า {t_pno} แต่บทอยู่จริงหน้า {pno}",
-                            f"เลขหน้าบทในสารบัญควรเป็น {pno}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ", "FRONT.TOC")
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FRONT.TOC_PAGE_REF")
             elif BODY_RULES['check_toc_chapter_presence']:
                 rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})", "ไม่อยู่ในสารบัญ",
                         "ทุกบทต้องปรากฏในสารบัญ", "", "FRONT.TOC")
@@ -4001,39 +4006,41 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                 f'คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "{page_terms[0]}"',
                                 f'แก้คำในสารบัญให้เป็น "{page_terms[0]}"', "FRONT.TOC_CONTENT",
                             )
+                # เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569) — บันทึกเป็น
+                # ข้อสังเกตสีเหลือง เล่มที่มีแต่ข้อเหล่านี้ผ่านได้
                 if not entry["page_label"]:
                     rep.add(
-                        "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",
+                        TOC_PAGE_ZONE, "front_matter",
+                        f"สารบัญ ({page_ref(entry['source_page_idx'])})",
                         f"หัวข้อ {section_label} ไม่มีเลขหน้า",
-                        f"หัวข้อ {section_label} ต้องระบุเลขหน้าที่เริ่มต้นจริง",
-                        "เพิ่มเลขหน้าของหัวข้อนี้ในสารบัญ",
-                        "FRONT.TOC_CONTENT",
+                        "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                        "FRONT.TOC_PAGE_REF",
                     )
                     continue
                 actual_label = page_labels.get(actual_page_idx, "")
                 if actual_label and entry["page_label"] != actual_label:
                     location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) กับ"
                                 f"{section_label} ({page_ref(actual_page_idx)})")
-                    # เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี ให้เจ้าหน้าที่
-                    # ตัดสิน (ถ้าไม่มีจุดผิดสำคัญกว่าก็ผ่านได้) กรณีภาคผนวกหลายชุดแค่ใช้
-                    # ข้อความอธิบายต่างออกไปว่าเลขที่ระบุเป็นหน้าเริ่มของภาคผนวกอีกชุด
+                    # กรณีภาคผนวกหลายชุดใช้ข้อความอธิบายต่างออกไป ว่าเลขที่ระบุเป็น
+                    # หน้าเริ่มของภาคผนวกอีกชุด ไม่ใช่เลขมั่ว
                     if toc_page_mismatch_is_appendix_alt(section_kind, entry["page_label"],
                                                          appendix_labels):
                         rep.add(
-                            "ORANGE", "front_matter", location,
+                            TOC_PAGE_ZONE, "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} ซึ่งเป็นหน้าเริ่มของภาคผนวกอีกชุดหนึ่ง "
                             f"(ภาคผนวกชุดแรกอยู่หน้า {actual_label})",
-                            f"โดยทั่วไปหัวข้อ {section_label} ควรชี้หน้าเริ่มของภาคผนวกชุดแรก คือหน้า {actual_label}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เป็นหน้าแรกของภาคผนวก",
-                            "FRONT.TOC_CONTENT",
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                            "FRONT.TOC_PAGE_REF",
                         )
                     else:
                         rep.add(
-                            "ORANGE", "front_matter", location,
+                            TOC_PAGE_ZONE, "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} แต่หัวข้อเริ่มจริงหน้า {actual_label}",
-                            f"เลขหน้า {section_label} ในสารบัญควรเป็น {actual_label}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ",
-                            "FRONT.TOC_CONTENT",
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                            "FRONT.TOC_PAGE_REF",
                         )
 
             for optional_kind in ("list_tables", "list_figures", "list_abbreviations"):

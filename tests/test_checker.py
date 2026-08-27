@@ -500,12 +500,12 @@ class TocSectionPageTests(unittest.TestCase):
 
     def test_appendix_pointing_at_another_appendix_uses_alt_message(self):
         # สารบัญเขียน "APPENDIX 87" แต่ภาคผนวกชุดแรกอยู่หน้า 85 — 87 เป็นหน้าเริ่ม
-        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นส้ม)
+        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นเหลือง)
         self.assertTrue(
             toc_page_mismatch_is_appendix_alt("appendix", "87", self.APPENDIX_PAGES))
 
     def test_appendix_pointing_at_a_page_with_no_appendix_is_generic(self):
-        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นส้ม
+        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นเหลือง
         self.assertFalse(
             toc_page_mismatch_is_appendix_alt("appendix", "999", self.APPENDIX_PAGES))
 
@@ -1691,6 +1691,67 @@ class TocHeadingMustBeTableOfContents(unittest.TestCase):
         for heading in ("TABLE OF CONTENTS", "สารบัญ"):
             self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
             self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+
+class TocPageReferencesAreOnlyANotice(unittest.TestCase):
+    """เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569)
+
+    เจ้าหน้าที่สั่งว่าไม่ต้องเทียบเลขหน้าในสารบัญกับหน้าจริง และไม่ต้องตรวจการเรียง
+    เลขหน้าของรายการในสารบัญ ถ้าพบให้ติดเหลืองไว้เฉย ๆ เล่มที่มีแต่ข้อนี้ต้องผ่าน
+    """
+
+    NOTICES = (
+        ("front_matter", "สารบัญ (หน้า viii) กับบทที่ 3 (หน้า 45)",
+         "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45"),
+        ("front_matter", "สารบัญ (หน้า viii)",
+         "หัวข้อ ภาคผนวก ไม่มีเลขหน้า"),
+    )
+
+    def _report_with_only_toc_page_notices(self):
+        report = Report()
+        for part, loc, found in self.NOTICES:
+            report.add(checker_module.TOC_PAGE_ZONE, part, loc, found,
+                       "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                       "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                       "FRONT.TOC_PAGE_REF")
+        return report
+
+    def test_the_rule_is_registered_as_a_yellow_notice(self):
+        self.assertIn("FRONT.TOC_PAGE_REF", RULE_CATALOG)
+        self.assertEqual(rule_zone("FRONT.TOC_PAGE_REF"), "YELLOW")
+        self.assertEqual(checker_module.TOC_PAGE_ZONE, "YELLOW")
+
+    def test_a_book_with_only_these_notices_passes(self):
+        report = self._report_with_only_toc_page_notices()
+        self.assertEqual(len(report.zones["YELLOW"]), len(self.NOTICES))
+        self.assertFalse(report.zones["RED"])
+        self.assertFalse(report.zones["ORANGE"])
+        self.assertEqual(report.verdict(), "ผ่าน")
+
+    def test_the_notices_stay_out_of_the_student_fix_list(self):
+        report = self._report_with_only_toc_page_notices()
+        result = {"issues_by_zone": report.zones}
+        self.assertEqual(checker_module.issues_to_fix(result), [])
+        # เจ้าหน้าที่ยังกด "ไม่ผ่าน" รายข้อได้ ถ้าเห็นว่าเล่มนี้ควรแก้จริง
+        self.assertEqual(len(checker_module.issues_to_fix(result, failed={"YELLOW:0"})), 1)
+
+    def test_every_toc_page_reference_finding_uses_the_notice_zone(self):
+        """กันไม่ให้มีจุดไหนหลุดกลับไปใช้สีแดง/ส้มกับกฎนี้"""
+        import ast
+        tree = ast.parse(Path(checker_module.__file__).read_text(encoding="utf-8"))
+        zones = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add"):
+                continue
+            rule = [a for a in node.args
+                    if isinstance(a, ast.Constant) and a.value == "FRONT.TOC_PAGE_REF"]
+            if not rule or not node.args:
+                continue
+            zones.append(ast.dump(node.args[0]))
+        self.assertTrue(zones, "ไม่พบจุดที่ใช้กฎ FRONT.TOC_PAGE_REF เลย")
+        self.assertEqual(set(zones), {ast.dump(ast.Name(id="TOC_PAGE_ZONE", ctx=ast.Load()))})
 
 
 class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
