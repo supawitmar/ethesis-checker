@@ -37,6 +37,7 @@ ABSTRACT_BOLD_ZONE = rule_zone("FORMAT.ABSTRACT_BOLD", "YELLOW")
 BLANK_PAGE_ZONE = rule_zone("PAGE.BLANK", "YELLOW")
 UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
 TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
+ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -834,30 +835,143 @@ def _committee_names(expected):
     return [m.get("name", "") if isinstance(m, dict) else (m or "") for m in expected]
 
 
-def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE"):
-    """รายชื่อกรรมการตามข้อมูลอนุมัติ = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
+# เอกสารต้นทางของรายชื่อแต่ละชุด (ชื่อแบบฟอร์มของบัณฑิตวิทยาลัย) ตามที่เจ้าหน้าที่
+# กำหนด ส.ค. 2569 — รายงานภาษาอังกฤษเรียกฟอร์มเดียวกันว่า GR.1 / GR.2
+#   หน้าลงนาม 1 (คณะกรรมการที่ปรึกษา) = บฑ.1
+#   หน้าลงนาม 2 (คณะกรรมการสอบ)       = บฑ.2
+#   หน้าบทคัดย่อ (คณะกรรมการที่ปรึกษา) = บฑ.1
+COMMITTEE_SOURCE_FORM = {"advisory": "บฑ.1", "exam": "บฑ.2"}
 
-    นโยบายเจ้าหน้าที่ (ส.ค. 2569): **ระบบไม่เทียบชื่อและตัวสะกดให้แล้ว** พิมพ์รายชื่อ
-    จาก บฑ. ไว้ให้กวาดตาทานเอง เพราะการเทียบตัวอักษรสร้างข้อฟ้องที่ต้องมานั่งปัดทิ้ง
-    ทีละข้อจนเป็นอุปสรรคต่อการใช้งานจริง (ดู _report_committee_count)
+
+def committee_source_form(kind):
+    """ชื่อฟอร์มต้นทางที่ใช้เทียบรายชื่อชุดนี้ — ชนิดหน้าที่อ่านไม่ออกถือเป็น บฑ.1"""
+    return COMMITTEE_SOURCE_FORM.get(kind) or "บฑ.1"
+
+
+# ช่องในตารางลายเซ็นที่ "ไม่มีตัวอักษรเลย" ไม่ใช่ชื่อคน (เศษเส้น/ตัวเลข/สัญลักษณ์)
+_NAME_HAS_LETTER = re.compile(r'[A-Za-zก-๙]')
+
+
+def committee_name_list(members):
+    """เฉพาะ "ชื่ออาจารย์" ในตารางลายเซ็น เรียงตามลำดับช่อง
+
+    เจ้าหน้าที่สั่ง (ส.ค. 2569) ว่าให้นับเฉพาะชื่ออาจารย์ ช่องคงที่ของ template
+    (คณบดี / ประธานหลักสูตร / ข้อความตัวอย่าง) ถูกคัดออกตั้งแต่ _sig_clean_name แล้ว
+    เหลือกันเศษที่ไม่มีตัวอักษรเลยออกอีกชั้น เพื่อไม่ให้ถูกนับเป็นคนหนึ่งคน
+    """
+    return [members[k] for k in sorted(members)
+            if members.get(k) and _NAME_HAS_LETTER.search(members[k])]
+
+
+def _committee_name_key(name):
+    """กุญแจเทียบชื่ออาจารย์ — เหลือเฉพาะชื่อ-สกุล ตัดตำแหน่งวิชาการ/คำนำหน้าออกก่อน"""
+    return norm(strip_name_prefix(_strip_committee_title(name or "")))
+
+
+def committee_name_script(names):
+    """อักษรที่ใช้เขียนรายชื่อชุดนี้ — 'th', 'en' หรือ '' ถ้าปนกัน/บอกไม่ได้"""
+    text = "".join(names or [])
+    thai = bool(re.search(r'[ก-๙]', text))
+    latin = bool(re.search(r'[A-Za-z]', text))
+    if thai and not latin:
+        return 'th'
+    if latin and not thai:
+        return 'en'
+    return ''
+
+
+def committee_names_match(expected, found):
+    """เทียบชื่ออาจารย์สองชุดแบบไม่สนลำดับ — คืน (ที่ขาดไป, ที่เกินมา)
+
+    เทียบ **เฉพาะชื่อ-สกุล** ตัดตำแหน่งวิชาการออกก่อนทั้งสองฝั่ง ตามที่เจ้าหน้าที่
+    สั่งไว้ ("ให้อาจารย์เฉพาะชื่ออาจารย์" ส.ค. 2569) เพราะตำแหน่งวิชาการในเล่มกับใน
+    บฑ. ต่างกันได้โดยไม่ผิด — ตำแหน่งเปลี่ยนหลังยื่นเรื่องเป็นเรื่องปกติ ถ้าเอาตำแหน่ง
+    มาเทียบด้วยจะได้ข้อฟ้องที่ต้องปัดทิ้งเองแทบทุกเล่ม
+
+    ไม่สนลำดับ เพราะลำดับช่องบนหน้าลงนามไม่ได้ตรงกับลำดับใน บฑ. เสมอไป
+    """
+    want = [(_committee_name_key(n), n) for n in expected]
+    got = [(_committee_name_key(n), n) for n in found]
+    left = [(k, n) for k, n in want if k]
+    extra = []
+    for key, raw in got:
+        if not key:
+            continue
+        hit = next((i for i, (wk, _) in enumerate(left) if wk == key), None)
+        if hit is None:
+            extra.append(raw)
+        else:
+            left.pop(hit)
+    return [n for _, n in left], extra
+
+
+def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE",
+                              form="บฑ.1", compared=False):
+    """รายชื่ออาจารย์ตามข้อมูลต้นทาง = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
+
+    ข้อความต่างกันตามว่าระบบเทียบชื่อให้ได้หรือไม่ (ดู _report_committee_names):
+      เทียบได้    — บอกว่าเทียบชื่อให้แล้ว เหลือคุณวุฒิ/ตำแหน่งวิชาการที่ต้องทานเอง
+      เทียบไม่ได้ — บอกเหตุผลตรง ๆ ว่าฟอร์มต้นทางเก็บชื่อเป็นภาษาไทย แต่หน้านี้พิมพ์อังกฤษ
+                    ระบบจึงจับคู่ตัวอักษรไม่ได้ ต้องทานเองทั้งชุด
     """
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(_committee_names(expected), start=1))
-    rep.add_human(loc, "ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด "
-                       f"โปรดทานรายชื่อกับข้อมูลอนุมัติ (บฑ.) คือ {names}", rule_id)
+    lead = (f"ระบบนับจำนวนและเทียบชื่ออาจารย์กับ {form} ให้แล้ว "
+            "เหลือคุณวุฒิและตำแหน่งทางวิชาการที่ต้องทานเอง"
+            if compared else
+            f"ระบบนับจำนวนอาจารย์ให้แล้ว แต่เทียบชื่อไม่ได้เพราะ {form} เก็บชื่อเป็นภาษาไทย "
+            "ส่วนหน้านี้พิมพ์เป็นภาษาอังกฤษ โปรดทานรายชื่อเอง")
+    rep.add_human(loc, f"{lead} รายชื่อตาม {form} คือ {names}", rule_id)
 
 
-def _report_committee_count(rep, expected, found_names, loc,
-                            rule_id="FRONT.COMMITTEE", label="กรรมการ"):
-    """นับจำนวนกรรมการให้ครบ — ไม่เทียบชื่อ ไม่เทียบตัวสะกด
+def _report_committee_names(rep, expected, found_names, loc, form,
+                            rule_id="FRONT.COMMITTEE", label="อาจารย์"):
+    """เทียบ "ชื่ออาจารย์" บนหน้ากับรายชื่อจากต้นทาง — คืน True ถ้าเทียบได้จริง
 
-    นโยบายเจ้าหน้าที่ (ส.ค. 2569): *"ไม่ต้องตรวจสอบรายชื่อจำนวนอาจารย์ในหน้าลงนาม
-    และหน้าบทคัดย่อ แค่นับจำนวนให้ครบพอ ไม่ต้องเทียบชื่อสะกดชื่อตรงไหม
-    ส่วนนี้เป็นอุปสรรคต่อการใช้ระบบมาก"*
+    เจ้าหน้าที่สั่ง (ส.ค. 2569): *"ให้อาจารย์เฉพาะชื่ออาจารย์ และนับว่าตรงกันกับที่ระบบ
+    ดึงมาจากต้นทาง ซึ่งถ้าไม่ตรง ให้แจ้ง"*
 
-    เหตุผลเชิงเนื้อหา: ชื่อในเล่มกับใน บฑ. ต่างกันได้โดยไม่ผิด — ตำแหน่งวิชาการเปลี่ยน
-    หลังยื่นเรื่อง ใช้ชื่อสกุลคนละแบบ หรือถอดเป็นอังกฤษคนละหลัก การเทียบตัวอักษรจึง
-    ให้ข้อฟ้องที่เจ้าหน้าที่ต้องปัดทิ้งเองแทบทุกเล่ม
+    เทียบได้เฉพาะเมื่อทั้งสองฝั่งเขียนด้วยอักษรชุดเดียวกัน — ต้นทางเก็บชื่อเป็นภาษาไทย
+    เสมอ ส่วนเล่มหลักสูตรนานาชาติพิมพ์ชื่อเป็นภาษาอังกฤษ ("นริศรา จันทราทิตย์" กับ
+    "Narisara Chantratita" เป็นคนเดียวกัน) การจับคู่ตัวอักษรจึงทำไม่ได้ ต้องบอกตรง ๆ
+    ว่าเทียบไม่ได้ ไม่ใช่ฟ้องว่าชื่อไม่ตรง
+
+    ผลเป็น **ส้ม ไม่ใช่แดง** เพราะชื่อต่างกันได้โดยเล่มไม่ผิด (เปลี่ยนนามสกุล ใช้ชื่อ
+    คนละแบบ) และระบบอ่านตารางเพี้ยนได้ เจ้าหน้าที่เป็นคนตัดสิน
+    """
+    names = _committee_names(expected)
+    if not names or not found_names:
+        return False
+    if committee_name_script(names) != committee_name_script(found_names):
+        return False
+    missing, extra = committee_names_match(names, found_names)
+    if not missing and not extra:
+        return True
+    # ใส่เครื่องหมายคำพูดรอบชื่อ = "ค่าที่อ่านได้จากเล่ม/จากต้นทาง" ต้องคงเป็นไทย
+    # ในรายงานอังกฤษ (ด่าน check_i18n ใช้เครื่องหมายนี้แยกออกจากข้อความของระบบ)
+    def quoted(names):
+        return ", ".join('"%s"' % n for n in names)
+    lead = f"ชื่อ{label}บนหน้านี้ไม่ตรงกับ {form}:"
+    if missing and extra:
+        found = (f"{lead} ขาด {quoted(_display_committee_name(n) for n in missing)}"
+                 f" และเกิน {quoted(extra)}")
+    elif missing:
+        found = f"{lead} ขาด {quoted(_display_committee_name(n) for n in missing)}"
+    else:
+        found = f"{lead} เกิน {quoted(extra)}"
+    rep.add("ORANGE", "front_matter", loc, found,
+            f"ชื่อ{label}บนหน้านี้ต้องตรงกับ {form}",
+            f"ตรวจว่าเป็นคนเดียวกันหรือไม่ ถ้าใช่ให้ผ่านได้ ถ้าไม่ใช่ให้แก้ชื่อบนหน้านี้ให้ตรงกับ {form}",
+            rule_id)
+    return True
+
+
+def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
+                            rule_id="FRONT.COMMITTEE", label="อาจารย์"):
+    """นับจำนวนอาจารย์ให้ครบ — นับเฉพาะช่องที่เป็นชื่ออาจารย์ (ดู committee_name_list)
+
+    ชื่อที่นับได้จะถูกเทียบตัวสะกดต่อใน _report_committee_names เมื่ออักษรทั้งสองฝั่ง
+    ตรงชุดกัน ข้อนี้จึงเหลือหน้าที่เดียวคือ "จำนวนไม่เท่ากัน"
 
     จำนวนไม่ตรง = **ส้ม ไม่ใช่แดง** เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม
     ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม
@@ -870,9 +984,9 @@ def _report_committee_count(rep, expected, found_names, loc,
     listed = ("  ".join(f'{k}. "{n}"' for k, n in enumerate(found_names, start=1))
               or "ไม่พบชื่อเลย")
     rep.add("ORANGE", "front_matter", loc,
-            f"นับรายชื่อ{label}บนหน้านี้ได้ {len(found_names)} คน "
-            f"แต่ข้อมูลอนุมัติมี {want} คน ระบบอ่านได้ว่า {listed}",
-            f"ต้องมี{label} {want} คนตามข้อมูลอนุมัติ (บฑ.)",
+            f"นับชื่อ{label}บนหน้านี้ได้ {len(found_names)} คน "
+            f"แต่ {form} มี {want} คน ระบบอ่านได้ว่า {listed}",
+            f"ต้องมี{label} {want} คนตาม {form}",
             f"ตรวจว่าจำนวน{label}บนหน้านี้ครบหรือไม่ "
             "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
             rule_id)
@@ -1100,7 +1214,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         _report_committee_name_case(rep, members, loc)
         # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
         # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
-        read_names = [members[k] for k in sorted(members) if members.get(k)]
+        read_names = committee_name_list(members)
         rep.add_info("front_matter", f"รายชื่อที่ระบบอ่านได้จาก{page_label}",
                      "  ".join(f'{k}. {n}' for k, n in enumerate(read_names, start=1))
                      or "ระบบอ่านรายชื่อบนหน้านี้ไม่ได้")
@@ -1109,11 +1223,13 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         handled_any = True
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
-        # นับจำนวนอย่างเดียว ไม่เทียบชื่อ/ตัวสะกด (นโยบาย ส.ค. 2569)
-        # ภาษาของเล่มจึงไม่มีผลกับการตรวจส่วนนี้อีกต่อไป — เล่มไทยและเล่มอังกฤษ
-        # ใช้เกณฑ์เดียวกัน และไม่ต้องถอดชื่อไทยเป็นอังกฤษก่อนอีกแล้ว
-        _report_committee_count(rep, expected, read_names, loc)
-        _note_committee_reference(rep, expected, loc)
+        # นับจำนวน แล้วเทียบชื่ออาจารย์กับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2)
+        # เทียบได้เฉพาะเล่มที่พิมพ์ชื่อเป็นภาษาไทยเหมือนต้นทาง — เล่มหลักสูตร
+        # นานาชาติพิมพ์ชื่ออังกฤษ จับคู่ตัวอักษรกับต้นทางที่เป็นไทยไม่ได้
+        form = committee_source_form(kind)
+        _report_committee_count(rep, expected, read_names, loc, form)
+        compared = _report_committee_names(rep, expected, read_names, loc, form)
+        _note_committee_reference(rep, expected, loc, form=form, compared=compared)
 
         # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
@@ -1428,16 +1544,17 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         if inside else "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
 
             # รูปแบบ 1.1: ต้องมีจุลภาคคั่นระหว่างคุณวุฒิของคนก่อนกับชื่อคนถัดไป
-            # (เจอในเล่มจริง ถ้าไม่ฟ้องตรงนี้ เจ้าหน้าที่จะไม่รู้ว่าต้องเติมจุลภาคตรงไหน)
+            # เจ้าหน้าที่สั่ง ส.ค. 2569 ว่าเรื่องจุลภาคให้แจ้งเป็นสีเหลือง — ยังบอกให้
+            # ครบว่าขาดตรงไหนและต้องเป็นอะไร แต่ไม่ทำให้เล่มไม่ผ่าน
             for nm in abstract_committee_missing_commas(block):
-                rep.add("RED", "front_matter", loc,
+                rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc,
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
-                        f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
+                        f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT_COMMA")
             for printed, correct in abstract_committee_missing_degree_commas(block):
-                rep.add("RED", "front_matter", loc,
+                rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc,
                         f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{printed}"',
-                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT")
+                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT_COMMA")
             # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
             # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
             stripped = [nm for nm in (n.strip() for n in names)
@@ -1461,13 +1578,18 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         "ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด",
                         "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
 
-            # นับจำนวนอย่างเดียว ไม่เทียบชื่อ/ตัวสะกด (นโยบาย ส.ค. 2569)
-            # ภาษาของหน้าจึงไม่มีผล — บทคัดย่อไทยและอังกฤษใช้เกณฑ์เดียวกัน
+            # รายชื่อบนหน้าบทคัดย่อคือคณะกรรมการที่ปรึกษา จึงเทียบกับ บฑ.1 เสมอ
+            # หน้าบทคัดย่ออังกฤษพิมพ์ชื่ออังกฤษ เทียบตัวอักษรกับต้นทางที่เป็นไทยไม่ได้
             if not advisory:
                 continue
-            _report_committee_count(rep, advisory, [n.strip() for n in names], loc,
-                                    "FRONT.ABSTRACT", "กรรมการที่ปรึกษา")
-            _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT")
+            read_names = [n.strip() for n in names]
+            form = committee_source_form("advisory")
+            _report_committee_count(rep, advisory, read_names, loc, form,
+                                    "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
+            compared = _report_committee_names(rep, advisory, read_names, loc, form,
+                                               "FRONT.ABSTRACT", "อาจารย์ที่ปรึกษา")
+            _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT",
+                                      form=form, compared=compared)
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
