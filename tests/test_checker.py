@@ -1723,6 +1723,35 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
         # หน้าที่อ่านชนิดไม่ออก ยังต้องบอกฟอร์มได้ ไม่ใช่คืนค่าว่าง
         self.assertEqual(checker_module.committee_source_form(None), "บฑ.1")
 
+    def test_the_form_follows_the_page_all_the_way_from_its_page_number(self):
+        """เลขหน้า -> ชนิดหน้า -> ชื่อฟอร์ม ต้องต่อกันถูกทั้งเล่มไทยและเล่มอังกฤษ
+
+        เจ้าหน้าที่สั่งว่า "ต้องเปลี่ยนเงื่อนไข บฑ. ไปแต่ละหน้า" — หน้าลงนาม 1 กับ
+        หน้าบทคัดย่อใช้ บฑ.1 ส่วนหน้าลงนาม 2 ใช้ บฑ.2
+        """
+        for label, form in (("i", "บฑ.1"), ("ii", "บฑ.2"),
+                            ("ก", "บฑ.1"), ("ข", "บฑ.2")):
+            kind = checker_module.signature_page_kind(label, "")
+            self.assertEqual(checker_module.committee_source_form(kind), form, label)
+
+    def test_the_abstract_page_always_cites_the_advisory_form(self):
+        """หน้าบทคัดย่อพิมพ์คณะกรรมการที่ปรึกษา จึงอ้าง บฑ.1 เสมอ ไม่ว่าจะภาษาอะไร"""
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
+                                    {"name": "ธเนศ ข", "role": ""}]}
+        pages = {
+            "ไทย": "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ",
+            "อังกฤษ": "THESIS ADVISORY COMMITTEE: KANANG KOR, Ph.D.\nABSTRACT",
+        }
+        for lang, page in pages.items():
+            rep = Report()
+            en = [0] if lang == "อังกฤษ" else []
+            th = [] if lang == "อังกฤษ" else [0]
+            _check_abstract_committees(rep, committees, en, th, [page],
+                                       lambda i: "หน้า iv")
+            found = " ".join(i["found"] for i in rep.zones["ORANGE"])
+            self.assertIn("บฑ.1", found, lang)
+            self.assertNotIn("บฑ.2", found, lang)
+
     def test_names_are_never_compared(self):
         """คนละคนกันทั้งชุด แต่จำนวนครบ ต้องไม่ฟ้อง"""
         rep = self._count(["สมชาย ใจดี", "สมหญิง รักเรียน", "สมศักดิ์ ตั้งใจ"])
