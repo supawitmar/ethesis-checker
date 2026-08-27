@@ -36,6 +36,9 @@ BOLD_FAILURE_ZONE = rule_zone("FORMAT.BOLD", "ORANGE")
 ABSTRACT_BOLD_ZONE = rule_zone("FORMAT.ABSTRACT_BOLD", "YELLOW")
 BLANK_PAGE_ZONE = rule_zone("PAGE.BLANK", "YELLOW")
 UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
+TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
+ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
+DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -833,46 +836,108 @@ def _committee_names(expected):
     return [m.get("name", "") if isinstance(m, dict) else (m or "") for m in expected]
 
 
-def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE"):
-    """รายชื่อกรรมการตามข้อมูลอนุมัติ = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
+# เอกสารต้นทางของรายชื่อแต่ละชุด (ชื่อแบบฟอร์มของบัณฑิตวิทยาลัย) ตามที่เจ้าหน้าที่
+# กำหนด ส.ค. 2569 — รายงานภาษาอังกฤษเรียกฟอร์มเดียวกันว่า GR.1 / GR.2
+#   หน้าลงนาม 1 (คณะกรรมการที่ปรึกษา) = บฑ.1
+#   หน้าลงนาม 2 (คณะกรรมการสอบ)       = บฑ.2
+#   หน้าบทคัดย่อ (คณะกรรมการที่ปรึกษา) = บฑ.1
+COMMITTEE_SOURCE_FORM = {"advisory": "บฑ.1", "exam": "บฑ.2"}
 
-    นโยบายเจ้าหน้าที่ (ส.ค. 2569): **ระบบไม่เทียบชื่อและตัวสะกดให้แล้ว** พิมพ์รายชื่อ
-    จาก บฑ. ไว้ให้กวาดตาทานเอง เพราะการเทียบตัวอักษรสร้างข้อฟ้องที่ต้องมานั่งปัดทิ้ง
-    ทีละข้อจนเป็นอุปสรรคต่อการใช้งานจริง (ดู _report_committee_count)
+
+def committee_source_form(kind):
+    """ชื่อฟอร์มต้นทางที่ใช้เทียบรายชื่อชุดนี้ — ชนิดหน้าที่อ่านไม่ออกถือเป็น บฑ.1"""
+    return COMMITTEE_SOURCE_FORM.get(kind) or "บฑ.1"
+
+
+# ช่องในตารางลายเซ็นที่ "ไม่มีตัวอักษรเลย" ไม่ใช่ชื่อคน (เศษเส้น/ตัวเลข/สัญลักษณ์)
+_NAME_HAS_LETTER = re.compile(r'[A-Za-zก-๙]')
+
+
+def committee_name_list(members):
+    """เฉพาะ "ชื่ออาจารย์" ในตารางลายเซ็น เรียงตามลำดับช่อง
+
+    เจ้าหน้าที่สั่ง (ส.ค. 2569) ว่าให้นับเฉพาะชื่ออาจารย์ ช่องคงที่ของ template
+    (คณบดี / ประธานหลักสูตร / ข้อความตัวอย่าง) ถูกคัดออกตั้งแต่ _sig_clean_name แล้ว
+    เหลือกันเศษที่ไม่มีตัวอักษรเลยออกอีกชั้น เพื่อไม่ให้ถูกนับเป็นคนหนึ่งคน
+    """
+    return [members[k] for k in sorted(members)
+            if members.get(k) and _NAME_HAS_LETTER.search(members[k])]
+
+
+def committee_read_is_trustworthy(names):
+    """รายชื่อที่อ่านมาหน้าตาน่าเชื่อพอจะเอาไปเทียบหรือไม่
+
+    ใช้ตัดสินว่า "นับจำนวนได้ไหม" — ตารางลายเซ็นเป็นตาราง 2 คอลัมน์คั่นด้วยเส้นประ
+    ซึ่งอ่านพลาดได้หลายแบบและเคยพลาดมาแล้วทุกแบบในเล่มจริง:
+      - เส้นแบ่งคอลัมน์คลาดไป 0.13 pt  ชื่อขาดครึ่ง ("มยุรี หอมสนิท" -> "หอมสนิท")
+      - ฟอนต์เว้นช่องกลางคำ            ชื่อถูกตัดเป็นหลายคำ ("วันเพ็ญ แก้ว ปาน")
+      - วรรณยุกต์หลุดเป็นคำของตัวเอง    ("สุภาภรณ ์ สงค์ประชา")
+      - ข้อความชั้นเก่าที่ถมขาวไว้        ชื่อซ้ำหรือไปโผล่ผิดช่อง
+      - อ่านเส้นประไม่ครบ               แถวคณบดีเลื่อนขึ้นมาเป็นกรรมการ
+
+    ทุกแบบให้ผลเป็น "ชื่อที่ไม่ใช่ชื่อคน" — ท่อนเดียวโดด ๆ หรือเศษข้อความ และทำให้
+    **จำนวนที่นับได้ผิดไปด้วย** (ชื่อแตกครึ่งกลายเป็นสองคน) ถ้าฟ้องดื้อ ๆ จะกลายเป็น
+    บอกว่าเล่มที่ถูกอยู่แล้วมีรายชื่อไม่ครบ จึงต้องเช็คก่อนว่าทุกช่องหน้าตาเป็น
+    "ชื่อ นามสกุล" จริง
+    """
+    return bool(names) and all(
+        _looks_like_person_name(_strip_committee_title(n) or n) for n in names)
+
+
+# เหตุผลที่เขียนในรายการสีม่วง ตามว่าระบบนับจำนวนให้ได้หรือไม่
+_COMMITTEE_NOTE_LEAD = {
+    "counted": "ระบบนับจำนวนอาจารย์เทียบกับ {form} ให้แล้ว แต่ไม่ได้เทียบชื่อ "
+               "โปรดทานรายชื่อเอง",
+    "unclear": "ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ {form} ไม่ได้ "
+               "โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ",
+}
+
+
+def _note_committee_reference(rep, expected, loc, rule_id="FRONT.COMMITTEE",
+                              form="บฑ.1", status="unclear"):
+    """รายชื่ออาจารย์ตามข้อมูลต้นทาง = รายการให้เจ้าหน้าที่ทานเอง (สีม่วง)
+
+    ระบบไม่เทียบชื่อให้ (ดู _report_committee_count) รายการนี้จึงเป็นที่เดียวที่
+    เจ้าหน้าที่จะเห็นรายชื่อตามฟอร์ม เหตุผลต้องตรงกับสิ่งที่ระบบทำได้จริง เจ้าหน้าที่
+    จะได้รู้ว่าเมื่อไรที่แม้แต่ "จำนวน" ก็เชื่อไม่ได้ (committee_read_is_trustworthy)
     """
     names = "  ".join(f'{k}. {_display_committee_name(n)}'
                       for k, n in enumerate(_committee_names(expected), start=1))
-    rep.add_human(loc, "ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด "
-                       f"โปรดทานรายชื่อกับข้อมูลอนุมัติ (บฑ.) คือ {names}", rule_id)
+    lead = _COMMITTEE_NOTE_LEAD.get(status, _COMMITTEE_NOTE_LEAD["unclear"])
+    rep.add_human(loc, f"{lead.format(form=form)} รายชื่อตาม {form} คือ {names}", rule_id)
 
 
-def _report_committee_count(rep, expected, found_names, loc,
-                            rule_id="FRONT.COMMITTEE", label="กรรมการ"):
-    """นับจำนวนกรรมการให้ครบ — ไม่เทียบชื่อ ไม่เทียบตัวสะกด
+def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
+                            rule_id="FRONT.COMMITTEE"):
+    """จำนวนรายชื่อบนหน้าต้องเท่ากับที่ได้รับอนุมัติในฟอร์มต้นทาง (บฑ.1 / บฑ.2)
 
-    นโยบายเจ้าหน้าที่ (ส.ค. 2569): *"ไม่ต้องตรวจสอบรายชื่อจำนวนอาจารย์ในหน้าลงนาม
-    และหน้าบทคัดย่อ แค่นับจำนวนให้ครบพอ ไม่ต้องเทียบชื่อสะกดชื่อตรงไหม
-    ส่วนนี้เป็นอุปสรรคต่อการใช้ระบบมาก"*
+    เจ้าหน้าที่สั่ง (ส.ค. 2569): *"ทั้งไทยและอังกฤษ ไม่ต้องเทียบชื่อ สมมุติว่าใน บฑ.1
+    หรือ บฑ.2 เป็น 3 ชื่อ ในเล่มมี 2 หรือ 4 ชื่อ ... แจ้งว่ารายชื่อไม่ครบตามที่ได้รับ
+    อนุมัติใน บฑ.1 หรือ 2 แล้วแต่หน้า และก็บอกว่าควรมีชื่ออะไรบ้าง"*
 
-    เหตุผลเชิงเนื้อหา: ชื่อในเล่มกับใน บฑ. ต่างกันได้โดยไม่ผิด — ตำแหน่งวิชาการเปลี่ยน
-    หลังยื่นเรื่อง ใช้ชื่อสกุลคนละแบบ หรือถอดเป็นอังกฤษคนละหลัก การเทียบตัวอักษรจึง
-    ให้ข้อฟ้องที่เจ้าหน้าที่ต้องปัดทิ้งเองแทบทุกเล่ม
+    **ไม่เทียบชื่อเลย** เพราะชื่อในเล่มกับในฟอร์มต่างกันได้โดยเล่มไม่ผิด — เล่มหลักสูตร
+    นานาชาติพิมพ์ชื่ออังกฤษขณะที่ฟอร์มเก็บชื่อไทย และคนไทยสะกดชื่อตัวเองตามพาสปอร์ต
+    ไม่ได้ตามหลักถอดเสียง (วัดจากคู่ชื่อจริง 9 คนในเล่มทดสอบ: ถอดเสียงตามหลัก
+    ราชบัณฑิตฯ แล้วตรงกับที่เล่มพิมพ์ 0 คน — "จันทราทิตย์" ถอดได้ "Chanthrathit"
+    แต่เจ้าตัวสะกด "Chantratita")
+
+    "ควรมีชื่ออะไรบ้าง" อยู่ในบรรทัดที่ควรเป็น ดึงจากฟอร์มต้นทางโดยตรง
 
     จำนวนไม่ตรง = **ส้ม ไม่ใช่แดง** เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม
     ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม
     """
-    want = len(expected)
-    if not want or len(found_names) == want:
+    want = _committee_names(expected)
+    if not want or len(found_names) == len(want):
         return
-    # ใส่เครื่องหมายคำพูดรอบชื่อ — เป็น "ค่าที่อ่านได้จากเล่ม" ไม่ใช่ข้อความของระบบ
-    # จึงต้องคงเป็นภาษาไทยในรายงานอังกฤษ (ด่าน check_i18n ใช้เครื่องหมายนี้แยก)
-    listed = ("  ".join(f'{k}. "{n}"' for k, n in enumerate(found_names, start=1))
-              or "ไม่พบชื่อเลย")
+    listed = "  ".join(f'{k}. {_display_committee_name(n)}'
+                       for k, n in enumerate(want, start=1))
+    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}"
+            if len(found_names) < len(want) else
+            f"รายชื่อเกินจากที่ได้รับอนุมัติใน {form}")
     rep.add("ORANGE", "front_matter", loc,
-            f"นับรายชื่อ{label}บนหน้านี้ได้ {len(found_names)} คน "
-            f"แต่ข้อมูลอนุมัติมี {want} คน ระบบอ่านได้ว่า {listed}",
-            f"ต้องมี{label} {want} คนตามข้อมูลอนุมัติ (บฑ.)",
-            f"ตรวจว่าจำนวน{label}บนหน้านี้ครบหรือไม่ "
+            f"{lead}: หน้านี้มี {len(found_names)} ชื่อ แต่อนุมัติไว้ {len(want)} ชื่อ",
+            f"ต้องมีรายชื่อครบตาม {form} คือ {listed}",
+            "ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ "
             "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
             rule_id)
 
@@ -890,6 +955,35 @@ def signature_page_kind(page_label, page_text):
     label = (page_label or '').strip()
     return _SIG_LABEL_KIND.get(label.lower()) or _SIG_LABEL_KIND.get(norm(label)) \
         or _committee_page_kind(page_text)
+
+
+# เลขหน้าที่หน้าลงนามแต่ละหน้าต้องพิมพ์ไว้ ตามลำดับหน้า (อังกฤษ, ไทย)
+SIGNATURE_PAGE_LABELS = (("i", "ก"), ("ii", "ข"))
+
+
+def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone):
+    """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
+
+    เลขหน้าสองหน้านี้ไม่ใช่แค่การเรียงเลข — เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการ
+    ที่ปรึกษา หน้าไหนเป็นของคณะกรรมการสอบ (ดู signature_page_kind) ซึ่งกำหนดว่า
+    หน้านั้นจะถูกเทียบกับ บฑ.1 หรือ บฑ.2 ถ้าเลขหน้าผิด การตรวจทั้งหน้าเพี้ยนตาม
+
+    ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่บรรทัดแรก
+    เสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่เป็นเลขหน้าล้วน
+    จึงไม่ชนกับข้อความในเนื้อหน้า
+    """
+    for k, idx in enumerate(sig_pages[:2]):
+        lab_en, lab_th = SIGNATURE_PAGE_LABELS[k]
+        page_lines = [l.strip() for l in pages[idx].split('\n') if l.strip()]
+        if any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines):
+            continue
+        found_lab = _extract_page_label(pages[idx])
+        what = (f'หน้านี้พิมพ์เลขหน้าว่า "{found_lab}"' if found_lab
+                else "ไม่พบเลขหน้าบนหน้า")
+        rep.add(zone, "front_matter", f"หน้าลงนามหน้า {k + 1} ({page_ref(idx)})",
+                what,
+                f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                "", "PAGE.NUMBERING")
 
 
 def _is_white_fill(color):
@@ -1060,9 +1154,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
 
     หน้าไหนเป็นของใครยึดเลขหน้าก่อน (i/ก = ที่ปรึกษา, ii/ข = กรรมการสอบ)
 
-    **ไม่เทียบชื่อและตัวสะกดกับข้อมูลอนุมัติ** (นโยบายเจ้าหน้าที่ ส.ค. 2569)
-    ตรวจแค่ "จำนวนครบไหม" ส่วนรายชื่อพิมพ์ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง
-    ภาษาของเล่มจึงไม่มีผลกับส่วนนี้ และไม่ต้องถอดชื่อไทยเป็นอังกฤษอีกต่อไป
+    ตรวจ **จำนวน** รายชื่อเทียบกับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2) เท่านั้น
+    ไม่เทียบชื่อทั้งเล่มไทยและเล่มอังกฤษ (ดู _report_committee_count) รายชื่อตามฟอร์ม
+    พิมพ์ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง
 
     กฎรูปแบบยังตรวจตามเดิม (เป็นกฎของ template ไม่ใช่การเทียบชื่อ):
       ตัวพิมพ์ของชื่อ, ข้อความตัวอย่างที่ค้างอยู่, คุณวุฒิใต้ชื่อต้องมี, ชื่อสาขา/คณะ
@@ -1099,7 +1193,7 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         _report_committee_name_case(rep, members, loc)
         # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
         # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
-        read_names = [members[k] for k in sorted(members) if members.get(k)]
+        read_names = committee_name_list(members)
         rep.add_info("front_matter", f"รายชื่อที่ระบบอ่านได้จาก{page_label}",
                      "  ".join(f'{k}. {n}' for k, n in enumerate(read_names, start=1))
                      or "ระบบอ่านรายชื่อบนหน้านี้ไม่ได้")
@@ -1108,11 +1202,15 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         handled_any = True
         _report_sig_placeholders(rep, leftover.get(idx) or [], loc)
 
-        # นับจำนวนอย่างเดียว ไม่เทียบชื่อ/ตัวสะกด (นโยบาย ส.ค. 2569)
-        # ภาษาของเล่มจึงไม่มีผลกับการตรวจส่วนนี้อีกต่อไป — เล่มไทยและเล่มอังกฤษ
-        # ใช้เกณฑ์เดียวกัน และไม่ต้องถอดชื่อไทยเป็นอังกฤษก่อนอีกแล้ว
-        _report_committee_count(rep, expected, read_names, loc)
-        _note_committee_reference(rep, expected, loc)
+        # นับจำนวนเทียบกับฟอร์มต้นทางของหน้านั้น (บฑ.1 / บฑ.2) ไม่เทียบชื่อ
+        # นับได้ก็ต่อเมื่ออ่านตารางออกเป็นชื่อคนจริงทุกช่อง ไม่งั้นจำนวนก็เชื่อไม่ได้
+        # (ตารางลายเซ็นอ่านพลาดได้หลายแบบ ดู committee_read_is_trustworthy)
+        form = committee_source_form(kind)
+        countable = committee_read_is_trustworthy(read_names)
+        if countable:
+            _report_committee_count(rep, expected, read_names, loc, form)
+        _note_committee_reference(rep, expected, loc, form=form,
+                                  status="counted" if countable else "unclear")
 
         # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
@@ -1427,16 +1525,17 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         if inside else "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
 
             # รูปแบบ 1.1: ต้องมีจุลภาคคั่นระหว่างคุณวุฒิของคนก่อนกับชื่อคนถัดไป
-            # (เจอในเล่มจริง ถ้าไม่ฟ้องตรงนี้ เจ้าหน้าที่จะไม่รู้ว่าต้องเติมจุลภาคตรงไหน)
+            # เจ้าหน้าที่สั่ง ส.ค. 2569 ว่าเรื่องจุลภาคให้แจ้งเป็นสีเหลือง — ยังบอกให้
+            # ครบว่าขาดตรงไหนและต้องเป็นอะไร แต่ไม่ทำให้เล่มไม่ผ่าน
             for nm in abstract_committee_missing_commas(block):
-                rep.add("RED", "front_matter", loc,
+                rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc,
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
                         "ต้องคั่นด้วยจุลภาคทุกช่อง คือ 'ชื่อ นามสกุล, คุณวุฒิ, ชื่อ นามสกุล, คุณวุฒิ'",
-                        f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT")
+                        f'เติมจุลภาคหน้าชื่อ "{nm}"', "FRONT.ABSTRACT_COMMA")
             for printed, correct in abstract_committee_missing_degree_commas(block):
-                rep.add("RED", "front_matter", loc,
+                rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc,
                         f'ชื่อกรรมการกับคุณวุฒิไม่ได้คั่นด้วยจุลภาค คือ "{printed}"',
-                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT")
+                        f'ต้องเป็น "{correct}"', "", "FRONT.ABSTRACT_COMMA")
             # รูปแบบ 2-3: รวมชื่อที่ผิดของหน้านั้นไว้ข้อเดียว ไม่ฟ้องรายคน
             # (เล่มที่ 4 พิมพ์ Capital Case ทั้ง 3 คน เดิมได้ 3 ข้อที่แก้เหมือนกันหมด)
             stripped = [nm for nm in (n.strip() for n in names)
@@ -1460,13 +1559,19 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         "ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด",
                         "แก้ชื่อกรรมการเป็นตัวพิมพ์ใหญ่ทั้งหมด", "FRONT.ABSTRACT")
 
-            # นับจำนวนอย่างเดียว ไม่เทียบชื่อ/ตัวสะกด (นโยบาย ส.ค. 2569)
-            # ภาษาของหน้าจึงไม่มีผล — บทคัดย่อไทยและอังกฤษใช้เกณฑ์เดียวกัน
+            # รายชื่อบนหน้าบทคัดย่อคือคณะกรรมการที่ปรึกษา จึงเทียบกับ บฑ.1 เสมอ
+            # หน้าบทคัดย่ออังกฤษพิมพ์ชื่ออังกฤษ เทียบตัวอักษรกับต้นทางที่เป็นไทยไม่ได้
             if not advisory:
                 continue
-            _report_committee_count(rep, advisory, [n.strip() for n in names], loc,
-                                    "FRONT.ABSTRACT", "กรรมการที่ปรึกษา")
-            _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT")
+            read_names = [n.strip() for n in names]
+            form = committee_source_form("advisory")
+            countable = committee_read_is_trustworthy(read_names)
+            if countable:
+                _report_committee_count(rep, advisory, read_names, loc, form,
+                                        "FRONT.ABSTRACT")
+            _note_committee_reference(rep, advisory, loc, "FRONT.ABSTRACT",
+                                      form=form,
+                                      status="counted" if countable else "unclear")
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
@@ -2031,10 +2136,10 @@ def plain_summary(report, failed=None, passed=None):
 def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
     """เลขหน้าภาคผนวกในสารบัญชี้ไปหน้าเริ่มของภาคผนวก 'อีกชุด' ที่มีอยู่จริงในเล่ม
 
-    ใช้เลือก 'ข้อความอธิบาย' เท่านั้น ไม่ได้ใช้ตัดสินสี — นโยบายใหม่: เลขหน้าของ
-    หัวข้อหลักในสารบัญไม่ตรงหน้าจริง ให้เป็น 'ส้ม' (รอเจ้าหน้าที่ยืนยัน) ทุกกรณี
-    ถ้าไม่มีจุดผิดที่สำคัญกว่า เจ้าหน้าที่ให้ผ่านได้ กรณีภาคผนวกหลายชุดนี้แค่
-    ต้องอธิบายให้ชัดว่า 87 เป็นหน้าเริ่มของภาคผนวกอีกชุด ไม่ใช่เลขมั่ว
+    ใช้เลือก 'ข้อความอธิบาย' เท่านั้น ไม่ได้ใช้ตัดสินสี — กติกา ส.ค. 2569 เลิกตรวจ
+    เลขหน้าที่สารบัญอ้างถึงแล้ว ทุกกรณีเป็น 'เหลือง' (ข้อสังเกต ผ่านได้) กรณี
+    ภาคผนวกหลายชุดนี้แค่ต้องอธิบายให้ชัดว่า 87 เป็นหน้าเริ่มของภาคผนวกอีกชุด
+    ไม่ใช่เลขมั่ว
     """
     return section_kind == "appendix" and toc_label in appendix_labels
 
@@ -2243,6 +2348,62 @@ def mismatch_detail(label, compared, expected=''):
     elif compared['status'] == 'typo':
         detail += ' พิมพ์ผิดเล็กน้อย'
     return detail
+
+
+# คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้
+_TITLE_LEAD_IN = re.compile(r'^(?:entitled|เรื่อง)$', re.I)
+# บรรทัดที่บอกว่าบล็อกชื่อเรื่องจบแล้ว (ข้อความ template ที่ตามหลังชื่อเรื่องเสมอ)
+_TITLE_STOP = re.compile(
+    r'^(?:was\s+submitted\s+to'
+    r'|A\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|MASTER|DOCTOR)'
+    r'|ได้รับการพิจารณา|วิทยานิพนธ์นี้เป็นส่วนหนึ่ง|สารนิพนธ์นี้เป็นส่วนหนึ่ง'
+    r'|ABSTRACT|บทคัดย่อ|FACULTY\s+OF|บัณฑิตวิทยาลัย)', re.I)
+
+
+def printed_title(page_text, student_name=""):
+    """ชื่อเรื่อง "ตามที่พิมพ์จริง" บนหน้านั้น รวมบรรทัดที่ห่อคำมาให้ครบ
+
+    ต้องหาจากโครงสร้างของหน้า ไม่ใช่หาช่วงที่ "ใกล้เคียงข้อมูลอนุมัติที่สุด" เพราะถ้า
+    ชื่อในเล่มกับในระบบเป็นคนละเรื่องกันจริง ๆ การหาช่วงที่ใกล้เคียงจะได้เศษข้อความมั่ว
+    เล่มจริงเคยได้บรรทัดเนื้อความบทคัดย่อ ("suitable for future implementation of
+    Robotic Process Automation (RPA), and to establish a") มาอ้างว่าเป็นชื่อเรื่อง
+
+    ขอบเขต: เริ่มหลังคำว่า "entitled"/"เรื่อง" (หน้าลงนาม) หรือบรรทัดแรกที่ยาวพอ
+    (หน้าปก/หน้าบทคัดย่อ) จบเมื่อเจอข้อความ template ที่ตามหลังชื่อเรื่อง ชื่อนักศึกษา
+    หรือบรรทัดชื่อ-รหัสนักศึกษา
+    """
+    lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
+    start = None
+    for i, line in enumerate(lines):
+        if _TITLE_LEAD_IN.match(line.strip()):
+            start = i + 1
+            break
+    if start is None:
+        start = next((i for i, line in enumerate(lines)
+                      if len(norm(line)) >= 8 and not _ABS_RUNNING_HEAD.search(line)), None)
+    if start is None:
+        return ""
+    want_name = norm(_strip_student_title(student_name)) if student_name else ""
+    out = []
+    for line in lines[start:start + 6]:
+        if _TITLE_STOP.match(line.strip()) or _ABS_STUDENT_LINE.search(line):
+            break
+        if want_name and want_name in norm(line):
+            break
+        out.append(line)
+    return ' '.join(out).strip()
+
+
+def _title_as_printed(compared, page_text, expected, student_name=""):
+    """แทน "ช่วงที่ใกล้เคียงที่สุด" ด้วยชื่อเรื่องตามที่พิมพ์จริง เมื่อหาบล็อกชื่อเรื่องเจอ
+
+    ใช้เฉพาะตอนที่ยังไม่ตรง — ถ้าตรงอยู่แล้วไม่ต้องแตะ
+    ถ้าหาบล็อกไม่เจอ คงค่าเดิมไว้ ดีกว่าไม่มีอะไรให้เจ้าหน้าที่ดูเลย
+    """
+    printed = printed_title(page_text, student_name)
+    if not printed:
+        return compared
+    return compare_values(printed, expected, 'title')
 
 
 def title_mismatch_detail(label, compared, expected=''):
@@ -2523,7 +2684,13 @@ def _toc_chapter_title(text):
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
-N_TOC = [norm('สารบัญ'), 'TABLEOFCONTENTS', 'CONTENTS']
+# หัวข้อสารบัญตาม template คือ "TABLE OF CONTENTS" / "สารบัญ" เท่านั้น
+# ส่วน CONTENT / CONTENTS เป็นคำที่เล่มจริงพิมพ์ผิดมา ต้องรู้จักไว้เพื่อ "หาหน้าสารบัญเจอ"
+# (ไม่งั้นการตรวจสารบัญทั้งชุดเงียบไปทั้งเล่ม แล้วยังฟ้องผิดว่า "ไม่พบหน้าสารบัญ")
+# แล้วค่อยฟ้องแยกว่าให้แก้หัวข้อเป็น TABLE OF CONTENTS
+TOC_HEADING_CANONICAL = 'TABLE OF CONTENTS'
+N_TOC_WRONG = ['CONTENTS', 'CONTENT']
+N_TOC = [norm('สารบัญ'), 'TABLEOFCONTENTS'] + N_TOC_WRONG
 N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญรูป'), norm('สารบัญรูปภาพ'), norm('สารบัญภาพ'),
            norm('คำย่อ'), norm('คำอธิบายสัญลักษณ์/คำย่อ'),
            'LISTOFTABLES', 'LISTOFFIGURES', 'LISTOFABBREVIATIONS', 'LISTOFILLUSTRATIONS']
@@ -2654,8 +2821,6 @@ def resolve_option(body_ch, approved, chapters_mode):
     if chapters_mode == "free" and selected in {"1", "2"}:
         return int(selected)
     return inferred
-
-
 
 
 def classify(issue):
@@ -2806,6 +2971,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("ระบุตำแหน่ง section ส่วนนำ")
     front_limit = min(n, 20)
     sig_pages, abs_th_pages, abs_en_pages, ack_pages, toc_pages, list_pages = [], [], [], [], [], []
+    toc_heading_wrong = []      # (ดัชนีหน้า, หัวข้อที่เล่มพิมพ์) เมื่อไม่ใช่ TABLE OF CONTENTS
     for i in range(front_limit):
         tls = top_lines(pages[i], 12)
         nls = [norm(l) for l in tls]
@@ -2822,7 +2988,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if nl in N_ACK:
                 ack_pages.append(i); break
             if nl in N_TOC:
-                toc_pages.append(i); break
+                toc_pages.append(i)
+                if nl in N_TOC_WRONG:
+                    toc_heading_wrong.append((i, soft(tls[j])))
+                break
             if nl in N_LISTS:
                 list_pages.append(i); break
 
@@ -2917,21 +3086,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    expected_labels = [("i", "ก"), ("ii", "ข")]
-    for k, i2 in enumerate(sig_pages[:2]):
-        lab_en, lab_th = expected_labels[k]
-        # ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่
-        # บรรทัดแรกเสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่
-        # เป็นเลขหน้าล้วน (สั้น) จึงไม่ชนกับข้อความในเนื้อหน้า
-        page_lines = [l.strip() for l in pages[i2].split('\n') if l.strip()]
-        matched = any(t.lower() == lab_en or norm(t) == norm(lab_th) for t in page_lines)
-        if not matched:
-            found_lab = _extract_page_label(pages[i2])
-            what = f'หน้านี้พิมพ์เลขหน้าว่า "{found_lab}"' if found_lab else "ไม่พบเลขหน้าบนหน้า"
-            rep.add(FRONT_FAILURE_ZONE, "front_matter", f"หน้าลงนามหน้า {k+1} ({page_ref(i2)})",
-                    what,
-                    f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
-                    "", "PAGE.NUMBERING")
+    _report_signature_page_labels(rep, sig_pages, pages, page_ref, FRONT_FAILURE_ZONE)
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -3052,16 +3207,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             found_msg += f" {diff}"
                         rep.add("RED", "body", loc, found_msg,
                                 f'ต้องแก้เป็น "{correct}"', "", "FRONT.TOC")
+                # เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569) — ยังบันทึก
+                # ไว้เป็นข้อสังเกตสีเหลืองให้เจ้าหน้าที่เห็น แต่ไม่ทำให้เล่มไม่ผ่าน
                 if BODY_RULES['check_toc_page_numbers'] and t_pno is None:
-                    rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
+                    rep.add(TOC_PAGE_ZONE, "front_matter",
+                            f"สารบัญ ({page_ref(toc_page_idx)}) บทที่ {cn}",
                             f"หัวข้อ \"{t_raw}\" ไม่มีเลขหน้า",
-                            "หัวข้อบทในสารบัญต้องระบุเลขหน้า", "เพิ่มเลขหน้าให้ตรงกับบทจริง", "FRONT.TOC")
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FRONT.TOC_PAGE_REF")
                 elif BODY_RULES['check_toc_page_numbers'] and pno is not None and t_pno != pno:
-                    # เลขหน้าบทในสารบัญไม่ตรงหน้าจริง = ส้ม ให้เจ้าหน้าที่ตัดสิน
-                    rep.add("ORANGE", "body", f"สารบัญ ({page_ref(toc_page_idx)}) กับบทที่ {cn} ({page_ref(ppage)})",
+                    rep.add(TOC_PAGE_ZONE, "body",
+                            f"สารบัญ ({page_ref(toc_page_idx)}) กับบทที่ {cn} ({page_ref(ppage)})",
                             f"สารบัญระบุหน้า {t_pno} แต่บทอยู่จริงหน้า {pno}",
-                            f"เลขหน้าบทในสารบัญควรเป็น {pno}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ", "FRONT.TOC")
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FRONT.TOC_PAGE_REF")
             elif BODY_RULES['check_toc_chapter_presence']:
                 rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})", "ไม่อยู่ในสารบัญ",
                         "ทุกบทต้องปรากฏในสารบัญ", "", "FRONT.TOC")
@@ -3072,18 +3231,29 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 toc_problem, "ส่วนนำต้องมีสารบัญและระบุบททุกบทพร้อมเลขหน้า",
                 "เพิ่มหรืออัปเดตสารบัญให้ครบ", "FRONT.TOC_CONTENT")
 
+    # หัวข้อหน้าสารบัญต้องเป็น "TABLE OF CONTENTS" ตาม template
+    # เล่มจริงพิมพ์ "CONTENT" ซึ่งทำให้ระบบหาหน้าสารบัญไม่เจอทั้งชุด (ตอนนี้รู้จักแล้ว)
+    for toc_idx, printed_heading in toc_heading_wrong:
+        rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_idx)})",
+                f'หัวข้อหน้าสารบัญเขียนว่า "{printed_heading}"',
+                f'ต้องแก้เป็น "{TOC_HEADING_CANONICAL}"', "", "FRONT.TOC")
+
     # หัวข้อระดับหลักในสารบัญต้องเป็นตัวหนา (ไม่บังคับหัวข้อย่อย 1.1, 1.2, ...)
     toc_scan_pages = toc_page_indices
     if toc_scan_pages:
         try:
             with pdfplumber.open(pdf_path) as _pl:
+                # สารบัญยาวหลายหน้า แต่ฟอนต์เป็นของทั้งไฟล์ ถ้าบอกน้ำหนักไม่ได้ก็บอก
+                # ไม่ได้ทุกหน้าเหมือนกัน จึงฟ้องข้อเดียว ไม่ใช่ซ้ำทีละหน้า
+                if all(bold_is_undetectable(_pl.pages[i]) for i in toc_scan_pages):
+                    rep.add(UNCERTAIN_ZONE, "front_matter",
+                            f"สารบัญ ({page_ref(toc_scan_pages[0])})",
+                            "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
+                            "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                            "ตรวจด้วยตา", "FORMAT.BOLD")
+                    toc_scan_pages = []
                 for toc_idx in toc_scan_pages:
                     if bold_is_undetectable(_pl.pages[toc_idx]):
-                        rep.add(UNCERTAIN_ZONE, "front_matter",
-                                f"สารบัญ ({page_ref(toc_idx)})",
-                                "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
-                                "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
-                                "ตรวจด้วยตา", "FORMAT.BOLD")
                         continue
                     nonbold = []
                     for line in _font_lines(_pl.pages[toc_idx]):
@@ -3476,6 +3646,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "FRONT.ORDER",
             )
 
+        # ต้องรู้ชื่อนักศึกษาก่อนตรวจชื่อเรื่อง — printed_title ใช้ชื่อนักศึกษาเป็น
+        # ขอบล่างของบล็อกชื่อเรื่องบนหน้าปก (บรรทัดถัดจากชื่อเรื่องคือชื่อผู้เขียน)
+        student_name = strip_name_prefix(A.get("student_name", ""))
+        student_name_th = strip_name_prefix(A.get("student_name_th", ""))
+        primary_student_name = student_name_th if thai_book else student_name
+
         main_title = (A.get("title_th") if thai_book else A.get("title_en")) or ""
         alt_title = "" if A.get("program_language") == "international" else \
             ((A.get("title_en") if thai_book else A.get("title_th")) or "")
@@ -3489,6 +3665,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 spots.append((f"บทคัดย่อ ({page_ref(main_abs)})", pages[main_abs]))
             for spot_name, spot_text in spots:
                 compared = compare_reference_text(spot_text, main_title, 'title')
+                if compared['status'] != 'exact':
+                    compared = _title_as_printed(compared, spot_text,
+                                                 main_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", spot_name,
                                      "pass" if compared['status'] == 'exact' else "fail",
                                      "" if compared['status'] == 'exact' else compared['actual'])
@@ -3502,6 +3681,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             alt_lbl = "บทคัดย่อภาษาอังกฤษ" if thai_book else "บทคัดย่อภาษาไทย"
             if alt_abs is not None:
                 compared = compare_reference_text(pages[alt_abs], alt_title, 'title')
+                if compared['status'] != 'exact':
+                    compared = _title_as_printed(compared, pages[alt_abs],
+                                                 alt_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(alt_abs)})",
                                      "pass" if compared['status'] == 'exact' else "fail",
                                      "" if compared['status'] == 'exact' else compared['actual'])
@@ -3515,10 +3697,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # อยู่แล้ว จึงไม่ฟ้องซ้ำด้วยข้อความที่ฟังเหมือนระบบอ่านไม่ได้
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "เล่มไม่มีหน้าบทคัดย่อภาษานี้")
-
-        student_name = strip_name_prefix(A.get("student_name", ""))
-        student_name_th = strip_name_prefix(A.get("student_name_th", ""))
-        primary_student_name = student_name_th if thai_book else student_name
 
         if ack_pages and (student_name_th if thai_book else student_name):
             ack_start = ack_pages[0]
@@ -3721,13 +3899,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     continue
                 if norm(expected_degree) in norm(spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
-                    # (เช่น comma ในวงเล็บสาขา) — ส้มให้เจ้าหน้าที่ยืนยัน
+                    # (เช่น "M.Sc. ()" กับ "M.Sc.()") = ข้อสังเกตสีเหลือง ผ่านได้
+                    # ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
                     rep.add_verification("ชื่อปริญญา", spot_name, "pending",
                                          "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                    rep.add("ORANGE", "front_matter", spot_name,
+                    rep.add(DEGREE_SPACING_ZONE, "front_matter", spot_name,
                             f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                             f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
-                            "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FORM.DEGREE_SPACING")
                 else:
                     rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
@@ -3758,12 +3937,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 else:
                     rep.add_verification("ชื่อปริญญา", vloc, "pass")
             elif norm(abbr) in norm(abstract_text):
-                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง — ส้มให้เจ้าหน้าที่ยืนยัน
+                # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
-                rep.add("ORANGE", "front_matter", box,
+                rep.add(DEGREE_SPACING_ZONE, "front_matter", box,
                         f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                         f"ข้อมูลอนุมัติ: \"{abbr}\"",
-                        "เจ้าหน้าที่ยืนยันว่ายอมรับได้หรือให้แก้", "FORM.APPROVED_MATCH")
+                        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FORM.DEGREE_SPACING")
             elif not _looks_like_degree_line(compared['actual']):
                 # หน้านี้ไม่มีบรรทัดชื่อปริญญาแบบย่อเลย (เจอในเล่มจริง: ข้ามจากบรรทัด
                 # ชื่อ-รหัสนักศึกษาไป THESIS ADVISORY COMMITTEE เลย) ห้ามยกบรรทัดอื่น
@@ -3916,39 +4095,41 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                 f'คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "{page_terms[0]}"',
                                 f'แก้คำในสารบัญให้เป็น "{page_terms[0]}"', "FRONT.TOC_CONTENT",
                             )
+                # เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569) — บันทึกเป็น
+                # ข้อสังเกตสีเหลือง เล่มที่มีแต่ข้อเหล่านี้ผ่านได้
                 if not entry["page_label"]:
                     rep.add(
-                        "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",
+                        TOC_PAGE_ZONE, "front_matter",
+                        f"สารบัญ ({page_ref(entry['source_page_idx'])})",
                         f"หัวข้อ {section_label} ไม่มีเลขหน้า",
-                        f"หัวข้อ {section_label} ต้องระบุเลขหน้าที่เริ่มต้นจริง",
-                        "เพิ่มเลขหน้าของหัวข้อนี้ในสารบัญ",
-                        "FRONT.TOC_CONTENT",
+                        "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                        "FRONT.TOC_PAGE_REF",
                     )
                     continue
                 actual_label = page_labels.get(actual_page_idx, "")
                 if actual_label and entry["page_label"] != actual_label:
                     location = (f"สารบัญ ({page_ref(entry['source_page_idx'])}) กับ"
                                 f"{section_label} ({page_ref(actual_page_idx)})")
-                    # เลขหน้าหัวข้อหลักในสารบัญไม่ตรงหน้าจริง = ส้มทุกกรณี ให้เจ้าหน้าที่
-                    # ตัดสิน (ถ้าไม่มีจุดผิดสำคัญกว่าก็ผ่านได้) กรณีภาคผนวกหลายชุดแค่ใช้
-                    # ข้อความอธิบายต่างออกไปว่าเลขที่ระบุเป็นหน้าเริ่มของภาคผนวกอีกชุด
+                    # กรณีภาคผนวกหลายชุดใช้ข้อความอธิบายต่างออกไป ว่าเลขที่ระบุเป็น
+                    # หน้าเริ่มของภาคผนวกอีกชุด ไม่ใช่เลขมั่ว
                     if toc_page_mismatch_is_appendix_alt(section_kind, entry["page_label"],
                                                          appendix_labels):
                         rep.add(
-                            "ORANGE", "front_matter", location,
+                            TOC_PAGE_ZONE, "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} ซึ่งเป็นหน้าเริ่มของภาคผนวกอีกชุดหนึ่ง "
                             f"(ภาคผนวกชุดแรกอยู่หน้า {actual_label})",
-                            f"โดยทั่วไปหัวข้อ {section_label} ควรชี้หน้าเริ่มของภาคผนวกชุดแรก คือหน้า {actual_label}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เป็นหน้าแรกของภาคผนวก",
-                            "FRONT.TOC_CONTENT",
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                            "FRONT.TOC_PAGE_REF",
                         )
                     else:
                         rep.add(
-                            "ORANGE", "front_matter", location,
+                            TOC_PAGE_ZONE, "front_matter", location,
                             f"สารบัญระบุหน้า {entry['page_label']} แต่หัวข้อเริ่มจริงหน้า {actual_label}",
-                            f"เลขหน้า {section_label} ในสารบัญควรเป็น {actual_label}",
-                            "เจ้าหน้าที่พิจารณาว่ายอมรับได้ หรือให้แก้เลขหน้าในสารบัญ",
-                            "FRONT.TOC_CONTENT",
+                            "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                            "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                            "FRONT.TOC_PAGE_REF",
                         )
 
             for optional_kind in ("list_tables", "list_figures", "list_abbreviations"):

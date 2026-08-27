@@ -15,6 +15,7 @@ from checker import (
     _drop_separator_dot,
     _graphemes,
     _correctly_spelled_side,
+    printed_title,
     _check_student_line_pairs_name_with_id,
     student_id_line,
     _looks_like_degree_line,
@@ -499,12 +500,12 @@ class TocSectionPageTests(unittest.TestCase):
 
     def test_appendix_pointing_at_another_appendix_uses_alt_message(self):
         # สารบัญเขียน "APPENDIX 87" แต่ภาคผนวกชุดแรกอยู่หน้า 85 — 87 เป็นหน้าเริ่ม
-        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นส้ม)
+        # ของ APPENDIX B ที่มีจริง จึงใช้ข้อความอธิบายแบบภาคผนวกหลายชุด (ยังเป็นเหลือง)
         self.assertTrue(
             toc_page_mismatch_is_appendix_alt("appendix", "87", self.APPENDIX_PAGES))
 
     def test_appendix_pointing_at_a_page_with_no_appendix_is_generic(self):
-        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นส้ม
+        # ชี้ไปหน้าที่ไม่มีภาคผนวกเลย = mismatch ธรรมดา (ไม่ใช่ alt) แต่ก็ยังเป็นเหลือง
         self.assertFalse(
             toc_page_mismatch_is_appendix_alt("appendix", "999", self.APPENDIX_PAGES))
 
@@ -954,7 +955,7 @@ class AbstractCommitteeTests(unittest.TestCase):
         self.assertTrue(any("ตำแหน่งทางวิชาการ" in r for r in reds))
 
     def test_different_names_are_not_flagged_when_the_count_matches(self):
-        """นโยบาย ส.ค. 2569: ไม่เทียบชื่อ/ตัวสะกด — คนละชื่อแต่ครบจำนวนก็ไม่ฟ้อง"""
+        """ไม่เทียบชื่อทั้งไทยและอังกฤษ (เจ้าหน้าที่สั่ง ส.ค. 2569) — ครบจำนวนก็พอ"""
         committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
                                     {"name": "ธเนศ ข", "role": ""}]}
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด., สมชาย ใจดี, พย.ด.\nบทคัดย่อ"]
@@ -969,23 +970,29 @@ class AbstractCommitteeTests(unittest.TestCase):
         rep = self._run(committees, [], [0], pages)
         self.assertEqual(self._reds(rep), [])          # จำนวนไม่ตรง = ส้ม ไม่ใช่แดง
         found = [i["found"] for i in rep.zones["ORANGE"]]
-        self.assertTrue(any("ได้ 1 คน" in f and "มี 2 คน" in f for f in found))
+        self.assertTrue(any("หน้านี้มี 1 ชื่อ แต่อนุมัติไว้ 2 ชื่อ" in f for f in found),
+                        found)
+        # ต้องบอกด้วยว่าควรมีชื่ออะไรบ้าง (ดึงจากฟอร์มต้นทาง)
+        expected = [i["expected"] for i in rep.zones["ORANGE"]]
+        self.assertTrue(any("ธเนศ ข" in e for e in expected), expected)
 
     def test_committee_list_is_printed_for_staff_to_check_by_eye(self):
         committees = {"advisory": [{"name": "คนางค์ ก", "role": ""}]}
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ"]
         rep = self._run(committees, [], [0], pages)
         why = " ".join(h["why"] for h in rep.human_checklist)
-        self.assertIn("ไม่ได้เทียบชื่อ", why)
+        self.assertIn("นับจำนวนอาจารย์เทียบกับ บฑ.1 ให้แล้ว แต่ไม่ได้เทียบชื่อ", why)
         self.assertIn("คนางค์ ก", why)
 
-    def test_english_abstract_needs_no_transliteration_any_more(self):
-        """เลิกเทียบชื่อแล้ว เล่มอังกฤษจึงไม่ต้องถอดชื่อไทยก่อน และไม่ฟ้องอะไรเพิ่ม"""
+    def test_an_english_page_is_treated_exactly_like_a_thai_one(self):
+        """ไม่เทียบชื่อแล้ว ภาษาของหน้าจึงไม่มีผล — ชื่อไทยกับอังกฤษนับเหมือนกัน"""
         committees = {"advisory": [{"name": "นริศรา จันทราทิตย์", "role": ""}]}
         pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D.\nABSTRACT"]
         rep = self._run(committees, [0], [], pages)
         self.assertEqual(self._reds(rep), [])
         self.assertEqual(rep.zones["ORANGE"], [])
+        why = " ".join(h["why"] for h in rep.human_checklist)
+        self.assertIn("นับจำนวนอาจารย์เทียบกับ บฑ.1 ให้แล้ว แต่ไม่ได้เทียบชื่อ", why)
 
     def test_format_rules_run_without_ethesis_data(self):
         # กฎรูปแบบเป็นกฎของ template ล้วน ต้องตรวจได้แม้เจ้าหน้าที่ไม่ได้อัปโหลด eThesis
@@ -1617,6 +1624,387 @@ class StudentIdMismatchSaysWhatTheBookPrinted(unittest.TestCase):
         self.assertEqual(_closest_student_id(page, "6536627 NSMY/M"), "6526627 NSMY/M")
 
 
+class TitleIsQuotedAsPrintedNotAsTheClosestFragment(unittest.TestCase):
+    """ชื่อเรื่องที่ยกมาต้องเป็นชื่อเรื่องตามที่พิมพ์จริง ไม่ใช่ช่วงที่ใกล้เคียงที่สุด
+
+    ถ้าชื่อในเล่มกับในระบบเป็นคนละเรื่องกันจริง ๆ การหา "ช่วงที่ใกล้เคียงที่สุด"
+    จะได้เศษข้อความมั่ว เล่มจริงเคยได้บรรทัดเนื้อความบทคัดย่อมาอ้างว่าเป็นชื่อเรื่อง
+    """
+
+    COVER = "\n".join([
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC",
+        "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI-",
+        "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK",
+        "CHANATASA MOUNGKHAODAENG",
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "OF THE REQUIREMENTS FOR THE DEGREE OF",
+    ])
+    SIGNATURE = "\n".join([
+        "i", "Thesis", "entitled",
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC",
+        "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI-",
+        "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK",
+        "was submitted to the Faculty of Graduate Studies, Mahidol University",
+    ])
+    ABSTRACT = "\n".join([
+        "iv",
+        "SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC PROCESS",
+        "AUTOMATION IMPLEMENTATION: A HYBRID MULTI-CRITERIA DECISION-",
+        "MAKING BASED ON BOCR FRAMEWORK",
+        "CHANATASA MOUNGKHAODAENG 6537062 EGIE/M",
+        "M.Eng. (LOGISTICS AND SUPPLY CHAIN)",
+        "ABSTRACT",
+        "This study aims to identify warehouse processes suitable for future",
+        "implementation of Robotic Process Automation (RPA), and to establish a",
+    ])
+    FULL = ("SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC "
+            "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI- "
+            "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK")
+
+    def test_cover_title_stops_at_the_author_name(self):
+        self.assertEqual(printed_title(self.COVER, "CHANATASA MOUNGKHAODAENG"),
+                         self.FULL)
+
+    def test_signature_title_starts_after_entitled(self):
+        got = printed_title(self.SIGNATURE, "CHANATASA MOUNGKHAODAENG")
+        self.assertEqual(got, self.FULL)
+        self.assertNotIn("Thesis", got)
+        self.assertNotIn("was submitted", got)
+
+    def test_abstract_title_does_not_take_a_body_sentence(self):
+        got = printed_title(self.ABSTRACT, "CHANATASA MOUNGKHAODAENG")
+        self.assertTrue(got.startswith("SELECTION OF SMART WAREHOUSE"), got)
+        self.assertNotIn("This study aims", got)
+        self.assertNotIn("6537062", got)
+
+    def test_page_without_a_title_returns_empty_so_the_old_value_is_kept(self):
+        self.assertEqual(printed_title("iv\nABSTRACT\nBody text here."), "")
+
+
+class TocHeadingMustBeTableOfContents(unittest.TestCase):
+    """หัวข้อหน้าสารบัญที่พิมพ์ผิด ต้องยังหาหน้าสารบัญเจอ แล้วฟ้องแยกว่าให้แก้หัวข้อ
+
+    เล่มจริงพิมพ์ "CONTENT" ระบบจึงหาหน้าสารบัญไม่เจอทั้งชุด แล้วฟ้องผิดพ่วงมาอีก
+    ("ไม่พบหน้าสารบัญ", "ภาคผนวกไม่อยู่ในสารบัญ", "บทคัดย่อไทยเกิน 2 หน้า")
+    """
+
+    def test_wrong_headings_are_still_recognised_as_a_toc(self):
+        for heading in ("CONTENT", "CONTENTS"):
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+    def test_canonical_headings_are_not_flagged(self):
+        for heading in ("TABLE OF CONTENTS", "สารบัญ"):
+            self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
+            self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+
+class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
+    """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
+
+    เจ้าหน้าที่ย้ำว่า "เลขหน้า ก ข i ii ยังต้องตรวจนะ" — สองเลขนี้ไม่ใช่แค่การเรียงเลข
+    แต่เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการที่ปรึกษา หน้าไหนเป็นของคณะกรรมการสอบ
+    ซึ่งกำหนดว่าหน้านั้นจะถูกเทียบกับ บฑ.1 หรือ บฑ.2
+    """
+
+    def _run(self, first, second):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}", "RED")
+        return [(it["location"], it["found"]) for it in rep.zones["RED"]]
+
+    def test_correct_labels_pass(self):
+        self.assertEqual(self._run("Thesis entitled X\ni", "Thesis entitled X\nii"), [])
+        self.assertEqual(self._run("วิทยานิพนธ์ เรื่อง X\nก", "วิทยานิพนธ์ เรื่อง X\nข"), [])
+
+    def test_the_same_number_on_both_pages_is_caught(self):
+        """เล่มจริง (เล่มทดสอบ 3) พิมพ์ "ค" ทั้งสองหน้า ต้องฟ้องทั้งคู่"""
+        bad = self._run("วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค")
+        self.assertEqual(len(bad), 2)
+        self.assertTrue(all('พิมพ์เลขหน้าว่า "ค"' in f for _loc, f in bad), bad)
+
+    def test_swapped_pages_are_caught(self):
+        """สลับหน้ากันแปลว่าหน้าที่ปรึกษากับหน้ากรรมการสอบสลับที่ ต้องไม่ปล่อยผ่าน"""
+        bad = self._run("Thesis entitled X\nii", "Thesis entitled X\ni")
+        self.assertEqual(len(bad), 2)
+
+    def test_a_page_with_no_number_says_so(self):
+        """ไม่มีเลขหน้ากับพิมพ์เลขผิด เป็นคนละเรื่อง วิธีแก้ต่างกัน"""
+        bad = self._run("Thesis entitled X", "Thesis entitled X")
+        self.assertEqual([f for _loc, f in bad],
+                         ["ไม่พบเลขหน้าบนหน้า", "ไม่พบเลขหน้าบนหน้า"])
+
+    def test_the_number_does_not_have_to_be_on_the_first_line(self):
+        """บางเล่มมีหัวเรื่องนำหน้า เลขหน้าจึงไม่ได้อยู่บรรทัดแรก"""
+        page = "วิทยานิพนธ์\nก\nเรื่อง ...\nได้รับการพิจารณา..."
+        self.assertEqual(self._run(page, "วิทยานิพนธ์ เรื่อง X\nข"), [])
+
+    def test_the_expected_label_is_stated_in_both_scripts(self):
+        """เจ้าหน้าที่ต้องรู้ทันทีว่าหน้านั้นต้องเป็นเลขอะไร ไม่ต้องเปิดคู่มือ"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["Thesis entitled X\nz", "Thesis entitled X\nz"],
+            lambda i: f"แผ่นที่ {i + 1}", "RED")
+        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["RED"][0]["expected"])
+        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["RED"][1]["expected"])
+
+    def test_the_page_number_decides_which_form_the_page_is_checked_against(self):
+        """เหตุผลที่กฎนี้ยังต้องอยู่ — เลขหน้าคือตัวเลือกฟอร์ม"""
+        for label, form in (("i", "บฑ.1"), ("ii", "บฑ.2"),
+                            ("ก", "บฑ.1"), ("ข", "บฑ.2")):
+            kind = checker_module.signature_page_kind(label, "")
+            self.assertEqual(checker_module.committee_source_form(kind), form, label)
+
+
+class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
+    """หน้าลงนาม/หน้าบทคัดย่อ: ตรวจ "จำนวน" รายชื่อเทียบฟอร์มต้นทาง ไม่เทียบชื่อ
+
+    เจ้าหน้าที่สั่ง (ส.ค. 2569): *"ทั้งไทยและอังกฤษ ไม่ต้องเทียบชื่อ สมมุติว่าใน บฑ.1
+    หรือ บฑ.2 เป็น 3 ชื่อ ในเล่มมี 2 หรือ 4 ชื่อ ... แจ้งว่ารายชื่อไม่ครบตามที่ได้รับ
+    อนุมัติใน บฑ.1 หรือ 2 แล้วแต่หน้า และก็บอกว่าควรมีชื่ออะไรบ้าง"*
+    """
+
+    FORM3 = [{"name": "คนางค์ คันธมธุรพจน์"},
+             {"name": "ธเนศ เกษศิลป์"},
+             {"name": "สุภาภรณ์ สงค์ประชา"}]
+
+    def _count(self, read, form="บฑ.2"):
+        rep = Report()
+        checker_module._report_committee_count(
+            rep, self.FORM3, read, "หน้ากรรมการสอบ (หน้า ข)", form)
+        return rep
+
+    def test_each_page_names_its_own_source_form(self):
+        self.assertEqual(checker_module.committee_source_form("advisory"), "บฑ.1")
+        self.assertEqual(checker_module.committee_source_form("exam"), "บฑ.2")
+        # หน้าที่อ่านชนิดไม่ออก ยังต้องบอกฟอร์มได้ ไม่ใช่คืนค่าว่าง
+        self.assertEqual(checker_module.committee_source_form(None), "บฑ.1")
+
+    def test_the_form_follows_the_page_all_the_way_from_its_page_number(self):
+        """เลขหน้า -> ชนิดหน้า -> ชื่อฟอร์ม ต้องต่อกันถูกทั้งเล่มไทยและเล่มอังกฤษ
+
+        เจ้าหน้าที่สั่งว่า "ต้องเปลี่ยนเงื่อนไข บฑ. ไปแต่ละหน้า" — หน้าลงนาม 1 กับ
+        หน้าบทคัดย่อใช้ บฑ.1 ส่วนหน้าลงนาม 2 ใช้ บฑ.2
+        """
+        for label, form in (("i", "บฑ.1"), ("ii", "บฑ.2"),
+                            ("ก", "บฑ.1"), ("ข", "บฑ.2")):
+            kind = checker_module.signature_page_kind(label, "")
+            self.assertEqual(checker_module.committee_source_form(kind), form, label)
+
+    def test_the_abstract_page_always_cites_the_advisory_form(self):
+        """หน้าบทคัดย่อพิมพ์คณะกรรมการที่ปรึกษา จึงอ้าง บฑ.1 เสมอ ไม่ว่าจะภาษาอะไร"""
+        committees = {"advisory": [{"name": "คนางค์ ก", "role": ""},
+                                    {"name": "ธเนศ ข", "role": ""}]}
+        pages = {
+            "ไทย": "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ",
+            "อังกฤษ": "THESIS ADVISORY COMMITTEE: KANANG KOR, Ph.D.\nABSTRACT",
+        }
+        for lang, page in pages.items():
+            rep = Report()
+            en = [0] if lang == "อังกฤษ" else []
+            th = [] if lang == "อังกฤษ" else [0]
+            _check_abstract_committees(rep, committees, en, th, [page],
+                                       lambda i: "หน้า iv")
+            found = " ".join(i["found"] for i in rep.zones["ORANGE"])
+            self.assertIn("บฑ.1", found, lang)
+            self.assertNotIn("บฑ.2", found, lang)
+
+    def test_names_are_never_compared(self):
+        """คนละคนกันทั้งชุด แต่จำนวนครบ ต้องไม่ฟ้อง"""
+        rep = self._count(["สมชาย ใจดี", "สมหญิง รักเรียน", "สมศักดิ์ ตั้งใจ"])
+        self.assertEqual(rep.zones["ORANGE"], [])
+        self.assertEqual(rep.zones["RED"], [])
+        # ตัวเทียบชื่อต้องถูกถอดออกไปแล้วจริง ๆ ไม่ใช่แค่เลิกเรียก
+        for gone in ("_report_committee_names", "committee_names_match",
+                     "committee_name_script", "_committee_name_key"):
+            self.assertFalse(hasattr(checker_module, gone), gone)
+
+    def test_too_few_names_says_the_list_is_incomplete(self):
+        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        self.assertIn("รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.2", issue["found"])
+        self.assertIn("หน้านี้มี 2 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
+
+    def test_too_many_names_says_the_list_is_over(self):
+        issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["ORANGE"][0]
+        self.assertIn("รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2", issue["found"])
+        self.assertIn("หน้านี้มี 4 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
+
+    def test_the_finding_lists_who_should_be_there(self):
+        """เจ้าหน้าที่สั่งให้บอกด้วยว่าควรมีชื่ออะไรบ้าง ดึงจากฟอร์มต้นทาง"""
+        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        for name in ("คนางค์ คันธมธุรพจน์", "ธเนศ เกษศิลป์", "สุภาภรณ์ สงค์ประชา"):
+            self.assertIn(name, issue["expected"], name)
+        self.assertIn("ตาม บฑ.2", issue["expected"])
+
+    def test_the_right_count_says_nothing(self):
+        self.assertEqual(self._count(["ก ก", "ข ข", "ค ค"]).zones["ORANGE"], [])
+
+    def test_only_cells_holding_a_name_are_counted(self):
+        # ช่องคงที่ของ template ถูกคัดออกตั้งแต่ _sig_clean_name (คืน None)
+        # เหลือกันเศษที่ไม่มีตัวอักษรเลย ไม่ให้ถูกนับเป็นอาจารย์อีกคน
+        members = {1: "คนางค์ ก", 2: None, 3: "....", 4: "ธเนศ ข", 5: "  "}
+        self.assertEqual(checker_module.committee_name_list(members),
+                         ["คนางค์ ก", "ธเนศ ข"])
+
+    def test_a_broken_read_never_becomes_an_accusation(self):
+        """ตารางลายเซ็นอ่านพลาดได้หลายแบบ ทุกแบบทำให้ "จำนวน" ผิดไปด้วย
+
+        แต่ละเคสคือความพลาดที่เคยเจอในเล่มจริง บันทึกไว้ในคอมเมนต์ของ
+        signature_committee_slots / _rejoin_thai_marks — ถ้าฟ้องดื้อ ๆ จะกลายเป็น
+        บอกว่าเล่มที่ถูกอยู่แล้วมีรายชื่อไม่ครบ
+        """
+        broken = {
+            "เส้นแบ่งคอลัมน์เพี้ยน ชื่อแตกเป็นสองคน": ["หอมสนิท", "มยุรี", "ธเนศ เกษศิลป์"],
+            "ชื่อขาดครึ่ง": ["หอมสนิท", "ธเนศ เกษศิลป์"],
+            "อ่านไม่ออกเลย": [],
+        }
+        for label, read in broken.items():
+            self.assertFalse(checker_module.committee_read_is_trustworthy(read), label)
+
+    def test_a_clean_read_is_countable(self):
+        """ด่านกันการอ่านเพี้ยนต้องไม่กลืนเคสที่ควรฟ้องจริงไปด้วย"""
+        self.assertTrue(checker_module.committee_read_is_trustworthy(
+            ["มยุรี หอมสนิท", "รศ.ดร. ธเนศ เกษศิลป์"]))
+
+    def test_purple_note_says_whether_the_count_could_be_trusted(self):
+        counted, unclear = Report(), Report()
+        checker_module._note_committee_reference(
+            counted, [{"name": "คนางค์ ก"}], "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
+            form="บฑ.1", status="counted")
+        checker_module._note_committee_reference(
+            unclear, [{"name": "คนางค์ ก"}], "หน้ากรรมการสอบ (หน้า ข)",
+            form="บฑ.2", status="unclear")
+        self.assertIn("นับจำนวนอาจารย์เทียบกับ บฑ.1 ให้แล้ว แต่ไม่ได้เทียบชื่อ",
+                      counted.human_checklist[0]["why"])
+        self.assertIn("อ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ บฑ.2 ไม่ได้",
+                      unclear.human_checklist[0]["why"])
+        self.assertIn("คนางค์ ก", counted.human_checklist[0]["why"])
+
+    def test_every_message_of_this_rule_has_an_english_translation(self):
+        """ข้อความชุดนี้ไม่โผล่ในเล่มทดสอบ ด่าน --corpus จึงตรวจคำแปลให้ไม่ได้
+
+        เคยหลุดมาแล้วจนรายงานอังกฤษออกมาเป็นไทยปนอังกฤษ ต้องเรียกกฎตรง ๆ แบบนี้
+        """
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        rep = self._count(["ก ก", "ข ข"])
+        checker_module._report_committee_count(
+            rep, self.FORM3, ["ก ก", "ข ข", "ค ค", "ง ง"],
+            "หน้าอาจารย์ที่ปรึกษา (หน้า ก)", "บฑ.1")
+        for status in ("counted", "unclear"):
+            checker_module._note_committee_reference(
+                rep, [{"name": "คนางค์ ก"}], "หน้ากรรมการสอบ (หน้า ข)",
+                form="บฑ.2", status=status)
+        texts = [f for it in rep.zones["ORANGE"]
+                 for f in (it["found"], it["expected"], it["fix"])]
+        texts += [h["why"] for h in rep.human_checklist]
+        # รายชื่อคนที่ต่อท้าย "... คือ" เป็นข้อมูลจากต้นทาง ต้องคงเป็นไทย
+        # ตัดออกก่อนตรวจด้วยกติกาเดียวกับด่าน --corpus
+        texts = [i18n.re.sub(r"(บฑ\.\d?\)?) คือ.*$", r"\1 คือ", t) for t in texts]
+        for th in texts:
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}\n  TH: {th}\n  EN: {en}")
+
+
+class DegreeSpacingIsOnlyANotice(unittest.TestCase):
+    """ชื่อปริญญาที่ต่างเฉพาะช่องว่าง/วรรคตอน = เหลือง ผ่านได้
+
+    เจ้าหน้าที่สั่ง ส.ค. 2569: *"ชื่อปริญญา ที่มีช่องเว้นว่างเช่น M.Sc. () กับ M.Sc.()
+    ให้เป็นสีเหลือง ไม่ใช่สีแดง"* (เดิมเป็นส้ม ซึ่งทำให้เล่มยังไม่ผ่าน)
+    """
+
+    def test_the_rule_is_registered_as_a_yellow_notice(self):
+        self.assertIn("FORM.DEGREE_SPACING", RULE_CATALOG)
+        self.assertEqual(rule_zone("FORM.DEGREE_SPACING"), "YELLOW")
+        self.assertEqual(checker_module.DEGREE_SPACING_ZONE, "YELLOW")
+
+    def test_a_pure_spacing_difference_already_passes_outright(self):
+        """ต่างแค่ช่องว่างล้วน ๆ ถือว่าตรง ไม่ต้องแจ้งอะไรเลย"""
+        for want, printed in (("M.Sc. ()", "M.Sc.()"),
+                              ("M.Sc. (Nursing)", "M.Sc.(Nursing)"),
+                              ("ปร.ด. (การพยาบาล)", "ปร.ด.(การพยาบาล)")):
+            text = f"WISIT KAWAYAPANIK 6236350 NSNS/D\n{printed}\nTHESIS ADVISORY COMMITTEE"
+            compared = compare_reference_text(text, want, "degree", degree_line=True)
+            self.assertEqual(compared["status"], "exact", (want, printed))
+
+    def test_a_punctuation_difference_is_a_yellow_notice(self):
+        """ต่างที่เครื่องหมายวรรคตอน ตัวอักษรยังครบ = เหลือง เล่มผ่านได้"""
+        want = "M.Sc. (Technology of Information System Management)"
+        printed = "M.Sc. [Technology of Information System Management]"
+        text = f"WISIT KAWAYAPANIK 6236350 NSNS/D\n{printed}\nTHESIS ADVISORY COMMITTEE"
+        compared = compare_reference_text(text, want, "degree", degree_line=True)
+        self.assertNotEqual(compared["status"], "exact")
+        self.assertIn(norm(want), norm(text))      # ตัวอักษรครบทุกตัว -> เข้าทางเหลือง
+
+    def test_a_real_spelling_difference_is_still_red(self):
+        """ตัวอักษรหายจริง ไม่ใช่แค่ช่องว่าง ต้องยังเป็นแดง"""
+        want = "M.Sc. (Nursing)"
+        text = "WISIT KAWAYAPANIK 6236350 NSNS/D\nM.Sc. (Nursery)\nTHESIS ADVISORY COMMITTEE"
+        self.assertNotIn(norm(want), norm(text))
+
+
+class TocPageReferencesAreOnlyANotice(unittest.TestCase):
+    """เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569)
+
+    เจ้าหน้าที่สั่งว่าไม่ต้องเทียบเลขหน้าในสารบัญกับหน้าจริง และไม่ต้องตรวจการเรียง
+    เลขหน้าของรายการในสารบัญ ถ้าพบให้ติดเหลืองไว้เฉย ๆ เล่มที่มีแต่ข้อนี้ต้องผ่าน
+    """
+
+    NOTICES = (
+        ("front_matter", "สารบัญ (หน้า viii) กับบทที่ 3 (หน้า 45)",
+         "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45"),
+        ("front_matter", "สารบัญ (หน้า viii)",
+         "หัวข้อ ภาคผนวก ไม่มีเลขหน้า"),
+    )
+
+    def _report_with_only_toc_page_notices(self):
+        report = Report()
+        for part, loc, found in self.NOTICES:
+            report.add(checker_module.TOC_PAGE_ZONE, part, loc, found,
+                       "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+                       "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+                       "FRONT.TOC_PAGE_REF")
+        return report
+
+    def test_the_rule_is_registered_as_a_yellow_notice(self):
+        self.assertIn("FRONT.TOC_PAGE_REF", RULE_CATALOG)
+        self.assertEqual(rule_zone("FRONT.TOC_PAGE_REF"), "YELLOW")
+        self.assertEqual(checker_module.TOC_PAGE_ZONE, "YELLOW")
+
+    def test_a_book_with_only_these_notices_passes(self):
+        report = self._report_with_only_toc_page_notices()
+        self.assertEqual(len(report.zones["YELLOW"]), len(self.NOTICES))
+        self.assertFalse(report.zones["RED"])
+        self.assertFalse(report.zones["ORANGE"])
+        self.assertEqual(report.verdict(), "ผ่าน")
+
+    def test_the_notices_stay_out_of_the_student_fix_list(self):
+        report = self._report_with_only_toc_page_notices()
+        result = {"issues_by_zone": report.zones}
+        self.assertEqual(checker_module.issues_to_fix(result), [])
+        # เจ้าหน้าที่ยังกด "ไม่ผ่าน" รายข้อได้ ถ้าเห็นว่าเล่มนี้ควรแก้จริง
+        self.assertEqual(len(checker_module.issues_to_fix(result, failed={"YELLOW:0"})), 1)
+
+    def test_every_toc_page_reference_finding_uses_the_notice_zone(self):
+        """กันไม่ให้มีจุดไหนหลุดกลับไปใช้สีแดง/ส้มกับกฎนี้"""
+        import ast
+        tree = ast.parse(Path(checker_module.__file__).read_text(encoding="utf-8"))
+        zones = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add"):
+                continue
+            rule = [a for a in node.args
+                    if isinstance(a, ast.Constant) and a.value == "FRONT.TOC_PAGE_REF"]
+            if not rule or not node.args:
+                continue
+            zones.append(ast.dump(node.args[0]))
+        self.assertTrue(zones, "ไม่พบจุดที่ใช้กฎ FRONT.TOC_PAGE_REF เลย")
+        self.assertEqual(set(zones), {ast.dump(ast.Name(id="TOC_PAGE_ZONE", ctx=ast.Load()))})
+
+
 class TocVersusBodyMustNotTellYouToIntroduceATypo(unittest.TestCase):
     """สารบัญกับเนื้อหาไม่ตรงกัน ต้องไม่ยึดสารบัญเป็นถูกเสมอ
 
@@ -1803,9 +2191,25 @@ class MissingCommaBetweenNameAndDegree(unittest.TestCase):
         rep = Report()
         page = "THESIS ADVISORY COMMITTEE: " + self.BLOCK + "\nABSTRACT\nBody."
         _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า iv")
-        founds = [it["found"] for it in rep.zones["RED"]]
+        founds = [it["found"] for it in rep.zones["YELLOW"]]
         self.assertTrue(any("ไม่ได้คั่นด้วยจุลภาค" in f for f in founds), founds)
-        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in founds), founds)
+        reds = [it["found"] for it in rep.zones["RED"]]
+        self.assertFalse(any("ตัวพิมพ์ใหญ่" in f for f in reds), reds)
+
+    def test_a_missing_comma_is_only_a_notice(self):
+        """เจ้าหน้าที่สั่ง ส.ค. 2569: เรื่องจุลภาคให้แจ้งเป็นสีเหลือง เล่มยังผ่านได้"""
+        rep = Report()
+        page = "THESIS ADVISORY COMMITTEE: " + self.BLOCK + "\nABSTRACT\nBody."
+        _check_abstract_committees(rep, {}, [0], [], [page], lambda i: "หน้า iv")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.verdict(), "ผ่าน")
+        self.assertEqual([it["rule_id"] for it in rep.zones["YELLOW"]],
+                         ["FRONT.ABSTRACT_COMMA"])
+        self.assertEqual(rule_zone("FRONT.ABSTRACT_COMMA"), "YELLOW")
+        # ยังต้องบอกให้ครบว่าขาดตรงไหนและต้องเป็นอะไร ไม่ใช่แค่ "มีบางอย่างไม่เรียบร้อย"
+        notice = rep.zones["YELLOW"][0]
+        self.assertIn("WATCHARAPONG CHOOKAEW D. Eng.", notice["found"])
+        self.assertIn("WATCHARAPONG CHOOKAEW, D. Eng.", notice["expected"])
 
     def test_a_full_stop_used_instead_of_a_comma(self):
         """เล่มจริงคั่นด้วยจุดแทนจุลภาค — ที่ควรเป็นต้องเปลี่ยนจุดเป็นจุลภาค ไม่ใช่เติมจุลภาค"""
