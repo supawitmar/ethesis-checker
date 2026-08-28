@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 import checker as checker_module
+import ethesis_import
 
 from checker import (
     describe_diff,
@@ -1697,6 +1698,120 @@ class TocHeadingMustBeTableOfContents(unittest.TestCase):
         for heading in ("TABLE OF CONTENTS", "สารบัญ"):
             self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
             self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+
+class TrArrayMustNotHaveHoles(unittest.TestCase):
+    """ช่องว่างในอาร์เรย์ TR ทำให้การแปลพังทั้งก้อนแบบเงียบ ๆ
+
+    JS ยอมให้เขียน [a, , b] ได้ โดยช่องกลางมีค่า undefined — ถ้าลบ entry ทิ้งแต่ลืม
+    ลบคอมมา trWhole จะพังตอนอ่าน TR[i][0] ("Cannot read properties of undefined")
+    หน้าเว็บไม่ขึ้น error ให้เห็น รู้อีกทีคือกดปุ่ม EN แล้วข้อความสรุปไม่ยอมแปล
+    (เกิดขึ้นจริง ส.ค. 2569 ตอนถอดกฎที่เลิกใช้ออก 11 รายการ)
+
+    ด่านเดิมจับไม่ได้ เพราะจำนวน entry กับจำนวน "[/" ลดลงเท่ากัน และวงเล็บยังสมดุล
+    """
+
+    GOOD = ("var TR = [\n"
+            "  [/aaa/g, 'A'],\n"
+            "  [/bbb/g, 'B'],\n"
+            "  // คอมเมนต์คั่นระหว่าง entry ได้\n"
+            "  [/ccc/g, 'C']\n"
+            "];")
+
+    def _problems(self, block):
+        import tools.check_i18n as i18n
+        return i18n.entry_separator_problems(block)
+
+    def test_a_well_formed_array_has_no_problems(self):
+        self.assertEqual(self._problems(self.GOOD), [])
+
+    def test_a_hole_left_by_a_removed_entry_is_caught(self):
+        block = self.GOOD.replace("  [/bbb/g, 'B'],", "  ,")
+        problems = self._problems(block)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ช่องว่างในอาร์เรย์", problems[0][1])
+
+    def test_a_missing_comma_is_caught(self):
+        block = self.GOOD.replace("[/aaa/g, 'A'],", "[/aaa/g, 'A']")
+        self.assertIn("ไม่มีคอมมาคั่น", self._problems(block)[0][1])
+
+    def test_a_leading_comma_is_caught(self):
+        block = self.GOOD.replace("var TR = [", "var TR = [\n  ,")
+        self.assertIn("คอมมาก่อน entry แรก", self._problems(block)[0][1])
+
+    def test_the_real_report_template_is_clean(self):
+        """ไฟล์จริงต้องไม่มีช่องว่าง — ด่านนี้คือสิ่งที่ควรจับบั๊กเดิมได้"""
+        import tools.check_i18n as i18n
+        block, _pairs = i18n.load_tr()
+        self.assertEqual(i18n.entry_separator_problems(block), [])
+
+    def test_lint_reports_a_failure_count_instead_of_always_passing(self):
+        """ของเดิม lint() คืน 0 เสมอ ด่านนี้จึงไม่เคยฟ้องจริง"""
+        import tools.check_i18n as i18n
+        block, pairs = i18n.load_tr()
+        import io as _io
+        import contextlib
+        with contextlib.redirect_stdout(_io.StringIO()):
+            self.assertEqual(i18n.lint(block, pairs), 0)
+
+
+class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
+    """ตัวย่อชื่อปริญญาต้องย่อได้ตอนดึงข้อมูลจาก eThesis เพื่อใช้ตรวจหน้าบทคัดย่อ
+
+    เจ้าหน้าที่แจ้ง ส.ค. 2569 ว่าระบบย่อชื่อปริญญาชุดนี้ไม่ได้ ทำให้ช่อง
+    "ชื่อปริญญาแบบย่อ" ว่าง แล้วการตรวจหน้าบทคัดย่อถูกข้ามไปทั้งข้อ
+    """
+
+    # (ชื่อเต็มจาก eThesis, ตัวย่อที่ถูกต้อง)
+    PAIRS = (
+        ("DOCTOR OF PUBLIC ADMINISTRATION", "D.P.A."),
+        ("MASTER OF PUBLIC ADMINISTRATION", "M.P.A."),
+        ("MASTER OF PUBLIC HEALTH", "M.P.H."),
+        ("DOCTOR OF PUBLIC HEALTH", "Dr. P.H."),
+        ("MASTER OF NURSING SCIENCE", "M.N.S."),
+        ("DOCTOR OF NURSING SCIENCE", "D.N.S."),
+    )
+
+    def test_every_degree_the_staff_listed_can_be_abbreviated(self):
+        for full, abbr in self.PAIRS:
+            self.assertEqual(ethesis_import._degree_abbr(full), abbr, full)
+
+    def test_the_field_in_parentheses_is_kept(self):
+        for full, abbr in self.PAIRS:
+            for probe in (f"{full}(HEALTH SOCIAL SCIENCE)",
+                          f"{full} (HEALTH SOCIAL SCIENCE)"):
+                self.assertEqual(ethesis_import._degree_abbr(probe),
+                                 f"{abbr} (HEALTH SOCIAL SCIENCE)", probe)
+
+    def test_public_health_doctorate_breaks_the_usual_pattern(self):
+        """เหตุผลที่ต้องใช้ตารางตายตัว ไม่ใช่เดาจากอักษรตัวแรกของแต่ละคำ"""
+        self.assertEqual(ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH"),
+                         "Dr. P.H.")
+        self.assertNotEqual(ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH"),
+                            "D.P.H.")
+
+    def test_an_abbreviation_with_a_space_still_matches_the_book(self):
+        """"Dr. P.H." มีช่องว่างในตัวเอง เล่มพิมพ์ติดกันก็ต้องถือว่าตรง"""
+        want = ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH (PUBLIC HEALTH)")
+        self.assertEqual(want, "Dr. P.H. (PUBLIC HEALTH)")
+        for printed in ("Dr. P.H. (PUBLIC HEALTH)", "Dr.P.H. (PUBLIC HEALTH)"):
+            text = ("WISIT KAWAYAPANIK 6236350 NSNS/D\n"
+                    f"{printed}\nTHESIS ADVISORY COMMITTEE")
+            compared = compare_reference_text(text, want, "degree", degree_line=True)
+            self.assertEqual(compared["status"], "exact", printed)
+
+    def test_an_unknown_degree_stays_empty_rather_than_guessing(self):
+        """เดาผิดแล้วไปฟ้องเล่มที่ถูก แย่กว่าปล่อยว่างให้เจ้าหน้าที่กรอกเอง"""
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF IMAGINARY STUDIES"), "")
+
+    def test_the_thai_side_covers_the_same_programmes(self):
+        for thai, abbr in (("รัฐประศาสนศาสตรดุษฎีบัณฑิต", "รป.ด."),
+                           ("รัฐประศาสนศาสตรมหาบัณฑิต", "รป.ม."),
+                           ("สาธารณสุขศาสตรมหาบัณฑิต", "ส.ม."),
+                           ("สาธารณสุขศาสตรดุษฎีบัณฑิต", "ส.ด."),
+                           ("พยาบาลศาสตรมหาบัณฑิต", "พย.ม."),
+                           ("พยาบาลศาสตรดุษฎีบัณฑิต", "พย.ด.")):
+            self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
 class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
