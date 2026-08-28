@@ -1914,6 +1914,36 @@ class UnknownSignaturePageKindIsReported(unittest.TestCase):
         self.assertFalse(kind("ค", "xxxxx"))
         self.assertFalse(kind("", ""))
 
+    def test_it_goes_to_the_purple_list_not_the_student_fix_list(self):
+        """เจ้าหน้าที่สั่ง ส.ค. 2569: "เอาเป็นสีม่วงไหม เพราะแบบนั้นต้องตรวจตาอยู่แล้ว"
+
+        และเหตุผลที่หนักกว่านั้น: สีส้มเข้าใบสั่งแก้ที่ส่งให้นักศึกษาโดยปริยาย
+        นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย เพราะเป็นข้อจำกัดของการอ่านไฟล์
+        ไม่ใช่จุดผิดของเล่ม (กติกาเดียวกับ system_note)
+        """
+        # _check_committees ต้องเปิด PDF จริงจึงทดสอบตรง ๆ ในชุดนี้ไม่ได้
+        # (ด่าน --detail ของ regress_books ยืนยันกับเล่มจริงแล้ว) ตรงนี้ล็อกกติกา
+        # ปลายทางแทน: ข้อแบบนี้ต้องอยู่รายการสีม่วง ไม่กระทบคำตัดสิน ไม่เข้าใบสั่งแก้
+        rep = Report()
+        rep.add_human("หน้าลงนาม 1 (หน้า ค)",
+                      "ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือ"
+                      "คณะกรรมการสอบ จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
+                      "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา",
+                      "UNCERTAIN.REVIEW")
+        self.assertEqual(rep.verdict(), "ผ่าน")          # ไม่กระทบคำตัดสิน
+        self.assertEqual(checker_module.issues_to_fix({"issues_by_zone": rep.zones}), [])
+        self.assertIn("แยกไม่ออก", rep.human_checklist[0]["why"])
+
+    def test_the_purple_message_has_an_english_translation(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        why = ("ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือคณะกรรมการสอบ "
+               "จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
+               "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา")
+        en = i18n.tr_en(why, pairs)
+        left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+        self.assertEqual(left, [], f"ยังไม่แปล {left}\n  EN: {en}")
+
     def test_page_one_and_two_do_not_depend_on_the_page_label_at_all(self):
         """ป้าย "หน้าลงนามหน้า 1/2" มาจากลำดับในไฟล์ ไม่ใช่เลขหน้า"""
         rep = Report()
