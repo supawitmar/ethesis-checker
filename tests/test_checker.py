@@ -1857,6 +1857,73 @@ class AbstractLocationSaysWhichLanguage(unittest.TestCase):
             self.assertEqual(summary_section(issue), "บทคัดย่อ")
 
 
+class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
+    """ข้อของหน้าลงนามต้องไม่ตกหมวด "อื่นๆ"
+
+    classify() มองหาคำว่า "หน้าลงนาม" แต่ตำแหน่งจริงเขียนตามบทบาทของหน้า
+    ("หน้าอาจารย์ที่ปรึกษา" / "หน้ากรรมการสอบ") — ปัญหาเดียวกับที่ SUMMARY_SECTIONS
+    เคยเจอและแก้ไปแล้ว แต่ classify() ยังไม่ได้แก้ตาม
+    """
+
+    FORM3 = [{"name": "ก ก"}, {"name": "ข ข"}, {"name": "ค ค"}]
+
+    def _count_issue(self, loc, form="บฑ.2"):
+        rep = Report()
+        checker_module._report_committee_count(rep, self.FORM3, ["ก ก", "ข ข"], loc, form)
+        return rep.zones["ORANGE"][0]
+
+    def test_the_count_finding_is_filed_as_a_data_mismatch(self):
+        for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
+                    "บทคัดย่อไทย (หน้า ง) รายชื่อคณะกรรมการที่ปรึกษา"):
+            issue = self._count_issue(loc)
+            self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
+
+    def test_other_signature_page_findings_are_not_other_either(self):
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "narisara chantratita"}, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
+        self.assertNotEqual(checker_module.classify(rep.zones["ORANGE"][0]), "อื่นๆ")
+
+    def test_every_category_used_here_has_an_english_name(self):
+        import tools.check_i18n as i18n
+        catmap = i18n.load_catmap()
+        for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)"):
+            issue = self._count_issue(loc)
+            self.assertIn(checker_module.classify(issue), catmap)
+            self.assertIn(checker_module.summary_section(issue), catmap)
+
+
+class UnknownSignaturePageKindIsReported(unittest.TestCase):
+    """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
+
+    signature_page_kind ดูเลขหน้าก่อน แล้วถอยไปดูหัวข้อบนหน้า ถ้าเสียทั้งคู่จะเลือก
+    ฟอร์มไม่ได้ (บฑ.1 หรือ บฑ.2) แล้วการนับจำนวนอาจารย์ถูกข้ามไป เดิมไม่มีข้อความ
+    บอก เจ้าหน้าที่เห็นว่าหน้านั้นไม่มีข้อฟ้องแล้วนึกว่าผ่าน
+    """
+
+    def test_the_page_kind_survives_a_wrong_or_missing_page_label(self):
+        """เลขหน้าผิดหรือหายไม่ทำให้แยกหน้าไม่ออก เพราะยังถอยไปดูหัวข้อได้"""
+        kind = checker_module.signature_page_kind
+        self.assertEqual(kind("ค", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์"), "advisory")
+        self.assertEqual(kind("ค", "คณะกรรมการสอบวิทยานิพนธ์"), "exam")
+        self.assertEqual(kind("", "THESIS ADVISORY COMMITTEE"), "advisory")
+        self.assertEqual(kind("", "THESIS EXAMINATION COMMITTEE"), "exam")
+
+    def test_it_gives_up_only_when_both_signals_are_gone(self):
+        kind = checker_module.signature_page_kind
+        self.assertFalse(kind("ค", "xxxxx"))
+        self.assertFalse(kind("", ""))
+
+    def test_page_one_and_two_do_not_depend_on_the_page_label_at_all(self):
+        """ป้าย "หน้าลงนามหน้า 1/2" มาจากลำดับในไฟล์ ไม่ใช่เลขหน้า"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [7, 9], {7: "Thesis entitled X", 9: "Thesis entitled X"},
+            lambda i: f"แผ่นที่ {i + 1}")
+        self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
+                         ["หน้าลงนามหน้า 1 (แผ่นที่ 8)", "หน้าลงนามหน้า 2 (แผ่นที่ 10)"])
+
+
 class ContinuedHeadingIsTheSameChapter(unittest.TestCase):
     """บรรทัด "(ต่อ)" ในสารบัญคือบทเดิม ไม่ใช่บทใหม่
 
@@ -1928,7 +1995,35 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
         """เล่มจริง (เล่มทดสอบ 3) พิมพ์ "ค" ทั้งสองหน้า ต้องฟ้องทั้งคู่"""
         bad = self._run("วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค")
         self.assertEqual(len(bad), 2)
-        self.assertTrue(all('พิมพ์เลขหน้าว่า "ค"' in f for _loc, f in bad), bad)
+        self.assertTrue(all(f == "เลขหน้าของหน้านี้ไม่ถูกต้อง" for _loc, f in bad), bad)
+
+    def test_the_finding_does_not_repeat_the_page_label(self):
+        """ตำแหน่งบอกเลขที่พิมพ์แล้ว บรรทัด "สิ่งที่พบ" ต้องไม่พูดซ้ำ
+
+        เจ้าหน้าที่สั่ง ส.ค. 2569: กฎนี้พิเศษกว่ากฎอื่นตรงที่ "เลขหน้าที่ใช้ระบุตำแหน่ง"
+        กับ "สิ่งที่ผิด" เป็นค่าเดียวกัน เดิมจึงได้ ค สองรอบในข้อเดียว
+        """
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("ค", issue["location"])          # ตำแหน่งยังบอกเลขที่พิมพ์
+        self.assertNotIn("ค\"", issue["found"])        # แต่บรรทัดสองไม่พูดซ้ำ
+        self.assertNotIn("พิมพ์เลขหน้าว่า", issue["found"])
+
+    def test_a_page_with_no_label_keeps_its_only_locator(self):
+        """หน้าที่ไม่มีเลขหน้า ตำแหน่งบอกแผ่นที่ของไฟล์ ซึ่งไม่ซ้ำกับสิ่งที่พบอยู่แล้ว
+
+        จึงต้องไม่ถูกตัดทิ้งไปด้วย ไม่งั้นจะไม่เหลืออะไรชี้ว่าอยู่แผ่นไหน
+        """
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["Thesis entitled X", "Thesis entitled X"],
+            lambda i: f"หน้าไม่ระบุเลข (แผ่นที่ {i + 3} ของไฟล์)")
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("แผ่นที่ 3 ของไฟล์", issue["location"])
+        self.assertEqual(issue["found"], "ไม่พบเลขหน้าบนหน้า")
 
     def test_swapped_pages_are_caught(self):
         """สลับหน้ากันแปลว่าหน้าที่ปรึกษากับหน้ากรรมการสอบสลับที่ ต้องไม่ปล่อยผ่าน"""
