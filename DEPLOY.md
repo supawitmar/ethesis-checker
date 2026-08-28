@@ -31,7 +31,8 @@ pip install -r requirements.txt
 | `APP_PASSWORD` | **ใช่** | (ว่าง) | รหัสผ่านล็อกอินเจ้าหน้าที่ — ถ้าไม่ตั้งจะเข้าใช้ระบบไม่ได้ |
 | `ANTHROPIC_API_KEY` | ไม่ | — | ใช้เรียบเรียงข้อความสรุปส่งนักศึกษาเท่านั้น ไม่ตั้งก็ตรวจได้ครบทุกกฎ |
 | `LLM_ASSIST` | ไม่ | เปิด | ตั้ง `off` เพื่อปิด AI แม้มีคีย์ |
-| `LLM_ASSIST_MODEL` | ไม่ | claude-opus-4-8 | เปลี่ยนรุ่นโมเดล |
+| `LLM_ASSIST_MODEL` | ไม่ | claude-sonnet-5 | เปลี่ยนรุ่นโมเดล |
+| `LLM_ASSIST_EFFORT` | ไม่ | high | ระดับความพยายามของโมเดล `low`/`medium`/`high`/`xhigh`/`max` |
 | `LLM_TIMEOUT_SECONDS` | ไม่ | 90 | timeout ต่อการเรียก AI 1 ครั้ง (กันงานค้างกินโควตา) |
 | `LLM_MAX_RETRIES` | ไม่ | 1 | จำนวนครั้งที่ลองใหม่เมื่อ API ล้มเหลว |
 | `MAX_UPLOAD_MB` | ไม่ | 25 | ขนาดไฟล์อัปโหลดสูงสุด |

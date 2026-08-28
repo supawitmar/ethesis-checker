@@ -1814,6 +1814,195 @@ class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
             self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
+class AbstractLocationSaysWhichLanguage(unittest.TestCase):
+    """เล่มหลักสูตรไทยมีบทคัดย่อสองหน้า ตำแหน่งต้องบอกว่าหน้าไหน
+
+    เจ้าหน้าที่แจ้ง ส.ค. 2569: "เล่มไทย เวลาตรวจ ระบบแจ้งผลการตรวจไม่ได้ระบุว่า
+    บทคัดย่อไทยหรืออังกฤษ ระบุแค่ว่าบทคัดย่อ (หน้า ...)"
+    """
+
+    def test_the_label_names_the_language(self):
+        label = checker_module.abstract_page_label
+        self.assertEqual(label(3, [3], [5]), "บทคัดย่ออังกฤษ")
+        self.assertEqual(label(5, [3], [5]), "บทคัดย่อไทย")
+
+    def test_an_unknown_page_falls_back_without_crashing(self):
+        label = checker_module.abstract_page_label
+        self.assertEqual(label(9, [3], [5]), "บทคัดย่อ")
+        self.assertEqual(label(9, None, None), "บทคัดย่อ")
+        self.assertEqual(label(9, [], []), "บทคัดย่อ")
+
+    def test_the_wording_does_not_collide_with_the_language_category(self):
+        """ห้ามใช้ "บทคัดย่อภาษาไทย" — classify() จะจัดเข้าหมวดผิด
+
+        classify() จัดข้อความที่มีคำว่า "ภาษาไทย"/"ภาษาอังกฤษ" เข้าหมวด
+        "ภาษาไม่ครบตามหลักสูตร" ซึ่งใช้กับข้อ "เล่มขาดบทคัดย่ออีกภาษา" เท่านั้น
+        ถ้าตำแหน่งมีคำนั้น ข้อของหน้าบทคัดย่อทุกข้อจะติดหมวดผิดหมด
+        """
+        label = checker_module.abstract_page_label
+        for lbl in (label(3, [3], [5]), label(5, [3], [5])):
+            self.assertNotIn("ภาษาไทย", lbl)
+            self.assertNotIn("ภาษาอังกฤษ", lbl)
+            issue = {"location": f"{lbl} (หน้า ง)", "found": 'มีข้อความตัวหนา: "x"',
+                     "expected": "y", "part": "front_matter"}
+            self.assertNotEqual(checker_module.classify(issue),
+                                "ภาษาไม่ครบตามหลักสูตร")
+
+    def test_both_languages_still_group_under_one_section(self):
+        """ป้ายแยกภาษา แต่การ์ดต้องยังอยู่กลุ่ม "บทคัดย่อ" กลุ่มเดียว"""
+        label = checker_module.abstract_page_label
+        for lbl in (label(3, [3], [5]), label(5, [3], [5])):
+            issue = {"location": f"{lbl} (หน้า ง)", "found": "x",
+                     "expected": "y", "part": "front_matter"}
+            self.assertEqual(summary_section(issue), "บทคัดย่อ")
+
+
+class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
+    """ข้อของหน้าลงนามต้องไม่ตกหมวด "อื่นๆ"
+
+    classify() มองหาคำว่า "หน้าลงนาม" แต่ตำแหน่งจริงเขียนตามบทบาทของหน้า
+    ("หน้าอาจารย์ที่ปรึกษา" / "หน้ากรรมการสอบ") — ปัญหาเดียวกับที่ SUMMARY_SECTIONS
+    เคยเจอและแก้ไปแล้ว แต่ classify() ยังไม่ได้แก้ตาม
+    """
+
+    FORM3 = [{"name": "ก ก"}, {"name": "ข ข"}, {"name": "ค ค"}]
+
+    def _count_issue(self, loc, form="บฑ.2"):
+        rep = Report()
+        checker_module._report_committee_count(rep, self.FORM3, ["ก ก", "ข ข"], loc, form)
+        return rep.zones["ORANGE"][0]
+
+    def test_the_count_finding_is_filed_as_a_data_mismatch(self):
+        for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
+                    "บทคัดย่อไทย (หน้า ง) รายชื่อคณะกรรมการที่ปรึกษา"):
+            issue = self._count_issue(loc)
+            self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
+
+    def test_other_signature_page_findings_are_not_other_either(self):
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "narisara chantratita"}, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
+        self.assertNotEqual(checker_module.classify(rep.zones["ORANGE"][0]), "อื่นๆ")
+
+    def test_every_category_used_here_has_an_english_name(self):
+        import tools.check_i18n as i18n
+        catmap = i18n.load_catmap()
+        for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)"):
+            issue = self._count_issue(loc)
+            self.assertIn(checker_module.classify(issue), catmap)
+            self.assertIn(checker_module.summary_section(issue), catmap)
+
+
+class UnknownSignaturePageKindIsReported(unittest.TestCase):
+    """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
+
+    signature_page_kind ดูเลขหน้าก่อน แล้วถอยไปดูหัวข้อบนหน้า ถ้าเสียทั้งคู่จะเลือก
+    ฟอร์มไม่ได้ (บฑ.1 หรือ บฑ.2) แล้วการนับจำนวนอาจารย์ถูกข้ามไป เดิมไม่มีข้อความ
+    บอก เจ้าหน้าที่เห็นว่าหน้านั้นไม่มีข้อฟ้องแล้วนึกว่าผ่าน
+    """
+
+    def test_the_page_kind_survives_a_wrong_or_missing_page_label(self):
+        """เลขหน้าผิดหรือหายไม่ทำให้แยกหน้าไม่ออก เพราะยังถอยไปดูหัวข้อได้"""
+        kind = checker_module.signature_page_kind
+        self.assertEqual(kind("ค", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์"), "advisory")
+        self.assertEqual(kind("ค", "คณะกรรมการสอบวิทยานิพนธ์"), "exam")
+        self.assertEqual(kind("", "THESIS ADVISORY COMMITTEE"), "advisory")
+        self.assertEqual(kind("", "THESIS EXAMINATION COMMITTEE"), "exam")
+
+    def test_it_gives_up_only_when_both_signals_are_gone(self):
+        kind = checker_module.signature_page_kind
+        self.assertFalse(kind("ค", "xxxxx"))
+        self.assertFalse(kind("", ""))
+
+    def test_it_goes_to_the_purple_list_not_the_student_fix_list(self):
+        """เจ้าหน้าที่สั่ง ส.ค. 2569: "เอาเป็นสีม่วงไหม เพราะแบบนั้นต้องตรวจตาอยู่แล้ว"
+
+        และเหตุผลที่หนักกว่านั้น: สีส้มเข้าใบสั่งแก้ที่ส่งให้นักศึกษาโดยปริยาย
+        นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย เพราะเป็นข้อจำกัดของการอ่านไฟล์
+        ไม่ใช่จุดผิดของเล่ม (กติกาเดียวกับ system_note)
+        """
+        # _check_committees ต้องเปิด PDF จริงจึงทดสอบตรง ๆ ในชุดนี้ไม่ได้
+        # (ด่าน --detail ของ regress_books ยืนยันกับเล่มจริงแล้ว) ตรงนี้ล็อกกติกา
+        # ปลายทางแทน: ข้อแบบนี้ต้องอยู่รายการสีม่วง ไม่กระทบคำตัดสิน ไม่เข้าใบสั่งแก้
+        rep = Report()
+        rep.add_human("หน้าลงนาม 1 (หน้า ค)",
+                      "ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือ"
+                      "คณะกรรมการสอบ จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
+                      "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา",
+                      "UNCERTAIN.REVIEW")
+        self.assertEqual(rep.verdict(), "ผ่าน")          # ไม่กระทบคำตัดสิน
+        self.assertEqual(checker_module.issues_to_fix({"issues_by_zone": rep.zones}), [])
+        self.assertIn("แยกไม่ออก", rep.human_checklist[0]["why"])
+
+    def test_the_purple_message_has_an_english_translation(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        why = ("ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือคณะกรรมการสอบ "
+               "จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
+               "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา")
+        en = i18n.tr_en(why, pairs)
+        left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+        self.assertEqual(left, [], f"ยังไม่แปล {left}\n  EN: {en}")
+
+    def test_page_one_and_two_do_not_depend_on_the_page_label_at_all(self):
+        """ป้าย "หน้าลงนามหน้า 1/2" มาจากลำดับในไฟล์ ไม่ใช่เลขหน้า"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [7, 9], {7: "Thesis entitled X", 9: "Thesis entitled X"},
+            lambda i: f"แผ่นที่ {i + 1}")
+        self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
+                         ["หน้าลงนามหน้า 1 (แผ่นที่ 8)", "หน้าลงนามหน้า 2 (แผ่นที่ 10)"])
+
+
+class ContinuedHeadingIsTheSameChapter(unittest.TestCase):
+    """บรรทัด "(ต่อ)" ในสารบัญคือบทเดิม ไม่ใช่บทใหม่
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: บางเล่มเขียนสารบัญเป็น
+
+        บทที่ 3 วิธีดำเนินการวิจัย        21
+        บทที่ 3 วิธีดำเนินการวิจัย (ต่อ)   25
+
+    สองบรรทัดนี้คือบทที่ 3 บทเดียว ไม่ผิด ใช้กับทุกบทและภาษาอังกฤษด้วย
+    """
+
+    CONTINUED = (
+        "บทที่ 3 วิธีดำเนินการวิจัย (ต่อ)",
+        "บทที่ 3 วิธีดำเนินการวิจัย (ต่อ) 25",
+        "บทที่ 3 วิธีดำเนินการวิจัย .......... (ต่อ) 25",
+        "CHAPTER 3 RESEARCH METHODOLOGY (cont.)",
+        "CHAPTER 3 RESEARCH METHODOLOGY (Cont.) 25",
+        "CHAPTER 3 RESEARCH METHODOLOGY (continued) 25",
+        # PDF ทำวรรณยุกต์หลุดเป็นประจำ ต้องยังจับได้
+        "บทท 3 วธดาเนนการวจย (ตอ) 25",
+    )
+
+    NOT_CONTINUED = (
+        "บทที่ 3 วิธีดำเนินการวิจัย 21",
+        "CHAPTER 3 RESEARCH METHODOLOGY 21",
+        # วงเล็บท้ายบรรทัดที่ไม่ใช่คำว่าต่อ ต้องไม่ถูกกลืน
+        "บทที่ 2 วรรณกรรมและงานวิจัยที่เกี่ยวข้อง (ฉบับปรับปรุง) 9",
+        "CHAPTER 5 DISCUSSION (WITH APPENDIX) 76",
+    )
+
+    def test_continuation_lines_are_recognised(self):
+        for line in self.CONTINUED:
+            self.assertTrue(checker_module.is_continuation_heading(line), line)
+
+    def test_ordinary_headings_are_not_swallowed(self):
+        for line in self.NOT_CONTINUED:
+            self.assertFalse(checker_module.is_continuation_heading(line), line)
+
+    def test_it_applies_to_every_chapter_number(self):
+        for n in range(1, 10):
+            self.assertTrue(checker_module.is_continuation_heading(
+                f"บทที่ {n} ชื่อบท (ต่อ) {n * 10}"), n)
+            self.assertTrue(checker_module.is_continuation_heading(
+                f"CHAPTER {n} SOME TITLE (cont.) {n * 10}"), n)
+
+    def test_an_empty_parenthesis_is_not_a_continuation(self):
+        self.assertFalse(checker_module.is_continuation_heading("บทที่ 3 ชื่อบท () 25"))
+
+
 class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
@@ -1825,8 +2014,8 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
     def _run(self, first, second):
         rep = Report()
         checker_module._report_signature_page_labels(
-            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}", "RED")
-        return [(it["location"], it["found"]) for it in rep.zones["RED"]]
+            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}")
+        return [(it["location"], it["found"]) for it in rep.zones["ORANGE"]]
 
     def test_correct_labels_pass(self):
         self.assertEqual(self._run("Thesis entitled X\ni", "Thesis entitled X\nii"), [])
@@ -1836,7 +2025,35 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
         """เล่มจริง (เล่มทดสอบ 3) พิมพ์ "ค" ทั้งสองหน้า ต้องฟ้องทั้งคู่"""
         bad = self._run("วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค")
         self.assertEqual(len(bad), 2)
-        self.assertTrue(all('พิมพ์เลขหน้าว่า "ค"' in f for _loc, f in bad), bad)
+        self.assertTrue(all(f == "เลขหน้าของหน้านี้ไม่ถูกต้อง" for _loc, f in bad), bad)
+
+    def test_the_finding_does_not_repeat_the_page_label(self):
+        """ตำแหน่งบอกเลขที่พิมพ์แล้ว บรรทัด "สิ่งที่พบ" ต้องไม่พูดซ้ำ
+
+        เจ้าหน้าที่สั่ง ส.ค. 2569: กฎนี้พิเศษกว่ากฎอื่นตรงที่ "เลขหน้าที่ใช้ระบุตำแหน่ง"
+        กับ "สิ่งที่ผิด" เป็นค่าเดียวกัน เดิมจึงได้ ค สองรอบในข้อเดียว
+        """
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("ค", issue["location"])          # ตำแหน่งยังบอกเลขที่พิมพ์
+        self.assertNotIn("ค\"", issue["found"])        # แต่บรรทัดสองไม่พูดซ้ำ
+        self.assertNotIn("พิมพ์เลขหน้าว่า", issue["found"])
+
+    def test_a_page_with_no_label_keeps_its_only_locator(self):
+        """หน้าที่ไม่มีเลขหน้า ตำแหน่งบอกแผ่นที่ของไฟล์ ซึ่งไม่ซ้ำกับสิ่งที่พบอยู่แล้ว
+
+        จึงต้องไม่ถูกตัดทิ้งไปด้วย ไม่งั้นจะไม่เหลืออะไรชี้ว่าอยู่แผ่นไหน
+        """
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["Thesis entitled X", "Thesis entitled X"],
+            lambda i: f"หน้าไม่ระบุเลข (แผ่นที่ {i + 3} ของไฟล์)")
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("แผ่นที่ 3 ของไฟล์", issue["location"])
+        self.assertEqual(issue["found"], "ไม่พบเลขหน้าบนหน้า")
 
     def test_swapped_pages_are_caught(self):
         """สลับหน้ากันแปลว่าหน้าที่ปรึกษากับหน้ากรรมการสอบสลับที่ ต้องไม่ปล่อยผ่าน"""
@@ -1859,9 +2076,34 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
         rep = Report()
         checker_module._report_signature_page_labels(
             rep, [0, 1], ["Thesis entitled X\nz", "Thesis entitled X\nz"],
-            lambda i: f"แผ่นที่ {i + 1}", "RED")
-        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["RED"][0]["expected"])
-        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["RED"][1]["expected"])
+            lambda i: f"แผ่นที่ {i + 1}")
+        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["ORANGE"][0]["expected"])
+        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["ORANGE"][1]["expected"])
+
+    def test_a_wrong_label_is_orange_not_red(self):
+        """เจ้าหน้าที่สั่ง ส.ค. 2569: เลขหน้าลงนามผิดให้แจ้งเป็นสีส้ม
+
+        เพราะมันพ่วงไปทำให้เลขหน้าส่วนนำหน้าอื่นผิดตาม กฎ "เลขหน้าไม่ต่อเนื่อง"
+        จึงฟ้องซ้ำอีกข้อจากต้นเหตุเดียวกัน ถ้าแดงทั้งคู่จะได้สองข้อจากความผิดเดียว
+        """
+        self.assertEqual(rule_zone("PAGE.SIGNATURE_LABEL"), "ORANGE")
+        self.assertEqual(checker_module.SIG_LABEL_ZONE, "ORANGE")
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 2)
+        self.assertEqual([it["rule_id"] for it in rep.zones["ORANGE"]],
+                         ["PAGE.SIGNATURE_LABEL"] * 2)
+
+    def test_the_fix_line_warns_that_later_pages_shift_too(self):
+        """เหตุผลที่เป็นส้มคือมันพ่วง — ข้อความต้องบอกด้วย ไม่งั้นดูเหมือนเรื่องเล็ก"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        self.assertIn("ไล่เลขหน้าส่วนนำที่เหลือใหม่", rep.zones["ORANGE"][0]["fix"])
 
     def test_the_page_number_decides_which_form_the_page_is_checked_against(self):
         """เหตุผลที่กฎนี้ยังต้องอยู่ — เลขหน้าคือตัวเลือกฟอร์ม"""
