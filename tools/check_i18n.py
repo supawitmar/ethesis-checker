@@ -89,8 +89,54 @@ def unparsed_entries(block):
     return out
 
 
+def entry_separator_problems(block):
+    """ตัวคั่นระหว่าง entry ของ TR ต้องเป็นคอมมาพอดีหนึ่งตัว
+
+    JS ยอมให้เขียน [a, , b] ได้ โดยช่องกลางเป็น "hole" ที่มีค่า undefined
+    ถ้าเผลอลบ entry ทิ้งแต่ทิ้งคอมมาไว้ จะได้ hole แล้ว trWhole พังตอนอ่าน TR[i][0]
+    ("Cannot read properties of undefined") ทั้งก้อน — หน้าเว็บไม่ขึ้น error ให้เห็น
+    รู้อีกทีคือกดปุ่ม EN แล้วข้อความสรุปไม่ยอมแปล (เจอจริง ส.ค. 2569)
+
+    ด่านเดิมจับไม่ได้ เพราะจำนวน entry กับจำนวน "[/" ลดลงเท่ากัน และวงเล็บก็ยังสมดุล
+    คืนรายการ (บรรทัดที่, อาการ, ข้อความรอบ ๆ)
+    """
+    problems = []
+    spans = [m.span() for m in _TR_ENTRY.finditer(block)]
+    if not spans:
+        return problems
+
+    def where(pos):
+        return block.count("\n", 0, pos) + 1
+
+    # ก่อน entry แรก: ต้องไม่มีคอมมาคั่นจาก "var TR = ["
+    head = _strip_js_comments(block[:spans[0][0]])
+    if head.count(","):
+        problems.append((where(spans[0][0]), "มีคอมมาก่อน entry แรก",
+                         block[:spans[0][0]][-60:]))
+    for (a_start, a_end), (b_start, _b_end) in zip(spans, spans[1:]):
+        gap = _strip_js_comments(block[a_end:b_start])
+        commas = gap.count(",")
+        if commas == 1 and not gap.replace(",", "").strip():
+            continue
+        why = ("ไม่มีคอมมาคั่น" if commas == 0
+               else f"มีคอมมา {commas} ตัว (ช่องว่างในอาร์เรย์)"
+               if commas > 1 else "มีอย่างอื่นคั่นนอกจากคอมมา")
+        problems.append((where(a_end), why, block[a_end:b_start][:60]))
+    return problems
+
+
+def _strip_js_comments(text):
+    """ตัดคอมเมนต์ // ออก เพื่อให้เหลือแต่ตัวคั่นจริง"""
+    return re.sub(r"//[^\n]*", "", text)
+
+
 def lint(block, pairs):
-    """เทียบจำนวน entry ที่แยกได้กับจำนวน '[/' จริง และหา regex ที่ python ใช้ไม่ได้"""
+    """ตรวจโครงสร้างบล็อก TR — คืน "จำนวนปัญหา" เพื่อให้ผู้เรียกใช้เป็น exit code
+
+    ทุกอย่างที่นับเป็นปัญหาในนี้ทำให้ <script> พังเงียบ ๆ ทั้งก้อน หน้าเว็บไม่ขึ้น
+    error ให้เห็น รู้อีกทีคือกดปุ่ม EN แล้วบางส่วนไม่ยอมแปล จึงต้องให้ด่านนี้ fail
+    ไม่ใช่แค่พิมพ์เตือนแล้วผ่าน (ของเดิมคืน 0 เสมอ ด่านนี้จึงไม่เคยฟ้องจริง)
+    """
     starts = len(re.findall(r"\[/", block))
     print(f"TR entries: {len(pairs)} / '[/' ที่พบ: {starts}")
     broken_entries = unparsed_entries(block)
@@ -132,6 +178,22 @@ def lint(block, pairs):
         for pat in doubled[:5]:
             print(f"     {pat[:60]}")
     print(f"escape / ซ้ำ: {len(doubled)}")
+
+    # ด่านสำคัญอีกตัว: JS ยอมให้มี "ช่องว่าง" ในอาร์เรย์ ([a, , b]) โดยไม่ error
+    # ตอนโหลด แต่ TR[i] ของช่องนั้นเป็น undefined แล้ว trWhole พังทั้งก้อนตอนแปล
+    separators = entry_separator_problems(block)
+    if separators:
+        print(f"  !! ตัวคั่นระหว่าง entry ผิด {len(separators)} จุด — TR จะมีช่องว่าง "
+              f"(undefined) แล้วการแปลพังทั้งก้อน")
+        for line_no, why, text in separators[:5]:
+            print(f"     บรรทัดที่ {line_no} ของบล็อก TR: {why}")
+            print(f"        {text.strip()[:60]!r}")
+    print(f"ตัวคั่นระหว่าง entry ผิด: {len(separators)}")
+
+    return (len(broken_entries) + broken + len(doubled) + len(separators)
+            + (1 if cat_pairs != cat_colons else 0)
+            + (1 if block.count("[") != block.count("]") else 0)
+            + (1 if len(pairs) != starts else 0))
 
 
 def _py(pat):
@@ -339,8 +401,10 @@ def main():
     block, pairs = load_tr()
 
     if "--lint" in args:
-        lint(block, pairs)
-        return 0
+        problems = lint(block, pairs)
+        if problems:
+            print(f"\nLINT FAILED: {problems} ปัญหา — แก้ก่อน commit")
+        return 1 if problems else 0
 
     if "--corpus" in args:
         # ไม่ใส่ path มาก็ได้ ให้ใช้โฟลเดอร์เล่มทดสอบมาตรฐาน
