@@ -1814,6 +1814,49 @@ class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
             self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
+class AbstractLocationSaysWhichLanguage(unittest.TestCase):
+    """เล่มหลักสูตรไทยมีบทคัดย่อสองหน้า ตำแหน่งต้องบอกว่าหน้าไหน
+
+    เจ้าหน้าที่แจ้ง ส.ค. 2569: "เล่มไทย เวลาตรวจ ระบบแจ้งผลการตรวจไม่ได้ระบุว่า
+    บทคัดย่อไทยหรืออังกฤษ ระบุแค่ว่าบทคัดย่อ (หน้า ...)"
+    """
+
+    def test_the_label_names_the_language(self):
+        label = checker_module.abstract_page_label
+        self.assertEqual(label(3, [3], [5]), "บทคัดย่ออังกฤษ")
+        self.assertEqual(label(5, [3], [5]), "บทคัดย่อไทย")
+
+    def test_an_unknown_page_falls_back_without_crashing(self):
+        label = checker_module.abstract_page_label
+        self.assertEqual(label(9, [3], [5]), "บทคัดย่อ")
+        self.assertEqual(label(9, None, None), "บทคัดย่อ")
+        self.assertEqual(label(9, [], []), "บทคัดย่อ")
+
+    def test_the_wording_does_not_collide_with_the_language_category(self):
+        """ห้ามใช้ "บทคัดย่อภาษาไทย" — classify() จะจัดเข้าหมวดผิด
+
+        classify() จัดข้อความที่มีคำว่า "ภาษาไทย"/"ภาษาอังกฤษ" เข้าหมวด
+        "ภาษาไม่ครบตามหลักสูตร" ซึ่งใช้กับข้อ "เล่มขาดบทคัดย่ออีกภาษา" เท่านั้น
+        ถ้าตำแหน่งมีคำนั้น ข้อของหน้าบทคัดย่อทุกข้อจะติดหมวดผิดหมด
+        """
+        label = checker_module.abstract_page_label
+        for lbl in (label(3, [3], [5]), label(5, [3], [5])):
+            self.assertNotIn("ภาษาไทย", lbl)
+            self.assertNotIn("ภาษาอังกฤษ", lbl)
+            issue = {"location": f"{lbl} (หน้า ง)", "found": 'มีข้อความตัวหนา: "x"',
+                     "expected": "y", "part": "front_matter"}
+            self.assertNotEqual(checker_module.classify(issue),
+                                "ภาษาไม่ครบตามหลักสูตร")
+
+    def test_both_languages_still_group_under_one_section(self):
+        """ป้ายแยกภาษา แต่การ์ดต้องยังอยู่กลุ่ม "บทคัดย่อ" กลุ่มเดียว"""
+        label = checker_module.abstract_page_label
+        for lbl in (label(3, [3], [5]), label(5, [3], [5])):
+            issue = {"location": f"{lbl} (หน้า ง)", "found": "x",
+                     "expected": "y", "part": "front_matter"}
+            self.assertEqual(summary_section(issue), "บทคัดย่อ")
+
+
 class ContinuedHeadingIsTheSameChapter(unittest.TestCase):
     """บรรทัด "(ต่อ)" ในสารบัญคือบทเดิม ไม่ใช่บทใหม่
 

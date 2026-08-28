@@ -1521,7 +1521,8 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             names, degrees = split_abstract_committee(block)
             if not names:
                 continue
-            loc = f"บทคัดย่อ ({page_ref(ai)}) รายชื่อคณะกรรมการที่ปรึกษา"
+            abs_label = "บทคัดย่ออังกฤษ" if heading_en else "บทคัดย่อไทย"
+            loc = f"{abs_label} ({page_ref(ai)}) รายชื่อคณะกรรมการที่ปรึกษา"
 
             # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
             if "(" in block or ")" in block:
@@ -2694,6 +2695,28 @@ def _toc_section_kind(text):
     return ""
 
 
+def abstract_page_label(start_idx, abs_en_pages, abs_th_pages):
+    """ชื่อหน้าบทคัดย่อพร้อมภาษา เช่น "บทคัดย่อภาษาไทย"
+
+    เล่มหลักสูตรไทยมีบทคัดย่อสองหน้า (ไทยและอังกฤษ) ถ้าตำแหน่งเขียนแค่ "บทคัดย่อ"
+    เจ้าหน้าที่แยกไม่ออกว่าข้อไหนเป็นของหน้าไหน โดยเฉพาะเวลาสองหน้าฟ้องข้อความ
+    เหมือนกัน (เล่มทดสอบ 3 ได้ "บทคัดย่อ (หน้า ง)" กับ "บทคัดย่อ (หน้า จ)")
+
+    ใช้คำว่า "บทคัดย่อไทย" ไม่ใช่ "บทคัดย่อภาษาไทย" — สองเหตุผล: เป็นคำเดียวกับที่
+    ระบบใช้อยู่แล้วใน _check_degree_abbr และเลี่ยงชนกับ classify() ที่จัดข้อความซึ่งมี
+    คำว่า "ภาษาไทย"/"ภาษาอังกฤษ" เข้าหมวด "ภาษาไม่ครบตามหลักสูตร" ซึ่งจะทำให้
+    ข้อของหน้าบทคัดย่อทุกข้อติดหมวดผิด
+
+    รับ "หน้าเริ่ม" ของบทคัดย่อ ไม่ใช่หน้าใดก็ได้ในช่วง เพราะสองรายการนี้เก็บเฉพาะ
+    หน้าเริ่ม — ผู้เรียกที่วนทีละหน้าในช่วงต้องส่งหน้าเริ่มของช่วงนั้นมา
+    """
+    if start_idx in set(abs_en_pages or ()):
+        return "บทคัดย่ออังกฤษ"
+    if start_idx in set(abs_th_pages or ()):
+        return "บทคัดย่อไทย"
+    return "บทคัดย่อ"
+
+
 def _is_abstract_heading(text):
     """หัวเรื่อง 'บทคัดย่อ'/'ABSTRACT' เป็นตัวหนาตาม template อยู่แล้ว ไม่ใช่ข้อสังเกต"""
     nl = norm(_strip_toc_page_number(text))
@@ -3522,7 +3545,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     count_missing, count_wrong = [], []
     for ai in abstract_idxs:
         span_pgs = list(range(ai, min(ai + span_of(ai), n)))
-        lbl = f"บทคัดย่อ ({page_ref(ai)})"
+        lbl = f"{abstract_page_label(ai, abs_en_pages, abs_th_pages)} ({page_ref(ai)})"
         # จำนวนหน้า "xxx pages / xxx หน้า" — ค้นทุกหน้าในช่วง (มักอยู่หน้าสุดท้ายของบทคัดย่อ)
         m2 = None
         for sp in span_pgs:
@@ -3546,7 +3569,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     tail = raw.split(':', 1)[1] if ':' in raw else raw
                     kws = [k for k in re.split(r'[,;/]', tail) if k.strip()]
                     if len(kws) > 5:
-                        rep.add("RED", "front_matter", f"บทคัดย่อ ({page_ref(sp)})",
+                        rep.add("RED", "front_matter",
+                                f"{abstract_page_label(ai, abs_en_pages, abs_th_pages)}"
+                                f" ({page_ref(sp)})",
                                 f"Keywords {len(kws)} คำ", "ไม่เกิน 5 คำตามประกาศ",
                                 "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.ABSTRACT")
                     done_kw = True
@@ -3570,12 +3595,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         try:
             with pdfplumber.open(pdf_path) as _pl:
                 for ai in abstract_idxs:
+                    abs_label = abstract_page_label(ai, abs_en_pages, abs_th_pages)
                     for abs_page_idx in range(ai, min(ai + span_of(ai), n)):
                         lines = _font_lines(_pl.pages[abs_page_idx])
                         # ชื่อเรื่องบนหน้านี้ต้องชิดซ้ายและไม่หนา (แยกจากข้อสังเกตตัวหนาทั่วไป
                         # เพราะเป็นกฎเฉพาะของบรรทัดชื่อเรื่อง ไม่ใช่ทั้งหน้า)
                         _report_abstract_title_format(
-                            rep, lines, f"บทคัดย่อ ({page_ref(abs_page_idx)})")
+                            rep, lines, f"{abs_label} ({page_ref(abs_page_idx)})")
                         bold_lines = [
                             line['text'] for line in lines
                             if line['bold_ratio'] > 0 and len(norm(line['text'])) >= 2
@@ -3585,7 +3611,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             examples = ", ".join(f'"{line}"' for line in bold_lines[:5])
                             more = f" และอีก {len(bold_lines) - 5} บรรทัด" if len(bold_lines) > 5 else ""
                             rep.add(ABSTRACT_BOLD_ZONE, "front_matter",
-                                    f"บทคัดย่อ ({page_ref(abs_page_idx)})",
+                                    f"{abs_label} ({page_ref(abs_page_idx)})",
                                     f"มีข้อความตัวหนา: {examples}{more}",
                                     "แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้",
                                     "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่", "FORMAT.ABSTRACT_BOLD")
@@ -3703,7 +3729,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 spots.append((f"หน้าลงนาม {k2+1} ({page_ref(i2)})", pages[i2]))
             main_abs = abs_th_idx if thai_book else abs_en_idx
             if main_abs is not None:
-                spots.append((f"บทคัดย่อ ({page_ref(main_abs)})", pages[main_abs]))
+                spots.append((f"{abstract_page_label(main_abs, abs_en_pages, abs_th_pages)}"
+                              f" ({page_ref(main_abs)})", pages[main_abs]))
             for spot_name, spot_text in spots:
                 compared = compare_reference_text(spot_text, main_title, 'title')
                 if compared['status'] != 'exact':
