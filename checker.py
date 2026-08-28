@@ -39,6 +39,7 @@ UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
 TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
+SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -961,17 +962,23 @@ def signature_page_kind(page_label, page_text):
 SIGNATURE_PAGE_LABELS = (("i", "ก"), ("ii", "ข"))
 
 
-def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone):
+def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
     เลขหน้าสองหน้านี้ไม่ใช่แค่การเรียงเลข — เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการ
     ที่ปรึกษา หน้าไหนเป็นของคณะกรรมการสอบ (ดู signature_page_kind) ซึ่งกำหนดว่า
     หน้านั้นจะถูกเทียบกับ บฑ.1 หรือ บฑ.2 ถ้าเลขหน้าผิด การตรวจทั้งหน้าเพี้ยนตาม
 
+    **สีส้ม ไม่ใช่แดง** ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569: เลขหน้าลงนามที่ผิดจะพ่วงไป
+    ทำให้เลขหน้าส่วนนำหน้าอื่นผิดตามไปด้วย (เล่มจริงพิมพ์ "ค" ทั้งสองหน้า กฎ
+    "เลขหน้าไม่ต่อเนื่อง" จึงฟ้องซ้ำอีกข้อจากต้นเหตุเดียวกัน) ถ้าฟ้องแดงทั้งคู่
+    เจ้าหน้าที่จะเห็นสองข้อจากความผิดเดียว จึงให้ข้อนี้เป็นส้มแล้วบอกผลพ่วงไว้ด้วย
+
     ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่บรรทัดแรก
     เสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่เป็นเลขหน้าล้วน
     จึงไม่ชนกับข้อความในเนื้อหน้า
     """
+    zone = zone or SIG_LABEL_ZONE
     for k, idx in enumerate(sig_pages[:2]):
         lab_en, lab_th = SIGNATURE_PAGE_LABELS[k]
         page_lines = [l.strip() for l in pages[idx].split('\n') if l.strip()]
@@ -983,7 +990,9 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone):
         rep.add(zone, "front_matter", f"หน้าลงนามหน้า {k + 1} ({page_ref(idx)})",
                 what,
                 f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
-                "", "PAGE.NUMBERING")
+                "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
+                "เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย",
+                "PAGE.SIGNATURE_LABEL")
 
 
 def _is_white_fill(color):
@@ -2631,6 +2640,32 @@ def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
     return best
 
 
+# คำที่ใช้บอกว่า "บรรทัดนี้คือหัวข้อเดิมที่ยกมาต่อ" ไม่ใช่หัวข้อใหม่
+# เทียบด้วย norm() เพราะ PDF ทำวรรณยุกต์ของ "ต่อ" หลุดเป็นประจำ
+_CONTINUATION_WORDS = {norm("ต่อ"), "CONT", "CONTD", "CONTINUED", "CONTINUE"}
+_TRAILING_PAREN = re.compile(r"\(([^()]*)\)\s*$")
+
+
+def is_continuation_heading(line):
+    """บรรทัดสารบัญ/หัวบทนี้เป็นบรรทัด "(ต่อ)" ของหัวข้อเดิมหรือไม่
+
+    เจ้าหน้าที่กำหนด (ส.ค. 2569): บางเล่มเขียนสารบัญเป็น
+
+        บทที่ 3 วิธีดำเนินการวิจัย        21
+        บทที่ 3 วิธีดำเนินการวิจัย (ต่อ)   25
+
+    สองบรรทัดนี้คือ **บทที่ 3 บทเดียว** ไม่ผิด ถ้านับเป็นสองบทจะพังสองทาง:
+    จำนวนบทในสารบัญเกินจากเนื้อหา (ฟ้องผิด) และ toc_map เก็บบรรทัดหลังไว้
+    ทำให้ชื่อบทที่เอาไปเทียบกลายเป็น "วิธีดำเนินการวิจัย (ต่อ)" (ฟ้องผิดอีกข้อ)
+
+    ตัดเลขหน้า/จุดไข่ปลาท้ายบรรทัดออกก่อน เพราะคำว่า (ต่อ) ไม่ได้อยู่ท้ายบรรทัดเสมอ
+    ("บทที่ 3 วิธีดำเนินการวิจัย (ต่อ) 25")
+    """
+    head = _strip_toc_page_number(line or "")
+    found = _TRAILING_PAREN.search(head)
+    return bool(found and norm(found.group(1)) in _CONTINUATION_WORDS)
+
+
 def _toc_section_kind(text):
     """Classify one non-chapter TOC entry using its visible heading."""
     normalized = norm(_strip_toc_page_number(text))
@@ -3086,7 +3121,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    _report_signature_page_labels(rep, sig_pages, pages, page_ref, FRONT_FAILURE_ZONE)
+    _report_signature_page_labels(rep, sig_pages, pages, page_ref)
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -3118,6 +3153,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     for source_page_idx, line in toc_lines:
         raw = line.strip()
         if not raw:
+            continue
+        # "บทที่ 3 ... (ต่อ)" คือบทเดิมที่ยกมาต่อ ไม่ใช่บทใหม่ (ดู is_continuation_heading)
+        if is_continuation_heading(raw):
             continue
         m_pg = re.search(r'(\d{1,3})\s*$', raw)
         nl = norm(raw)
@@ -3151,6 +3189,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             cn = _chapter_match(l)
             if cn is not None and j + 1 < len(tls):
                 title = tls[j+1]
+                # หัวบทที่เขียน "(ต่อ)" เป็นหน้าถัดไปของบทเดิม ไม่ใช่บทใหม่
+                if is_continuation_heading(l) or is_continuation_heading(title):
+                    break
                 if not re.match(r'\d', title):
                     body_ch.append((cn, title, i, printed.get(i)))
                 break

@@ -1149,6 +1149,7 @@ var TR = [
   [/ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the page really lists everyone; if it does, the system simply could not read some cells and this can pass'],
   [/ระบบนับจำนวนอาจารย์เทียบกับ (บฑ\.\d) ให้แล้ว แต่ไม่ได้เทียบชื่อ โปรดทานรายชื่อเอง รายชื่อตาม (บฑ\.\d) คือ/g, 'The system compared the number of professors against $1 but did not compare the names themselves — please check them by eye. The $2 list is:'],
   [/ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ (บฑ\.\d) ไม่ได้ โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม (บฑ\.\d) คือ/g, 'The system could not read the names on this page clearly, so it could not even compare the count with $1 — please check by eye, and see what the system did read under supporting information. The $2 list is:'],
+  [/แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย/g, 'Fix this page label first, then renumber the rest of the front matter, because a wrong label here shifts every page after it'],
   [/ชื่อบทในเนื้อหาข้อความไม่ตรง: /g, 'Chapter title in the content does not match: '],
   [/ชื่อบทในสารบัญพิมพ์ผิดเล็กน้อย: /g, 'Chapter title in the TOC has a minor typo: '],
   [/ชื่อบทในเนื้อหาพิมพ์ผิดเล็กน้อย: /g, 'Chapter title in the content has a minor typo: '],

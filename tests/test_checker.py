@@ -1814,6 +1814,55 @@ class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
             self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
+class ContinuedHeadingIsTheSameChapter(unittest.TestCase):
+    """บรรทัด "(ต่อ)" ในสารบัญคือบทเดิม ไม่ใช่บทใหม่
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: บางเล่มเขียนสารบัญเป็น
+
+        บทที่ 3 วิธีดำเนินการวิจัย        21
+        บทที่ 3 วิธีดำเนินการวิจัย (ต่อ)   25
+
+    สองบรรทัดนี้คือบทที่ 3 บทเดียว ไม่ผิด ใช้กับทุกบทและภาษาอังกฤษด้วย
+    """
+
+    CONTINUED = (
+        "บทที่ 3 วิธีดำเนินการวิจัย (ต่อ)",
+        "บทที่ 3 วิธีดำเนินการวิจัย (ต่อ) 25",
+        "บทที่ 3 วิธีดำเนินการวิจัย .......... (ต่อ) 25",
+        "CHAPTER 3 RESEARCH METHODOLOGY (cont.)",
+        "CHAPTER 3 RESEARCH METHODOLOGY (Cont.) 25",
+        "CHAPTER 3 RESEARCH METHODOLOGY (continued) 25",
+        # PDF ทำวรรณยุกต์หลุดเป็นประจำ ต้องยังจับได้
+        "บทท 3 วธดาเนนการวจย (ตอ) 25",
+    )
+
+    NOT_CONTINUED = (
+        "บทที่ 3 วิธีดำเนินการวิจัย 21",
+        "CHAPTER 3 RESEARCH METHODOLOGY 21",
+        # วงเล็บท้ายบรรทัดที่ไม่ใช่คำว่าต่อ ต้องไม่ถูกกลืน
+        "บทที่ 2 วรรณกรรมและงานวิจัยที่เกี่ยวข้อง (ฉบับปรับปรุง) 9",
+        "CHAPTER 5 DISCUSSION (WITH APPENDIX) 76",
+    )
+
+    def test_continuation_lines_are_recognised(self):
+        for line in self.CONTINUED:
+            self.assertTrue(checker_module.is_continuation_heading(line), line)
+
+    def test_ordinary_headings_are_not_swallowed(self):
+        for line in self.NOT_CONTINUED:
+            self.assertFalse(checker_module.is_continuation_heading(line), line)
+
+    def test_it_applies_to_every_chapter_number(self):
+        for n in range(1, 10):
+            self.assertTrue(checker_module.is_continuation_heading(
+                f"บทที่ {n} ชื่อบท (ต่อ) {n * 10}"), n)
+            self.assertTrue(checker_module.is_continuation_heading(
+                f"CHAPTER {n} SOME TITLE (cont.) {n * 10}"), n)
+
+    def test_an_empty_parenthesis_is_not_a_continuation(self):
+        self.assertFalse(checker_module.is_continuation_heading("บทที่ 3 ชื่อบท () 25"))
+
+
 class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
@@ -1825,8 +1874,8 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
     def _run(self, first, second):
         rep = Report()
         checker_module._report_signature_page_labels(
-            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}", "RED")
-        return [(it["location"], it["found"]) for it in rep.zones["RED"]]
+            rep, [0, 1], [first, second], lambda i: f"แผ่นที่ {i + 1}")
+        return [(it["location"], it["found"]) for it in rep.zones["ORANGE"]]
 
     def test_correct_labels_pass(self):
         self.assertEqual(self._run("Thesis entitled X\ni", "Thesis entitled X\nii"), [])
@@ -1859,9 +1908,34 @@ class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
         rep = Report()
         checker_module._report_signature_page_labels(
             rep, [0, 1], ["Thesis entitled X\nz", "Thesis entitled X\nz"],
-            lambda i: f"แผ่นที่ {i + 1}", "RED")
-        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["RED"][0]["expected"])
-        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["RED"][1]["expected"])
+            lambda i: f"แผ่นที่ {i + 1}")
+        self.assertIn('"ก" (ไทย) หรือ "i" (อังกฤษ)', rep.zones["ORANGE"][0]["expected"])
+        self.assertIn('"ข" (ไทย) หรือ "ii" (อังกฤษ)', rep.zones["ORANGE"][1]["expected"])
+
+    def test_a_wrong_label_is_orange_not_red(self):
+        """เจ้าหน้าที่สั่ง ส.ค. 2569: เลขหน้าลงนามผิดให้แจ้งเป็นสีส้ม
+
+        เพราะมันพ่วงไปทำให้เลขหน้าส่วนนำหน้าอื่นผิดตาม กฎ "เลขหน้าไม่ต่อเนื่อง"
+        จึงฟ้องซ้ำอีกข้อจากต้นเหตุเดียวกัน ถ้าแดงทั้งคู่จะได้สองข้อจากความผิดเดียว
+        """
+        self.assertEqual(rule_zone("PAGE.SIGNATURE_LABEL"), "ORANGE")
+        self.assertEqual(checker_module.SIG_LABEL_ZONE, "ORANGE")
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 2)
+        self.assertEqual([it["rule_id"] for it in rep.zones["ORANGE"]],
+                         ["PAGE.SIGNATURE_LABEL"] * 2)
+
+    def test_the_fix_line_warns_that_later_pages_shift_too(self):
+        """เหตุผลที่เป็นส้มคือมันพ่วง — ข้อความต้องบอกด้วย ไม่งั้นดูเหมือนเรื่องเล็ก"""
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [0, 1], ["วิทยานิพนธ์ เรื่อง X\nค", "วิทยานิพนธ์ เรื่อง X\nค"],
+            lambda i: "หน้า ค")
+        self.assertIn("ไล่เลขหน้าส่วนนำที่เหลือใหม่", rep.zones["ORANGE"][0]["fix"])
 
     def test_the_page_number_decides_which_form_the_page_is_checked_against(self):
         """เหตุผลที่กฎนี้ยังต้องอยู่ — เลขหน้าคือตัวเลือกฟอร์ม"""
