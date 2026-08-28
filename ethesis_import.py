@@ -28,13 +28,20 @@ THAI_MONTHS = {
 # ตัวย่อปริญญาอังกฤษ "เดาจากตัวอักษรแรกไม่ได้" — DOCTOR OF PHILOSOPHY ไม่ใช่ D.O.P.
 # และ MASTER OF SCIENCE ไม่ใช่ M.S. จึงต้องเปิดตารางเท่านั้น ไม่เดาเอง
 # ปริญญาที่ยังไม่มีในตาราง ระบบจะไม่เดาและไม่ฟ้องแดง (ดู FORM.REQUIRED ใน checker)
+# ตัวย่อชื่อปริญญาอังกฤษ — ต้องเป็น "ตารางตายตัว" เดาจากอักษรตัวแรกของแต่ละคำไม่ได้
+# เพราะแบบแผนไม่สม่ำเสมอ: DOCTOR OF PUBLIC HEALTH ย่อว่า "Dr. P.H." ไม่ใช่ "D.P.H."
+# ขณะที่ DOCTOR OF PUBLIC ADMINISTRATION ย่อว่า "D.P.A." ตามแบบปกติ
+# ชื่อที่ไม่อยู่ในตารางคืน '' เพื่อให้เจ้าหน้าที่กรอกเอง ดีกว่าเดาผิดแล้วฟ้องเล่มที่ถูก
 DEGREE_ABBR = {
     'DOCTOR OF PHILOSOPHY': 'Ph.D.',
     'DOCTOR OF NURSING SCIENCE': 'D.N.S.',      # ยืนยันจากเล่มจริง (เล่มที่ 6)
+    'DOCTOR OF PUBLIC ADMINISTRATION': 'D.P.A.',
+    'DOCTOR OF PUBLIC HEALTH': 'Dr. P.H.',      # ไม่ใช่ D.P.H. — เจ้าหน้าที่ยืนยัน ส.ค. 2569
     'MASTER OF ENGINEERING': 'M.Eng.',
     'MASTER OF SCIENCE': 'M.Sc.',
     'MASTER OF ARTS': 'M.A.',
     'MASTER OF BUSINESS ADMINISTRATION': 'M.B.A.',
+    'MASTER OF PUBLIC ADMINISTRATION': 'M.P.A.',
     'MASTER OF PUBLIC HEALTH': 'M.P.H.',
     'MASTER OF NURSING SCIENCE': 'M.N.S.',
     'MASTER OF EDUCATION': 'M.Ed.',

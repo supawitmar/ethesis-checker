@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 import checker as checker_module
+import ethesis_import
 
 from checker import (
     describe_diff,
@@ -1697,6 +1698,65 @@ class TocHeadingMustBeTableOfContents(unittest.TestCase):
         for heading in ("TABLE OF CONTENTS", "สารบัญ"):
             self.assertIn(checker_module.norm(heading), checker_module.N_TOC, heading)
             self.assertNotIn(checker_module.norm(heading), checker_module.N_TOC_WRONG)
+
+
+class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
+    """ตัวย่อชื่อปริญญาต้องย่อได้ตอนดึงข้อมูลจาก eThesis เพื่อใช้ตรวจหน้าบทคัดย่อ
+
+    เจ้าหน้าที่แจ้ง ส.ค. 2569 ว่าระบบย่อชื่อปริญญาชุดนี้ไม่ได้ ทำให้ช่อง
+    "ชื่อปริญญาแบบย่อ" ว่าง แล้วการตรวจหน้าบทคัดย่อถูกข้ามไปทั้งข้อ
+    """
+
+    # (ชื่อเต็มจาก eThesis, ตัวย่อที่ถูกต้อง)
+    PAIRS = (
+        ("DOCTOR OF PUBLIC ADMINISTRATION", "D.P.A."),
+        ("MASTER OF PUBLIC ADMINISTRATION", "M.P.A."),
+        ("MASTER OF PUBLIC HEALTH", "M.P.H."),
+        ("DOCTOR OF PUBLIC HEALTH", "Dr. P.H."),
+        ("MASTER OF NURSING SCIENCE", "M.N.S."),
+        ("DOCTOR OF NURSING SCIENCE", "D.N.S."),
+    )
+
+    def test_every_degree_the_staff_listed_can_be_abbreviated(self):
+        for full, abbr in self.PAIRS:
+            self.assertEqual(ethesis_import._degree_abbr(full), abbr, full)
+
+    def test_the_field_in_parentheses_is_kept(self):
+        for full, abbr in self.PAIRS:
+            for probe in (f"{full}(HEALTH SOCIAL SCIENCE)",
+                          f"{full} (HEALTH SOCIAL SCIENCE)"):
+                self.assertEqual(ethesis_import._degree_abbr(probe),
+                                 f"{abbr} (HEALTH SOCIAL SCIENCE)", probe)
+
+    def test_public_health_doctorate_breaks_the_usual_pattern(self):
+        """เหตุผลที่ต้องใช้ตารางตายตัว ไม่ใช่เดาจากอักษรตัวแรกของแต่ละคำ"""
+        self.assertEqual(ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH"),
+                         "Dr. P.H.")
+        self.assertNotEqual(ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH"),
+                            "D.P.H.")
+
+    def test_an_abbreviation_with_a_space_still_matches_the_book(self):
+        """"Dr. P.H." มีช่องว่างในตัวเอง เล่มพิมพ์ติดกันก็ต้องถือว่าตรง"""
+        want = ethesis_import._degree_abbr("DOCTOR OF PUBLIC HEALTH (PUBLIC HEALTH)")
+        self.assertEqual(want, "Dr. P.H. (PUBLIC HEALTH)")
+        for printed in ("Dr. P.H. (PUBLIC HEALTH)", "Dr.P.H. (PUBLIC HEALTH)"):
+            text = ("WISIT KAWAYAPANIK 6236350 NSNS/D\n"
+                    f"{printed}\nTHESIS ADVISORY COMMITTEE")
+            compared = compare_reference_text(text, want, "degree", degree_line=True)
+            self.assertEqual(compared["status"], "exact", printed)
+
+    def test_an_unknown_degree_stays_empty_rather_than_guessing(self):
+        """เดาผิดแล้วไปฟ้องเล่มที่ถูก แย่กว่าปล่อยว่างให้เจ้าหน้าที่กรอกเอง"""
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF IMAGINARY STUDIES"), "")
+
+    def test_the_thai_side_covers_the_same_programmes(self):
+        for thai, abbr in (("รัฐประศาสนศาสตรดุษฎีบัณฑิต", "รป.ด."),
+                           ("รัฐประศาสนศาสตรมหาบัณฑิต", "รป.ม."),
+                           ("สาธารณสุขศาสตรมหาบัณฑิต", "ส.ม."),
+                           ("สาธารณสุขศาสตรดุษฎีบัณฑิต", "ส.ด."),
+                           ("พยาบาลศาสตรมหาบัณฑิต", "พย.ม."),
+                           ("พยาบาลศาสตรดุษฎีบัณฑิต", "พย.ด.")):
+            self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
 class SignaturePageNumbersMustBeFirstAndSecond(unittest.TestCase):
