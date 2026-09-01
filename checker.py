@@ -1911,11 +1911,39 @@ def cover_required_items(doc_type, program_language):
     )
 
 
-# บรรทัดลิขสิทธิ์เป็นข้อความเดียวที่มี "เฉพาะบนหน้าปก" เท่านั้น
-# วัดจากเล่มจริง 3 เล่ม (ไทย/นานาชาติ/ไทย-อังกฤษ): ชื่อบัณฑิตวิทยาลัยกับชื่อมหาวิทยาลัย
-# ไปโผล่บนหน้าลงนามและหน้าบทคัดย่อด้วย (2/4 ข้อ) ส่วนบรรทัดลิขสิทธิ์อยู่แผ่นแรกแผ่นเดียว
-# เก็บทั้งสองภาษาไว้ เพื่อให้หาเจอแม้ยังไม่รู้ว่าเล่มเป็นหลักสูตรภาษาไหน
-_COVER_COPYRIGHT = (norm("ลิขสิทธิ์ของมหาวิทยาลัยมหิดล"), norm("COPYRIGHT OF MAHIDOL UNIVERSITY"))
+# "สิ่งที่ควรอยู่บนหน้าปก" — ให้คะแนนจากเนื้อความทั้งหน้า ไม่ผูกกับบรรทัดใดบรรทัดหนึ่ง
+#
+# จับข้อความเดียวแบบเป๊ะ ๆ ไม่พอ: พิมพ์ผิดตัวเดียวในบรรทัดลิขสิทธิ์ (ซึ่งเป็นความผิด
+# ที่ระบบมีไว้จับพอดี) ก็ทำให้หาหน้าปกไม่เจอทั้งหน้า วัดกับเล่มจริงแล้วยืนยัน
+# ให้นับ "สิ่งที่ควรมี" หลายอย่างแทน พิมพ์ผิดหนึ่งจุดจึงเหลืออีกสามอย่างให้ยึด
+# เก็บทั้งคำไทยและคำอังกฤษ เพื่อให้หาเจอโดยไม่ต้องรู้ภาษาของหลักสูตรก่อน
+_COVER_MARKERS = (
+    ("ลิขสิทธิ์", ("COPYRIGHT", norm("ลิขสิทธิ์"))),
+    ("บัณฑิตวิทยาลัย", (norm("FACULTY OF GRADUATE STUDIES"), norm("บัณฑิตวิทยาลัย"))),
+    ("มหาวิทยาลัยมหิดล", (norm("MAHIDOL UNIVERSITY"), norm("มหาวิทยาลัยมหิดล"))),
+    ("ข้อความประเภทงาน", (norm("SUBMITTED IN PARTIAL FULFILLMENT"),
+                          norm("เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"))),
+)
+
+# "สิ่งที่หน้าปกต้องไม่มี" — ชื่อบัณฑิตวิทยาลัยกับชื่อมหาวิทยาลัยไปโผล่บนหน้าลงนาม
+# และหน้าบทคัดย่อด้วย (2 จาก 4 ข้อ) คำกลุ่มนี้จึงเป็นตัวแยกสองหน้านั้นออกจากหน้าปก
+# วัดกับเล่มจริงสามเล่ม: หน้าปกไม่มีคำกลุ่มนี้เลยสักเล่ม ส่วนหน้าลงนาม/บทคัดย่อมีทุกหน้า
+_NOT_COVER_MARKERS = tuple(norm(w) for w in (
+    "ENTITLED", "ABSTRACT", "บทคัดย่อ", "คณะกรรมการ",
+    "ADVISORY COMMITTEE", "EXAMINATION COMMITTEE", "อาจารย์ที่ปรึกษา", "คณบดี",
+))
+
+
+def cover_page_score(text):
+    """คะแนนความเป็นหน้าปกของหน้าหนึ่ง = สิ่งที่ควรมี ลบ สิ่งที่ต้องไม่มี
+
+    ใช้หักลบแทนการตัดทิ้ง เพราะชื่อเรื่องบางเล่มอาจมีคำอย่าง ABSTRACT อยู่จริง
+    ถ้าตัดทิ้งทันทีจะหาหน้าปกของเล่มนั้นไม่เจอเลย
+    """
+    nt = norm(text)
+    want = sum(1 for _label, alts in _COVER_MARKERS if any(a in nt for a in alts))
+    avoid = sum(1 for w in _NOT_COVER_MARKERS if w in nt)
+    return want - avoid
 
 
 def find_cover_page(pages, limit=10):
@@ -1925,14 +1953,15 @@ def find_cover_page(pages, limit=10):
     มาก่อนจึงถูกตรวจผิดจุดทั้งชุด (ไม่พบข้อความบังคับ ไม่พบปี ไม่พบชื่อปริญญา)
     โดยไม่มีข้อไหนบอกสาเหตุจริงว่าหน้าปกไม่ได้อยู่แผ่นแรก
 
-    ถ้าหาบรรทัดลิขสิทธิ์ไม่เจอเลย คืน 0 เท่าเดิม เพราะการเดาหน้าปกผิดอันตรายกว่า
-    (และการที่ไม่มีบรรทัดลิขสิทธิ์ก็ถูกฟ้องด้วยกฎข้อความบังคับบนหน้าปกอยู่แล้ว)
+    เสมอกันให้แผ่นแรกสุดชนะ และถ้าไม่มีหน้าไหนดูเป็นหน้าปกพอ คืน 0 เท่าเดิม
+    เพราะการเดาหน้าปกผิดอันตรายกว่าการไม่เดา
     """
+    best_idx, best_score = 0, 0
     for i, text in enumerate(pages[:limit]):
-        nt = norm(text)
-        if any(w in nt for w in _COVER_COPYRIGHT):
-            return i
-    return 0
+        score = cover_page_score(text)
+        if score > best_score:
+            best_idx, best_score = i, score
+    return best_idx if best_score >= 2 else 0
 
 
 def _best_cover_match(expected, cover_text):
@@ -2722,6 +2751,24 @@ def _is_toc_major_heading(text):
 _TOC_PAGE_TOKEN = r'(?:\d{1,4}|[ivxlcdm]+|[ก-ฮ])'
 
 
+_TOC_ENTRY_TAIL = re.compile(
+    rf'\s+{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?\s*$', re.I)
+
+
+def looks_like_contents_page(text, min_entries=5):
+    """หน้านี้เป็น "รายการสารบัญ" หรือไม่ — ดูจากสิ่งที่ควรอยู่บนหน้าสารบัญ
+
+    ใช้แยกหน้าสารบัญออกจากหน้าหัวข้อจริง เพราะบรรทัดในสารบัญมีรูปเดียวกับหัวข้อที่มี
+    เลขหน้าติดมาท้ายบรรทัดเป๊ะ ๆ ("ACKNOWLEDGEMENTS iii") ถ้าไม่แยก การยอมตัดเลขหน้า
+    ท้ายบรรทัดจะทำให้หน้าสารบัญถูกนับเป็นหน้ากิตติกรรมประกาศ
+
+    วัดกับเล่มจริงสามเล่ม: หน้าสารบัญได้ 13-20 บรรทัด หน้าสารบัญตาราง/รูปได้ 3-6
+    ส่วนหน้าปก หน้าลงนาม หน้ากิตติกรรมประกาศ และหน้าบทคัดย่อได้ 0-1 บรรทัด
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return sum(1 for line in lines if _TOC_ENTRY_TAIL.search(soft(line))) >= min_entries
+
+
 def _strip_toc_page_number(text):
     s = soft(text)
     # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
@@ -3127,6 +3174,45 @@ class Report:
         return "ผ่าน"
 
 
+def front_section_kind(page_text):
+    """หน้าส่วนนำหน้านี้เป็นชนิดไหน — ตัดสินจากเนื้อความบนหน้า ไม่ใช่บรรทัดเป๊ะบรรทัดเดียว
+
+    คืน (ชนิด, บรรทัดหัวข้อที่พิมพ์จริง) ชนิดที่เป็นไปได้คือ
+    signature / abstract_th / abstract_en / ack / toc / list และ "" เมื่อไม่ใช่ทั้งหมด
+
+    รองรับหัวข้อที่มีเลขหน้าติดมาท้ายบรรทัด ("ACKNOWLEDGEMENTS iii") เพราะ PDF
+    บางเล่มดึงหัวกระดาษมารวมกับบรรทัดหัวข้อ วัดกับเล่มจริงแล้วพบว่าถ้าไม่รองรับ
+    เล่มที่ผ่านสะอาดจะกลายเป็นไม่ผ่านทันที 4 ข้อ (ไม่พบกิตติกรรมประกาศ ไม่พบสารบัญ
+    ไม่พบบทคัดย่อ และภาคผนวกไม่อยู่ในสารบัญ) ทั้งที่เล่มถูกทุกอย่าง
+
+    แต่ห้ามใช้รูปแบบที่ตัดเลขหน้าแล้วกับ "หน้าที่เป็นรายการสารบัญ" เพราะทุกบรรทัด
+    ในสารบัญมีรูปเดียวกันเป๊ะ หน้าสารบัญจะถูกนับเป็นหน้ากิตติกรรมประกาศแทน
+    """
+    tls = top_lines(page_text, 12)
+    nls = [norm(l) for l in tls]
+    bare = [norm(_strip_toc_page_number(l)) for l in tls]
+    alt = nls if looks_like_contents_page(page_text) else bare
+    if any(x in N_ENTITLED for x in nls) or any(x in N_ENTITLED for x in alt):
+        return "signature", soft(tls[0]) if tls else ""
+    # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
+    # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
+    for j, nl in enumerate(nls[:12]):
+        al = alt[j]
+        if N_ABSTRACT_TH in (nl, al):
+            return "abstract_th", soft(tls[j])
+        if 'ABSTRACT' in (nl, al) or any(re.match(r'^ABSTRACT\(', x) for x in (nl, al)):
+            return "abstract_en", soft(tls[j])
+        if nl in N_ACK or al in N_ACK:
+            return "ack", soft(tls[j])
+        # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ แม้บนหน้าที่เป็นรายการสารบัญเอง
+        # เพราะสารบัญไม่เคยมีบรรทัดที่ชื่อว่า "สารบัญ" อยู่ในรายการของตัวเอง
+        if nl in N_TOC or bare[j] in N_TOC:
+            return "toc", soft(tls[j])
+        if nl in N_LISTS or al in N_LISTS:
+            return "list", soft(tls[j])
+    return "", ""
+
+
 def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
               skip_identity_check=False):
     """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
@@ -3184,27 +3270,21 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     sig_pages, abs_th_pages, abs_en_pages, ack_pages, toc_pages, list_pages = [], [], [], [], [], []
     toc_heading_wrong = []      # (ดัชนีหน้า, หัวข้อที่เล่มพิมพ์) เมื่อไม่ใช่ TABLE OF CONTENTS
     for i in range(front_limit):
-        tls = top_lines(pages[i], 12)
-        nls = [norm(l) for l in tls]
-        if any(x in N_ENTITLED for x in nls):
+        kind, heading = front_section_kind(pages[i])
+        if kind == "signature":
             sig_pages.append(i)
-            continue
-        # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
-        # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
-        for j, nl in enumerate(nls[:12]):
-            if nl == N_ABSTRACT_TH:
-                abs_th_pages.append(i); break
-            if nl == 'ABSTRACT' or re.match(r'^ABSTRACT\(', nl):
-                abs_en_pages.append(i); break
-            if nl in N_ACK:
-                ack_pages.append(i); break
-            if nl in N_TOC:
-                toc_pages.append(i)
-                if nl in N_TOC_WRONG:
-                    toc_heading_wrong.append((i, soft(tls[j])))
-                break
-            if nl in N_LISTS:
-                list_pages.append(i); break
+        elif kind == "abstract_th":
+            abs_th_pages.append(i)
+        elif kind == "abstract_en":
+            abs_en_pages.append(i)
+        elif kind == "ack":
+            ack_pages.append(i)
+        elif kind == "toc":
+            toc_pages.append(i)
+            if norm(_strip_toc_page_number(heading)) in N_TOC_WRONG:
+                toc_heading_wrong.append((i, heading))
+        elif kind == "list":
+            list_pages.append(i)
 
     abs_th_idx = abs_th_pages[0] if abs_th_pages else None
     abs_en_idx = abs_en_pages[0] if abs_en_pages else None

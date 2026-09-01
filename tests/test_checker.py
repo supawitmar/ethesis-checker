@@ -9,6 +9,8 @@ from unittest import mock
 import checker as checker_module
 import ethesis_import
 
+NEWLINE = chr(10)
+
 from checker import (
     describe_diff,
     _closest_student_id,
@@ -1933,6 +1935,121 @@ class OrderFindingsAreFiledUnderStructure(unittest.TestCase):
             found="ไม่พบข้อความบังคับ (ข้อความลิขสิทธิ์) บนหน้าปก",
             expected='ข้อความที่ถูกต้อง: "COPYRIGHT OF MAHIDOL UNIVERSITY"'))
         self.assertEqual(got, "ขาดหาย/ไม่พบ")
+
+
+class PagesAreIdentifiedByContentNotExactLines(unittest.TestCase):
+    """ระบุหน้าจาก "สิ่งที่ควรอยู่ในหน้านั้น" ไม่ใช่จากบรรทัดที่ตรงเป๊ะบรรทัดเดียว
+
+    เจ้าหน้าที่ท้วง (ก.ย. 2569) ว่าบางเล่มบรรทัดไม่ตรงกัน การมองบรรทัดเป๊ะทำให้ตรวจ
+    คลาดเคลื่อน วัดกับเล่มจริงแล้วยืนยัน: ถ้า PDF ดึงเลขหน้ามาต่อท้ายบรรทัดหัวข้อ
+    (เกิดเมื่อหัวกระดาษกับหัวข้ออยู่ระดับเดียวกัน) เล่มที่ผ่านสะอาดกลายเป็นไม่ผ่าน
+    4 ข้อรวด คือ ไม่พบกิตติกรรมประกาศ ไม่พบสารบัญ ไม่พบบทคัดย่อ และภาคผนวกไม่อยู่ในสารบัญ
+    """
+
+    ACK_EN = """ACKNOWLEDGEMENTS
+I would like to express my sincere gratitude to my advisor."""
+    ACK_TH = """กิตติกรรมประกาศ
+ขอขอบพระคุณอาจารย์ที่ปรึกษาที่กรุณาให้คำแนะนำตลอดมา"""
+    TOC_EN = """TABLE OF CONTENTS
+Page
+ACKNOWLEDGEMENTS iii
+ABSTRACT (ENGLISH) iv
+ABSTRACT (THAI) v
+LIST OF TABLES viii
+LIST OF FIGURES ix
+CHAPTER I INTRODUCTION 1
+REFERENCES 52
+BIOGRAPHY 60"""
+
+    def test_clean_headings_are_identified(self):
+        kinds = {
+            self.ACK_EN: "ack",
+            self.ACK_TH: "ack",
+            self.TOC_EN: "toc",
+            "ABSTRACT@This study aims to": "abstract_en",
+            "บทคัดย่อ@การศึกษานี้มีวัตถุประสงค์": "abstract_th",
+            "LIST OF TABLES@Table 1.1 Something 5": "list",
+        }
+        for text, want in kinds.items():
+            got = checker_module.front_section_kind(text.replace("@", NEWLINE))[0]
+            self.assertEqual(got, want, text[:24])
+
+    def test_a_page_number_stuck_to_the_heading_still_works(self):
+        """หัวกระดาษถูกดึงมารวมกับหัวข้อ — เคสที่ทำให้เล่มดี ๆ ตกทั้งเล่ม"""
+        cases = {
+            "ACKNOWLEDGEMENTS iii@I would like to thank": "ack",
+            "กิตติกรรมประกาศ ค@ขอขอบพระคุณอาจารย์": "ack",
+            "ABSTRACT iv@This study aims to": "abstract_en",
+            "บทคัดย่อ ง@การศึกษานี้มีวัตถุประสงค์": "abstract_th",
+            "TABLE OF CONTENTS vi@Page": "toc",
+            "สารบัญ ฉ@หน้า": "toc",
+        }
+        for text, want in cases.items():
+            got = checker_module.front_section_kind(text.replace("@", NEWLINE))[0]
+            self.assertEqual(got, want, text[:24])
+
+    def test_a_contents_listing_is_not_mistaken_for_the_pages_it_lists(self):
+        """บรรทัดในสารบัญมีรูปเดียวกับหัวข้อที่มีเลขหน้าติดท้ายเป๊ะ ๆ ต้องแยกให้ออก"""
+        self.assertEqual(checker_module.front_section_kind(self.TOC_EN)[0], "toc")
+        self.assertTrue(checker_module.looks_like_contents_page(self.TOC_EN))
+        self.assertFalse(checker_module.looks_like_contents_page(self.ACK_EN))
+
+    def test_a_continued_contents_page_is_not_read_as_a_heading_page(self):
+        """หน้าสารบัญหน้าที่สองไม่มีหัวข้อของตัวเองให้ยึด การ์ดนี้จึงเป็นตัวเดียวที่กันไว้
+
+        หัวข้อ "TABLE OF CONTENTS (cont.)" ไม่ตรงกับชุดคำหัวข้อ พอไม่มีอะไรแมตช์
+        บรรทัดแรกที่เป็นรายการ ("ACKNOWLEDGEMENTS iii") จะกลายเป็นตัวชี้ว่าหน้านี้
+        คือหน้ากิตติกรรมประกาศ ทั้งที่เป็นสารบัญ
+        """
+        cont = NEWLINE.join([
+            "TABLE OF CONTENTS (cont.)", "Page",
+            "ACKNOWLEDGEMENTS iii", "ABSTRACT (ENGLISH) iv", "ABSTRACT (THAI) v",
+            "LIST OF TABLES viii", "LIST OF FIGURES ix", "REFERENCES 52",
+        ])
+        self.assertTrue(checker_module.looks_like_contents_page(cont))
+        self.assertNotEqual(checker_module.front_section_kind(cont)[0], "ack")
+
+    def test_a_short_listing_still_falls_back_to_the_line(self):
+        """หน้าที่มีรายการน้อยเกินกว่าจะเป็นสารบัญ ยังใช้บรรทัดตัดสินได้ตามเดิม"""
+        short = NEWLINE.join(["ACKNOWLEDGEMENTS iii", "I would like to thank"])
+        self.assertFalse(checker_module.looks_like_contents_page(short))
+        self.assertEqual(checker_module.front_section_kind(short)[0], "ack")
+
+
+class CoverIsFoundByWhatBelongsOnIt(unittest.TestCase):
+    """หน้าปกหาโดยนับ "สิ่งที่ควรมีบนหน้าปก" ไม่ใช่จับข้อความเดียวแบบเป๊ะ
+
+    เดิมยึดบรรทัดลิขสิทธิ์อย่างเดียว พิมพ์ผิดตัวเดียว (ซึ่งเป็นความผิดที่ระบบมีไว้จับ
+    พอดี) ก็หาหน้าปกไม่เจอ แล้วตกกลับไปถือว่าแผ่นแรกคือหน้าปก ทำให้เล่มที่หน้าปก
+    ไม่ได้อยู่แผ่นแรกกลับไปฟ้องมั่วเหมือนเดิม
+    """
+
+    COVER = """A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE DEGREE OF
+MASTER OF SCIENCE
+FACULTY OF GRADUATE STUDIES
+MAHIDOL UNIVERSITY
+2026
+COPYRIGHT OF MAHIDOL UNIVERSITY"""
+    SIGNATURE = """THESIS ENTITLED
+SOMETHING SOMETHING
+FACULTY OF GRADUATE STUDIES
+MAHIDOL UNIVERSITY
+Advisory Committee"""
+
+    def test_the_cover_outscores_the_signature_page(self):
+        self.assertGreater(checker_module.cover_page_score(self.COVER),
+                           checker_module.cover_page_score(self.SIGNATURE))
+
+    def test_one_typo_does_not_hide_the_cover(self):
+        typo = self.COVER.replace("COPYRIGHT OF MAHIDOL UNIVERSITY",
+                                  "COPYRIGHT OF MAHIDOL UNIVERSTY")
+        self.assertNotEqual(typo, self.COVER)
+        self.assertEqual(checker_module.find_cover_page(["ใบรับรอง", typo, self.SIGNATURE]), 1)
+
+    def test_a_cover_whose_title_contains_a_banned_word_is_still_found(self):
+        """หักคะแนนแทนการตัดทิ้ง — ชื่อเรื่องบางเล่มมีคำว่า abstract อยู่จริง"""
+        cover = "ABSTRACT REASONING IN CHILDREN" + NEWLINE + self.COVER
+        self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
 
 
 class CoverPageMustBeTheFirstSheet(unittest.TestCase):
