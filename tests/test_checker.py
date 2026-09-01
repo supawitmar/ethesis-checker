@@ -1,3 +1,4 @@
+import inspect
 import re
 import sys
 
@@ -1893,6 +1894,114 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
+class OrderFindingsAreFiledUnderStructure(unittest.TestCase):
+    """กฎลำดับ/ตำแหน่งของส่วนประกอบ ต้องอยู่หมวด "โครงสร้างเล่ม"
+
+    ข้อความของกฎพวกนี้เป็นรายการชื่อส่วนทั้งเล่ม จึงมีคำที่ classify จับได้เต็มไปหมด
+    ลำดับส่วนนำของเล่มไทยเคยตกหมวด "ภาษาไม่ครบตามหลักสูตร" เพราะในข้อความมีคำว่า
+    "บทคัดย่อภาษาไทย" ส่วนหน้าปกที่ไม่ได้อยู่แผ่นแรกไม่มีคำไหนตรงเลย เลยตกหมวด "อื่นๆ"
+    จึงจัดหมวดจากรหัสกฎแทนการเดาจากคำ
+    """
+
+    def test_each_order_rule_lands_in_the_structure_bucket(self):
+        cases = {
+            "FRONT.COVER_FIRST": ("หน้าปกอยู่แผ่นที่ 2 ของไฟล์ ไม่ใช่แผ่นแรก",
+                                  "หน้าปกต้องเป็นแผ่นแรกของไฟล์", "หน้าปก"),
+            "FRONT.ORDER": ("ลำดับที่พบ: หน้าลงนาม (แผ่นที่ 3 ของไฟล์) แล้ว "
+                            "บทคัดย่อภาษาไทย (แผ่นที่ 5 ของไฟล์)",
+                            "ลำดับที่ต้องเป็น: หน้าลงนาม แล้ว กิตติกรรมประกาศ", "ส่วนนำ"),
+            "END.STRUCTURE": ("ลำดับที่พบ: ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                              "ลำดับที่ต้องเป็น: รายการอ้างอิง/บรรณานุกรม", "ส่วนท้ายเล่ม"),
+        }
+        for rule_id, (found, expected, loc) in cases.items():
+            got = checker_module.classify(dict(rule_id=rule_id, found=found,
+                                               expected=expected, location=loc))
+            self.assertEqual(got, "โครงสร้างเล่ม", rule_id)
+
+    def test_the_shortcut_is_what_keeps_them_there(self):
+        """ควบคุมเชิงลบ: ถ้าเดาจากคำเหมือนเดิม เล่มไทยจะไปโผล่หมวดภาษา"""
+        got = checker_module.classify(dict(
+            rule_id="", location="ส่วนนำ",
+            found="ลำดับที่พบ: หน้าลงนาม (แผ่นที่ 3 ของไฟล์) แล้ว บทคัดย่อภาษาไทย (แผ่นที่ 5 ของไฟล์)",
+            expected="ลำดับที่ต้องเป็น: หน้าลงนาม แล้ว กิตติกรรมประกาศ"))
+        self.assertEqual(got, "ภาษาไม่ครบตามหลักสูตร")
+
+    def test_other_cover_rules_keep_their_own_category(self):
+        """ทางลัดต้องแคบ ห้ามลากข้ออื่นบนหน้าปกเข้ามาด้วย"""
+        got = checker_module.classify(dict(
+            rule_id="FRONT.COVER_REQUIRED", location="หน้าปก",
+            found="ไม่พบข้อความบังคับ (ข้อความลิขสิทธิ์) บนหน้าปก",
+            expected='ข้อความที่ถูกต้อง: "COPYRIGHT OF MAHIDOL UNIVERSITY"'))
+        self.assertEqual(got, "ขาดหาย/ไม่พบ")
+
+
+class CoverPageMustBeTheFirstSheet(unittest.TestCase):
+    """หน้าปกต้องอยู่แผ่นแรกของไฟล์เสมอ (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    เดิมโค้ดถือว่า pages[0] คือหน้าปกเสมอ เล่มที่มีใบปะหน้า ใบรับรอง หรือหน้าว่าง
+    มาก่อนจึงถูกตรวจผิดจุดทั้งชุด วัดกับเล่มจริงที่แทรกหน้าเกินไว้หน้าสุด ได้ข้อฟ้อง
+    บนหน้าปก 8/8/7 ข้อ โดยไม่มีข้อไหนบอกสาเหตุจริงเลย
+
+    ตัวชี้ขาดคือ "บรรทัดลิขสิทธิ์" ซึ่งวัดจากเล่มจริงทั้งสามเล่ม (นานาชาติ /
+    ไทย-อังกฤษ / ไทย) แล้วพบเฉพาะบนแผ่นแรกแผ่นเดียว ส่วนชื่อบัณฑิตวิทยาลัยกับ
+    ชื่อมหาวิทยาลัยไปโผล่บนหน้าลงนามและหน้าบทคัดย่อด้วย จึงใช้ชี้ขาดไม่ได้
+    """
+
+    TH_COVER = "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\nลิขสิทธิ์ของมหาวิทยาลัยมหิดล"
+    EN_COVER = ("FACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\nCOPYRIGHT OF MAHIDOL UNIVERSITY")
+
+    def test_a_normal_book_has_its_cover_on_the_first_sheet(self):
+        for cover in (self.TH_COVER, self.EN_COVER):
+            self.assertEqual(checker_module.find_cover_page([cover, "ANY", "MORE"]), 0)
+
+    def test_sheets_inserted_before_the_cover_are_found(self):
+        for cover in (self.TH_COVER, self.EN_COVER):
+            pages = ["ใบรับรอง", "", cover, "CHAPTER I"]
+            self.assertEqual(checker_module.find_cover_page(pages), 2)
+
+    def test_a_book_with_no_copyright_line_is_not_guessed(self):
+        """ถ้าไม่มีบรรทัดลิขสิทธิ์เลย ห้ามเดา — คืนแผ่นแรกเท่าเดิม
+
+        การเดาผิดอันตรายกว่า และเล่มที่ไม่มีบรรทัดลิขสิทธิ์ถูกฟ้องด้วยกฎ
+        ข้อความบังคับบนหน้าปกอยู่แล้ว
+        """
+        self.assertEqual(checker_module.find_cover_page(["A", "B", "C"]), 0)
+        self.assertEqual(checker_module.find_cover_page([]), 0)
+
+    def test_the_signature_page_is_not_mistaken_for_the_cover(self):
+        """หน้าลงนามมีชื่อบัณฑิตวิทยาลัยและชื่อมหาวิทยาลัยเหมือนกัน แต่ไม่มีบรรทัดลิขสิทธิ์"""
+        sig = "FACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\nTHESIS ENTITLED"
+        self.assertEqual(checker_module.find_cover_page([sig, self.EN_COVER]), 1)
+
+    def test_the_search_does_not_run_to_the_end_of_the_book(self):
+        """หน้าปกอยู่ต้นเล่มเสมอ ไม่ต้องไล่ทั้งเล่มให้เสี่ยงไปเจอข้อความที่อ้างถึงลิขสิทธิ์"""
+        pages = ["x"] * 30 + [self.EN_COVER]
+        self.assertEqual(checker_module.find_cover_page(pages), 0)
+
+    def test_the_cover_checks_read_the_sheet_that_was_found(self):
+        """ถ้ายังอ่าน pages[0] อยู่ ข้อฟ้องบนหน้าปกจะกลับมาผิดทั้งชุดเหมือนเดิม"""
+        src = inspect.getsource(checker_module.run_check)
+        for line in src.splitlines():
+            if "หน้าปก" in line and ("spots" in line or "_check_cover_year" in line
+                                      or "cover_digits" in line):
+                self.assertNotIn("pages[0]", line, line.strip())
+
+    def test_the_rule_has_a_reference(self):
+        ref = checker_module.rule_reference("FRONT.COVER_FIRST")
+        self.assertNotEqual(ref, checker_module.rule_reference("FORM.REQUIRED"),
+                            "รหัสกฎพิมพ์ผิดจะเงียบ แล้วไปคืนที่มาของกฎอื่นแทน")
+
+    def test_the_message_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("หน้าปกอยู่แผ่นที่ 2 ของไฟล์ ไม่ใช่แผ่นแรก",
+                   "หน้าปกต้องเป็นแผ่นแรกของไฟล์",
+                   "ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
 class EndMatterMustBeInOrder(unittest.TestCase):
     """ลำดับส่วนท้ายเล่ม: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
 
@@ -1908,7 +2017,7 @@ class EndMatterMustBeInOrder(unittest.TestCase):
         """สร้างข้อฟ้องลำดับจากเลขหน้าที่ให้มา (None = ไม่มีส่วนนั้น)"""
         want = []
         if ref is not None:
-            want.append(("รายการอ้างอิง", ref))
+            want.append(("รายการอ้างอิง/บรรณานุกรม", ref))
         if app is not None:
             want.append(("ภาคผนวก", app))
         want.append(("ประวัติผู้วิจัย", bio))
@@ -1924,7 +2033,7 @@ class EndMatterMustBeInOrder(unittest.TestCase):
         wrong, _w, got = self._order_issue(ref=120, app=90, bio=130)
         self.assertTrue(wrong)
         self.assertEqual([n for n, _i in got],
-                         ["ภาคผนวก", "รายการอ้างอิง", "ประวัติผู้วิจัย"])
+                         ["ภาคผนวก", "รายการอ้างอิง/บรรณานุกรม", "ประวัติผู้วิจัย"])
 
     def test_a_biography_that_is_not_last_is_still_caught(self):
         """กฎเดิมจับเคสนี้ได้ กฎใหม่ต้องไม่ทำให้หลุด"""
@@ -1934,6 +2043,42 @@ class EndMatterMustBeInOrder(unittest.TestCase):
     def test_a_book_without_an_appendix_still_works(self):
         self.assertFalse(self._order_issue(ref=120, app=None, bio=130)[0])
         self.assertTrue(self._order_issue(ref=130, app=None, bio=120)[0])
+
+
+class OrderMessagesPointAtTheSheetNotThePrintedNumber(unittest.TestCase):
+    """ข้อความลำดับต้องบอก "แผ่นที่ N ของไฟล์" ไม่ใช่เลขหน้าที่พิมพ์ในเล่ม
+
+    เล่มที่ผิดลำดับส่วนใหญ่เกิดจากรวมไฟล์สลับกันโดยไม่ได้ใส่เลขหน้าใหม่ เลขที่พิมพ์
+    จึงสลับตามไปด้วย พอรายงานด้วยเลขที่พิมพ์จะได้ข้อความที่ดูขัดกับตัวเอง
+
+        ลำดับที่พบ: ภาคผนวก (หน้า 60) แล้ว รายการอ้างอิง (หน้า 52)
+
+    อ่านแล้วเหมือนระบบเรียงผิดเอง ทั้งที่เรียงตามไฟล์ถูกแล้ว (เจอตอนทดลองสลับ
+    ส่วนท้ายของเล่มจริงทั้งเล่มไทยและเล่มอังกฤษ) แผ่นที่ของไฟล์มีเสมอ ไม่ซ้ำ และ
+    เป็นตัวที่เจ้าหน้าที่ใช้เปิดไปดูใน PDF จริง
+    """
+
+    def test_the_order_rules_do_not_use_page_ref(self):
+        src = inspect.getsource(checker_module.run_check)
+        for line in src.splitlines():
+            if "actual_end" in line or "actual_front_sections" in line:
+                self.assertNotIn("page_ref(", line,
+                                 "ข้อความลำดับต้องใช้ order_ref ไม่ใช่ page_ref: "
+                                 + line.strip())
+
+    def test_the_sheet_number_starts_at_one(self):
+        """ดัชนีในโค้ดเริ่มที่ 0 แต่เจ้าหน้าที่นับแผ่นแรกของไฟล์เป็นแผ่นที่ 1"""
+        src = inspect.getsource(checker_module.run_check)
+        self.assertRegex(
+            src, r'(?s)def order_ref\(page_index\):.*?แผ่นที่ \{page_index \+ 1\} ของไฟล์',
+            "order_ref ต้องคืนแผ่นที่โดยบวกหนึ่งจากดัชนี")
+
+    def test_the_sheet_phrase_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("ภาคผนวก (แผ่นที่ 71 ของไฟล์)", pairs)
+        self.assertNotIn("แผ่น", en)
+        self.assertIn("71", en)
 
 
 class OrderMessagesUseWordsNotArrows(unittest.TestCase):
@@ -1955,15 +2100,17 @@ class OrderMessagesUseWordsNotArrows(unittest.TestCase):
         join = checker_module._ORDER_JOIN
         rep = Report()
         rep.add("RED", "front_matter", "ส่วนนำ",
-                "ลำดับที่พบ: " + join.join(["หน้าลงนาม (หน้า ii)", "สารบัญ (หน้า iv)",
-                                            "กิตติกรรมประกาศ (หน้า v)"]),
+                "ลำดับที่พบ: " + join.join(["หน้าลงนาม (แผ่นที่ 3 ของไฟล์)",
+                                            "สารบัญ (แผ่นที่ 5 ของไฟล์)",
+                                            "กิตติกรรมประกาศ (แผ่นที่ 6 ของไฟล์)"]),
                 "ลำดับที่ต้องเป็น: " + join.join(["หน้าลงนาม", "กิตติกรรมประกาศ",
                                                   "สารบัญ"]),
                 "ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด", "FRONT.ORDER")
         rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
-                "ลำดับที่พบ: " + join.join(["ภาคผนวก (หน้า 90)", "รายการอ้างอิง (หน้า 120)",
-                                            "ประวัติผู้วิจัย (หน้า 130)"]),
-                "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง", "ภาคผนวก",
+                "ลำดับที่พบ: " + join.join(["ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                                            "รายการอ้างอิง/บรรณานุกรม (แผ่นที่ 108 ของไฟล์)",
+                                            "ประวัติผู้วิจัย (แผ่นที่ 118 ของไฟล์)"]),
+                "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง/บรรณานุกรม", "ภาคผนวก",
                                                   "ประวัติผู้วิจัย"]),
                 "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด", "END.STRUCTURE")
         for it in rep.zones["RED"]:
@@ -1976,10 +2123,10 @@ class OrderMessagesUseWordsNotArrows(unittest.TestCase):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
         join = checker_module._ORDER_JOIN
-        for th in ("ลำดับที่พบ: " + join.join(["ภาคผนวก (หน้า 90)",
-                                               "รายการอ้างอิง (หน้า 120)",
-                                               "ประวัติผู้วิจัย (หน้า 130)"]),
-                   "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง", "ภาคผนวก",
+        for th in ("ลำดับที่พบ: " + join.join(["ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                                               "รายการอ้างอิง/บรรณานุกรม (แผ่นที่ 108 ของไฟล์)",
+                                               "ประวัติผู้วิจัย (แผ่นที่ 118 ของไฟล์)"]),
+                   "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง/บรรณานุกรม", "ภาคผนวก",
                                                      "ประวัติผู้วิจัย"]),
                    "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
                    "ส่วนท้ายเล่ม"):

@@ -569,6 +569,9 @@ var TR = [
   [/หัวข้อสารบัญข้อความไม่ตรง/g, 'The TOC heading text does not match'],
   [/แก้การสะกดหัวข้อสารบัญ/g, 'Correct the spelling of the TOC heading'],
   [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
+  [/หน้าปกอยู่(.+) ไม่ใช่แผ่นแรก/g, 'The cover page is on $1, not the first sheet'],
+  [/หน้าปกต้องเป็นแผ่นแรกของไฟล์/g, 'The cover page must be the first sheet of the file'],
+  [/ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก/g, 'Delete the pages that come before the cover, or move the cover to the first sheet'],
   [/ลำดับที่พบ: /g, 'Order found: '],
   [/ลำดับที่ต้องเป็น: /g, 'Required order: '],
   [/ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด/g, 'Move each front-matter section into the required order'],
@@ -821,7 +824,6 @@ var TR = [
   [/รายการอ้างอิง\/บรรณานุกรม/g, 'References/Bibliography'],
   [/รายการอ้างอิง/g, 'the reference list'],
   [/ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด/g, 'Move each end-matter section into the required order'],
-  [/ส่วนท้ายเล่ม/g, 'End matter'],
   [/ประวัติผู้วิจัย/g, 'Biography'],
   [/ภาคผนวก/g, 'Appendix'],
   [/บทคัดย่อภาษาไทย/g, 'Thai abstract'],
@@ -1204,6 +1206,7 @@ var TR = [
   [/หน้า (\d+)/g, 'Page $1'],
   // กฎเศษคำกว้าง ๆ ต้องอยู่ท้ายสุดเสมอ ไม่งั้นจะยิงตัดหน้ากฎเต็มประโยคที่อยู่ล่างกว่า
   // "บฑ." = ชื่อแบบฟอร์มของบัณฑิตวิทยาลัย รายงานอังกฤษเรียกฟอร์มเดียวกันว่า "GR."
+  [/แผ่นที่ (\d+) ของไฟล์/g, 'sheet $1 of the file'],
   [/ แล้ว /g, ' then '],
   [/อาจารย์ที่ปรึกษา/g, 'advisory committee members'],
   [/อาจารย์/g, 'professors'],

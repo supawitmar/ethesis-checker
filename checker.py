@@ -1911,6 +1911,30 @@ def cover_required_items(doc_type, program_language):
     )
 
 
+# บรรทัดลิขสิทธิ์เป็นข้อความเดียวที่มี "เฉพาะบนหน้าปก" เท่านั้น
+# วัดจากเล่มจริง 3 เล่ม (ไทย/นานาชาติ/ไทย-อังกฤษ): ชื่อบัณฑิตวิทยาลัยกับชื่อมหาวิทยาลัย
+# ไปโผล่บนหน้าลงนามและหน้าบทคัดย่อด้วย (2/4 ข้อ) ส่วนบรรทัดลิขสิทธิ์อยู่แผ่นแรกแผ่นเดียว
+# เก็บทั้งสองภาษาไว้ เพื่อให้หาเจอแม้ยังไม่รู้ว่าเล่มเป็นหลักสูตรภาษาไหน
+_COVER_COPYRIGHT = (norm("ลิขสิทธิ์ของมหาวิทยาลัยมหิดล"), norm("COPYRIGHT OF MAHIDOL UNIVERSITY"))
+
+
+def find_cover_page(pages, limit=10):
+    """แผ่นไหนของไฟล์คือหน้าปก (ปกติต้องเป็นแผ่นที่ 1)
+
+    เดิมโค้ดถือว่า pages[0] คือหน้าปกเสมอ เล่มที่มีใบปะหน้า ใบรับรอง หรือหน้าว่าง
+    มาก่อนจึงถูกตรวจผิดจุดทั้งชุด (ไม่พบข้อความบังคับ ไม่พบปี ไม่พบชื่อปริญญา)
+    โดยไม่มีข้อไหนบอกสาเหตุจริงว่าหน้าปกไม่ได้อยู่แผ่นแรก
+
+    ถ้าหาบรรทัดลิขสิทธิ์ไม่เจอเลย คืน 0 เท่าเดิม เพราะการเดาหน้าปกผิดอันตรายกว่า
+    (และการที่ไม่มีบรรทัดลิขสิทธิ์ก็ถูกฟ้องด้วยกฎข้อความบังคับบนหน้าปกอยู่แล้ว)
+    """
+    for i, text in enumerate(pages[:limit]):
+        nt = norm(text)
+        if any(w in nt for w in _COVER_COPYRIGHT):
+            return i
+    return 0
+
+
 def _best_cover_match(expected, cover_text):
     """หา 'ข้อความบนหน้าปกที่ใกล้เคียงที่สุด' กับข้อความบังคับ
 
@@ -2995,6 +3019,14 @@ def resolve_option(body_ch, approved, chapters_mode):
 def classify(issue):
     f, e, loc = issue.get("found", ""), issue.get("expected", ""), issue.get("location", "")
     text = f + " " + e + " " + loc
+    # กฎ "ลำดับ/ตำแหน่งของส่วนประกอบ" จัดหมวดจากรหัสกฎ ไม่ใช่จากคำในข้อความ
+    #
+    # ข้อความของกฎพวกนี้เป็น "รายการชื่อส่วนทั้งเล่ม" จึงมีคำที่กฎข้างล่างจับได้เต็มไปหมด
+    # (เช่น "บทคัดย่อภาษาไทย" ทำให้ลำดับส่วนนำตกไปหมวดภาษาไม่ครบตามหลักสูตร) และการที่
+    # หน้าปกไม่ได้อยู่แผ่นแรกก็ไม่มีคำไหนตรงเลย เลยตกหมวด "อื่นๆ" ทั้งที่เป็นเรื่อง
+    # โครงสร้างเล่มชัด ๆ
+    if issue.get("rule_id") in ("FRONT.COVER_FIRST", "FRONT.ORDER", "END.STRUCTURE"):
+        return "โครงสร้างเล่ม"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -3205,6 +3237,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if label:
             return f"หน้า {label}"
         return f"หน้าไม่ระบุเลข (แผ่นที่ {page_index + 1} ของไฟล์)"
+
+    def order_ref(page_index):
+        """ตำแหน่งสำหรับกฎ "ลำดับ" — ต้องเป็นแผ่นในไฟล์ ไม่ใช่เลขหน้าที่พิมพ์
+
+        กฎลำดับพูดถึงลำดับจริงในไฟล์ ส่วนเลขหน้าที่พิมพ์เป็นสิ่งที่เล่มผิดลำดับมัก
+        พิมพ์มาผิดอยู่แล้ว ถ้ารายงานด้วยเลขที่พิมพ์ เล่มที่รวมไฟล์สลับกันโดยไม่ได้
+        ใส่เลขใหม่จะได้ข้อความที่ดูขัดกับตัวเอง เช่น
+            "ภาคผนวก (หน้า 60) แล้ว รายการอ้างอิง (หน้า 52)"
+        ซึ่งอ่านแล้วเหมือนระบบเรียงผิดเอง ทั้งที่ระบบเรียงตามไฟล์ถูกแล้ว
+        แผ่นที่ของไฟล์มีเสมอ ไม่ซ้ำ และเป็นตัวที่เจ้าหน้าที่ใช้เปิดไปดูใน PDF จริง
+        """
+        return f"แผ่นที่ {page_index + 1} ของไฟล์"
+
+    # ---------- หน้าปกต้องเป็นแผ่นแรก ----------
+    cover_idx = find_cover_page(pages)
+    cover_text = pages[cover_idx] if pages else ""
+    if cover_idx > 0:
+        rep.add("RED", "front_matter", "หน้าปก",
+                f"หน้าปกอยู่{order_ref(cover_idx)} ไม่ใช่แผ่นแรก",
+                "หน้าปกต้องเป็นแผ่นแรกของไฟล์",
+                "ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก",
+                "FRONT.COVER_FIRST")
 
     seq = sorted(printed.items())
     arabic_sequence_ok = bool(seq) and seq[0][1] == 1 and all(
@@ -3620,7 +3674,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # ทั้งที่ผิดลำดับเหมือนกัน — ตรวจทั้งชุดทีเดียวแบบเดียวกับลำดับส่วนนำ
         end_sections = []
         if ref_head:
-            end_sections.append(("รายการอ้างอิง", ref_head[1]))
+            # ใช้ชื่อรวมสองคำแบบเดียวกับกฎสารบัญ เพราะเล่มไทยใช้ได้ทั้ง "รายการอ้างอิง"
+            # และ "บรรณานุกรม" ถ้าเลือกคำเดียวจะไปเรียกชื่อส่วนผิดจากที่พิมพ์ในเล่ม
+            end_sections.append(("รายการอ้างอิง/บรรณานุกรม", ref_head[1]))
         if appendix_page is not None:
             end_sections.append(("ภาคผนวก", appendix_page))
         end_sections.append(("ประวัติผู้วิจัย", bio_page))
@@ -3628,7 +3684,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if [n for n, _i in actual_end] != [n for n, _i in end_sections]:
             rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
                     "ลำดับที่พบ: " + _ORDER_JOIN.join(
-                        f"{name} ({page_ref(idx)})" for name, idx in actual_end),
+                        f"{name} ({order_ref(idx)})" for name, idx in actual_end),
                     "ลำดับที่ต้องเป็น: " + _ORDER_JOIN.join(
                         name for name, _i in end_sections),
                     "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
@@ -3778,7 +3834,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())
         _report_missing_form_fields(rep, A, required_fields)
 
-        cover_text = pages[0] if pages else ""
         missing_cover_items = [
             (label, expected_text)
             for label, expected_text in cover_required_items(A.get("doc_type", ""), program_language)
@@ -3841,7 +3896,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         actual_front_sections = sorted(ordered_front_sections, key=lambda item: item[1])
         if [name for name, _idx in actual_front_sections] != [name for name, _idx in ordered_front_sections]:
             actual_order = _ORDER_JOIN.join(
-                f"{name} ({page_ref(page_idx)})" for name, page_idx in actual_front_sections
+                f"{name} ({order_ref(page_idx)})" for name, page_idx in actual_front_sections
             )
             expected_order = _ORDER_JOIN.join(name for name, _idx in ordered_front_sections)
             rep.add(
@@ -3863,7 +3918,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ((A.get("title_en") if thai_book else A.get("title_th")) or "")
 
         if main_title:
-            spots = [("หน้าปก", pages[0] if pages else "")]
+            spots = [("หน้าปก", cover_text)]
             for k2, i2 in enumerate(sig_pages):
                 spots.append((f"หน้าลงนาม {k2+1} ({page_ref(i2)})", pages[i2]))
             main_abs = abs_th_idx if thai_book else abs_en_idx
@@ -3950,7 +4005,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # (บฑ. ของเล่มที่ 9 เขียน "พ.จ.ต. ณัชนพ เพชรสุข" แต่เล่มพิมพ์แค่ชื่อ-สกุล
             #  เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด)
             core_name = _strip_student_title(primary_student_name)
-            name_spots = [("หน้าปก", 0, "cover")] + [
+            name_spots = [("หน้าปก", cover_idx, "cover")] + [
                 (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", idx, "signature")
                 for k, idx in enumerate(sig_pages)
             ]
@@ -4012,7 +4067,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         student_id = soft(A.get("student_id", ""))
         if student_id:
             digits_only = re.sub(r'\D', '', student_id)
-            cover_digits = re.sub(r'[^\d]', '', pages[0] if pages else "")
+            cover_digits = re.sub(r'[^\d]', '', cover_text)
             if digits_only and digits_only in cover_digits:
                 rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "fail",
                                      "พบรหัสบนหน้าปก")
@@ -4112,7 +4167,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
-                degree_spots.append(("หน้าปก", pages[0] if pages else "", cover_degree))
+                degree_spots.append(("หน้าปก", cover_text, cover_degree))
             if sig_degree:
                 degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], sig_degree)
                                     for k, idx in enumerate(sig_pages))
@@ -4190,7 +4245,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if A.get("exam_date"):
             _check_exam_date(rep, A["exam_date"], sig_pages, pages, page_ref)
         if A.get("year"):
-            _check_cover_year(rep, str(A["year"]), pages[0] if pages else "")
+            _check_cover_year(rep, str(A["year"]), cover_text)
 
         # ---------- รายชื่อกรรมการบนหน้าลงนาม ----------
         # ถ้ามีข้อมูลกรรมการจาก eThesis → นับจำนวนเทียบกับ บฑ.1 / บฑ.2 ของหน้านั้น
