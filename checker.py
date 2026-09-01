@@ -4000,11 +4000,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         for k, idx in enumerate(sig_pages):
             spot = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
             if norm(sig_template) in norm(pages[idx]):
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
+                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "pass")
             else:
                 # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
                 # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
-                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความตาม template" เจ้าหน้าที่จะนึกว่าระบบ
+                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความ template" เจ้าหน้าที่จะนึกว่าระบบ
                 # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
                 #
                 # ตัด "ชื่อปริญญา" ออกจากหน้าก่อน แล้วที่เหลือจึงเป็นข้อความ template
@@ -4025,9 +4025,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         found_msg += f" {diff}"
                     detail = near
                 else:
-                    found_msg = f'ไม่พบข้อความตาม template: "{sig_template}"'
-                    detail = "ไม่พบข้อความตาม template"
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail", detail)
+                    found_msg = ('ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
+                                 f'"{sig_template}"')
+                    detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
                 rep.add("RED", "front_matter", spot, found_msg,
                         f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
                         "", "FRONT.APPROVAL")
