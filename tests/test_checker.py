@@ -2052,6 +2052,159 @@ Advisory Committee"""
         self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
 
 
+class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
+    """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
+
+    กฎ "หน้านี้ต้องไม่มีชื่อเรื่องอีกภาษา" สั่งให้ลบข้อความออกจากเล่ม ถ้าเดาเองว่า
+    ข้อความไหนคือชื่อเรื่องแล้วเดาผิด จะสั่งให้นักศึกษาลบข้อความที่ถูกต้องทิ้ง
+    """
+
+    TH = "การพัฒนาระบบ RFID สำหรับการจัดการคลังสินค้า"
+    EN = "DEVELOPMENT OF AN RFID SYSTEM FOR WAREHOUSE MANAGEMENT"
+
+    def test_each_field_is_read_by_its_own_label(self):
+        A = {"title_th": self.TH, "title_en": self.EN}
+        self.assertEqual(checker_module.approved_title(A, "thai"), self.TH)
+        self.assertEqual(checker_module.approved_title(A, "en"), self.EN)
+
+    def test_a_dash_is_not_a_thai_title(self):
+        """หลักสูตรนานาชาติกรอกช่องชื่อเรื่องภาษาไทยเป็นขีด (เล่มทดสอบที่ 1)"""
+        self.assertEqual(checker_module.approved_title({"title_th": "-"}, "thai"), "")
+
+    def test_an_empty_or_missing_field_is_not_used(self):
+        self.assertEqual(checker_module.approved_title({"title_th": ""}, "thai"), "")
+        self.assertEqual(checker_module.approved_title({}, "en"), "")
+
+    def test_fields_filled_in_the_wrong_language_are_not_used(self):
+        """ถ้าข้อมูลระบบสลับช่องกันไว้ ให้ข้ามดีกว่าเทียบผิดช่องแล้วฟ้องมั่ว"""
+        swapped = {"title_th": self.EN, "title_en": self.TH}
+        self.assertEqual(checker_module.approved_title(swapped, "thai"), "")
+        self.assertEqual(checker_module.approved_title(swapped, "en"), "")
+
+
+class ThaiTitlesMayContainEnglishLetters(unittest.TestCase):
+    """ชื่อเรื่องไทยมีอักษรอังกฤษปนได้ ต้องไม่ถูกนับเป็นชื่อเรื่องภาษาอังกฤษ
+
+    เจ้าหน้าที่เตือนไว้ตรง ๆ (ก.ย. 2569) ว่าหัวข้อไทยบางหัวข้อมีตัวอักษรภาษาอังกฤษ
+    ผสมอยู่ — ชื่อเทคโนโลยี ตัวย่อ ชื่อสารเคมี ตัวชี้ขาดจึงเป็น "มีอักษรไทยไหม"
+    ไม่ใช่ "มีอักษรอังกฤษไหม" เพราะชื่อเรื่องภาษาอังกฤษไม่มีอักษรไทยปนเลยสักตัว
+    แต่ชื่อเรื่องไทยมีอักษรอังกฤษปนได้เกินครึ่งบรรทัด
+
+    ชื่อเรื่องไทยแบบนี้ไปคล้ายชื่อเรื่องภาษาอังกฤษของตัวเองเสมอ วัดคะแนนตอนไม่กรอง
+    ภาษาได้ 0.53-0.74 แล้วแต่เล่ม ซึ่งคาบเกี่ยวและข้ามเกณฑ์ 0.6 ได้จริง
+    """
+
+    TH = "ผลของ machine learning based clinical decision support system ต่อการวินิจฉัย"
+    EN = ("EFFECT OF A MACHINE LEARNING BASED CLINICAL DECISION SUPPORT SYSTEM "
+          "ON DIAGNOSIS")
+    OTHER_TH = "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ"
+    COVER = ("วิทยานิพนธ์@ผลของ machine learning based clinical decision support "
+             "system ต่อการวินิจฉัย@นางสาวสมหญิง ดีงาม@"
+             "ลิขสิทธิ์ของมหาวิทยาลัยมหิดล").replace("@", NEWLINE)
+
+    def test_a_title_that_is_mostly_english_letters_is_still_thai(self):
+        for thai in (self.TH, self.OTHER_TH):
+            self.assertEqual(checker_module.title_script(thai), "thai")
+        self.assertEqual(checker_module.title_script(self.EN), "en")
+
+    def test_the_thai_cover_is_not_accused_of_carrying_the_english_title(self):
+        self.assertEqual(checker_module.title_printed_on_page(self.COVER, self.EN), "")
+
+    def test_without_the_language_filter_that_same_cover_is_accused(self):
+        """ควบคุมเชิงลบ: ถ้าไม่แยกภาษาก่อนเทียบ หน้าปกไทยที่ถูกต้องจะโดนฟ้อง"""
+        with mock.patch.object(checker_module, "title_script", lambda text: "en"):
+            self.assertNotEqual(
+                checker_module.title_printed_on_page(self.COVER, self.EN), "")
+
+    def test_the_english_title_really_added_is_still_found(self):
+        """กรองภาษาแล้วต้องยังจับของจริงได้ ไม่ใช่ปิดกฎทิ้ง"""
+        cover = self.COVER + NEWLINE + self.EN
+        self.assertIn("MACHINE LEARNING",
+                      checker_module.title_printed_on_page(cover, self.EN))
+
+
+class CoverAndSignatureCarryOneTitleLanguage(unittest.TestCase):
+    """หน้าปกและหน้าลงนามต้องมีชื่อเรื่องภาษาเดียว ตามภาษาของเล่ม
+
+    เกณฑ์ตัดสินวัดจากเล่มจริงสามเล่ม (นานาชาติ / ไทย-อังกฤษ / ไทย): หน้าที่ไม่มี
+    ชื่อเรื่องอีกภาษาได้คะแนนสูงสุด 0.21 หน้าที่พิมพ์ไว้จริงได้ 0.69 ขึ้นไป
+    """
+
+    TH = "การมีส่วนร่วมของประชาชนในการประเมินผลกระทบสิ่งแวดล้อมของโครงการปิโตรเลียม"
+    EN = ("PUBLIC PARTICIPATION IN ENVIRONMENTAL IMPACT ASSESSMENT "
+          "OF PETROLEUM DEVELOPMENT PROJECTS")
+    TH_TAIL = ("นายสมชาย ใจดี@วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร@"
+               "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล@ลิขสิทธิ์ของมหาวิทยาลัยมหิดล")
+    EN_TAIL = ("SOMCHAI JAIDEE@A THESIS SUBMITTED IN PARTIAL FULFILLMENT@"
+               "FACULTY OF GRADUATE STUDIES@MAHIDOL UNIVERSITY@"
+               "COPYRIGHT OF MAHIDOL UNIVERSITY")
+
+    def page(self, *blocks):
+        return NEWLINE.join(blocks).replace("@", NEWLINE)
+
+    def test_a_thai_cover_with_only_the_thai_title_is_clean(self):
+        cover = self.page(self.TH, self.TH_TAIL)
+        self.assertEqual(checker_module.title_printed_on_page(cover, self.EN), "")
+
+    def test_an_english_cover_with_only_the_english_title_is_clean(self):
+        cover = self.page(self.EN, self.EN_TAIL)
+        self.assertEqual(checker_module.title_printed_on_page(cover, self.TH), "")
+
+    def test_an_english_title_added_to_a_thai_cover_is_reported(self):
+        cover = self.page(self.TH, self.EN, self.TH_TAIL)
+        self.assertIn("PUBLIC PARTICIPATION",
+                      checker_module.title_printed_on_page(cover, self.EN))
+
+    def test_a_thai_title_added_to_an_english_cover_is_reported(self):
+        cover = self.page(self.EN, self.TH, self.EN_TAIL)
+        self.assertIn("การมีส่วนร่วม",
+                      checker_module.title_printed_on_page(cover, self.TH))
+
+    def test_a_title_broken_across_lines_is_still_found(self):
+        """ชื่อเรื่องยาวถูกตัดขึ้นหลายบรรทัดเสมอ ต้องรวมบรรทัดก่อนเทียบ"""
+        wrapped = "@".join(["PUBLIC PARTICIPATION IN ENVIRONMENTAL",
+                            "IMPACT ASSESSMENT OF PETROLEUM",
+                            "DEVELOPMENT PROJECTS"])
+        cover = self.page(self.TH, wrapped, self.TH_TAIL)
+        self.assertNotEqual(checker_module.title_printed_on_page(cover, self.EN), "")
+
+    def test_template_wording_alone_is_not_mistaken_for_the_title(self):
+        """หน้าปกอังกฤษมีข้อความ template เต็มหน้า ต้องไม่ถูกนับเป็นชื่อเรื่องไทย"""
+        self.assertEqual(
+            checker_module.title_printed_on_page(self.page(self.EN_TAIL), self.TH), "")
+
+    def test_the_rule_stays_off_when_the_system_has_no_such_title(self):
+        """หลักสูตรนานาชาติไม่มีชื่อเรื่องภาษาไทยในระบบ จึงไม่มีอะไรให้เทียบ"""
+        cover = self.page(self.EN, self.EN_TAIL)
+        self.assertEqual(
+            checker_module.title_printed_on_page(
+                cover, checker_module.approved_title({"title_th": "-"}, "thai")), "")
+
+
+class TitleLanguageFindingsAreNotFiledAsTitleMismatch(unittest.TestCase):
+    """ข้อ "หน้านี้มีชื่อเรื่องอีกภาษาอยู่ด้วย" ไม่ใช่ "ชื่อเรื่องไม่ตรง บฑ.1"
+
+    ชื่อเรื่องตรง บฑ.1 ทุกตัวอักษร แต่มีชื่อเรื่องเกินมาอีกอัน วิธีแก้คือลบข้อความออก
+    ไม่ใช่ไล่เทียบตัวอักษรกับ บฑ.1
+    """
+
+    ISSUE = {"rule_id": "FRONT.TITLE_ONE_LANGUAGE", "location": "หน้าปก",
+             "found": 'หน้านี้มีชื่อเรื่องภาษาอังกฤษอยู่ด้วย: "PUBLIC PARTICIPATION"',
+             "expected": "เล่มภาษาไทยต้องมีเฉพาะชื่อเรื่องภาษาไทย ทั้งบนหน้าปกและหน้าลงนาม"}
+
+    def test_the_finding_lands_in_its_own_category(self):
+        self.assertEqual(checker_module.classify(self.ISSUE), "ภาษาของชื่อเรื่อง")
+
+    def test_without_the_shortcut_it_looks_like_a_title_mismatch(self):
+        """ควบคุมเชิงลบ: ถ้าเดาจากคำ คำว่าชื่อเรื่องจะพาไปหมวดเทียบ บฑ.1"""
+        loose = dict(self.ISSUE, rule_id="")
+        self.assertEqual(checker_module.classify(loose), "ชื่อเรื่องไม่ตรง บฑ.1")
+
+    def test_the_category_has_an_english_name(self):
+        import tools.check_i18n as i18n
+        self.assertIn(checker_module.classify(self.ISSUE), i18n.load_catmap())
+
+
 class CoverPageMustBeTheFirstSheet(unittest.TestCase):
     """หน้าปกต้องอยู่แผ่นแรกของไฟล์เสมอ (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
 

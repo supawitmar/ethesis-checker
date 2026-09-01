@@ -2524,6 +2524,76 @@ def mismatch_detail(label, compared, expected=''):
     return detail
 
 
+# ---------- "ชื่อเรื่องนี้เป็นภาษาอะไร" ----------
+# ชื่อเรื่องภาษาไทยจำนวนมากมีอักษรอังกฤษปนอยู่จริง — ชื่อเทคโนโลยี ตัวย่อ ชื่อสารเคมี
+# เช่น "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ" ซึ่งอักษรอังกฤษเกินครึ่ง
+# บรรทัด ถ้าตัดสินด้วย "มีอักษรอังกฤษ = เป็นชื่อเรื่องภาษาอังกฤษ" หรือด้วยสัดส่วน
+# ตัวอักษร จะตัดสินผิดทันที ส่วนชื่อเรื่องภาษาอังกฤษไม่มีอักษรไทยปนเลยสักตัว
+# "การมีอักษรไทย" จึงเป็นตัวแยกสองภาษาที่เชื่อถือได้ทางเดียว
+_THAI_LETTER = re.compile(r'[ก-๙]')
+_LATIN_LETTER = re.compile(r'[A-Za-z]')
+
+
+def title_script(text):
+    """ภาษาของข้อความหนึ่งช่วง: "thai" / "en" / "" (ไม่มีตัวอักษรของภาษาใดเลย)"""
+    if _THAI_LETTER.search(text or ""):
+        return "thai"
+    if _LATIN_LETTER.search(text or ""):
+        return "en"
+    return ""
+
+
+def approved_title(approved, script):
+    """ชื่อเรื่องภาษาที่ต้องการ เอาจากข้อมูลระบบ (eThesis/บฑ.1) เท่านั้น
+
+    ไม่เดาชื่อเรื่องจากหน้ากระดาษเอง เพราะกฎนี้ตัดสินว่า "หน้านี้มีชื่อเรื่องอีกภาษา
+    อยู่ด้วยหรือไม่" ถ้าเดาเองแล้วเดาผิด จะสั่งให้นักศึกษาลบข้อความที่ถูกต้องออก
+
+    คืน "" เมื่อช่องนั้นกรอกเป็นภาษาอื่นหรือไม่ได้กรอก — หลักสูตรนานาชาติกรอก
+    ช่องชื่อเรื่องภาษาไทยเป็น "-" ซึ่งไม่ใช่ชื่อเรื่องภาษาไทย จึงไม่มีอะไรให้เทียบ
+    ถ้าข้อมูลระบบสลับช่องกันไว้ก็คืน "" เช่นกัน ดีกว่าเทียบผิดช่องแล้วฟ้องมั่ว
+    """
+    value = soft((approved or {}).get("title_th" if script == "thai" else "title_en", "") or "")
+    return value if title_script(value) == script else ""
+
+
+# เกณฑ์ตัดสินว่า "ชื่อเรื่องนี้ถูกพิมพ์อยู่บนหน้านี้จริง"
+#
+# วัดกับเล่มจริงสามเล่มและกับชื่อเรื่องไทยที่มีอักษรอังกฤษปน:
+#   หน้าที่ไม่มีชื่อเรื่องอีกภาษาจริง ๆ ได้สูงสุด 0.21
+#   หน้าที่พิมพ์ชื่อเรื่องอีกภาษาไว้จริง ได้ 0.69 ขึ้นไป (ครบทั้งชื่อได้ 1.0)
+# ตั้งไว้กลางช่องว่างนั้น กฎนี้สั่งให้ "ลบข้อความออก" การฟ้องผิดจึงเสียหายกว่าการปล่อย
+TITLE_ON_PAGE_MIN = 0.6
+
+
+def title_printed_on_page(page_text, title, min_ratio=TITLE_ON_PAGE_MIN):
+    """ข้อความบนหน้านี้ที่เป็นชื่อเรื่องดังกล่าว (คืน "" ถ้าไม่มี)
+
+    เทียบเฉพาะช่วงข้อความที่เป็น "ภาษาเดียวกับชื่อเรื่องที่กำลังหา" — ชื่อเรื่องไทยที่มี
+    อักษรอังกฤษปนจะไปคล้ายชื่อเรื่องภาษาอังกฤษของตัวเองเสมอ (วัดได้ 0.59 ในเล่มที่
+    ชื่อไทยเป็น "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ") ถ้าไม่กรองภาษา
+    ก่อน หน้าปกไทยที่ถูกต้องจะโดนฟ้องว่ามีชื่อเรื่องภาษาอังกฤษ ช่วงที่มีอักษรไทย
+    ถือเป็นข้อความภาษาไทยเสมอ ต่อให้มีอักษรอังกฤษปนอยู่มากแค่ไหน
+    """
+    want = title_script(title)
+    target = norm(title)
+    if not want or not target:
+        return ""
+    lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
+    best, best_ratio = "", 0.0
+    for start in range(len(lines)):
+        for span in range(1, 5):
+            if start + span > len(lines):
+                break
+            window = " ".join(lines[start:start + span])
+            if title_script(window) != want:
+                continue
+            ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = window, ratio
+    return best if best_ratio >= min_ratio else ""
+
+
 # คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้
 _TITLE_LEAD_IN = re.compile(r'^(?:entitled|เรื่อง)$', re.I)
 # บรรทัดที่บอกว่าบล็อกชื่อเรื่องจบแล้ว (ข้อความ template ที่ตามหลังชื่อเรื่องเสมอ)
@@ -3074,6 +3144,11 @@ def classify(issue):
     # โครงสร้างเล่มชัด ๆ
     if issue.get("rule_id") in ("FRONT.COVER_FIRST", "FRONT.ORDER", "END.STRUCTURE"):
         return "โครงสร้างเล่ม"
+    # "หน้านี้มีชื่อเรื่องอีกภาษาอยู่ด้วย" ไม่ใช่ "ชื่อเรื่องไม่ตรง บฑ.1" — ชื่อเรื่องตรงทุกตัว
+    # แต่มีชื่อเรื่องเกินมาอีกอัน ถ้าปล่อยให้ตกหมวดเดิมตามคำว่า "ชื่อเรื่อง" เจ้าหน้าที่จะ
+    # ไปไล่เทียบตัวอักษรกับ บฑ.1 ทั้งที่วิธีแก้คือลบข้อความออก
+    if issue.get("rule_id") == "FRONT.TITLE_ONE_LANGUAGE":
+        return "ภาษาของชื่อเรื่อง"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -4039,6 +4114,30 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # อยู่แล้ว จึงไม่ฟ้องซ้ำด้วยข้อความที่ฟังเหมือนระบบอ่านไม่ได้
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "เล่มไม่มีหน้าบทคัดย่อภาษานี้")
+
+        # ---------- หน้าปกและหน้าลงนามต้องมีชื่อเรื่องภาษาเดียว ----------
+        # เจ้าหน้าที่ระบุ (ก.ย. 2569): เล่มภาษาไทยให้มีเฉพาะชื่อเรื่องภาษาไทย
+        # เล่มภาษาอังกฤษให้มีเฉพาะชื่อเรื่องภาษาอังกฤษ ทั้งบนหน้าปกและหน้าลงนาม
+        # (หน้าบทคัดย่อไม่เข้ากฎนี้ — เล่มสองภาษาต้องมีบทคัดย่อทั้งสองภาษาอยู่แล้ว)
+        other_script = "en" if thai_book else "thai"
+        other_lang_title = approved_title(A, other_script)
+        if other_lang_title:
+            other_word = "ภาษาอังกฤษ" if other_script == "en" else "ภาษาไทย"
+            book_word = "ภาษาไทย" if thai_book else "ภาษาอังกฤษ"
+            one_language_spots = [("หน้าปก", cover_text)] + [
+                (f"หน้าลงนาม {k2 + 1} ({page_ref(i2)})", pages[i2])
+                for k2, i2 in enumerate(sig_pages)
+            ]
+            for spot_name, spot_text in one_language_spots:
+                printed_other = title_printed_on_page(spot_text, other_lang_title)
+                if not printed_other:
+                    continue
+                rep.add("RED", "front_matter", spot_name,
+                        f'หน้านี้มีชื่อเรื่อง{other_word}อยู่ด้วย: "{printed_other[:160]}"',
+                        f"เล่ม{book_word}ต้องมีเฉพาะชื่อเรื่อง{book_word}"
+                        " ทั้งบนหน้าปกและหน้าลงนาม",
+                        f"ลบชื่อเรื่อง{other_word}ออกจากหน้านี้",
+                        "FRONT.TITLE_ONE_LANGUAGE")
 
         if ack_pages and (student_name_th if thai_book else student_name):
             ack_start = ack_pages[0]
