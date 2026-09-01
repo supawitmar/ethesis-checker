@@ -2009,13 +2009,48 @@ class SignatureTemplateIsSeparateFromTheDegree(unittest.TestCase):
         self.assertLess(checker_module.SIGNATURE_TEMPLATE_MIN_RATIO, 0.86)
 
 
-class UnknownSignaturePageKindIsReported(unittest.TestCase):
-    """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
+class SourceFormFollowsThePagePosition(unittest.TestCase):
+    """ฟอร์มต้นทางเลือกจากลำดับหน้า ไม่ใช่หัวข้อบนหน้า
 
-    signature_page_kind ดูเลขหน้าก่อน แล้วถอยไปดูหัวข้อบนหน้า ถ้าเสียทั้งคู่จะเลือก
-    ฟอร์มไม่ได้ (บฑ.1 หรือ บฑ.2) แล้วการนับจำนวนอาจารย์ถูกข้ามไป เดิมไม่มีข้อความ
-    บอก เจ้าหน้าที่เห็นว่าหน้านั้นไม่มีข้อฟ้องแล้วนึกว่าผ่าน
+    เจ้าหน้าที่กำหนด ส.ค. 2569: "บฑ.1 หน้าลงนาม 1 และบทคัดย่อ · บฑ.2 หน้าลงนาม 2"
     """
+
+    def test_each_position_maps_to_its_own_form(self):
+        pick = checker_module.signature_page_committee
+        form = checker_module.committee_source_form
+        self.assertEqual(pick([2, 3], 2), "advisory")
+        self.assertEqual(form(pick([2, 3], 2)), "บฑ.1")
+        self.assertEqual(pick([2, 3], 3), "exam")
+        self.assertEqual(form(pick([2, 3], 3)), "บฑ.2")
+
+    def test_the_abstract_page_always_uses_the_advisory_form(self):
+        self.assertEqual(checker_module.committee_source_form("advisory"), "บฑ.1")
+
+    def test_a_third_signature_page_is_not_compared(self):
+        """template มีหน้าลงนามสองหน้า หน้าที่เกินมาไม่มีฟอร์มให้เทียบ"""
+        self.assertEqual(checker_module.signature_page_committee([2, 3], 9), "")
+        self.assertEqual(checker_module.signature_page_committee([], 0), "")
+
+    def test_the_heading_does_not_override_the_position(self):
+        """เล่มที่สลับสองหน้ากันคือเล่มที่ผิด ถ้ายึดหัวข้อจะตามน้ำไปเทียบให้ถูกชุด
+        แล้วความผิดนั้นหายไปจากรายงาน จึงต้องยึดลำดับหน้าเสมอ"""
+        pick = checker_module.signature_page_committee
+        # ลำดับหน้าเป็นตัวตัดสินอย่างเดียว ฟังก์ชันไม่รับข้อความบนหน้าเลย
+        self.assertEqual(pick([5, 6], 5), "advisory")
+        self.assertEqual(pick([5, 6], 6), "exam")
+
+
+class SwappedSignaturePagesAreReported(unittest.TestCase):
+    """หัวข้อบนหน้าขัดกับลำดับหน้า = อาจสลับสองหน้ากัน ต้องบอก ไม่ใช่เงียบ
+
+    ระบบเทียบตามลำดับหน้าเสมอ (บฑ.1 กับหน้า 1, บฑ.2 กับหน้า 2) เล่มที่สลับหน้ากัน
+    จึงได้ข้อฟ้อง "รายชื่อไม่ครบ" ตามมา ถ้าไม่บอกว่าอาจสลับหน้า เจ้าหน้าที่จะนึกว่า
+    เล่มขาดคน ทั้งที่ของจริงคือสลับหน้า ซึ่งแก้คนละอย่างกัน
+    """
+
+    SWAPPED_WHY = ("หัวข้อบนหน้านี้ไม่ตรงกับลำดับหน้า อาจสลับหน้ากัน "
+                   "ระบบเทียบตามลำดับหน้าไว้ก่อน โปรดตรวจว่าหน้าลงนาม 1 "
+                   "เป็นคณะกรรมการที่ปรึกษา และหน้าลงนาม 2 เป็นคณะกรรมการสอบ")
 
     def test_the_page_kind_survives_a_wrong_or_missing_page_label(self):
         """เลขหน้าผิดหรือหายไม่ทำให้แยกหน้าไม่ออก เพราะยังถอยไปดูหัวข้อได้"""
@@ -2041,22 +2076,15 @@ class UnknownSignaturePageKindIsReported(unittest.TestCase):
         # (ด่าน --detail ของ regress_books ยืนยันกับเล่มจริงแล้ว) ตรงนี้ล็อกกติกา
         # ปลายทางแทน: ข้อแบบนี้ต้องอยู่รายการสีม่วง ไม่กระทบคำตัดสิน ไม่เข้าใบสั่งแก้
         rep = Report()
-        rep.add_human("หน้าลงนาม 1 (หน้า ค)",
-                      "ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือ"
-                      "คณะกรรมการสอบ จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
-                      "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา",
-                      "UNCERTAIN.REVIEW")
+        rep.add_human("หน้าลงนาม 1 (หน้า ค)", self.SWAPPED_WHY, "UNCERTAIN.REVIEW")
         self.assertEqual(rep.verdict(), "ผ่าน")          # ไม่กระทบคำตัดสิน
         self.assertEqual(checker_module.issues_to_fix({"issues_by_zone": rep.zones}), [])
-        self.assertIn("แยกไม่ออก", rep.human_checklist[0]["why"])
+        self.assertIn("อาจสลับหน้ากัน", rep.human_checklist[0]["why"])
 
     def test_the_purple_message_has_an_english_translation(self):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
-        why = ("ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือคณะกรรมการสอบ "
-               "จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
-               "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา")
-        en = i18n.tr_en(why, pairs)
+        en = i18n.tr_en(self.SWAPPED_WHY, pairs)
         left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
         self.assertEqual(left, [], f"ยังไม่แปล {left}\n  EN: {en}")
 
