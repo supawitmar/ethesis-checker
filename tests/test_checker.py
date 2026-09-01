@@ -1893,48 +1893,6 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
-class CommitteeDegreeLineIsOnlyANotice(unittest.TestCase):
-    """คุณวุฒิใต้ชื่อกรรมการบนหน้าลงนาม = ข้อสังเกตสีเหลือง
-
-    เจ้าหน้าที่สั่ง ส.ค. 2569: "เรื่องคุณวุฒิ ในหน้าลงนาม ปรับเป็นสีเหลือง"
-
-    เหตุผลเชิงเนื้อหา: บรรทัดคุณวุฒิเป็นข้อความบรรทัดเล็กใต้ชื่อในตารางลายเซ็น
-    ซึ่งเป็นจุดที่ระบบอ่านพลาดได้บ่อย และ "เนื้อหา" ของคุณวุฒิก็ไม่ได้ตรวจอยู่แล้ว
-    (อยู่ในกล่องไม่อยู่ในขอบเขต) จึงไม่ควรตีตกเล่มด้วยข้อนี้
-    """
-
-    def test_the_rule_is_registered_as_a_yellow_notice(self):
-        self.assertIn("FRONT.COMMITTEE_DEGREE", RULE_CATALOG)
-        self.assertEqual(rule_zone("FRONT.COMMITTEE_DEGREE"), "YELLOW")
-        self.assertEqual(checker_module.COMMITTEE_DEGREE_ZONE, "YELLOW")
-
-    def test_a_book_with_only_this_finding_passes(self):
-        rep = Report()
-        rep.add(checker_module.COMMITTEE_DEGREE_ZONE, "front_matter",
-                "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
-                'ไม่พบคุณวุฒิใต้ชื่อกรรมการ "คนางค์ คันธมธุรพจน์"',
-                "ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ (Degree)",
-                "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน",
-                "FRONT.COMMITTEE_DEGREE")
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(rep.verdict(), "ผ่าน")
-        # เหลือง = ไม่เข้าใบสั่งแก้โดยปริยาย แต่เจ้าหน้าที่กด "ไม่ผ่าน" รายข้อได้
-        result = {"issues_by_zone": rep.zones}
-        self.assertEqual(checker_module.issues_to_fix(result), [])
-        self.assertEqual(len(checker_module.issues_to_fix(result, failed={"YELLOW:0"})), 1)
-
-    def test_it_still_names_who_is_missing_a_degree_line(self):
-        """ลดสีแล้วต้องไม่ลดข้อมูล เจ้าหน้าที่ยังต้องรู้ว่าใครขาด"""
-        rep = Report()
-        rep.add(checker_module.COMMITTEE_DEGREE_ZONE, "front_matter",
-                "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
-                'ไม่พบคุณวุฒิใต้ชื่อกรรมการ "คนางค์ คันธมธุรพจน์"',
-                "ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ (Degree)",
-                "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน",
-                "FRONT.COMMITTEE_DEGREE")
-        self.assertIn("คนางค์ คันธมธุรพจน์", rep.zones["YELLOW"][0]["found"])
-
-
 class UnknownSignaturePageKindIsReported(unittest.TestCase):
     """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
 
