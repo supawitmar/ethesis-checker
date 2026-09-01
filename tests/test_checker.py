@@ -1893,6 +1893,101 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
+class EndMatterMustBeInOrder(unittest.TestCase):
+    """ลำดับส่วนท้ายเล่ม: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
+
+    เจ้าหน้าที่ระบุลำดับทั้งไฟล์ไว้ (ส.ค. 2569)
+        หน้าปก / หน้าลงนาม 1 / หน้าลงนาม 2 / กิตติกรรมประกาศ / บทคัดย่อ / สารบัญ /
+        เนื้อหารายบท / รายการอ้างอิง / ภาคผนวก (ถ้ามี) / ประวัติผู้วิจัย
+
+    เดิมส่วนท้ายตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" เล่มที่วางภาคผนวกไว้
+    ก่อนรายการอ้างอิงจึงหลุดไป ทั้งที่ผิดลำดับเหมือนกัน
+    """
+
+    def _order_issue(self, ref, app, bio):
+        """สร้างข้อฟ้องลำดับจากเลขหน้าที่ให้มา (None = ไม่มีส่วนนั้น)"""
+        want = []
+        if ref is not None:
+            want.append(("รายการอ้างอิง", ref))
+        if app is not None:
+            want.append(("ภาคผนวก", app))
+        want.append(("ประวัติผู้วิจัย", bio))
+        got = sorted(want, key=lambda item: item[1])
+        return [n for n, _i in got] != [n for n, _i in want], want, got
+
+    def test_the_correct_order_is_not_reported(self):
+        wrong, _w, _g = self._order_issue(ref=120, app=125, bio=130)
+        self.assertFalse(wrong)
+
+    def test_an_appendix_before_the_references_is_caught(self):
+        """เคสที่กฎเดิมมองไม่เห็น — ประวัติผู้วิจัยยังอยู่ท้ายสุด แต่ลำดับผิด"""
+        wrong, _w, got = self._order_issue(ref=120, app=90, bio=130)
+        self.assertTrue(wrong)
+        self.assertEqual([n for n, _i in got],
+                         ["ภาคผนวก", "รายการอ้างอิง", "ประวัติผู้วิจัย"])
+
+    def test_a_biography_that_is_not_last_is_still_caught(self):
+        """กฎเดิมจับเคสนี้ได้ กฎใหม่ต้องไม่ทำให้หลุด"""
+        wrong, _w, _g = self._order_issue(ref=120, app=135, bio=130)
+        self.assertTrue(wrong)
+
+    def test_a_book_without_an_appendix_still_works(self):
+        self.assertFalse(self._order_issue(ref=120, app=None, bio=130)[0])
+        self.assertTrue(self._order_issue(ref=130, app=None, bio=120)[0])
+
+
+class OrderMessagesUseWordsNotArrows(unittest.TestCase):
+    """ข้อความลำดับต้องไม่มีสัญลักษณ์
+
+    เจ้าหน้าที่คัดลอกข้อความสรุปไปวางในอีเมล/Word ซึ่งฟอนต์ปลายทางแสดงสัญลักษณ์
+    เพี้ยน (เคยเจอ "·" กลายเป็นรูปโทรศัพท์) กฎลำดับส่วนนำเคยใช้ลูกศร "→"
+    ซึ่งหลุดเข้าสรุปมาตลอด เพราะเล่มทดสอบไม่เคยผลิตข้อความนี้ ด่าน --corpus จึงไม่เห็น
+    """
+
+    BANNED = "·—–→↔•≤✆"
+
+    def test_the_joiner_is_a_word(self):
+        self.assertEqual(checker_module._ORDER_JOIN.strip(), "แล้ว")
+        for ch in self.BANNED:
+            self.assertNotIn(ch, checker_module._ORDER_JOIN)
+
+    def test_no_banned_symbol_reaches_the_summary(self):
+        join = checker_module._ORDER_JOIN
+        rep = Report()
+        rep.add("RED", "front_matter", "ส่วนนำ",
+                "ลำดับที่พบ: " + join.join(["หน้าลงนาม (หน้า ii)", "สารบัญ (หน้า iv)",
+                                            "กิตติกรรมประกาศ (หน้า v)"]),
+                "ลำดับที่ต้องเป็น: " + join.join(["หน้าลงนาม", "กิตติกรรมประกาศ",
+                                                  "สารบัญ"]),
+                "ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด", "FRONT.ORDER")
+        rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
+                "ลำดับที่พบ: " + join.join(["ภาคผนวก (หน้า 90)", "รายการอ้างอิง (หน้า 120)",
+                                            "ประวัติผู้วิจัย (หน้า 130)"]),
+                "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง", "ภาคผนวก",
+                                                  "ประวัติผู้วิจัย"]),
+                "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด", "END.STRUCTURE")
+        for it in rep.zones["RED"]:
+            it["category"] = checker_module.classify(it)
+            it["section"] = summary_section(it)
+        text = plain_summary({"verdict": "ไม่ผ่าน", "issues_by_zone": rep.zones})
+        self.assertEqual([c for c in self.BANNED if c in text], [])
+
+    def test_the_order_messages_translate(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        join = checker_module._ORDER_JOIN
+        for th in ("ลำดับที่พบ: " + join.join(["ภาคผนวก (หน้า 90)",
+                                               "รายการอ้างอิง (หน้า 120)",
+                                               "ประวัติผู้วิจัย (หน้า 130)"]),
+                   "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง", "ภาคผนวก",
+                                                     "ประวัติผู้วิจัย"]),
+                   "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
+                   "ส่วนท้ายเล่ม"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}\n  TH: {th}\n  EN: {en}")
+
+
 class SignaturePagesAreNamedTheSameWayEverywhere(unittest.TestCase):
     """ทุกกฎบนหน้าลงนามต้องเรียกตำแหน่งแบบเดียวกัน
 

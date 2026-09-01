@@ -819,6 +819,9 @@ var TR = [
   [/ต้องมีข้อความ(.+?)นำหน้า/g, 'Must be preceded by the text$1'],
   [/ใส่ข้อความตาม(.+?)ให้ครบ/g, 'Add the full wording per$1'],
   [/รายการอ้างอิง\/บรรณานุกรม/g, 'References/Bibliography'],
+  [/รายการอ้างอิง/g, 'the reference list'],
+  [/ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด/g, 'Move each end-matter section into the required order'],
+  [/ส่วนท้ายเล่ม/g, 'End matter'],
   [/ประวัติผู้วิจัย/g, 'Biography'],
   [/ภาคผนวก/g, 'Appendix'],
   [/บทคัดย่อภาษาไทย/g, 'Thai abstract'],
@@ -1201,6 +1204,7 @@ var TR = [
   [/หน้า (\d+)/g, 'Page $1'],
   // กฎเศษคำกว้าง ๆ ต้องอยู่ท้ายสุดเสมอ ไม่งั้นจะยิงตัดหน้ากฎเต็มประโยคที่อยู่ล่างกว่า
   // "บฑ." = ชื่อแบบฟอร์มของบัณฑิตวิทยาลัย รายงานอังกฤษเรียกฟอร์มเดียวกันว่า "GR."
+  [/ แล้ว /g, ' then '],
   [/อาจารย์ที่ปรึกษา/g, 'advisory committee members'],
   [/อาจารย์/g, 'professors'],
   [/บฑ\./g, 'GR.']

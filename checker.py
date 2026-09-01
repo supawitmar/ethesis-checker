@@ -46,6 +46,11 @@ SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 # พอดี ถ้าตั้งหลวมจะยกชื่อปริญญามาปนแล้วสองประเด็นนี้ปนกันในรายงาน
 SIGNATURE_TEMPLATE_MIN_RATIO = 0.8
 
+# ตัวคั่นของ "ลำดับส่วนประกอบ" — ต้องเป็นคำ ไม่ใช่ลูกศร เพราะเจ้าหน้าที่คัดลอก
+# ข้อความสรุปไปวางในอีเมล/Word ซึ่งฟอนต์ปลายทางแสดงสัญลักษณ์เพี้ยน
+# (เคยเจอ "·" กลายเป็นรูปโทรศัพท์ — กติกาเดียวกับที่ห้ามสัญลักษณ์ทั้งหมดในสรุป)
+_ORDER_JOIN = " แล้ว "
+
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
 # tone marks, THANTHAKHAT, NIKHAHIT, YAMAKKAN
@@ -3607,9 +3612,27 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
-    elif last_major and last_major[0] != "BIO":
-        rep.add("RED", "end_matter", page_ref(last_major[1]),
-                "หลัง BIOGRAPHY ยังมีส่วนอื่น", "ประวัติผู้วิจัยต้องเป็นหน้าสุดท้าย", "ย้ายไปท้ายสุด")
+    else:
+        # ลำดับส่วนท้ายเล่มตามประกาศ: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
+        #
+        # เดิมตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" ซึ่งจับได้เฉพาะกรณีที่ประวัติ
+        # ไม่ได้อยู่ท้ายสุด เล่มที่วางภาคผนวกไว้ "ก่อน" รายการอ้างอิงจึงหลุดไป
+        # ทั้งที่ผิดลำดับเหมือนกัน — ตรวจทั้งชุดทีเดียวแบบเดียวกับลำดับส่วนนำ
+        end_sections = []
+        if ref_head:
+            end_sections.append(("รายการอ้างอิง", ref_head[1]))
+        if appendix_page is not None:
+            end_sections.append(("ภาคผนวก", appendix_page))
+        end_sections.append(("ประวัติผู้วิจัย", bio_page))
+        actual_end = sorted(end_sections, key=lambda item: item[1])
+        if [n for n, _i in actual_end] != [n for n, _i in end_sections]:
+            rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
+                    "ลำดับที่พบ: " + _ORDER_JOIN.join(
+                        f"{name} ({page_ref(idx)})" for name, idx in actual_end),
+                    "ลำดับที่ต้องเป็น: " + _ORDER_JOIN.join(
+                        name for name, _i in end_sections),
+                    "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
+                    "END.STRUCTURE")
 
     appendix_toc_idx = next(
         (page_idx for page_idx, line in toc_lines if any(w in norm(line) for w in N_APPENDIX)),
@@ -3817,10 +3840,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ordered_front_sections.append(("บทที่ 1/ส่วนเนื้อหา", body_ch[0][2]))
         actual_front_sections = sorted(ordered_front_sections, key=lambda item: item[1])
         if [name for name, _idx in actual_front_sections] != [name for name, _idx in ordered_front_sections]:
-            actual_order = " → ".join(
+            actual_order = _ORDER_JOIN.join(
                 f"{name} ({page_ref(page_idx)})" for name, page_idx in actual_front_sections
             )
-            expected_order = " → ".join(name for name, _idx in ordered_front_sections)
+            expected_order = _ORDER_JOIN.join(name for name, _idx in ordered_front_sections)
             rep.add(
                 "RED", "front_matter", "ส่วนนำ",
                 f"ลำดับที่พบ: {actual_order}",
