@@ -4018,19 +4018,24 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 template_zone = signature_template_zone(pages[idx], sig_degree)
                 near = _closest_run(template_zone, sig_template,
                                     min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+                # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
+                # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
+                # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
+                #  สิ่งที่พบ และบรรทัดที่ควรเป็น)
                 if near:
                     diff = describe_diff(near, sig_template)
-                    found_msg = f'หน้าลงนามพิมพ์ว่า "{near}"'
+                    found_msg = f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"'
                     if diff:
                         found_msg += f" {diff}"
                     detail = near
                 else:
-                    found_msg = ('ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
-                                 f'"{sig_template}"')
+                    # ไม่ยกประโยคเต็มมาตรงนี้ เพราะบรรทัด "ต้องเป็น" ข้างล่างมีอยู่แล้ว
+                    # ยกสองรอบทำให้ข้อเดียวมีประโยคยาว ๆ ซ้ำกันสองครั้ง
+                    found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
                     detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
                 rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
                 rep.add("RED", "front_matter", spot, found_msg,
-                        f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
+                        f'ต้องเป็น "{sig_template}"',
                         "", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []

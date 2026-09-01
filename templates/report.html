@@ -475,6 +475,7 @@ var TR = [
   [/ช่วงเลขหน้า (\S+) ถึง (\S+)/g, 'Page range $1 to $2'],
   [/หน้าลงนามหน้า (\d+) \(หน้า (\S+)\)/g, 'Approval page $1 (page $2)'],
   [/หน้าลงนาม (\d+) \(หน้า (\S+)\)/g, 'Approval page $1 (page $2)'],
+  [/ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า ("[^"]*")/g, 'The template wording below the title reads $1'],
   [/ข้อความ template ใต้ชื่อหัวข้อ: ("[^"]*")/g, 'Template wording below the title: $1'],
   [/ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ("[^"]*")/g, 'The template wording below the title was not found: $1'],
   [/ไม่พบข้อความ template ใต้ชื่อหัวข้อ/g, 'The template wording below the title was not found'],
