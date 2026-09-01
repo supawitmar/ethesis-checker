@@ -40,6 +40,7 @@ TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
+COMMITTEE_DEGREE_ZONE = rule_zone("FRONT.COMMITTEE_DEGREE", "YELLOW")
 
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
@@ -1240,14 +1241,20 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         _note_committee_reference(rep, expected, loc, form=form,
                                   status="counted" if countable else "unclear")
 
-        # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ต้องมีทุกคน ----------
+        # ---------- คุณวุฒิใต้ชื่อ: ไม่ตรวจเนื้อหา แต่ควรมีทุกคน ----------
         # ตรวจเฉพาะช่องกรรมการจริง (1..N) — ช่องที่อ่านเพี้ยนถูกฟ้องเรื่องชื่อไปแล้ว
+        #
+        # สีเหลือง ไม่ใช่แดง ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569 — บรรทัดคุณวุฒิเป็น
+        # ข้อความบรรทัดเล็กใต้ชื่อในตารางลายเซ็น ซึ่งเป็นจุดที่ระบบอ่านพลาดได้บ่อย
+        # (ดู committee_read_is_trustworthy) และเนื้อหาคุณวุฒิเองก็ไม่ได้ตรวจอยู่แล้ว
+        # จึงไม่ควรตีตกเล่มด้วยข้อนี้ เจ้าหน้าที่มีรายการสีม่วงให้ทานอยู่แล้ว
         for k in range(1, len(expected) + 1):
             if members.get(k) and not member_quals.get(k):
-                rep.add("RED", "front_matter", loc,
+                rep.add(COMMITTEE_DEGREE_ZONE, "front_matter", loc,
                         f'ไม่พบคุณวุฒิใต้ชื่อกรรมการ "{members[k]}"',
                         "ใต้ชื่อกรรมการแต่ละคนต้องมีบรรทัดคุณวุฒิ (Degree)",
-                        "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน", "FRONT.COMMITTEE")
+                        "เพิ่มบรรทัดคุณวุฒิใต้ชื่อกรรมการให้ครบทุกคน",
+                        "FRONT.COMMITTEE_DEGREE")
 
         _check_signature_institution(
             rep, kind, bottom_text, A, english_book,
