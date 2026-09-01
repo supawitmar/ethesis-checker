@@ -1893,6 +1893,83 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
+class SignatureTemplateIsSeparateFromTheDegree(unittest.TestCase):
+    """ข้อความ template หน้าลงนาม ต้องแยกจากชื่อปริญญา
+
+    เจ้าหน้าที่สั่ง ส.ค. 2569: "แยกประเด็นข้อความ template นำหน้าชื่อปริญญาไม่ครบ
+    ออกจากชื่อปริญญา ... อ่าน template สิ และแยกชื่อปริญญาออกมา นอกนั้นก็เป็น
+    ข้อความ template"
+
+    template ทางการวางไว้ว่า "...for the degree of <Degree (Field of Study)>"
+    ชื่อปริญญาจึงต่อท้ายประโยค template พอดี ถ้าไม่ตัดออกก่อน ตัวหาช่วงที่ใกล้เคียง
+    จะคร่อมชื่อปริญญาเข้ามาแล้วรายงานยกชื่อปริญญามาอ้างว่าเป็นข้อความ template
+    """
+
+    DEGREE_EN = "Doctor of Philosophy (Tropical Medicine)"
+    DEGREE_TH = "ปรัชญาดุษฎีบัณฑิต (สาขาวิชาอายุรศาสตร์เขตร้อน)"
+
+    PAGE_NO_TEMPLATE = ("Thesis entitled\nX\nWISIT K\n"
+                        "Doctor of Philosophy (Tropical Medicine)\n"
+                        "Faculty of Graduate Studies, Mahidol University\non 1 June 2026")
+
+    def test_the_degree_is_cut_out_of_the_template_zone(self):
+        zone = checker_module.signature_template_zone(
+            "was submitted to the Faculty of Graduate Studies, Mahidol University "
+            "for the degree of\n" + self.DEGREE_EN + "\non 1 June 2026",
+            self.DEGREE_EN)
+        self.assertIn("for the degree of", zone)
+        self.assertNotIn("Tropical Medicine", zone)
+
+    def test_a_missing_template_sentence_never_quotes_the_degree(self):
+        """เคสที่เคยพัง: ไม่มีประโยค template เลย ระบบไปคว้าชื่อปริญญามาแทน"""
+        zone = checker_module.signature_template_zone(
+            self.PAGE_NO_TEMPLATE, self.DEGREE_EN)
+        self.assertNotIn("Tropical Medicine", zone)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_EN,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertEqual(near, "")      # ไม่ยกอะไรมาอ้าง จะฟ้องว่า "ไม่พบข้อความ template"
+
+    def test_a_real_typo_in_the_sentence_is_still_quoted(self):
+        """ลดการปนแล้วต้องไม่กลืนเคสที่ควรฟ้อง — เล่มพิมพ์ประโยคมาแต่ผิดคำ"""
+        page = ("WISIT K\nwas submitted to the Faculty of Graduate Study, "
+                "Mahidol University for the degree of\n" + self.DEGREE_EN)
+        zone = checker_module.signature_template_zone(page, self.DEGREE_EN)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_EN,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertTrue(near)
+        self.assertIn("Study,", near)
+        self.assertNotIn("Tropical", near)
+        self.assertEqual(describe_diff(near, SIGNATURE_TEMPLATE_EN),
+                         'ต่างที่ "Study," ต้องเป็น "Studies,"')
+
+    def test_the_thai_page_works_the_same_way(self):
+        page = ("วิทยานิพนธ์ เรื่อง\nX\n"
+                "ได้รับการพิจารณาให้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญา\n"
+                + self.DEGREE_TH + "\nวันที่ 11 พฤษภาคม 2569")
+        zone = checker_module.signature_template_zone(page, self.DEGREE_TH)
+        self.assertNotIn("อายุรศาสตร์เขตร้อน", zone)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_TH,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertEqual(describe_diff(near, SIGNATURE_TEMPLATE_TH), 'ขาด "นับ"')
+
+    def test_it_survives_a_missing_degree_field(self):
+        """ฟอร์มไม่ได้กรอกชื่อปริญญามา ต้องไม่พังและไม่ตัดอะไรทิ้ง"""
+        for degree in ("", None):
+            zone = checker_module.signature_template_zone(self.PAGE_NO_TEMPLATE, degree)
+            self.assertIn("Mahidol University", zone)
+
+    def test_the_threshold_sits_between_the_measured_cases(self):
+        """เกณฑ์ 0.8 มาจากการวัด ไม่ใช่เลขสุ่ม
+
+        ประโยคที่มีอยู่แต่ผิด ได้ 0.87-0.99 · ช่วงที่คร่อมชื่อปริญญา ได้ 0.68
+        """
+        self.assertGreater(checker_module.SIGNATURE_TEMPLATE_MIN_RATIO, 0.70)
+        self.assertLess(checker_module.SIGNATURE_TEMPLATE_MIN_RATIO, 0.86)
+
+
 class UnknownSignaturePageKindIsReported(unittest.TestCase):
     """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
 

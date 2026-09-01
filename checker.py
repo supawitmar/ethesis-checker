@@ -41,6 +41,11 @@ ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 
+# ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
+# ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
+# พอดี ถ้าตั้งหลวมจะยกชื่อปริญญามาปนแล้วสองประเด็นนี้ปนกันในรายงาน
+SIGNATURE_TEMPLATE_MIN_RATIO = 0.8
+
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
 # tone marks, THANTHAKHAT, NIKHAHIT, YAMAKKAN
@@ -1053,6 +1058,39 @@ def _closest_run(text, want, min_ratio=0.6):
             if ratio > best_ratio:
                 best, best_ratio = run, ratio
     return best
+
+
+def signature_template_zone(page_text, degree):
+    """ส่วนของหน้าลงนามที่ต้องเป็น "ข้อความ template" ล้วน — ตัดชื่อปริญญาออกแล้ว
+
+    template ทางการวางหน้าลงนามไว้แบบนี้ (Electronic File template-2026)
+
+        entitled / เรื่อง
+        <ชื่อเรื่อง>
+        <ชื่อนักศึกษา>
+        was submitted to the Faculty of Graduate Studies, Mahidol University
+        for the degree of  <Degree (Field of Study)>
+        on <วันที่>
+
+    ภาษาไทยก็โครงเดียวกัน "...ตามหลักสูตรปริญญา <ชื่อปริญญา>"
+
+    **ชื่อปริญญาเป็นช่องเติมช่องเดียวที่อยู่กลางประโยค ที่เหลือเป็นข้อความตายตัวทั้งหมด**
+    ถ้าไม่ตัดชื่อปริญญาออกก่อน ตัวหาช่วงที่ใกล้เคียงจะคร่อมชื่อปริญญาเข้ามาเป็นส่วนหนึ่ง
+    ของประโยค แล้วรายงานยกชื่อปริญญามาอ้างว่าเป็นข้อความ template ทำให้สองประเด็น
+    ปนกัน (เจ้าหน้าที่สั่ง ส.ค. 2569: "อ่าน template สิ และแยกชื่อปริญญาออกมา
+    นอกนั้นก็เป็นข้อความ template")
+
+    ตัดที่ "จุดเริ่มของชื่อปริญญาตามที่พิมพ์จริงในเล่ม" ไม่ใช่ตามข้อมูลอนุมัติตรง ๆ
+    เพราะเล่มอาจสะกดชื่อปริญญาต่างไปเล็กน้อย ซึ่งเป็นคนละข้อฟ้องกัน
+    """
+    text = soft(page_text or "")
+    if not (degree or "").strip():
+        return text
+    printed = _closest_run(text, degree, min_ratio=0.7)
+    if not printed:
+        return text
+    cut = text.find(printed)
+    return text[:cut] if cut > 0 else text
 
 
 def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
@@ -3968,7 +4006,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
                 # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความตาม template" เจ้าหน้าที่จะนึกว่าระบบ
                 # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
-                near = _closest_run(pages[idx], sig_template)
+                #
+                # ตัด "ชื่อปริญญา" ออกจากหน้าก่อน แล้วที่เหลือจึงเป็นข้อความ template
+                # ล้วน (ดู signature_template_zone) — ชื่อปริญญาต่อท้ายประโยคนี้พอดี
+                # ถ้าไม่ตัดออก ตัวหาช่วงจะคร่อมชื่อปริญญาเข้ามาแล้วสองประเด็นปนกัน
+                #
+                # กันอีกชั้นด้วยเกณฑ์ความใกล้เคียงที่สูงกว่าค่าปกติ (0.6) เผื่อกรณี
+                # ที่ตัดชื่อปริญญาไม่ได้ (เล่มไม่มีชื่อปริญญา หรือฟอร์มไม่ได้กรอกมา)
+                # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
+                # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
+                template_zone = signature_template_zone(pages[idx], sig_degree)
+                near = _closest_run(template_zone, sig_template,
+                                    min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
                 if near:
                     diff = describe_diff(near, sig_template)
                     found_msg = f'หน้าลงนามพิมพ์ว่า "{near}"'
