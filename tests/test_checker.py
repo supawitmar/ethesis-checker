@@ -2052,6 +2052,94 @@ Advisory Committee"""
         self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
 
 
+class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
+    """หัวข้อบทคัดย่อที่เขียนว่า ABSTRACT IN THAI ต้องนับเป็นบทคัดย่อภาษาไทย
+
+    template เขียน ABSTRACT (THAI) แต่เล่มจริงเขียน ABSTRACT IN THAI ก็มี
+    (สำรวจ 11 เล่ม พบทั้งสองแบบ) ระบบเดิมรู้จักแค่แบบมีวงเล็บ เล่มที่ใช้อีกแบบจึงโดน
+    ฟ้องผิดสามทางจากคำเดียวกัน
+        สารบัญ    "ไม่พบหัวข้อ บทคัดย่อภาษาไทย ในสารบัญ"  ทั้งที่มีอยู่จริง
+        หน้า      หาหน้าบทคัดย่อไทยไม่เจอถ้าหน้านั้นไม่มีคำว่า "บทคัดย่อ" กำกับ
+        ตัวหนา    "มีข้อความตัวหนา: ABSTRACT IN THAI" ทั้งที่เป็นหัวข้อตาม template
+    """
+
+    def test_the_toc_entry_counts_as_the_thai_abstract(self):
+        for line in ("ABSTRACT IN THAI vi", "ABSTRACT (THAI) v", "บทคัดย่อภาษาไทย ง"):
+            self.assertEqual(checker_module._toc_section_kind(line), "abstract_th", line)
+
+    def test_the_toc_entry_counts_as_the_english_abstract(self):
+        for line in ("ABSTRACT IN ENGLISH iv", "ABSTRACT (ENGLISH) iv", "ABSTRACT"):
+            self.assertEqual(checker_module._toc_section_kind(line), "abstract_en", line)
+
+    def test_the_heading_is_not_reported_as_stray_bold_text(self):
+        for line in ("ABSTRACT IN THAI", "ABSTRACT IN ENGLISH", "ABSTRACT (THAI)"):
+            self.assertTrue(checker_module._is_abstract_heading(line), line)
+
+    def test_the_page_is_found_without_the_thai_word(self):
+        """หน้าบทคัดย่อไทยที่หัวข้อเป็นอังกฤษล้วน ต้องยังหาเจอ"""
+        page = NEWLINE.join(["vi", "ABSTRACT IN THAI",
+                             "ความเป็นมาและความสำคัญของการศึกษา"])
+        self.assertEqual(checker_module.front_section_kind(page)[0], "abstract_th")
+
+    def test_other_english_headings_are_not_swept_in(self):
+        """ต้องแคบ ห้ามลากหัวข้ออื่นที่มีคำว่า ABSTRACT เข้ามาด้วย"""
+        for line in ("ABSTRACT REASONING IN CHILDREN", "LIST OF ABSTRACTS"):
+            self.assertNotIn(checker_module._toc_section_kind(line),
+                             ("abstract_th", "abstract_en"), line)
+
+
+class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
+    """หน้าที่ฟอนต์ทำให้ตัวเลขกลายเป็นตัวอักษร ต้องไม่ถูกฟ้องว่าเล่มพิมพ์ผิด
+
+    เล่มจริงเล่มหนึ่งฝังฟอนต์ย่อย (subset) ที่ตาราง ToUnicode ผิด เฉพาะหน้าบทคัดย่อไทย
+    รหัส "6437028" ถูกดึงออกมาเป็น "JKLMNOP" ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกัน
+    อ่านได้ถูกต้อง เล่มไม่ได้ผิด ระบบอ่านไม่ออกเอง เดิมฟ้องแดงสองข้อพร้อมกัน
+    (ชื่อสะกดผิด + ไม่พบรหัสนักศึกษา) แล้วสั่งให้แก้ข้อความที่ถูกอยู่แล้ว
+    """
+
+    ID = "6437028 PHPH/M"
+    NAMES = ("KEERATI YOUPRASIT", "กีรติ อยู่ประสิทธิ์")
+
+    def test_a_readable_page_reports_nothing(self):
+        line = "KEERATI YOUPRASIT 6437028 PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "")
+
+    def test_the_misread_digits_are_returned(self):
+        line = "กีรติ ยุประสิทธิ JKLMNOP PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "JKLMNOP")
+
+    def test_a_book_that_really_left_the_id_out_is_still_reported(self):
+        """เล่มที่ลืมพิมพ์รหัสจริง ๆ ต้องยังโดนฟ้อง ไม่ใช่ถูกกลบด้วยกฎนี้"""
+        for line in ("KEERATI YOUPRASIT PHPH/M", "กีรติ อยู่ประสิทธิ์ PHPH/M"):
+            self.assertEqual(
+                checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "", line)
+
+    def test_a_name_word_in_the_slot_is_not_mistaken_for_broken_digits(self):
+        """นามสกุลยาวเท่าจำนวนหลักพอดี ต้องไม่ถูกนับว่าเป็นเลขที่อ่านไม่ออก"""
+        line = "SOMCHAI JAIDEEX PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID,
+                                                ("SOMCHAI JAIDEEX",)), "")
+
+    def test_the_length_must_match_the_approved_id(self):
+        """ข้อมูลระบบบอกว่ารหัสมีกี่หลัก ใช้เป็นเงื่อนไขได้ ไม่ต้องเดา"""
+        self.assertEqual(
+            checker_module.unreadable_id_digits("ก ข JKLM PHPH/M", self.ID,
+                                                self.NAMES), "")
+
+    def test_a_page_without_the_programme_code_is_left_alone(self):
+        self.assertEqual(
+            checker_module.unreadable_id_digits("กีรติ ยุประสิทธิ JKLMNOP",
+                                                self.ID, self.NAMES), "")
+
+    def test_no_approved_id_means_nothing_to_compare(self):
+        self.assertEqual(
+            checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
+                                                self.NAMES), "")
+
+
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
     """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
 

@@ -1393,6 +1393,43 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
             "", "FORM.APPROVED_MATCH")
 
 
+def unreadable_id_digits(page_text, student_id, names=()):
+    """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
+
+    เจอกับเล่มจริง: หน้าบทคัดย่อไทยฝังฟอนต์ย่อย (subset) ที่ตาราง ToUnicode ผิด
+    เลข "6437028" จึงถูกดึงออกมาเป็น "JKLMNOP" — ตัวอักษรอังกฤษไล่เรียงตามลำดับ
+    glyph ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกันใช้อีกฟอนต์ อ่านได้ "6437028 PHPH/M"
+    ถูกต้อง เล่มไม่ได้พิมพ์ผิด ระบบอ่านไม่ออกเอง
+
+    ตัวชี้ขาดคือ "รหัสหลักสูตรอ่านได้ แต่ตัวเลขที่ต้องอยู่ข้างหน้ามันไม่ใช่ตัวเลข"
+    ไม่ใช่การนับสถิติตัวอักษรทั้งหน้า เพราะกฎนี้ใช้ยกเลิกการฟ้อง จึงต้องแคบไว้ก่อน
+
+    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสองอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
+    และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (เล่มที่ลืมรหัสจะเหลือนามสกุลติดอยู่ตรงนั้น)
+    """
+    student_id = soft(student_id)
+    digits = re.sub(r'\D', '', student_id)
+    tail = soft(re.sub(r'^\s*\d+', '', student_id))
+    if not digits or not tail:
+        return ""
+    if digits in re.sub(r'\D', '', page_text or ""):
+        return ""                       # อ่านเลขได้ ไม่ใช่ปัญหาฟอนต์
+    want_tail = norm(tail)
+    known = [norm(n) for n in names if soft(n or "")]
+    for line in (page_text or "").splitlines():
+        tokens = soft(line).split()
+        for k in range(1, len(tokens)):
+            if norm(tokens[k]) != want_tail:
+                continue
+            slot = tokens[k - 1]
+            if not re.fullmatch(r'[A-Za-z]+', slot) or len(slot) != len(digits):
+                continue
+            if any(norm(slot) in name for name in known):
+                continue
+            return slot
+    return ""
+
+
 def _closest_student_id(page_text, expected):
     """รหัสนักศึกษาที่ "พิมพ์อยู่จริง" บนหน้านี้ — คืน '' ถ้าหน้านี้ไม่มีรหัสเลย
 
@@ -2928,9 +2965,10 @@ def _toc_section_kind(text):
         return "abstract_en"
     if normalized == N_ABSTRACT_TH or normalized.startswith(norm("บทคัดย่อภาษาไทย")):
         return "abstract_th"
-    if normalized.startswith("ABSTRACTTHAI"):
+    if any(normalized.startswith(term) for term in N_ABSTRACT_TH_EN):
         return "abstract_th"
-    if normalized == "ABSTRACT" or normalized.startswith("ABSTRACTENGLISH"):
+    if normalized == "ABSTRACT" or any(normalized.startswith(term)
+                                       for term in N_ABSTRACT_EN_EN):
         return "abstract_en"
     if normalized in (norm("สารบัญตาราง"), "LISTOFTABLES"):
         return "list_tables"
@@ -2972,7 +3010,8 @@ def abstract_page_label(start_idx, abs_en_pages, abs_th_pages):
 def _is_abstract_heading(text):
     """หัวเรื่อง 'บทคัดย่อ'/'ABSTRACT' เป็นตัวหนาตาม template อยู่แล้ว ไม่ใช่ข้อสังเกต"""
     nl = norm(_strip_toc_page_number(text))
-    return (nl in ('ABSTRACT', 'ABSTRACTTHAI', 'ABSTRACTENGLISH')
+    return (nl == 'ABSTRACT'
+            or nl in N_ABSTRACT_TH_EN or nl in N_ABSTRACT_EN_EN
             or nl == N_ABSTRACT_TH
             or nl.startswith(norm('บทคัดย่อภาษา')))
 
@@ -2993,6 +3032,13 @@ def _toc_chapter_title(text):
 
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
+# หัวข้อบทคัดย่อ "ภาษาอังกฤษ" ของเล่มสองภาษา — template เขียน ABSTRACT (THAI)
+# แต่เล่มจริงเขียน ABSTRACT IN THAI ด้วย (สำรวจ 11 เล่ม พบทั้งสองแบบ) ต้องรู้จักทั้งคู่
+# ไม่งั้นสารบัญที่มีรายการนี้อยู่จริงจะถูกฟ้องว่า "ไม่พบหัวข้อบทคัดย่อภาษาไทยในสารบัญ"
+# และหัวเรื่องบนหน้าถูกฟ้องเป็น "ข้อความตัวหนาที่ไม่ใช่หัวข้อ" ทั้งที่เป็นหัวข้อจริง
+# (กติกาเดียวกับ N_TOC_WRONG: รู้จักไว้เพื่อให้การตรวจทั้งชุดทำงานต่อได้)
+N_ABSTRACT_TH_EN = ('ABSTRACTTHAI', 'ABSTRACTINTHAI')
+N_ABSTRACT_EN_EN = ('ABSTRACTENGLISH', 'ABSTRACTINENGLISH')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
 # หัวข้อสารบัญตาม template คือ "TABLE OF CONTENTS" / "สารบัญ" เท่านั้น
 # ส่วน CONTENT / CONTENTS เป็นคำที่เล่มจริงพิมพ์ผิดมา ต้องรู้จักไว้เพื่อ "หาหน้าสารบัญเจอ"
@@ -3273,7 +3319,7 @@ def front_section_kind(page_text):
     # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
     for j, nl in enumerate(nls[:12]):
         al = alt[j]
-        if N_ABSTRACT_TH in (nl, al):
+        if N_ABSTRACT_TH in (nl, al) or any(x in N_ABSTRACT_TH_EN for x in (nl, al)):
             return "abstract_th", soft(tls[j])
         if 'ABSTRACT' in (nl, al) or any(re.match(r'^ABSTRACT\(', x) for x in (nl, al)):
             return "abstract_en", soft(tls[j])
@@ -4202,6 +4248,29 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                            "ชื่อนักศึกษา", spot_kind,
                                            "FORM.APPROVED_MATCH")
 
+        # ---------- หน้าที่ระบบอ่านตัวเลขไม่ออก ----------
+        # ฟอนต์ย่อยที่ตาราง ToUnicode ผิดทำให้ตัวเลขบนหน้ากลายเป็นตัวอักษรอังกฤษ
+        # ถ้าปล่อยไว้ หน้านั้นจะโดนฟ้องแดงสองข้อพร้อมกัน (ชื่อสะกดผิด + ไม่พบรหัส)
+        # แล้วสั่งให้นักศึกษาแก้ข้อความที่ถูกต้องอยู่แล้ว จึงฟ้องเป็นข้อเดียวว่า
+        # "ระบบอ่านหน้านี้ไม่ออก" แล้วข้ามการตรวจชื่อกับรหัสบนหน้านั้นไป
+        unreadable_digit_pages = {}
+        for _aidx in (abs_en_idx, abs_th_idx):
+            if _aidx is None:
+                continue
+            _misread = unreadable_id_digits(pages[_aidx], soft(A.get("student_id", "")),
+                                            (student_name, student_name_th))
+            if _misread:
+                unreadable_digit_pages[_aidx] = _misread
+        for _aidx, _misread in sorted(unreadable_digit_pages.items()):
+            _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
+                    f" ({page_ref(_aidx)})")
+            rep.add(UNCERTAIN_ZONE, "front_matter", _loc,
+                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก ฟอนต์ในไฟล์ทำให้รหัสนักศึกษา"
+                    f'กลายเป็นตัวอักษร "{_misread}"',
+                    "ระบบจึงข้ามการตรวจชื่อและรหัสนักศึกษาบนหน้านี้",
+                    "เจ้าหน้าที่เปิดหน้านี้ดูเองว่าชื่อและรหัสนักศึกษาถูกต้องหรือไม่",
+                    "UNCERTAIN.REVIEW", system_note=True)
+
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
             name_checks = [
@@ -4221,6 +4290,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # เล่มไม่มีหน้าบทคัดย่อภาษานี้ — กฎ "ภาษาครบตามหลักสูตร" ฟ้องแดงไปแล้ว
                 rep.add_verification("ชื่อนักศึกษา", albl, "pending",
                                      f"เล่มไม่มีหน้า{albl}")
+                continue
+            if aidx in unreadable_digit_pages:
+                rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
+                                     "pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ")
                 continue
             core3 = _strip_student_title(nm3)
             compared = compare_reference_text(pages[aidx], core3, 'student_name')
@@ -4265,6 +4338,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if abs_idx is None:
                     continue
                 loc = f"{abs_label} ({page_ref(abs_idx)})"
+                if abs_idx in unreadable_digit_pages:
+                    rep.add_verification("รหัสนักศึกษา", loc, "pending",
+                                         "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก")
+                    continue
                 if norm(student_id) in norm(pages[abs_idx]):
                     rep.add_verification("รหัสนักศึกษา", loc, "pass")
                 else:
