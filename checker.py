@@ -3090,6 +3090,24 @@ def compare_canonical_title(actual_title, canonical_pair):
     )
 
 
+def canonical_title_wrapped(title, next_line, candidates):
+    """ชื่อบทถูกตัดขึ้นบรรทัดใหม่จริงไหม — บรรทัดถัดไปต่อให้ครบชื่อในประกาศพอดีหรือเปล่า
+
+    หัวบทยาวถูกตัดขึ้นบรรทัดใหม่ได้จริง จึงต้องผ่อนให้ แต่ต้องผ่อนโดยดูของจริงว่า
+    "บรรทัดถัดไปต่อให้ครบไหม" ไม่ใช่ยอมรับทุกชื่อที่เป็นต้นของชื่อในประกาศ
+
+    ของเดิมยอมรับทุก prefix เล่มที่พิมพ์บทที่ 6 ว่า "CONCLUSION" เฉย ๆ จึงหลุด
+    (ประกาศให้เป็น "CONCLUSION AND RECOMMENDATIONS") ทั้งที่บรรทัดถัดไปคือ
+    "6.1 Conclusions" ซึ่งเป็นหัวข้อย่อย ไม่ใช่ส่วนที่เหลือของชื่อบท
+    วัดกับเล่มจริง 11 เล่ม ข้อผ่อนผันแบบเดิมทำงานครั้งเดียว คือครั้งที่ปล่อยเล่มผิดให้ผ่าน
+    """
+    base = norm(title)
+    joined = norm(f"{title} {_strip_toc_page_number(next_line)}")
+    if not base or joined == base:
+        return False
+    return any(norm(candidate) == joined for candidate in candidates)
+
+
 def canonical_title_status(actual_title, chapter_no, option):
     """จัดชั้นชื่อบทเทียบประกาศ: exact | variant (ตามคู่มือ = ส้ม) | wrong (= แดง)"""
     canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
@@ -3548,8 +3566,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "raw": line.strip(),
                 "page_label": _toc_page_label(line),
             })
-    toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx)
-    for source_page_idx, line in toc_lines:
+    # บรรทัดถัดไปเก็บไว้ด้วย เพราะชื่อบทยาวถูกตัดขึ้นบรรทัดใหม่ได้ ต้องดูของจริง
+    # ไม่ใช่ยอมรับทุกชื่อที่ "เป็นต้นของชื่อมาตรฐาน" (ดู _title_status)
+    toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx, next_line)
+    for _k, (source_page_idx, line) in enumerate(toc_lines):
+        next_toc_line = toc_lines[_k + 1][1].strip() if _k + 1 < len(toc_lines) else ""
         raw = line.strip()
         if not raw:
             continue
@@ -3579,9 +3600,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             continue
         toc_ch.append((chap_no, title_n,
                        int(m_pg.group(1)) if m_pg else None, raw,
-                       source_page_idx))
+                       source_page_idx, next_toc_line))
 
-    body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no)
+    body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no, next_line)
     for i, t in enumerate(pages):
         tls = top_lines(t, BODY_RULES['heading_scan_lines'])
         for j, l in enumerate(tls):
@@ -3592,7 +3613,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if is_continuation_heading(l) or is_continuation_heading(title):
                     break
                 if not re.match(r'\d', title):
-                    body_ch.append((cn, title, i, printed.get(i)))
+                    body_ch.append((cn, title, i, printed.get(i),
+                                    tls[j + 2] if j + 2 < len(tls) else ""))
                 break
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
@@ -3612,7 +3634,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท",
                     "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา", "FRONT.TOC")
         toc_map = {c[0]: (c[1], c[2], c[3], c[4]) for c in toc_ch}
-        for cn, title, ppage, pno in body_ch:
+        for cn, title, ppage, pno, _next_line in body_ch:
             if cn in toc_map:
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
@@ -3748,28 +3770,30 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if chapters_mode == "strict":
         canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
         rule_id = "BODY.OPTION1" if option == 1 else "BODY.OPTION2"
-        toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4]) for c in toc_ch}
-        body_by_ch = ({c[0]: (c[1], c[2]) for c in body_ch}
+        toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4], c[5]) for c in toc_ch}
+        body_by_ch = ({c[0]: (c[1], c[2], c[4]) for c in body_ch}
                       if body_ch and BODY_RULES['check_body_title_against_canonical'] else {})
 
-        def _title_status(title, cn):
-            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้"""
+        def _title_status(title, cn, next_line=""):
+            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้
+
+            ชื่อที่เป็นแค่ต้นของชื่อในประกาศ ยอมรับได้ต่อเมื่อบรรทัดถัดไปต่อให้ครบจริง
+            (ดู canonical_title_wrapped)
+            """
             kind, compared, expected = canonical_title_status(title, cn, option)
             if kind == 'exact':
                 return None
-            # หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่ — ยอมรับถ้าชื่อมาตรฐานขึ้นต้นด้วยข้อความที่พบ
-            nb = norm(title)
-            if len(nb) >= 8 and any(norm(cand).startswith(nb) for cand in canon[cn - 1]):
+            if canonical_title_wrapped(title, next_line, canon[cn - 1]):
                 return None
             return kind, compared, expected
 
         for cn in sorted(set(toc_by_ch) | set(body_by_ch)):
             if not (1 <= cn <= enforced_chapters):
                 continue
-            toc_title, toc_idx = toc_by_ch.get(cn, (None, None))
-            body_title, body_idx = body_by_ch.get(cn, (None, None))
-            toc_bad = _title_status(toc_title, cn) if toc_title is not None else None
-            body_bad = _title_status(body_title, cn) if body_title is not None else None
+            toc_title, toc_idx, toc_next = toc_by_ch.get(cn, (None, None, ""))
+            body_title, body_idx, body_next = body_by_ch.get(cn, (None, None, ""))
+            toc_bad = _title_status(toc_title, cn, toc_next) if toc_title is not None else None
+            body_bad = _title_status(body_title, cn, body_next) if body_title is not None else None
             if not toc_bad and not body_bad:
                 continue
 

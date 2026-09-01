@@ -2052,6 +2052,61 @@ Advisory Committee"""
         self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
 
 
+class ChapterTitlesThatAreOnlyTheStartOfTheRule(unittest.TestCase):
+    """ชื่อบทที่พิมพ์แค่ต้นของชื่อในประกาศ ต้องถูกฟ้อง ถ้าไม่มีบรรทัดต่อจริง
+
+    เล่มจริงพิมพ์บทที่ 6 ว่า "CONCLUSION" ประกาศ 2569 ให้เป็น
+    "CONCLUSION AND RECOMMENDATIONS" แต่ระบบปล่อยผ่าน เพราะข้อผ่อนผัน
+    "หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่" ยอมรับทุกชื่อที่เป็นต้นของชื่อในประกาศ
+    ทั้งที่บรรทัดถัดไปในเล่มคือ "6.1 Conclusions" ซึ่งเป็นหัวข้อย่อย ไม่ใช่ส่วนที่เหลือ
+
+    สำรวจเล่มจริง 11 เล่ม: ข้อผ่อนผันแบบเดิมทำงานครั้งเดียว คือครั้งที่ปล่อยเล่มผิดให้ผ่าน
+    ไม่มีเล่มไหนที่หัวบทถูกตัดขึ้นบรรทัดใหม่จริง ๆ เลย
+    """
+
+    CH6 = ("บทสรุปและข้อเสนอแนะ", "CONCLUSION AND RECOMMENDATIONS")
+    CH2 = ("วรรณกรรมและงานวิจัยที่เกี่ยวข้อง", "LITERATURE REVIEW")
+
+    def test_a_short_title_with_an_unrelated_next_line_is_not_excused(self):
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "6.1 Conclusions", self.CH6))
+
+    def test_a_title_with_no_next_line_is_not_excused(self):
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "", self.CH6))
+
+    def test_a_really_wrapped_title_is_still_accepted(self):
+        """ต้องไม่ปิดข้อผ่อนผันทิ้ง หัวบทที่ห่อบรรทัดจริงต้องยังผ่าน"""
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "AND RECOMMENDATIONS", self.CH6))
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION AND", "RECOMMENDATIONS", self.CH6))
+
+    def test_the_toc_page_number_on_the_next_line_is_ignored(self):
+        """บรรทัดต่อในสารบัญมีเลขหน้าติดมาด้วย ต้องตัดก่อนเทียบ"""
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION AND", "RECOMMENDATIONS 122", self.CH6))
+
+    def test_a_thai_title_wraps_the_same_way(self):
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "วรรณกรรมและงานวิจัย", "ที่เกี่ยวข้อง", self.CH2))
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "วรรณกรรมและงานวิจัย", "2.1 แนวคิดที่เกี่ยวข้อง", self.CH2))
+
+    def test_the_rule_still_says_the_short_title_is_wrong(self):
+        """ตัวเทียบกับประกาศบอกว่าผิดอยู่แล้ว ปัญหาเดิมอยู่ที่ข้อผ่อนผันล้วน ๆ"""
+        kind, _compared, expected = checker_module.canonical_title_status(
+            "CONCLUSION", 6, 1)
+        self.assertNotEqual(kind, "exact")
+        self.assertEqual(expected, "CONCLUSION AND RECOMMENDATIONS")
+
+    def test_the_check_uses_the_next_line_not_a_bare_prefix(self):
+        """ควบคุมเชิงลบ: ห้ามกลับไปยอมรับ prefix ลอย ๆ อีก"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("canonical_title_wrapped(title, next_line", source)
+        self.assertNotIn("norm(cand).startswith(nb)", source)
+
+
 class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
     """หัวข้อบทคัดย่อที่เขียนว่า ABSTRACT IN THAI ต้องนับเป็นบทคัดย่อภาษาไทย
 
