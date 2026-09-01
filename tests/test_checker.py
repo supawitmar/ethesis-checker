@@ -1893,6 +1893,45 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
+class SignaturePagesAreNamedTheSameWayEverywhere(unittest.TestCase):
+    """ทุกกฎบนหน้าลงนามต้องเรียกตำแหน่งแบบเดียวกัน
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: หัวกลุ่มเป็น "หน้าลงนาม" ตำแหน่งเป็น
+    "หน้าลงนาม 1" / "หน้าลงนาม 2"
+
+    เดิมกฎแต่ละตัวเรียกหน้าเดียวกันคนละแบบ ("หน้าอาจารย์ที่ปรึกษา",
+    "หน้าลงนามหน้า 1", "หน้าลงนาม 1") เจ้าหน้าที่อ่านแล้วนึกว่าเป็นคนละหน้า
+    """
+
+    def test_the_position_comes_from_the_order_in_the_file(self):
+        pos = checker_module.signature_page_position
+        self.assertEqual(pos([2, 3], 2), "หน้าลงนาม 1")
+        self.assertEqual(pos([2, 3], 3), "หน้าลงนาม 2")
+        # ลำดับในไฟล์ ไม่ใช่เลขหน้า — หน้าลงนามอยู่แผ่นไหนก็ได้
+        self.assertEqual(pos([7, 9], 7), "หน้าลงนาม 1")
+        self.assertEqual(pos([7, 9], 9), "หน้าลงนาม 2")
+
+    def test_a_page_outside_the_list_does_not_crash(self):
+        self.assertEqual(checker_module.signature_page_position([2, 3], 9), "หน้าลงนาม")
+        self.assertEqual(checker_module.signature_page_position([], 0), "หน้าลงนาม")
+
+    def test_the_page_number_rule_uses_the_same_name(self):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [2, 3], {2: "Thesis entitled X\nz", 3: "Thesis entitled X\nz"},
+            lambda i: "หน้า z")
+        self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
+                         ["หน้าลงนาม 1 (หน้า z)", "หน้าลงนาม 2 (หน้า z)"])
+
+    def test_every_signature_location_still_groups_under_one_heading(self):
+        """ตำแหน่งเปลี่ยนแล้ว หัวกลุ่มในสรุปต้องยังเป็น "หน้าลงนาม" กลุ่มเดียว"""
+        for loc in ("หน้าลงนาม 1 (หน้า i)", "หน้าลงนาม 2 (หน้า ii)",
+                    "หน้าลงนาม 1 ช่องคณบดีคณะ (มุมล่างขวา) (หน้า i)"):
+            issue = {"location": loc, "found": "x", "expected": "y",
+                     "part": "front_matter"}
+            self.assertEqual(summary_section(issue), "หน้าลงนาม", loc)
+
+
 class SignatureTemplateIsSeparateFromTheDegree(unittest.TestCase):
     """ข้อความ template หน้าลงนาม ต้องแยกจากชื่อปริญญา
 
@@ -2028,7 +2067,7 @@ class UnknownSignaturePageKindIsReported(unittest.TestCase):
             rep, [7, 9], {7: "Thesis entitled X", 9: "Thesis entitled X"},
             lambda i: f"แผ่นที่ {i + 1}")
         self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
-                         ["หน้าลงนามหน้า 1 (แผ่นที่ 8)", "หน้าลงนามหน้า 2 (แผ่นที่ 10)"])
+                         ["หน้าลงนาม 1 (แผ่นที่ 8)", "หน้าลงนาม 2 (แผ่นที่ 10)"])
 
 
 class ContinuedHeadingIsTheSameChapter(unittest.TestCase):

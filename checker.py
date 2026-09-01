@@ -967,6 +967,25 @@ def signature_page_kind(page_label, page_text):
 SIGNATURE_PAGE_LABELS = (("i", "ก"), ("ii", "ข"))
 
 
+def signature_page_position(sig_pages, page_index):
+    """ชื่อตำแหน่งของหน้าลงนาม — ใช้คำเดียวกันทุกกฎ
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: หัวกลุ่มในสรุปเป็น "หน้าลงนาม" ส่วนตำแหน่งของแต่ละข้อ
+    เป็น "หน้าลงนาม 1" / "หน้าลงนาม 2"
+
+    เดิมกฎแต่ละตัวเรียกหน้าเดียวกันคนละแบบ — บ้างตามบทบาทของหน้า
+    ("หน้าอาจารย์ที่ปรึกษา" / "หน้ากรรมการสอบ") บ้างตามลำดับ ("หน้าลงนามหน้า 1")
+    บ้าง "หน้าลงนาม 1" เจ้าหน้าที่อ่านรายงานแล้วนึกว่าเป็นคนละหน้ากัน ทั้งที่หน้าเดียวกัน
+
+    ยึด "ลำดับที่เจอในไฟล์" ไม่ใช่บทบาทของหน้า เพราะลำดับเชื่อได้เสมอ ส่วนบทบาท
+    อาจแยกไม่ออกเมื่อเลขหน้าผิดและหัวข้ออ่านไม่ได้ (ดู signature_page_kind)
+    """
+    try:
+        return f"หน้าลงนาม {list(sig_pages).index(page_index) + 1}"
+    except ValueError:
+        return "หน้าลงนาม"
+
+
 def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
@@ -996,7 +1015,8 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
         found_lab = _extract_page_label(pages[idx])
         what = ("เลขหน้าของหน้านี้ไม่ถูกต้อง" if found_lab
                 else "ไม่พบเลขหน้าบนหน้า")
-        rep.add(zone, "front_matter", f"หน้าลงนามหน้า {k + 1} ({page_ref(idx)})",
+        rep.add(zone, "front_matter",
+                f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
                 what,
                 f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
                 "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
@@ -1236,9 +1256,11 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         kind = signature_page_kind(page_labels.get(idx, ""), pages[idx])
         expected = committees.get(kind, []) if kind else []
         members, member_quals, bottom_text, member_raw = slots[idx]
-        page_label = ("หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else
-                      "หน้ากรรมการสอบ" if kind == "exam" else
-                      f"หน้าลงนาม {sig_pages.index(idx) + 1}")
+        # เรียกตามลำดับหน้าเสมอ ไม่เรียกตามบทบาท ("หน้าอาจารย์ที่ปรึกษา") เพราะ
+        # กฎอื่นบนหน้าเดียวกันเรียกว่า "หน้าลงนาม 1" อยู่แล้ว ถ้าเรียกคนละแบบ
+        # เจ้าหน้าที่จะนึกว่าเป็นคนละหน้า — บทบาทของหน้าอยู่ในข้อความอยู่แล้ว
+        # (ข้อฟ้องบอกว่าเทียบกับ บฑ.1 หรือ บฑ.2 ซึ่งบอกบทบาทในตัว)
+        page_label = signature_page_position(sig_pages, idx)
         loc = f"{page_label} ({page_ref(idx)})"
         # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
         _report_committee_name_case(rep, members, loc)
