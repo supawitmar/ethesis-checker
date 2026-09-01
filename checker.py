@@ -1393,6 +1393,43 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
             "", "FORM.APPROVED_MATCH")
 
 
+def unreadable_id_digits(page_text, student_id, names=()):
+    """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
+
+    เจอกับเล่มจริง: หน้าบทคัดย่อไทยฝังฟอนต์ย่อย (subset) ที่ตาราง ToUnicode ผิด
+    เลข "6437028" จึงถูกดึงออกมาเป็น "JKLMNOP" — ตัวอักษรอังกฤษไล่เรียงตามลำดับ
+    glyph ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกันใช้อีกฟอนต์ อ่านได้ "6437028 PHPH/M"
+    ถูกต้อง เล่มไม่ได้พิมพ์ผิด ระบบอ่านไม่ออกเอง
+
+    ตัวชี้ขาดคือ "รหัสหลักสูตรอ่านได้ แต่ตัวเลขที่ต้องอยู่ข้างหน้ามันไม่ใช่ตัวเลข"
+    ไม่ใช่การนับสถิติตัวอักษรทั้งหน้า เพราะกฎนี้ใช้ยกเลิกการฟ้อง จึงต้องแคบไว้ก่อน
+
+    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสองอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
+    และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (เล่มที่ลืมรหัสจะเหลือนามสกุลติดอยู่ตรงนั้น)
+    """
+    student_id = soft(student_id)
+    digits = re.sub(r'\D', '', student_id)
+    tail = soft(re.sub(r'^\s*\d+', '', student_id))
+    if not digits or not tail:
+        return ""
+    if digits in re.sub(r'\D', '', page_text or ""):
+        return ""                       # อ่านเลขได้ ไม่ใช่ปัญหาฟอนต์
+    want_tail = norm(tail)
+    known = [norm(n) for n in names if soft(n or "")]
+    for line in (page_text or "").splitlines():
+        tokens = soft(line).split()
+        for k in range(1, len(tokens)):
+            if norm(tokens[k]) != want_tail:
+                continue
+            slot = tokens[k - 1]
+            if not re.fullmatch(r'[A-Za-z]+', slot) or len(slot) != len(digits):
+                continue
+            if any(norm(slot) in name for name in known):
+                continue
+            return slot
+    return ""
+
+
 def _closest_student_id(page_text, expected):
     """รหัสนักศึกษาที่ "พิมพ์อยู่จริง" บนหน้านี้ — คืน '' ถ้าหน้านี้ไม่มีรหัสเลย
 
@@ -2524,6 +2561,76 @@ def mismatch_detail(label, compared, expected=''):
     return detail
 
 
+# ---------- "ชื่อเรื่องนี้เป็นภาษาอะไร" ----------
+# ชื่อเรื่องภาษาไทยจำนวนมากมีอักษรอังกฤษปนอยู่จริง — ชื่อเทคโนโลยี ตัวย่อ ชื่อสารเคมี
+# เช่น "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ" ซึ่งอักษรอังกฤษเกินครึ่ง
+# บรรทัด ถ้าตัดสินด้วย "มีอักษรอังกฤษ = เป็นชื่อเรื่องภาษาอังกฤษ" หรือด้วยสัดส่วน
+# ตัวอักษร จะตัดสินผิดทันที ส่วนชื่อเรื่องภาษาอังกฤษไม่มีอักษรไทยปนเลยสักตัว
+# "การมีอักษรไทย" จึงเป็นตัวแยกสองภาษาที่เชื่อถือได้ทางเดียว
+_THAI_LETTER = re.compile(r'[ก-๙]')
+_LATIN_LETTER = re.compile(r'[A-Za-z]')
+
+
+def title_script(text):
+    """ภาษาของข้อความหนึ่งช่วง: "thai" / "en" / "" (ไม่มีตัวอักษรของภาษาใดเลย)"""
+    if _THAI_LETTER.search(text or ""):
+        return "thai"
+    if _LATIN_LETTER.search(text or ""):
+        return "en"
+    return ""
+
+
+def approved_title(approved, script):
+    """ชื่อเรื่องภาษาที่ต้องการ เอาจากข้อมูลระบบ (eThesis/บฑ.1) เท่านั้น
+
+    ไม่เดาชื่อเรื่องจากหน้ากระดาษเอง เพราะกฎนี้ตัดสินว่า "หน้านี้มีชื่อเรื่องอีกภาษา
+    อยู่ด้วยหรือไม่" ถ้าเดาเองแล้วเดาผิด จะสั่งให้นักศึกษาลบข้อความที่ถูกต้องออก
+
+    คืน "" เมื่อช่องนั้นกรอกเป็นภาษาอื่นหรือไม่ได้กรอก — หลักสูตรนานาชาติกรอก
+    ช่องชื่อเรื่องภาษาไทยเป็น "-" ซึ่งไม่ใช่ชื่อเรื่องภาษาไทย จึงไม่มีอะไรให้เทียบ
+    ถ้าข้อมูลระบบสลับช่องกันไว้ก็คืน "" เช่นกัน ดีกว่าเทียบผิดช่องแล้วฟ้องมั่ว
+    """
+    value = soft((approved or {}).get("title_th" if script == "thai" else "title_en", "") or "")
+    return value if title_script(value) == script else ""
+
+
+# เกณฑ์ตัดสินว่า "ชื่อเรื่องนี้ถูกพิมพ์อยู่บนหน้านี้จริง"
+#
+# วัดกับเล่มจริงสามเล่มและกับชื่อเรื่องไทยที่มีอักษรอังกฤษปน:
+#   หน้าที่ไม่มีชื่อเรื่องอีกภาษาจริง ๆ ได้สูงสุด 0.21
+#   หน้าที่พิมพ์ชื่อเรื่องอีกภาษาไว้จริง ได้ 0.69 ขึ้นไป (ครบทั้งชื่อได้ 1.0)
+# ตั้งไว้กลางช่องว่างนั้น กฎนี้สั่งให้ "ลบข้อความออก" การฟ้องผิดจึงเสียหายกว่าการปล่อย
+TITLE_ON_PAGE_MIN = 0.6
+
+
+def title_printed_on_page(page_text, title, min_ratio=TITLE_ON_PAGE_MIN):
+    """ข้อความบนหน้านี้ที่เป็นชื่อเรื่องดังกล่าว (คืน "" ถ้าไม่มี)
+
+    เทียบเฉพาะช่วงข้อความที่เป็น "ภาษาเดียวกับชื่อเรื่องที่กำลังหา" — ชื่อเรื่องไทยที่มี
+    อักษรอังกฤษปนจะไปคล้ายชื่อเรื่องภาษาอังกฤษของตัวเองเสมอ (วัดได้ 0.59 ในเล่มที่
+    ชื่อไทยเป็น "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ") ถ้าไม่กรองภาษา
+    ก่อน หน้าปกไทยที่ถูกต้องจะโดนฟ้องว่ามีชื่อเรื่องภาษาอังกฤษ ช่วงที่มีอักษรไทย
+    ถือเป็นข้อความภาษาไทยเสมอ ต่อให้มีอักษรอังกฤษปนอยู่มากแค่ไหน
+    """
+    want = title_script(title)
+    target = norm(title)
+    if not want or not target:
+        return ""
+    lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
+    best, best_ratio = "", 0.0
+    for start in range(len(lines)):
+        for span in range(1, 5):
+            if start + span > len(lines):
+                break
+            window = " ".join(lines[start:start + span])
+            if title_script(window) != want:
+                continue
+            ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = window, ratio
+    return best if best_ratio >= min_ratio else ""
+
+
 # คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้
 _TITLE_LEAD_IN = re.compile(r'^(?:entitled|เรื่อง)$', re.I)
 # บรรทัดที่บอกว่าบล็อกชื่อเรื่องจบแล้ว (ข้อความ template ที่ตามหลังชื่อเรื่องเสมอ)
@@ -2858,9 +2965,10 @@ def _toc_section_kind(text):
         return "abstract_en"
     if normalized == N_ABSTRACT_TH or normalized.startswith(norm("บทคัดย่อภาษาไทย")):
         return "abstract_th"
-    if normalized.startswith("ABSTRACTTHAI"):
+    if any(normalized.startswith(term) for term in N_ABSTRACT_TH_EN):
         return "abstract_th"
-    if normalized == "ABSTRACT" or normalized.startswith("ABSTRACTENGLISH"):
+    if normalized == "ABSTRACT" or any(normalized.startswith(term)
+                                       for term in N_ABSTRACT_EN_EN):
         return "abstract_en"
     if normalized in (norm("สารบัญตาราง"), "LISTOFTABLES"):
         return "list_tables"
@@ -2902,7 +3010,8 @@ def abstract_page_label(start_idx, abs_en_pages, abs_th_pages):
 def _is_abstract_heading(text):
     """หัวเรื่อง 'บทคัดย่อ'/'ABSTRACT' เป็นตัวหนาตาม template อยู่แล้ว ไม่ใช่ข้อสังเกต"""
     nl = norm(_strip_toc_page_number(text))
-    return (nl in ('ABSTRACT', 'ABSTRACTTHAI', 'ABSTRACTENGLISH')
+    return (nl == 'ABSTRACT'
+            or nl in N_ABSTRACT_TH_EN or nl in N_ABSTRACT_EN_EN
             or nl == N_ABSTRACT_TH
             or nl.startswith(norm('บทคัดย่อภาษา')))
 
@@ -2923,6 +3032,13 @@ def _toc_chapter_title(text):
 
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
+# หัวข้อบทคัดย่อ "ภาษาอังกฤษ" ของเล่มสองภาษา — template เขียน ABSTRACT (THAI)
+# แต่เล่มจริงเขียน ABSTRACT IN THAI ด้วย (สำรวจ 11 เล่ม พบทั้งสองแบบ) ต้องรู้จักทั้งคู่
+# ไม่งั้นสารบัญที่มีรายการนี้อยู่จริงจะถูกฟ้องว่า "ไม่พบหัวข้อบทคัดย่อภาษาไทยในสารบัญ"
+# และหัวเรื่องบนหน้าถูกฟ้องเป็น "ข้อความตัวหนาที่ไม่ใช่หัวข้อ" ทั้งที่เป็นหัวข้อจริง
+# (กติกาเดียวกับ N_TOC_WRONG: รู้จักไว้เพื่อให้การตรวจทั้งชุดทำงานต่อได้)
+N_ABSTRACT_TH_EN = ('ABSTRACTTHAI', 'ABSTRACTINTHAI')
+N_ABSTRACT_EN_EN = ('ABSTRACTENGLISH', 'ABSTRACTINENGLISH')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
 # หัวข้อสารบัญตาม template คือ "TABLE OF CONTENTS" / "สารบัญ" เท่านั้น
 # ส่วน CONTENT / CONTENTS เป็นคำที่เล่มจริงพิมพ์ผิดมา ต้องรู้จักไว้เพื่อ "หาหน้าสารบัญเจอ"
@@ -2972,6 +3088,24 @@ def compare_canonical_title(actual_title, canonical_pair):
          for candidate in canonical_pair),
         key=lambda pair: (pair[0]['status'] == 'exact', pair[0]['score']),
     )
+
+
+def canonical_title_wrapped(title, next_line, candidates):
+    """ชื่อบทถูกตัดขึ้นบรรทัดใหม่จริงไหม — บรรทัดถัดไปต่อให้ครบชื่อในประกาศพอดีหรือเปล่า
+
+    หัวบทยาวถูกตัดขึ้นบรรทัดใหม่ได้จริง จึงต้องผ่อนให้ แต่ต้องผ่อนโดยดูของจริงว่า
+    "บรรทัดถัดไปต่อให้ครบไหม" ไม่ใช่ยอมรับทุกชื่อที่เป็นต้นของชื่อในประกาศ
+
+    ของเดิมยอมรับทุก prefix เล่มที่พิมพ์บทที่ 6 ว่า "CONCLUSION" เฉย ๆ จึงหลุด
+    (ประกาศให้เป็น "CONCLUSION AND RECOMMENDATIONS") ทั้งที่บรรทัดถัดไปคือ
+    "6.1 Conclusions" ซึ่งเป็นหัวข้อย่อย ไม่ใช่ส่วนที่เหลือของชื่อบท
+    วัดกับเล่มจริง 11 เล่ม ข้อผ่อนผันแบบเดิมทำงานครั้งเดียว คือครั้งที่ปล่อยเล่มผิดให้ผ่าน
+    """
+    base = norm(title)
+    joined = norm(f"{title} {_strip_toc_page_number(next_line)}")
+    if not base or joined == base:
+        return False
+    return any(norm(candidate) == joined for candidate in candidates)
 
 
 def canonical_title_status(actual_title, chapter_no, option):
@@ -3074,6 +3208,11 @@ def classify(issue):
     # โครงสร้างเล่มชัด ๆ
     if issue.get("rule_id") in ("FRONT.COVER_FIRST", "FRONT.ORDER", "END.STRUCTURE"):
         return "โครงสร้างเล่ม"
+    # "หน้านี้มีชื่อเรื่องอีกภาษาอยู่ด้วย" ไม่ใช่ "ชื่อเรื่องไม่ตรง บฑ.1" — ชื่อเรื่องตรงทุกตัว
+    # แต่มีชื่อเรื่องเกินมาอีกอัน ถ้าปล่อยให้ตกหมวดเดิมตามคำว่า "ชื่อเรื่อง" เจ้าหน้าที่จะ
+    # ไปไล่เทียบตัวอักษรกับ บฑ.1 ทั้งที่วิธีแก้คือลบข้อความออก
+    if issue.get("rule_id") == "FRONT.TITLE_ONE_LANGUAGE":
+        return "ภาษาของชื่อเรื่อง"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -3198,7 +3337,7 @@ def front_section_kind(page_text):
     # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
     for j, nl in enumerate(nls[:12]):
         al = alt[j]
-        if N_ABSTRACT_TH in (nl, al):
+        if N_ABSTRACT_TH in (nl, al) or any(x in N_ABSTRACT_TH_EN for x in (nl, al)):
             return "abstract_th", soft(tls[j])
         if 'ABSTRACT' in (nl, al) or any(re.match(r'^ABSTRACT\(', x) for x in (nl, al)):
             return "abstract_en", soft(tls[j])
@@ -3427,8 +3566,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "raw": line.strip(),
                 "page_label": _toc_page_label(line),
             })
-    toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx)
-    for source_page_idx, line in toc_lines:
+    # บรรทัดถัดไปเก็บไว้ด้วย เพราะชื่อบทยาวถูกตัดขึ้นบรรทัดใหม่ได้ ต้องดูของจริง
+    # ไม่ใช่ยอมรับทุกชื่อที่ "เป็นต้นของชื่อมาตรฐาน" (ดู _title_status)
+    toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx, next_line)
+    for _k, (source_page_idx, line) in enumerate(toc_lines):
+        next_toc_line = toc_lines[_k + 1][1].strip() if _k + 1 < len(toc_lines) else ""
         raw = line.strip()
         if not raw:
             continue
@@ -3458,9 +3600,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             continue
         toc_ch.append((chap_no, title_n,
                        int(m_pg.group(1)) if m_pg else None, raw,
-                       source_page_idx))
+                       source_page_idx, next_toc_line))
 
-    body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no)
+    body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no, next_line)
     for i, t in enumerate(pages):
         tls = top_lines(t, BODY_RULES['heading_scan_lines'])
         for j, l in enumerate(tls):
@@ -3471,7 +3613,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if is_continuation_heading(l) or is_continuation_heading(title):
                     break
                 if not re.match(r'\d', title):
-                    body_ch.append((cn, title, i, printed.get(i)))
+                    body_ch.append((cn, title, i, printed.get(i),
+                                    tls[j + 2] if j + 2 < len(tls) else ""))
                 break
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
@@ -3491,7 +3634,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท",
                     "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา", "FRONT.TOC")
         toc_map = {c[0]: (c[1], c[2], c[3], c[4]) for c in toc_ch}
-        for cn, title, ppage, pno in body_ch:
+        for cn, title, ppage, pno, _next_line in body_ch:
             if cn in toc_map:
                 t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
                 nb = norm(title)
@@ -3627,28 +3770,30 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if chapters_mode == "strict":
         canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
         rule_id = "BODY.OPTION1" if option == 1 else "BODY.OPTION2"
-        toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4]) for c in toc_ch}
-        body_by_ch = ({c[0]: (c[1], c[2]) for c in body_ch}
+        toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4], c[5]) for c in toc_ch}
+        body_by_ch = ({c[0]: (c[1], c[2], c[4]) for c in body_ch}
                       if body_ch and BODY_RULES['check_body_title_against_canonical'] else {})
 
-        def _title_status(title, cn):
-            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้"""
+        def _title_status(title, cn, next_line=""):
+            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้
+
+            ชื่อที่เป็นแค่ต้นของชื่อในประกาศ ยอมรับได้ต่อเมื่อบรรทัดถัดไปต่อให้ครบจริง
+            (ดู canonical_title_wrapped)
+            """
             kind, compared, expected = canonical_title_status(title, cn, option)
             if kind == 'exact':
                 return None
-            # หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่ — ยอมรับถ้าชื่อมาตรฐานขึ้นต้นด้วยข้อความที่พบ
-            nb = norm(title)
-            if len(nb) >= 8 and any(norm(cand).startswith(nb) for cand in canon[cn - 1]):
+            if canonical_title_wrapped(title, next_line, canon[cn - 1]):
                 return None
             return kind, compared, expected
 
         for cn in sorted(set(toc_by_ch) | set(body_by_ch)):
             if not (1 <= cn <= enforced_chapters):
                 continue
-            toc_title, toc_idx = toc_by_ch.get(cn, (None, None))
-            body_title, body_idx = body_by_ch.get(cn, (None, None))
-            toc_bad = _title_status(toc_title, cn) if toc_title is not None else None
-            body_bad = _title_status(body_title, cn) if body_title is not None else None
+            toc_title, toc_idx, toc_next = toc_by_ch.get(cn, (None, None, ""))
+            body_title, body_idx, body_next = body_by_ch.get(cn, (None, None, ""))
+            toc_bad = _title_status(toc_title, cn, toc_next) if toc_title is not None else None
+            body_bad = _title_status(body_title, cn, body_next) if body_title is not None else None
             if not toc_bad and not body_bad:
                 continue
 
@@ -4040,6 +4185,30 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
                                      "เล่มไม่มีหน้าบทคัดย่อภาษานี้")
 
+        # ---------- หน้าปกและหน้าลงนามต้องมีชื่อเรื่องภาษาเดียว ----------
+        # เจ้าหน้าที่ระบุ (ก.ย. 2569): เล่มภาษาไทยให้มีเฉพาะชื่อเรื่องภาษาไทย
+        # เล่มภาษาอังกฤษให้มีเฉพาะชื่อเรื่องภาษาอังกฤษ ทั้งบนหน้าปกและหน้าลงนาม
+        # (หน้าบทคัดย่อไม่เข้ากฎนี้ — เล่มสองภาษาต้องมีบทคัดย่อทั้งสองภาษาอยู่แล้ว)
+        other_script = "en" if thai_book else "thai"
+        other_lang_title = approved_title(A, other_script)
+        if other_lang_title:
+            other_word = "ภาษาอังกฤษ" if other_script == "en" else "ภาษาไทย"
+            book_word = "ภาษาไทย" if thai_book else "ภาษาอังกฤษ"
+            one_language_spots = [("หน้าปก", cover_text)] + [
+                (f"หน้าลงนาม {k2 + 1} ({page_ref(i2)})", pages[i2])
+                for k2, i2 in enumerate(sig_pages)
+            ]
+            for spot_name, spot_text in one_language_spots:
+                printed_other = title_printed_on_page(spot_text, other_lang_title)
+                if not printed_other:
+                    continue
+                rep.add("RED", "front_matter", spot_name,
+                        f'หน้านี้มีชื่อเรื่อง{other_word}อยู่ด้วย: "{printed_other[:160]}"',
+                        f"เล่ม{book_word}ต้องมีเฉพาะชื่อเรื่อง{book_word}"
+                        " ทั้งบนหน้าปกและหน้าลงนาม",
+                        f"ลบชื่อเรื่อง{other_word}ออกจากหน้านี้",
+                        "FRONT.TITLE_ONE_LANGUAGE")
+
         if ack_pages and (student_name_th if thai_book else student_name):
             ack_start = ack_pages[0]
             ack_page_indices = range(ack_start, min(ack_start + span_of(ack_start), n))
@@ -4103,6 +4272,29 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                            "ชื่อนักศึกษา", spot_kind,
                                            "FORM.APPROVED_MATCH")
 
+        # ---------- หน้าที่ระบบอ่านตัวเลขไม่ออก ----------
+        # ฟอนต์ย่อยที่ตาราง ToUnicode ผิดทำให้ตัวเลขบนหน้ากลายเป็นตัวอักษรอังกฤษ
+        # ถ้าปล่อยไว้ หน้านั้นจะโดนฟ้องแดงสองข้อพร้อมกัน (ชื่อสะกดผิด + ไม่พบรหัส)
+        # แล้วสั่งให้นักศึกษาแก้ข้อความที่ถูกต้องอยู่แล้ว จึงฟ้องเป็นข้อเดียวว่า
+        # "ระบบอ่านหน้านี้ไม่ออก" แล้วข้ามการตรวจชื่อกับรหัสบนหน้านั้นไป
+        unreadable_digit_pages = {}
+        for _aidx in (abs_en_idx, abs_th_idx):
+            if _aidx is None:
+                continue
+            _misread = unreadable_id_digits(pages[_aidx], soft(A.get("student_id", "")),
+                                            (student_name, student_name_th))
+            if _misread:
+                unreadable_digit_pages[_aidx] = _misread
+        for _aidx, _misread in sorted(unreadable_digit_pages.items()):
+            _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
+                    f" ({page_ref(_aidx)})")
+            rep.add(UNCERTAIN_ZONE, "front_matter", _loc,
+                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก ฟอนต์ในไฟล์ทำให้รหัสนักศึกษา"
+                    f'กลายเป็นตัวอักษร "{_misread}"',
+                    "ระบบจึงข้ามการตรวจชื่อและรหัสนักศึกษาบนหน้านี้",
+                    "เจ้าหน้าที่เปิดหน้านี้ดูเองว่าชื่อและรหัสนักศึกษาถูกต้องหรือไม่",
+                    "UNCERTAIN.REVIEW", system_note=True)
+
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
             name_checks = [
@@ -4122,6 +4314,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # เล่มไม่มีหน้าบทคัดย่อภาษานี้ — กฎ "ภาษาครบตามหลักสูตร" ฟ้องแดงไปแล้ว
                 rep.add_verification("ชื่อนักศึกษา", albl, "pending",
                                      f"เล่มไม่มีหน้า{albl}")
+                continue
+            if aidx in unreadable_digit_pages:
+                rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
+                                     "pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ")
                 continue
             core3 = _strip_student_title(nm3)
             compared = compare_reference_text(pages[aidx], core3, 'student_name')
@@ -4166,6 +4362,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if abs_idx is None:
                     continue
                 loc = f"{abs_label} ({page_ref(abs_idx)})"
+                if abs_idx in unreadable_digit_pages:
+                    rep.add_verification("รหัสนักศึกษา", loc, "pending",
+                                         "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก")
+                    continue
                 if norm(student_id) in norm(pages[abs_idx]):
                     rep.add_verification("รหัสนักศึกษา", loc, "pass")
                 else:

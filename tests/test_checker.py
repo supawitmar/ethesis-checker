@@ -2052,6 +2052,302 @@ Advisory Committee"""
         self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
 
 
+class ChapterTitlesThatAreOnlyTheStartOfTheRule(unittest.TestCase):
+    """ชื่อบทที่พิมพ์แค่ต้นของชื่อในประกาศ ต้องถูกฟ้อง ถ้าไม่มีบรรทัดต่อจริง
+
+    เล่มจริงพิมพ์บทที่ 6 ว่า "CONCLUSION" ประกาศ 2569 ให้เป็น
+    "CONCLUSION AND RECOMMENDATIONS" แต่ระบบปล่อยผ่าน เพราะข้อผ่อนผัน
+    "หัวบทยาวอาจถูกตัดขึ้นบรรทัดใหม่" ยอมรับทุกชื่อที่เป็นต้นของชื่อในประกาศ
+    ทั้งที่บรรทัดถัดไปในเล่มคือ "6.1 Conclusions" ซึ่งเป็นหัวข้อย่อย ไม่ใช่ส่วนที่เหลือ
+
+    สำรวจเล่มจริง 11 เล่ม: ข้อผ่อนผันแบบเดิมทำงานครั้งเดียว คือครั้งที่ปล่อยเล่มผิดให้ผ่าน
+    ไม่มีเล่มไหนที่หัวบทถูกตัดขึ้นบรรทัดใหม่จริง ๆ เลย
+    """
+
+    CH6 = ("บทสรุปและข้อเสนอแนะ", "CONCLUSION AND RECOMMENDATIONS")
+    CH2 = ("วรรณกรรมและงานวิจัยที่เกี่ยวข้อง", "LITERATURE REVIEW")
+
+    def test_a_short_title_with_an_unrelated_next_line_is_not_excused(self):
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "6.1 Conclusions", self.CH6))
+
+    def test_a_title_with_no_next_line_is_not_excused(self):
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "", self.CH6))
+
+    def test_a_really_wrapped_title_is_still_accepted(self):
+        """ต้องไม่ปิดข้อผ่อนผันทิ้ง หัวบทที่ห่อบรรทัดจริงต้องยังผ่าน"""
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION", "AND RECOMMENDATIONS", self.CH6))
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION AND", "RECOMMENDATIONS", self.CH6))
+
+    def test_the_toc_page_number_on_the_next_line_is_ignored(self):
+        """บรรทัดต่อในสารบัญมีเลขหน้าติดมาด้วย ต้องตัดก่อนเทียบ"""
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "CONCLUSION AND", "RECOMMENDATIONS 122", self.CH6))
+
+    def test_a_thai_title_wraps_the_same_way(self):
+        self.assertTrue(checker_module.canonical_title_wrapped(
+            "วรรณกรรมและงานวิจัย", "ที่เกี่ยวข้อง", self.CH2))
+        self.assertFalse(checker_module.canonical_title_wrapped(
+            "วรรณกรรมและงานวิจัย", "2.1 แนวคิดที่เกี่ยวข้อง", self.CH2))
+
+    def test_the_rule_still_says_the_short_title_is_wrong(self):
+        """ตัวเทียบกับประกาศบอกว่าผิดอยู่แล้ว ปัญหาเดิมอยู่ที่ข้อผ่อนผันล้วน ๆ"""
+        kind, _compared, expected = checker_module.canonical_title_status(
+            "CONCLUSION", 6, 1)
+        self.assertNotEqual(kind, "exact")
+        self.assertEqual(expected, "CONCLUSION AND RECOMMENDATIONS")
+
+    def test_the_check_uses_the_next_line_not_a_bare_prefix(self):
+        """ควบคุมเชิงลบ: ห้ามกลับไปยอมรับ prefix ลอย ๆ อีก"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("canonical_title_wrapped(title, next_line", source)
+        self.assertNotIn("norm(cand).startswith(nb)", source)
+
+
+class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
+    """หัวข้อบทคัดย่อที่เขียนว่า ABSTRACT IN THAI ต้องนับเป็นบทคัดย่อภาษาไทย
+
+    template เขียน ABSTRACT (THAI) แต่เล่มจริงเขียน ABSTRACT IN THAI ก็มี
+    (สำรวจ 11 เล่ม พบทั้งสองแบบ) ระบบเดิมรู้จักแค่แบบมีวงเล็บ เล่มที่ใช้อีกแบบจึงโดน
+    ฟ้องผิดสามทางจากคำเดียวกัน
+        สารบัญ    "ไม่พบหัวข้อ บทคัดย่อภาษาไทย ในสารบัญ"  ทั้งที่มีอยู่จริง
+        หน้า      หาหน้าบทคัดย่อไทยไม่เจอถ้าหน้านั้นไม่มีคำว่า "บทคัดย่อ" กำกับ
+        ตัวหนา    "มีข้อความตัวหนา: ABSTRACT IN THAI" ทั้งที่เป็นหัวข้อตาม template
+    """
+
+    def test_the_toc_entry_counts_as_the_thai_abstract(self):
+        for line in ("ABSTRACT IN THAI vi", "ABSTRACT (THAI) v", "บทคัดย่อภาษาไทย ง"):
+            self.assertEqual(checker_module._toc_section_kind(line), "abstract_th", line)
+
+    def test_the_toc_entry_counts_as_the_english_abstract(self):
+        for line in ("ABSTRACT IN ENGLISH iv", "ABSTRACT (ENGLISH) iv", "ABSTRACT"):
+            self.assertEqual(checker_module._toc_section_kind(line), "abstract_en", line)
+
+    def test_the_heading_is_not_reported_as_stray_bold_text(self):
+        for line in ("ABSTRACT IN THAI", "ABSTRACT IN ENGLISH", "ABSTRACT (THAI)"):
+            self.assertTrue(checker_module._is_abstract_heading(line), line)
+
+    def test_the_page_is_found_without_the_thai_word(self):
+        """หน้าบทคัดย่อไทยที่หัวข้อเป็นอังกฤษล้วน ต้องยังหาเจอ"""
+        page = NEWLINE.join(["vi", "ABSTRACT IN THAI",
+                             "ความเป็นมาและความสำคัญของการศึกษา"])
+        self.assertEqual(checker_module.front_section_kind(page)[0], "abstract_th")
+
+    def test_other_english_headings_are_not_swept_in(self):
+        """ต้องแคบ ห้ามลากหัวข้ออื่นที่มีคำว่า ABSTRACT เข้ามาด้วย"""
+        for line in ("ABSTRACT REASONING IN CHILDREN", "LIST OF ABSTRACTS"):
+            self.assertNotIn(checker_module._toc_section_kind(line),
+                             ("abstract_th", "abstract_en"), line)
+
+
+class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
+    """หน้าที่ฟอนต์ทำให้ตัวเลขกลายเป็นตัวอักษร ต้องไม่ถูกฟ้องว่าเล่มพิมพ์ผิด
+
+    เล่มจริงเล่มหนึ่งฝังฟอนต์ย่อย (subset) ที่ตาราง ToUnicode ผิด เฉพาะหน้าบทคัดย่อไทย
+    รหัส "6437028" ถูกดึงออกมาเป็น "JKLMNOP" ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกัน
+    อ่านได้ถูกต้อง เล่มไม่ได้ผิด ระบบอ่านไม่ออกเอง เดิมฟ้องแดงสองข้อพร้อมกัน
+    (ชื่อสะกดผิด + ไม่พบรหัสนักศึกษา) แล้วสั่งให้แก้ข้อความที่ถูกอยู่แล้ว
+    """
+
+    ID = "6437028 PHPH/M"
+    NAMES = ("KEERATI YOUPRASIT", "กีรติ อยู่ประสิทธิ์")
+
+    def test_a_readable_page_reports_nothing(self):
+        line = "KEERATI YOUPRASIT 6437028 PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "")
+
+    def test_the_misread_digits_are_returned(self):
+        line = "กีรติ ยุประสิทธิ JKLMNOP PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "JKLMNOP")
+
+    def test_a_book_that_really_left_the_id_out_is_still_reported(self):
+        """เล่มที่ลืมพิมพ์รหัสจริง ๆ ต้องยังโดนฟ้อง ไม่ใช่ถูกกลบด้วยกฎนี้"""
+        for line in ("KEERATI YOUPRASIT PHPH/M", "กีรติ อยู่ประสิทธิ์ PHPH/M"):
+            self.assertEqual(
+                checker_module.unreadable_id_digits(line, self.ID, self.NAMES), "", line)
+
+    def test_a_name_word_in_the_slot_is_not_mistaken_for_broken_digits(self):
+        """นามสกุลยาวเท่าจำนวนหลักพอดี ต้องไม่ถูกนับว่าเป็นเลขที่อ่านไม่ออก"""
+        line = "SOMCHAI JAIDEEX PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(line, self.ID,
+                                                ("SOMCHAI JAIDEEX",)), "")
+
+    def test_the_length_must_match_the_approved_id(self):
+        """ข้อมูลระบบบอกว่ารหัสมีกี่หลัก ใช้เป็นเงื่อนไขได้ ไม่ต้องเดา"""
+        self.assertEqual(
+            checker_module.unreadable_id_digits("ก ข JKLM PHPH/M", self.ID,
+                                                self.NAMES), "")
+
+    def test_a_page_without_the_programme_code_is_left_alone(self):
+        self.assertEqual(
+            checker_module.unreadable_id_digits("กีรติ ยุประสิทธิ JKLMNOP",
+                                                self.ID, self.NAMES), "")
+
+    def test_no_approved_id_means_nothing_to_compare(self):
+        self.assertEqual(
+            checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
+                                                self.NAMES), "")
+
+
+class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
+    """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
+
+    กฎ "หน้านี้ต้องไม่มีชื่อเรื่องอีกภาษา" สั่งให้ลบข้อความออกจากเล่ม ถ้าเดาเองว่า
+    ข้อความไหนคือชื่อเรื่องแล้วเดาผิด จะสั่งให้นักศึกษาลบข้อความที่ถูกต้องทิ้ง
+    """
+
+    TH = "การพัฒนาระบบ RFID สำหรับการจัดการคลังสินค้า"
+    EN = "DEVELOPMENT OF AN RFID SYSTEM FOR WAREHOUSE MANAGEMENT"
+
+    def test_each_field_is_read_by_its_own_label(self):
+        A = {"title_th": self.TH, "title_en": self.EN}
+        self.assertEqual(checker_module.approved_title(A, "thai"), self.TH)
+        self.assertEqual(checker_module.approved_title(A, "en"), self.EN)
+
+    def test_a_dash_is_not_a_thai_title(self):
+        """หลักสูตรนานาชาติกรอกช่องชื่อเรื่องภาษาไทยเป็นขีด (เล่มทดสอบที่ 1)"""
+        self.assertEqual(checker_module.approved_title({"title_th": "-"}, "thai"), "")
+
+    def test_an_empty_or_missing_field_is_not_used(self):
+        self.assertEqual(checker_module.approved_title({"title_th": ""}, "thai"), "")
+        self.assertEqual(checker_module.approved_title({}, "en"), "")
+
+    def test_fields_filled_in_the_wrong_language_are_not_used(self):
+        """ถ้าข้อมูลระบบสลับช่องกันไว้ ให้ข้ามดีกว่าเทียบผิดช่องแล้วฟ้องมั่ว"""
+        swapped = {"title_th": self.EN, "title_en": self.TH}
+        self.assertEqual(checker_module.approved_title(swapped, "thai"), "")
+        self.assertEqual(checker_module.approved_title(swapped, "en"), "")
+
+
+class ThaiTitlesMayContainEnglishLetters(unittest.TestCase):
+    """ชื่อเรื่องไทยมีอักษรอังกฤษปนได้ ต้องไม่ถูกนับเป็นชื่อเรื่องภาษาอังกฤษ
+
+    เจ้าหน้าที่เตือนไว้ตรง ๆ (ก.ย. 2569) ว่าหัวข้อไทยบางหัวข้อมีตัวอักษรภาษาอังกฤษ
+    ผสมอยู่ — ชื่อเทคโนโลยี ตัวย่อ ชื่อสารเคมี ตัวชี้ขาดจึงเป็น "มีอักษรไทยไหม"
+    ไม่ใช่ "มีอักษรอังกฤษไหม" เพราะชื่อเรื่องภาษาอังกฤษไม่มีอักษรไทยปนเลยสักตัว
+    แต่ชื่อเรื่องไทยมีอักษรอังกฤษปนได้เกินครึ่งบรรทัด
+
+    ชื่อเรื่องไทยแบบนี้ไปคล้ายชื่อเรื่องภาษาอังกฤษของตัวเองเสมอ วัดคะแนนตอนไม่กรอง
+    ภาษาได้ 0.53-0.74 แล้วแต่เล่ม ซึ่งคาบเกี่ยวและข้ามเกณฑ์ 0.6 ได้จริง
+    """
+
+    TH = "ผลของ machine learning based clinical decision support system ต่อการวินิจฉัย"
+    EN = ("EFFECT OF A MACHINE LEARNING BASED CLINICAL DECISION SUPPORT SYSTEM "
+          "ON DIAGNOSIS")
+    OTHER_TH = "การศึกษา COVID-19 mRNA vaccine booster ในผู้สูงอายุ"
+    COVER = ("วิทยานิพนธ์@ผลของ machine learning based clinical decision support "
+             "system ต่อการวินิจฉัย@นางสาวสมหญิง ดีงาม@"
+             "ลิขสิทธิ์ของมหาวิทยาลัยมหิดล").replace("@", NEWLINE)
+
+    def test_a_title_that_is_mostly_english_letters_is_still_thai(self):
+        for thai in (self.TH, self.OTHER_TH):
+            self.assertEqual(checker_module.title_script(thai), "thai")
+        self.assertEqual(checker_module.title_script(self.EN), "en")
+
+    def test_the_thai_cover_is_not_accused_of_carrying_the_english_title(self):
+        self.assertEqual(checker_module.title_printed_on_page(self.COVER, self.EN), "")
+
+    def test_without_the_language_filter_that_same_cover_is_accused(self):
+        """ควบคุมเชิงลบ: ถ้าไม่แยกภาษาก่อนเทียบ หน้าปกไทยที่ถูกต้องจะโดนฟ้อง"""
+        with mock.patch.object(checker_module, "title_script", lambda text: "en"):
+            self.assertNotEqual(
+                checker_module.title_printed_on_page(self.COVER, self.EN), "")
+
+    def test_the_english_title_really_added_is_still_found(self):
+        """กรองภาษาแล้วต้องยังจับของจริงได้ ไม่ใช่ปิดกฎทิ้ง"""
+        cover = self.COVER + NEWLINE + self.EN
+        self.assertIn("MACHINE LEARNING",
+                      checker_module.title_printed_on_page(cover, self.EN))
+
+
+class CoverAndSignatureCarryOneTitleLanguage(unittest.TestCase):
+    """หน้าปกและหน้าลงนามต้องมีชื่อเรื่องภาษาเดียว ตามภาษาของเล่ม
+
+    เกณฑ์ตัดสินวัดจากเล่มจริงสามเล่ม (นานาชาติ / ไทย-อังกฤษ / ไทย): หน้าที่ไม่มี
+    ชื่อเรื่องอีกภาษาได้คะแนนสูงสุด 0.21 หน้าที่พิมพ์ไว้จริงได้ 0.69 ขึ้นไป
+    """
+
+    TH = "การมีส่วนร่วมของประชาชนในการประเมินผลกระทบสิ่งแวดล้อมของโครงการปิโตรเลียม"
+    EN = ("PUBLIC PARTICIPATION IN ENVIRONMENTAL IMPACT ASSESSMENT "
+          "OF PETROLEUM DEVELOPMENT PROJECTS")
+    TH_TAIL = ("นายสมชาย ใจดี@วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร@"
+               "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล@ลิขสิทธิ์ของมหาวิทยาลัยมหิดล")
+    EN_TAIL = ("SOMCHAI JAIDEE@A THESIS SUBMITTED IN PARTIAL FULFILLMENT@"
+               "FACULTY OF GRADUATE STUDIES@MAHIDOL UNIVERSITY@"
+               "COPYRIGHT OF MAHIDOL UNIVERSITY")
+
+    def page(self, *blocks):
+        return NEWLINE.join(blocks).replace("@", NEWLINE)
+
+    def test_a_thai_cover_with_only_the_thai_title_is_clean(self):
+        cover = self.page(self.TH, self.TH_TAIL)
+        self.assertEqual(checker_module.title_printed_on_page(cover, self.EN), "")
+
+    def test_an_english_cover_with_only_the_english_title_is_clean(self):
+        cover = self.page(self.EN, self.EN_TAIL)
+        self.assertEqual(checker_module.title_printed_on_page(cover, self.TH), "")
+
+    def test_an_english_title_added_to_a_thai_cover_is_reported(self):
+        cover = self.page(self.TH, self.EN, self.TH_TAIL)
+        self.assertIn("PUBLIC PARTICIPATION",
+                      checker_module.title_printed_on_page(cover, self.EN))
+
+    def test_a_thai_title_added_to_an_english_cover_is_reported(self):
+        cover = self.page(self.EN, self.TH, self.EN_TAIL)
+        self.assertIn("การมีส่วนร่วม",
+                      checker_module.title_printed_on_page(cover, self.TH))
+
+    def test_a_title_broken_across_lines_is_still_found(self):
+        """ชื่อเรื่องยาวถูกตัดขึ้นหลายบรรทัดเสมอ ต้องรวมบรรทัดก่อนเทียบ"""
+        wrapped = "@".join(["PUBLIC PARTICIPATION IN ENVIRONMENTAL",
+                            "IMPACT ASSESSMENT OF PETROLEUM",
+                            "DEVELOPMENT PROJECTS"])
+        cover = self.page(self.TH, wrapped, self.TH_TAIL)
+        self.assertNotEqual(checker_module.title_printed_on_page(cover, self.EN), "")
+
+    def test_template_wording_alone_is_not_mistaken_for_the_title(self):
+        """หน้าปกอังกฤษมีข้อความ template เต็มหน้า ต้องไม่ถูกนับเป็นชื่อเรื่องไทย"""
+        self.assertEqual(
+            checker_module.title_printed_on_page(self.page(self.EN_TAIL), self.TH), "")
+
+    def test_the_rule_stays_off_when_the_system_has_no_such_title(self):
+        """หลักสูตรนานาชาติไม่มีชื่อเรื่องภาษาไทยในระบบ จึงไม่มีอะไรให้เทียบ"""
+        cover = self.page(self.EN, self.EN_TAIL)
+        self.assertEqual(
+            checker_module.title_printed_on_page(
+                cover, checker_module.approved_title({"title_th": "-"}, "thai")), "")
+
+
+class TitleLanguageFindingsAreNotFiledAsTitleMismatch(unittest.TestCase):
+    """ข้อ "หน้านี้มีชื่อเรื่องอีกภาษาอยู่ด้วย" ไม่ใช่ "ชื่อเรื่องไม่ตรง บฑ.1"
+
+    ชื่อเรื่องตรง บฑ.1 ทุกตัวอักษร แต่มีชื่อเรื่องเกินมาอีกอัน วิธีแก้คือลบข้อความออก
+    ไม่ใช่ไล่เทียบตัวอักษรกับ บฑ.1
+    """
+
+    ISSUE = {"rule_id": "FRONT.TITLE_ONE_LANGUAGE", "location": "หน้าปก",
+             "found": 'หน้านี้มีชื่อเรื่องภาษาอังกฤษอยู่ด้วย: "PUBLIC PARTICIPATION"',
+             "expected": "เล่มภาษาไทยต้องมีเฉพาะชื่อเรื่องภาษาไทย ทั้งบนหน้าปกและหน้าลงนาม"}
+
+    def test_the_finding_lands_in_its_own_category(self):
+        self.assertEqual(checker_module.classify(self.ISSUE), "ภาษาของชื่อเรื่อง")
+
+    def test_without_the_shortcut_it_looks_like_a_title_mismatch(self):
+        """ควบคุมเชิงลบ: ถ้าเดาจากคำ คำว่าชื่อเรื่องจะพาไปหมวดเทียบ บฑ.1"""
+        loose = dict(self.ISSUE, rule_id="")
+        self.assertEqual(checker_module.classify(loose), "ชื่อเรื่องไม่ตรง บฑ.1")
+
+    def test_the_category_has_an_english_name(self):
+        import tools.check_i18n as i18n
+        self.assertIn(checker_module.classify(self.ISSUE), i18n.load_catmap())
+
+
 class CoverPageMustBeTheFirstSheet(unittest.TestCase):
     """หน้าปกต้องอยู่แผ่นแรกของไฟล์เสมอ (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
 
