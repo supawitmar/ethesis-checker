@@ -1,3 +1,4 @@
+import inspect
 import re
 import sys
 
@@ -7,6 +8,8 @@ from unittest import mock
 
 import checker as checker_module
 import ethesis_import
+
+NEWLINE = chr(10)
 
 from checker import (
     describe_diff,
@@ -1893,13 +1896,520 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             self.assertIn(checker_module.summary_section(issue), catmap)
 
 
-class UnknownSignaturePageKindIsReported(unittest.TestCase):
-    """แยกไม่ออกว่าหน้าลงนามเป็นของคณะกรรมการชุดไหน ต้องบอก ไม่ใช่ข้ามเงียบ ๆ
+class OrderFindingsAreFiledUnderStructure(unittest.TestCase):
+    """กฎลำดับ/ตำแหน่งของส่วนประกอบ ต้องอยู่หมวด "โครงสร้างเล่ม"
 
-    signature_page_kind ดูเลขหน้าก่อน แล้วถอยไปดูหัวข้อบนหน้า ถ้าเสียทั้งคู่จะเลือก
-    ฟอร์มไม่ได้ (บฑ.1 หรือ บฑ.2) แล้วการนับจำนวนอาจารย์ถูกข้ามไป เดิมไม่มีข้อความ
-    บอก เจ้าหน้าที่เห็นว่าหน้านั้นไม่มีข้อฟ้องแล้วนึกว่าผ่าน
+    ข้อความของกฎพวกนี้เป็นรายการชื่อส่วนทั้งเล่ม จึงมีคำที่ classify จับได้เต็มไปหมด
+    ลำดับส่วนนำของเล่มไทยเคยตกหมวด "ภาษาไม่ครบตามหลักสูตร" เพราะในข้อความมีคำว่า
+    "บทคัดย่อภาษาไทย" ส่วนหน้าปกที่ไม่ได้อยู่แผ่นแรกไม่มีคำไหนตรงเลย เลยตกหมวด "อื่นๆ"
+    จึงจัดหมวดจากรหัสกฎแทนการเดาจากคำ
     """
+
+    def test_each_order_rule_lands_in_the_structure_bucket(self):
+        cases = {
+            "FRONT.COVER_FIRST": ("หน้าปกอยู่แผ่นที่ 2 ของไฟล์ ไม่ใช่แผ่นแรก",
+                                  "หน้าปกต้องเป็นแผ่นแรกของไฟล์", "หน้าปก"),
+            "FRONT.ORDER": ("ลำดับที่พบ: หน้าลงนาม (แผ่นที่ 3 ของไฟล์) แล้ว "
+                            "บทคัดย่อภาษาไทย (แผ่นที่ 5 ของไฟล์)",
+                            "ลำดับที่ต้องเป็น: หน้าลงนาม แล้ว กิตติกรรมประกาศ", "ส่วนนำ"),
+            "END.STRUCTURE": ("ลำดับที่พบ: ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                              "ลำดับที่ต้องเป็น: รายการอ้างอิง/บรรณานุกรม", "ส่วนท้ายเล่ม"),
+        }
+        for rule_id, (found, expected, loc) in cases.items():
+            got = checker_module.classify(dict(rule_id=rule_id, found=found,
+                                               expected=expected, location=loc))
+            self.assertEqual(got, "โครงสร้างเล่ม", rule_id)
+
+    def test_the_shortcut_is_what_keeps_them_there(self):
+        """ควบคุมเชิงลบ: ถ้าเดาจากคำเหมือนเดิม เล่มไทยจะไปโผล่หมวดภาษา"""
+        got = checker_module.classify(dict(
+            rule_id="", location="ส่วนนำ",
+            found="ลำดับที่พบ: หน้าลงนาม (แผ่นที่ 3 ของไฟล์) แล้ว บทคัดย่อภาษาไทย (แผ่นที่ 5 ของไฟล์)",
+            expected="ลำดับที่ต้องเป็น: หน้าลงนาม แล้ว กิตติกรรมประกาศ"))
+        self.assertEqual(got, "ภาษาไม่ครบตามหลักสูตร")
+
+    def test_other_cover_rules_keep_their_own_category(self):
+        """ทางลัดต้องแคบ ห้ามลากข้ออื่นบนหน้าปกเข้ามาด้วย"""
+        got = checker_module.classify(dict(
+            rule_id="FRONT.COVER_REQUIRED", location="หน้าปก",
+            found="ไม่พบข้อความบังคับ (ข้อความลิขสิทธิ์) บนหน้าปก",
+            expected='ข้อความที่ถูกต้อง: "COPYRIGHT OF MAHIDOL UNIVERSITY"'))
+        self.assertEqual(got, "ขาดหาย/ไม่พบ")
+
+
+class PagesAreIdentifiedByContentNotExactLines(unittest.TestCase):
+    """ระบุหน้าจาก "สิ่งที่ควรอยู่ในหน้านั้น" ไม่ใช่จากบรรทัดที่ตรงเป๊ะบรรทัดเดียว
+
+    เจ้าหน้าที่ท้วง (ก.ย. 2569) ว่าบางเล่มบรรทัดไม่ตรงกัน การมองบรรทัดเป๊ะทำให้ตรวจ
+    คลาดเคลื่อน วัดกับเล่มจริงแล้วยืนยัน: ถ้า PDF ดึงเลขหน้ามาต่อท้ายบรรทัดหัวข้อ
+    (เกิดเมื่อหัวกระดาษกับหัวข้ออยู่ระดับเดียวกัน) เล่มที่ผ่านสะอาดกลายเป็นไม่ผ่าน
+    4 ข้อรวด คือ ไม่พบกิตติกรรมประกาศ ไม่พบสารบัญ ไม่พบบทคัดย่อ และภาคผนวกไม่อยู่ในสารบัญ
+    """
+
+    ACK_EN = """ACKNOWLEDGEMENTS
+I would like to express my sincere gratitude to my advisor."""
+    ACK_TH = """กิตติกรรมประกาศ
+ขอขอบพระคุณอาจารย์ที่ปรึกษาที่กรุณาให้คำแนะนำตลอดมา"""
+    TOC_EN = """TABLE OF CONTENTS
+Page
+ACKNOWLEDGEMENTS iii
+ABSTRACT (ENGLISH) iv
+ABSTRACT (THAI) v
+LIST OF TABLES viii
+LIST OF FIGURES ix
+CHAPTER I INTRODUCTION 1
+REFERENCES 52
+BIOGRAPHY 60"""
+
+    def test_clean_headings_are_identified(self):
+        kinds = {
+            self.ACK_EN: "ack",
+            self.ACK_TH: "ack",
+            self.TOC_EN: "toc",
+            "ABSTRACT@This study aims to": "abstract_en",
+            "บทคัดย่อ@การศึกษานี้มีวัตถุประสงค์": "abstract_th",
+            "LIST OF TABLES@Table 1.1 Something 5": "list",
+        }
+        for text, want in kinds.items():
+            got = checker_module.front_section_kind(text.replace("@", NEWLINE))[0]
+            self.assertEqual(got, want, text[:24])
+
+    def test_a_page_number_stuck_to_the_heading_still_works(self):
+        """หัวกระดาษถูกดึงมารวมกับหัวข้อ — เคสที่ทำให้เล่มดี ๆ ตกทั้งเล่ม"""
+        cases = {
+            "ACKNOWLEDGEMENTS iii@I would like to thank": "ack",
+            "กิตติกรรมประกาศ ค@ขอขอบพระคุณอาจารย์": "ack",
+            "ABSTRACT iv@This study aims to": "abstract_en",
+            "บทคัดย่อ ง@การศึกษานี้มีวัตถุประสงค์": "abstract_th",
+            "TABLE OF CONTENTS vi@Page": "toc",
+            "สารบัญ ฉ@หน้า": "toc",
+        }
+        for text, want in cases.items():
+            got = checker_module.front_section_kind(text.replace("@", NEWLINE))[0]
+            self.assertEqual(got, want, text[:24])
+
+    def test_a_contents_listing_is_not_mistaken_for_the_pages_it_lists(self):
+        """บรรทัดในสารบัญมีรูปเดียวกับหัวข้อที่มีเลขหน้าติดท้ายเป๊ะ ๆ ต้องแยกให้ออก"""
+        self.assertEqual(checker_module.front_section_kind(self.TOC_EN)[0], "toc")
+        self.assertTrue(checker_module.looks_like_contents_page(self.TOC_EN))
+        self.assertFalse(checker_module.looks_like_contents_page(self.ACK_EN))
+
+    def test_a_continued_contents_page_is_not_read_as_a_heading_page(self):
+        """หน้าสารบัญหน้าที่สองไม่มีหัวข้อของตัวเองให้ยึด การ์ดนี้จึงเป็นตัวเดียวที่กันไว้
+
+        หัวข้อ "TABLE OF CONTENTS (cont.)" ไม่ตรงกับชุดคำหัวข้อ พอไม่มีอะไรแมตช์
+        บรรทัดแรกที่เป็นรายการ ("ACKNOWLEDGEMENTS iii") จะกลายเป็นตัวชี้ว่าหน้านี้
+        คือหน้ากิตติกรรมประกาศ ทั้งที่เป็นสารบัญ
+        """
+        cont = NEWLINE.join([
+            "TABLE OF CONTENTS (cont.)", "Page",
+            "ACKNOWLEDGEMENTS iii", "ABSTRACT (ENGLISH) iv", "ABSTRACT (THAI) v",
+            "LIST OF TABLES viii", "LIST OF FIGURES ix", "REFERENCES 52",
+        ])
+        self.assertTrue(checker_module.looks_like_contents_page(cont))
+        self.assertNotEqual(checker_module.front_section_kind(cont)[0], "ack")
+
+    def test_a_short_listing_still_falls_back_to_the_line(self):
+        """หน้าที่มีรายการน้อยเกินกว่าจะเป็นสารบัญ ยังใช้บรรทัดตัดสินได้ตามเดิม"""
+        short = NEWLINE.join(["ACKNOWLEDGEMENTS iii", "I would like to thank"])
+        self.assertFalse(checker_module.looks_like_contents_page(short))
+        self.assertEqual(checker_module.front_section_kind(short)[0], "ack")
+
+
+class CoverIsFoundByWhatBelongsOnIt(unittest.TestCase):
+    """หน้าปกหาโดยนับ "สิ่งที่ควรมีบนหน้าปก" ไม่ใช่จับข้อความเดียวแบบเป๊ะ
+
+    เดิมยึดบรรทัดลิขสิทธิ์อย่างเดียว พิมพ์ผิดตัวเดียว (ซึ่งเป็นความผิดที่ระบบมีไว้จับ
+    พอดี) ก็หาหน้าปกไม่เจอ แล้วตกกลับไปถือว่าแผ่นแรกคือหน้าปก ทำให้เล่มที่หน้าปก
+    ไม่ได้อยู่แผ่นแรกกลับไปฟ้องมั่วเหมือนเดิม
+    """
+
+    COVER = """A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE DEGREE OF
+MASTER OF SCIENCE
+FACULTY OF GRADUATE STUDIES
+MAHIDOL UNIVERSITY
+2026
+COPYRIGHT OF MAHIDOL UNIVERSITY"""
+    SIGNATURE = """THESIS ENTITLED
+SOMETHING SOMETHING
+FACULTY OF GRADUATE STUDIES
+MAHIDOL UNIVERSITY
+Advisory Committee"""
+
+    def test_the_cover_outscores_the_signature_page(self):
+        self.assertGreater(checker_module.cover_page_score(self.COVER),
+                           checker_module.cover_page_score(self.SIGNATURE))
+
+    def test_one_typo_does_not_hide_the_cover(self):
+        typo = self.COVER.replace("COPYRIGHT OF MAHIDOL UNIVERSITY",
+                                  "COPYRIGHT OF MAHIDOL UNIVERSTY")
+        self.assertNotEqual(typo, self.COVER)
+        self.assertEqual(checker_module.find_cover_page(["ใบรับรอง", typo, self.SIGNATURE]), 1)
+
+    def test_a_cover_whose_title_contains_a_banned_word_is_still_found(self):
+        """หักคะแนนแทนการตัดทิ้ง — ชื่อเรื่องบางเล่มมีคำว่า abstract อยู่จริง"""
+        cover = "ABSTRACT REASONING IN CHILDREN" + NEWLINE + self.COVER
+        self.assertEqual(checker_module.find_cover_page(["ใบปะหน้า", cover]), 1)
+
+
+class CoverPageMustBeTheFirstSheet(unittest.TestCase):
+    """หน้าปกต้องอยู่แผ่นแรกของไฟล์เสมอ (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    เดิมโค้ดถือว่า pages[0] คือหน้าปกเสมอ เล่มที่มีใบปะหน้า ใบรับรอง หรือหน้าว่าง
+    มาก่อนจึงถูกตรวจผิดจุดทั้งชุด วัดกับเล่มจริงที่แทรกหน้าเกินไว้หน้าสุด ได้ข้อฟ้อง
+    บนหน้าปก 8/8/7 ข้อ โดยไม่มีข้อไหนบอกสาเหตุจริงเลย
+
+    ตัวชี้ขาดคือ "บรรทัดลิขสิทธิ์" ซึ่งวัดจากเล่มจริงทั้งสามเล่ม (นานาชาติ /
+    ไทย-อังกฤษ / ไทย) แล้วพบเฉพาะบนแผ่นแรกแผ่นเดียว ส่วนชื่อบัณฑิตวิทยาลัยกับ
+    ชื่อมหาวิทยาลัยไปโผล่บนหน้าลงนามและหน้าบทคัดย่อด้วย จึงใช้ชี้ขาดไม่ได้
+    """
+
+    TH_COVER = "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\nลิขสิทธิ์ของมหาวิทยาลัยมหิดล"
+    EN_COVER = ("FACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\nCOPYRIGHT OF MAHIDOL UNIVERSITY")
+
+    def test_a_normal_book_has_its_cover_on_the_first_sheet(self):
+        for cover in (self.TH_COVER, self.EN_COVER):
+            self.assertEqual(checker_module.find_cover_page([cover, "ANY", "MORE"]), 0)
+
+    def test_sheets_inserted_before_the_cover_are_found(self):
+        for cover in (self.TH_COVER, self.EN_COVER):
+            pages = ["ใบรับรอง", "", cover, "CHAPTER I"]
+            self.assertEqual(checker_module.find_cover_page(pages), 2)
+
+    def test_a_book_with_no_copyright_line_is_not_guessed(self):
+        """ถ้าไม่มีบรรทัดลิขสิทธิ์เลย ห้ามเดา — คืนแผ่นแรกเท่าเดิม
+
+        การเดาผิดอันตรายกว่า และเล่มที่ไม่มีบรรทัดลิขสิทธิ์ถูกฟ้องด้วยกฎ
+        ข้อความบังคับบนหน้าปกอยู่แล้ว
+        """
+        self.assertEqual(checker_module.find_cover_page(["A", "B", "C"]), 0)
+        self.assertEqual(checker_module.find_cover_page([]), 0)
+
+    def test_the_signature_page_is_not_mistaken_for_the_cover(self):
+        """หน้าลงนามมีชื่อบัณฑิตวิทยาลัยและชื่อมหาวิทยาลัยเหมือนกัน แต่ไม่มีบรรทัดลิขสิทธิ์"""
+        sig = "FACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\nTHESIS ENTITLED"
+        self.assertEqual(checker_module.find_cover_page([sig, self.EN_COVER]), 1)
+
+    def test_the_search_does_not_run_to_the_end_of_the_book(self):
+        """หน้าปกอยู่ต้นเล่มเสมอ ไม่ต้องไล่ทั้งเล่มให้เสี่ยงไปเจอข้อความที่อ้างถึงลิขสิทธิ์"""
+        pages = ["x"] * 30 + [self.EN_COVER]
+        self.assertEqual(checker_module.find_cover_page(pages), 0)
+
+    def test_the_cover_checks_read_the_sheet_that_was_found(self):
+        """ถ้ายังอ่าน pages[0] อยู่ ข้อฟ้องบนหน้าปกจะกลับมาผิดทั้งชุดเหมือนเดิม"""
+        src = inspect.getsource(checker_module.run_check)
+        for line in src.splitlines():
+            if "หน้าปก" in line and ("spots" in line or "_check_cover_year" in line
+                                      or "cover_digits" in line):
+                self.assertNotIn("pages[0]", line, line.strip())
+
+    def test_the_rule_has_a_reference(self):
+        ref = checker_module.rule_reference("FRONT.COVER_FIRST")
+        self.assertNotEqual(ref, checker_module.rule_reference("FORM.REQUIRED"),
+                            "รหัสกฎพิมพ์ผิดจะเงียบ แล้วไปคืนที่มาของกฎอื่นแทน")
+
+    def test_the_message_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("หน้าปกอยู่แผ่นที่ 2 ของไฟล์ ไม่ใช่แผ่นแรก",
+                   "หน้าปกต้องเป็นแผ่นแรกของไฟล์",
+                   "ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class EndMatterMustBeInOrder(unittest.TestCase):
+    """ลำดับส่วนท้ายเล่ม: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
+
+    เจ้าหน้าที่ระบุลำดับทั้งไฟล์ไว้ (ส.ค. 2569)
+        หน้าปก / หน้าลงนาม 1 / หน้าลงนาม 2 / กิตติกรรมประกาศ / บทคัดย่อ / สารบัญ /
+        เนื้อหารายบท / รายการอ้างอิง / ภาคผนวก (ถ้ามี) / ประวัติผู้วิจัย
+
+    เดิมส่วนท้ายตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" เล่มที่วางภาคผนวกไว้
+    ก่อนรายการอ้างอิงจึงหลุดไป ทั้งที่ผิดลำดับเหมือนกัน
+    """
+
+    def _order_issue(self, ref, app, bio):
+        """สร้างข้อฟ้องลำดับจากเลขหน้าที่ให้มา (None = ไม่มีส่วนนั้น)"""
+        want = []
+        if ref is not None:
+            want.append(("รายการอ้างอิง/บรรณานุกรม", ref))
+        if app is not None:
+            want.append(("ภาคผนวก", app))
+        want.append(("ประวัติผู้วิจัย", bio))
+        got = sorted(want, key=lambda item: item[1])
+        return [n for n, _i in got] != [n for n, _i in want], want, got
+
+    def test_the_correct_order_is_not_reported(self):
+        wrong, _w, _g = self._order_issue(ref=120, app=125, bio=130)
+        self.assertFalse(wrong)
+
+    def test_an_appendix_before_the_references_is_caught(self):
+        """เคสที่กฎเดิมมองไม่เห็น — ประวัติผู้วิจัยยังอยู่ท้ายสุด แต่ลำดับผิด"""
+        wrong, _w, got = self._order_issue(ref=120, app=90, bio=130)
+        self.assertTrue(wrong)
+        self.assertEqual([n for n, _i in got],
+                         ["ภาคผนวก", "รายการอ้างอิง/บรรณานุกรม", "ประวัติผู้วิจัย"])
+
+    def test_a_biography_that_is_not_last_is_still_caught(self):
+        """กฎเดิมจับเคสนี้ได้ กฎใหม่ต้องไม่ทำให้หลุด"""
+        wrong, _w, _g = self._order_issue(ref=120, app=135, bio=130)
+        self.assertTrue(wrong)
+
+    def test_a_book_without_an_appendix_still_works(self):
+        self.assertFalse(self._order_issue(ref=120, app=None, bio=130)[0])
+        self.assertTrue(self._order_issue(ref=130, app=None, bio=120)[0])
+
+
+class OrderMessagesPointAtTheSheetNotThePrintedNumber(unittest.TestCase):
+    """ข้อความลำดับต้องบอก "แผ่นที่ N ของไฟล์" ไม่ใช่เลขหน้าที่พิมพ์ในเล่ม
+
+    เล่มที่ผิดลำดับส่วนใหญ่เกิดจากรวมไฟล์สลับกันโดยไม่ได้ใส่เลขหน้าใหม่ เลขที่พิมพ์
+    จึงสลับตามไปด้วย พอรายงานด้วยเลขที่พิมพ์จะได้ข้อความที่ดูขัดกับตัวเอง
+
+        ลำดับที่พบ: ภาคผนวก (หน้า 60) แล้ว รายการอ้างอิง (หน้า 52)
+
+    อ่านแล้วเหมือนระบบเรียงผิดเอง ทั้งที่เรียงตามไฟล์ถูกแล้ว (เจอตอนทดลองสลับ
+    ส่วนท้ายของเล่มจริงทั้งเล่มไทยและเล่มอังกฤษ) แผ่นที่ของไฟล์มีเสมอ ไม่ซ้ำ และ
+    เป็นตัวที่เจ้าหน้าที่ใช้เปิดไปดูใน PDF จริง
+    """
+
+    def test_the_order_rules_do_not_use_page_ref(self):
+        src = inspect.getsource(checker_module.run_check)
+        for line in src.splitlines():
+            if "actual_end" in line or "actual_front_sections" in line:
+                self.assertNotIn("page_ref(", line,
+                                 "ข้อความลำดับต้องใช้ order_ref ไม่ใช่ page_ref: "
+                                 + line.strip())
+
+    def test_the_sheet_number_starts_at_one(self):
+        """ดัชนีในโค้ดเริ่มที่ 0 แต่เจ้าหน้าที่นับแผ่นแรกของไฟล์เป็นแผ่นที่ 1"""
+        src = inspect.getsource(checker_module.run_check)
+        self.assertRegex(
+            src, r'(?s)def order_ref\(page_index\):.*?แผ่นที่ \{page_index \+ 1\} ของไฟล์',
+            "order_ref ต้องคืนแผ่นที่โดยบวกหนึ่งจากดัชนี")
+
+    def test_the_sheet_phrase_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("ภาคผนวก (แผ่นที่ 71 ของไฟล์)", pairs)
+        self.assertNotIn("แผ่น", en)
+        self.assertIn("71", en)
+
+
+class OrderMessagesUseWordsNotArrows(unittest.TestCase):
+    """ข้อความลำดับต้องไม่มีสัญลักษณ์
+
+    เจ้าหน้าที่คัดลอกข้อความสรุปไปวางในอีเมล/Word ซึ่งฟอนต์ปลายทางแสดงสัญลักษณ์
+    เพี้ยน (เคยเจอ "·" กลายเป็นรูปโทรศัพท์) กฎลำดับส่วนนำเคยใช้ลูกศร "→"
+    ซึ่งหลุดเข้าสรุปมาตลอด เพราะเล่มทดสอบไม่เคยผลิตข้อความนี้ ด่าน --corpus จึงไม่เห็น
+    """
+
+    BANNED = "·—–→↔•≤✆"
+
+    def test_the_joiner_is_a_word(self):
+        self.assertEqual(checker_module._ORDER_JOIN.strip(), "แล้ว")
+        for ch in self.BANNED:
+            self.assertNotIn(ch, checker_module._ORDER_JOIN)
+
+    def test_no_banned_symbol_reaches_the_summary(self):
+        join = checker_module._ORDER_JOIN
+        rep = Report()
+        rep.add("RED", "front_matter", "ส่วนนำ",
+                "ลำดับที่พบ: " + join.join(["หน้าลงนาม (แผ่นที่ 3 ของไฟล์)",
+                                            "สารบัญ (แผ่นที่ 5 ของไฟล์)",
+                                            "กิตติกรรมประกาศ (แผ่นที่ 6 ของไฟล์)"]),
+                "ลำดับที่ต้องเป็น: " + join.join(["หน้าลงนาม", "กิตติกรรมประกาศ",
+                                                  "สารบัญ"]),
+                "ย้ายแต่ละส่วนของส่วนนำให้เรียงตามลำดับที่กำหนด", "FRONT.ORDER")
+        rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
+                "ลำดับที่พบ: " + join.join(["ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                                            "รายการอ้างอิง/บรรณานุกรม (แผ่นที่ 108 ของไฟล์)",
+                                            "ประวัติผู้วิจัย (แผ่นที่ 118 ของไฟล์)"]),
+                "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง/บรรณานุกรม", "ภาคผนวก",
+                                                  "ประวัติผู้วิจัย"]),
+                "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด", "END.STRUCTURE")
+        for it in rep.zones["RED"]:
+            it["category"] = checker_module.classify(it)
+            it["section"] = summary_section(it)
+        text = plain_summary({"verdict": "ไม่ผ่าน", "issues_by_zone": rep.zones})
+        self.assertEqual([c for c in self.BANNED if c in text], [])
+
+    def test_the_order_messages_translate(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        join = checker_module._ORDER_JOIN
+        for th in ("ลำดับที่พบ: " + join.join(["ภาคผนวก (แผ่นที่ 71 ของไฟล์)",
+                                               "รายการอ้างอิง/บรรณานุกรม (แผ่นที่ 108 ของไฟล์)",
+                                               "ประวัติผู้วิจัย (แผ่นที่ 118 ของไฟล์)"]),
+                   "ลำดับที่ต้องเป็น: " + join.join(["รายการอ้างอิง/บรรณานุกรม", "ภาคผนวก",
+                                                     "ประวัติผู้วิจัย"]),
+                   "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
+                   "ส่วนท้ายเล่ม"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}\n  TH: {th}\n  EN: {en}")
+
+
+class SignaturePagesAreNamedTheSameWayEverywhere(unittest.TestCase):
+    """ทุกกฎบนหน้าลงนามต้องเรียกตำแหน่งแบบเดียวกัน
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: หัวกลุ่มเป็น "หน้าลงนาม" ตำแหน่งเป็น
+    "หน้าลงนาม 1" / "หน้าลงนาม 2"
+
+    เดิมกฎแต่ละตัวเรียกหน้าเดียวกันคนละแบบ ("หน้าอาจารย์ที่ปรึกษา",
+    "หน้าลงนามหน้า 1", "หน้าลงนาม 1") เจ้าหน้าที่อ่านแล้วนึกว่าเป็นคนละหน้า
+    """
+
+    def test_the_position_comes_from_the_order_in_the_file(self):
+        pos = checker_module.signature_page_position
+        self.assertEqual(pos([2, 3], 2), "หน้าลงนาม 1")
+        self.assertEqual(pos([2, 3], 3), "หน้าลงนาม 2")
+        # ลำดับในไฟล์ ไม่ใช่เลขหน้า — หน้าลงนามอยู่แผ่นไหนก็ได้
+        self.assertEqual(pos([7, 9], 7), "หน้าลงนาม 1")
+        self.assertEqual(pos([7, 9], 9), "หน้าลงนาม 2")
+
+    def test_a_page_outside_the_list_does_not_crash(self):
+        self.assertEqual(checker_module.signature_page_position([2, 3], 9), "หน้าลงนาม")
+        self.assertEqual(checker_module.signature_page_position([], 0), "หน้าลงนาม")
+
+    def test_the_page_number_rule_uses_the_same_name(self):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [2, 3], {2: "Thesis entitled X\nz", 3: "Thesis entitled X\nz"},
+            lambda i: "หน้า z")
+        self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
+                         ["หน้าลงนาม 1 (หน้า z)", "หน้าลงนาม 2 (หน้า z)"])
+
+    def test_every_signature_location_still_groups_under_one_heading(self):
+        """ตำแหน่งเปลี่ยนแล้ว หัวกลุ่มในสรุปต้องยังเป็น "หน้าลงนาม" กลุ่มเดียว"""
+        for loc in ("หน้าลงนาม 1 (หน้า i)", "หน้าลงนาม 2 (หน้า ii)",
+                    "หน้าลงนาม 1 ช่องคณบดีคณะ (มุมล่างขวา) (หน้า i)"):
+            issue = {"location": loc, "found": "x", "expected": "y",
+                     "part": "front_matter"}
+            self.assertEqual(summary_section(issue), "หน้าลงนาม", loc)
+
+
+class SignatureTemplateIsSeparateFromTheDegree(unittest.TestCase):
+    """ข้อความ template หน้าลงนาม ต้องแยกจากชื่อปริญญา
+
+    เจ้าหน้าที่สั่ง ส.ค. 2569: "แยกประเด็นข้อความ template นำหน้าชื่อปริญญาไม่ครบ
+    ออกจากชื่อปริญญา ... อ่าน template สิ และแยกชื่อปริญญาออกมา นอกนั้นก็เป็น
+    ข้อความ template"
+
+    template ทางการวางไว้ว่า "...for the degree of <Degree (Field of Study)>"
+    ชื่อปริญญาจึงต่อท้ายประโยค template พอดี ถ้าไม่ตัดออกก่อน ตัวหาช่วงที่ใกล้เคียง
+    จะคร่อมชื่อปริญญาเข้ามาแล้วรายงานยกชื่อปริญญามาอ้างว่าเป็นข้อความ template
+    """
+
+    DEGREE_EN = "Doctor of Philosophy (Tropical Medicine)"
+    DEGREE_TH = "ปรัชญาดุษฎีบัณฑิต (สาขาวิชาอายุรศาสตร์เขตร้อน)"
+
+    PAGE_NO_TEMPLATE = ("Thesis entitled\nX\nWISIT K\n"
+                        "Doctor of Philosophy (Tropical Medicine)\n"
+                        "Faculty of Graduate Studies, Mahidol University\non 1 June 2026")
+
+    def test_the_degree_is_cut_out_of_the_template_zone(self):
+        zone = checker_module.signature_template_zone(
+            "was submitted to the Faculty of Graduate Studies, Mahidol University "
+            "for the degree of\n" + self.DEGREE_EN + "\non 1 June 2026",
+            self.DEGREE_EN)
+        self.assertIn("for the degree of", zone)
+        self.assertNotIn("Tropical Medicine", zone)
+
+    def test_a_missing_template_sentence_never_quotes_the_degree(self):
+        """เคสที่เคยพัง: ไม่มีประโยค template เลย ระบบไปคว้าชื่อปริญญามาแทน"""
+        zone = checker_module.signature_template_zone(
+            self.PAGE_NO_TEMPLATE, self.DEGREE_EN)
+        self.assertNotIn("Tropical Medicine", zone)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_EN,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertEqual(near, "")      # ไม่ยกอะไรมาอ้าง จะฟ้องว่า "ไม่พบข้อความ template"
+
+    def test_a_real_typo_in_the_sentence_is_still_quoted(self):
+        """ลดการปนแล้วต้องไม่กลืนเคสที่ควรฟ้อง — เล่มพิมพ์ประโยคมาแต่ผิดคำ"""
+        page = ("WISIT K\nwas submitted to the Faculty of Graduate Study, "
+                "Mahidol University for the degree of\n" + self.DEGREE_EN)
+        zone = checker_module.signature_template_zone(page, self.DEGREE_EN)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_EN,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertTrue(near)
+        self.assertIn("Study,", near)
+        self.assertNotIn("Tropical", near)
+        self.assertEqual(describe_diff(near, SIGNATURE_TEMPLATE_EN),
+                         'ต่างที่ "Study," ต้องเป็น "Studies,"')
+
+    def test_the_thai_page_works_the_same_way(self):
+        page = ("วิทยานิพนธ์ เรื่อง\nX\n"
+                "ได้รับการพิจารณาให้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญา\n"
+                + self.DEGREE_TH + "\nวันที่ 11 พฤษภาคม 2569")
+        zone = checker_module.signature_template_zone(page, self.DEGREE_TH)
+        self.assertNotIn("อายุรศาสตร์เขตร้อน", zone)
+        near = checker_module._closest_run(
+            zone, SIGNATURE_TEMPLATE_TH,
+            min_ratio=checker_module.SIGNATURE_TEMPLATE_MIN_RATIO)
+        self.assertEqual(describe_diff(near, SIGNATURE_TEMPLATE_TH), 'ขาด "นับ"')
+
+    def test_it_survives_a_missing_degree_field(self):
+        """ฟอร์มไม่ได้กรอกชื่อปริญญามา ต้องไม่พังและไม่ตัดอะไรทิ้ง"""
+        for degree in ("", None):
+            zone = checker_module.signature_template_zone(self.PAGE_NO_TEMPLATE, degree)
+            self.assertIn("Mahidol University", zone)
+
+    def test_the_threshold_sits_between_the_measured_cases(self):
+        """เกณฑ์ 0.8 มาจากการวัด ไม่ใช่เลขสุ่ม
+
+        ประโยคที่มีอยู่แต่ผิด ได้ 0.87-0.99 · ช่วงที่คร่อมชื่อปริญญา ได้ 0.68
+        """
+        self.assertGreater(checker_module.SIGNATURE_TEMPLATE_MIN_RATIO, 0.70)
+        self.assertLess(checker_module.SIGNATURE_TEMPLATE_MIN_RATIO, 0.86)
+
+
+class SourceFormFollowsThePagePosition(unittest.TestCase):
+    """ฟอร์มต้นทางเลือกจากลำดับหน้า ไม่ใช่หัวข้อบนหน้า
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: "บฑ.1 หน้าลงนาม 1 และบทคัดย่อ · บฑ.2 หน้าลงนาม 2"
+    """
+
+    def test_each_position_maps_to_its_own_form(self):
+        pick = checker_module.signature_page_committee
+        form = checker_module.committee_source_form
+        self.assertEqual(pick([2, 3], 2), "advisory")
+        self.assertEqual(form(pick([2, 3], 2)), "บฑ.1")
+        self.assertEqual(pick([2, 3], 3), "exam")
+        self.assertEqual(form(pick([2, 3], 3)), "บฑ.2")
+
+    def test_the_abstract_page_always_uses_the_advisory_form(self):
+        self.assertEqual(checker_module.committee_source_form("advisory"), "บฑ.1")
+
+    def test_a_third_signature_page_is_not_compared(self):
+        """template มีหน้าลงนามสองหน้า หน้าที่เกินมาไม่มีฟอร์มให้เทียบ"""
+        self.assertEqual(checker_module.signature_page_committee([2, 3], 9), "")
+        self.assertEqual(checker_module.signature_page_committee([], 0), "")
+
+    def test_the_heading_does_not_override_the_position(self):
+        """เล่มที่สลับสองหน้ากันคือเล่มที่ผิด ถ้ายึดหัวข้อจะตามน้ำไปเทียบให้ถูกชุด
+        แล้วความผิดนั้นหายไปจากรายงาน จึงต้องยึดลำดับหน้าเสมอ"""
+        pick = checker_module.signature_page_committee
+        # ลำดับหน้าเป็นตัวตัดสินอย่างเดียว ฟังก์ชันไม่รับข้อความบนหน้าเลย
+        self.assertEqual(pick([5, 6], 5), "advisory")
+        self.assertEqual(pick([5, 6], 6), "exam")
+
+
+class SwappedSignaturePagesAreReported(unittest.TestCase):
+    """หัวข้อบนหน้าขัดกับลำดับหน้า = อาจสลับสองหน้ากัน ต้องบอก ไม่ใช่เงียบ
+
+    ระบบเทียบตามลำดับหน้าเสมอ (บฑ.1 กับหน้า 1, บฑ.2 กับหน้า 2) เล่มที่สลับหน้ากัน
+    จึงได้ข้อฟ้อง "รายชื่อไม่ครบ" ตามมา ถ้าไม่บอกว่าอาจสลับหน้า เจ้าหน้าที่จะนึกว่า
+    เล่มขาดคน ทั้งที่ของจริงคือสลับหน้า ซึ่งแก้คนละอย่างกัน
+    """
+
+    SWAPPED_WHY = ("หัวข้อบนหน้านี้ไม่ตรงกับลำดับหน้า อาจสลับหน้ากัน "
+                   "ระบบเทียบตามลำดับหน้าไว้ก่อน โปรดตรวจว่าหน้าลงนาม 1 "
+                   "เป็นคณะกรรมการที่ปรึกษา และหน้าลงนาม 2 เป็นคณะกรรมการสอบ")
 
     def test_the_page_kind_survives_a_wrong_or_missing_page_label(self):
         """เลขหน้าผิดหรือหายไม่ทำให้แยกหน้าไม่ออก เพราะยังถอยไปดูหัวข้อได้"""
@@ -1925,22 +2435,15 @@ class UnknownSignaturePageKindIsReported(unittest.TestCase):
         # (ด่าน --detail ของ regress_books ยืนยันกับเล่มจริงแล้ว) ตรงนี้ล็อกกติกา
         # ปลายทางแทน: ข้อแบบนี้ต้องอยู่รายการสีม่วง ไม่กระทบคำตัดสิน ไม่เข้าใบสั่งแก้
         rep = Report()
-        rep.add_human("หน้าลงนาม 1 (หน้า ค)",
-                      "ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือ"
-                      "คณะกรรมการสอบ จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
-                      "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา",
-                      "UNCERTAIN.REVIEW")
+        rep.add_human("หน้าลงนาม 1 (หน้า ค)", self.SWAPPED_WHY, "UNCERTAIN.REVIEW")
         self.assertEqual(rep.verdict(), "ผ่าน")          # ไม่กระทบคำตัดสิน
         self.assertEqual(checker_module.issues_to_fix({"issues_by_zone": rep.zones}), [])
-        self.assertIn("แยกไม่ออก", rep.human_checklist[0]["why"])
+        self.assertIn("อาจสลับหน้ากัน", rep.human_checklist[0]["why"])
 
     def test_the_purple_message_has_an_english_translation(self):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
-        why = ("ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือคณะกรรมการสอบ "
-               "จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
-               "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา")
-        en = i18n.tr_en(why, pairs)
+        en = i18n.tr_en(self.SWAPPED_WHY, pairs)
         left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
         self.assertEqual(left, [], f"ยังไม่แปล {left}\n  EN: {en}")
 
@@ -1951,7 +2454,7 @@ class UnknownSignaturePageKindIsReported(unittest.TestCase):
             rep, [7, 9], {7: "Thesis entitled X", 9: "Thesis entitled X"},
             lambda i: f"แผ่นที่ {i + 1}")
         self.assertEqual([it["location"] for it in rep.zones["ORANGE"]],
-                         ["หน้าลงนามหน้า 1 (แผ่นที่ 8)", "หน้าลงนามหน้า 2 (แผ่นที่ 10)"])
+                         ["หน้าลงนาม 1 (แผ่นที่ 8)", "หน้าลงนาม 2 (แผ่นที่ 10)"])
 
 
 class ContinuedHeadingIsTheSameChapter(unittest.TestCase):

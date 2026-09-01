@@ -41,6 +41,16 @@ ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 
+# ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
+# ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
+# พอดี ถ้าตั้งหลวมจะยกชื่อปริญญามาปนแล้วสองประเด็นนี้ปนกันในรายงาน
+SIGNATURE_TEMPLATE_MIN_RATIO = 0.8
+
+# ตัวคั่นของ "ลำดับส่วนประกอบ" — ต้องเป็นคำ ไม่ใช่ลูกศร เพราะเจ้าหน้าที่คัดลอก
+# ข้อความสรุปไปวางในอีเมล/Word ซึ่งฟอนต์ปลายทางแสดงสัญลักษณ์เพี้ยน
+# (เคยเจอ "·" กลายเป็นรูปโทรศัพท์ — กติกาเดียวกับที่ห้ามสัญลักษณ์ทั้งหมดในสรุป)
+_ORDER_JOIN = " แล้ว "
+
 
 # Thai combining marks: MAI HAN-AKAT, SARA I..SARA UU, PHINTHU, MAITAIKHU,
 # tone marks, THANTHAKHAT, NIKHAHIT, YAMAKKAN
@@ -845,6 +855,30 @@ def _committee_names(expected):
 COMMITTEE_SOURCE_FORM = {"advisory": "บฑ.1", "exam": "บฑ.2"}
 
 
+# ชุดรายชื่อที่ต้องปรากฏบนหน้าลงนามแต่ละหน้า เรียงตามลำดับหน้า
+# เจ้าหน้าที่กำหนด ส.ค. 2569: "บฑ.1 หน้าลงนาม 1 และบทคัดย่อ · บฑ.2 หน้าลงนาม 2"
+SIGNATURE_PAGE_COMMITTEE = ("advisory", "exam")
+
+
+def signature_page_committee(sig_pages, page_index):
+    """ชุดรายชื่อที่หน้านี้ต้องเทียบด้วย — ยึด "ลำดับหน้า" ไม่ใช่หัวข้อบนหน้า
+
+    หน้าลงนามหน้าแรกคือคณะกรรมการที่ปรึกษา (บฑ.1) หน้าที่สองคือคณะกรรมการสอบ (บฑ.2)
+    ตายตัวตาม template ไม่ต้องอ่านหัวข้อบนหน้าเพื่อเดา
+
+    ยึดลำดับดีกว่ายึดหัวข้อสองเหตุผล
+      1. ลำดับเชื่อได้เสมอ ส่วนหัวข้ออ่านพลาดได้ (ฟอนต์เพี้ยน/หน้าสแกน)
+      2. เล่มที่สลับสองหน้ากันคือเล่มที่ผิด การยึดหัวข้อจะ "ตามน้ำ" ไปเทียบให้ถูกชุด
+         แล้วความผิดนั้นหายไปจากรายงาน
+
+    คืน '' ถ้าหน้านี้ไม่ได้อยู่ในสองหน้าแรก
+    """
+    try:
+        return SIGNATURE_PAGE_COMMITTEE[list(sig_pages).index(page_index)]
+    except (ValueError, IndexError):
+        return ""
+
+
 def committee_source_form(kind):
     """ชื่อฟอร์มต้นทางที่ใช้เทียบรายชื่อชุดนี้ — ชนิดหน้าที่อ่านไม่ออกถือเป็น บฑ.1"""
     return COMMITTEE_SOURCE_FORM.get(kind) or "บฑ.1"
@@ -962,6 +996,25 @@ def signature_page_kind(page_label, page_text):
 SIGNATURE_PAGE_LABELS = (("i", "ก"), ("ii", "ข"))
 
 
+def signature_page_position(sig_pages, page_index):
+    """ชื่อตำแหน่งของหน้าลงนาม — ใช้คำเดียวกันทุกกฎ
+
+    เจ้าหน้าที่กำหนด ส.ค. 2569: หัวกลุ่มในสรุปเป็น "หน้าลงนาม" ส่วนตำแหน่งของแต่ละข้อ
+    เป็น "หน้าลงนาม 1" / "หน้าลงนาม 2"
+
+    เดิมกฎแต่ละตัวเรียกหน้าเดียวกันคนละแบบ — บ้างตามบทบาทของหน้า
+    ("หน้าอาจารย์ที่ปรึกษา" / "หน้ากรรมการสอบ") บ้างตามลำดับ ("หน้าลงนามหน้า 1")
+    บ้าง "หน้าลงนาม 1" เจ้าหน้าที่อ่านรายงานแล้วนึกว่าเป็นคนละหน้ากัน ทั้งที่หน้าเดียวกัน
+
+    ยึด "ลำดับที่เจอในไฟล์" ไม่ใช่บทบาทของหน้า เพราะลำดับเชื่อได้เสมอ ส่วนบทบาท
+    อาจแยกไม่ออกเมื่อเลขหน้าผิดและหัวข้ออ่านไม่ได้ (ดู signature_page_kind)
+    """
+    try:
+        return f"หน้าลงนาม {list(sig_pages).index(page_index) + 1}"
+    except ValueError:
+        return "หน้าลงนาม"
+
+
 def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
@@ -991,7 +1044,8 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
         found_lab = _extract_page_label(pages[idx])
         what = ("เลขหน้าของหน้านี้ไม่ถูกต้อง" if found_lab
                 else "ไม่พบเลขหน้าบนหน้า")
-        rep.add(zone, "front_matter", f"หน้าลงนามหน้า {k + 1} ({page_ref(idx)})",
+        rep.add(zone, "front_matter",
+                f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
                 what,
                 f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
                 "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
@@ -1053,6 +1107,39 @@ def _closest_run(text, want, min_ratio=0.6):
             if ratio > best_ratio:
                 best, best_ratio = run, ratio
     return best
+
+
+def signature_template_zone(page_text, degree):
+    """ส่วนของหน้าลงนามที่ต้องเป็น "ข้อความ template" ล้วน — ตัดชื่อปริญญาออกแล้ว
+
+    template ทางการวางหน้าลงนามไว้แบบนี้ (Electronic File template-2026)
+
+        entitled / เรื่อง
+        <ชื่อเรื่อง>
+        <ชื่อนักศึกษา>
+        was submitted to the Faculty of Graduate Studies, Mahidol University
+        for the degree of  <Degree (Field of Study)>
+        on <วันที่>
+
+    ภาษาไทยก็โครงเดียวกัน "...ตามหลักสูตรปริญญา <ชื่อปริญญา>"
+
+    **ชื่อปริญญาเป็นช่องเติมช่องเดียวที่อยู่กลางประโยค ที่เหลือเป็นข้อความตายตัวทั้งหมด**
+    ถ้าไม่ตัดชื่อปริญญาออกก่อน ตัวหาช่วงที่ใกล้เคียงจะคร่อมชื่อปริญญาเข้ามาเป็นส่วนหนึ่ง
+    ของประโยค แล้วรายงานยกชื่อปริญญามาอ้างว่าเป็นข้อความ template ทำให้สองประเด็น
+    ปนกัน (เจ้าหน้าที่สั่ง ส.ค. 2569: "อ่าน template สิ และแยกชื่อปริญญาออกมา
+    นอกนั้นก็เป็นข้อความ template")
+
+    ตัดที่ "จุดเริ่มของชื่อปริญญาตามที่พิมพ์จริงในเล่ม" ไม่ใช่ตามข้อมูลอนุมัติตรง ๆ
+    เพราะเล่มอาจสะกดชื่อปริญญาต่างไปเล็กน้อย ซึ่งเป็นคนละข้อฟ้องกัน
+    """
+    text = soft(page_text or "")
+    if not (degree or "").strip():
+        return text
+    printed = _closest_run(text, degree, min_ratio=0.7)
+    if not printed:
+        return text
+    cut = text.find(printed)
+    return text[:cut] if cut > 0 else text
 
 
 def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
@@ -1195,12 +1282,19 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
     for idx in sig_pages[:2]:
         if idx not in slots or idx >= len(pages):
             continue
-        kind = signature_page_kind(page_labels.get(idx, ""), pages[idx])
+        # ชุดรายชื่อ (และฟอร์มต้นทาง) มาจากลำดับหน้า ไม่ใช่หัวข้อบนหน้า
+        kind = signature_page_committee(sig_pages, idx)
         expected = committees.get(kind, []) if kind else []
+        # หัวข้อบนหน้ายังอ่านไว้ เพื่อเตือนเมื่อ "ขัดกับลำดับหน้า" (เช่น สลับสองหน้ากัน)
+        # ต้องอ่านจาก "หัวข้อบนหน้า" ล้วน ๆ ไม่ใช่ signature_page_kind ซึ่งดูเลขหน้าก่อน
+        # (เลขหน้ามักถูกอยู่แล้ว จึงกลบความขัดแย้งของหัวข้อจนตรวจไม่เจอ)
+        heading_kind = _committee_page_kind(pages[idx])
         members, member_quals, bottom_text, member_raw = slots[idx]
-        page_label = ("หน้าอาจารย์ที่ปรึกษา" if kind == "advisory" else
-                      "หน้ากรรมการสอบ" if kind == "exam" else
-                      f"หน้าลงนาม {sig_pages.index(idx) + 1}")
+        # เรียกตามลำดับหน้าเสมอ ไม่เรียกตามบทบาท ("หน้าอาจารย์ที่ปรึกษา") เพราะ
+        # กฎอื่นบนหน้าเดียวกันเรียกว่า "หน้าลงนาม 1" อยู่แล้ว ถ้าเรียกคนละแบบ
+        # เจ้าหน้าที่จะนึกว่าเป็นคนละหน้า — บทบาทของหน้าอยู่ในข้อความอยู่แล้ว
+        # (ข้อฟ้องบอกว่าเทียบกับ บฑ.1 หรือ บฑ.2 ซึ่งบอกบทบาทในตัว)
+        page_label = signature_page_position(sig_pages, idx)
         loc = f"{page_label} ({page_ref(idx)})"
         # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
         _report_committee_name_case(rep, members, loc)
@@ -1210,20 +1304,18 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         rep.add_info("front_matter", f"รายชื่อที่ระบบอ่านได้จาก{page_label}",
                      "  ".join(f'{k}. {n}' for k, n in enumerate(read_names, start=1))
                      or "ระบบอ่านรายชื่อบนหน้านี้ไม่ได้")
-        # แยกไม่ออกว่าหน้านี้เป็นของคณะกรรมการชุดไหน = เลือกฟอร์มไม่ได้ จึงนับไม่ได้
-        # ต้องบอกออกไป ไม่งั้นเจ้าหน้าที่เห็นว่าหน้านี้ไม่มีข้อฟ้องแล้วนึกว่าผ่าน
-        # (signature_page_kind ดูเลขหน้าก่อน แล้วถอยไปดูหัวข้อบนหน้า ถ้าเสียทั้งคู่
-        #  จะตกมาที่นี่ — เกิดยากเพราะหัวข้อเป็นข้อความบังคับของ template)
+        # หัวข้อบนหน้าขัดกับลำดับหน้า = อาจสลับสองหน้ากัน ระบบยังเทียบตามลำดับ
+        # (ตามกติกา) แต่ต้องบอกออกไป ไม่งั้นข้อฟ้อง "รายชื่อไม่ครบ" ที่ตามมาจะดู
+        # เหมือนเล่มขาดคน ทั้งที่ของจริงคือสลับหน้ากัน ซึ่งแก้คนละอย่างกัน
         #
         # ลงเป็น "รายการสีม่วง" ไม่ใช่ข้อฟ้องสีส้ม ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
         # ("เอาเป็นสีม่วงไหม เพราะแบบนั้นต้องตรวจตาอยู่แล้ว") — และเพราะสีส้มจะหลุด
-        # เข้าใบสั่งแก้ที่ส่งให้นักศึกษาโดยปริยาย ซึ่งนักศึกษาแก้อะไรก็ไม่หาย
-        # เป็นข้อจำกัดของการอ่านไฟล์ ไม่ใช่จุดผิดของเล่ม
-        if not kind:
+        # เข้าใบสั่งแก้ที่ส่งให้นักศึกษาโดยปริยาย
+        if kind and heading_kind and heading_kind != kind:
             rep.add_human(loc,
-                          "ระบบแยกไม่ออกว่าหน้านี้เป็นหน้าคณะกรรมการที่ปรึกษาหรือ"
-                          "คณะกรรมการสอบ จึงนับจำนวนอาจารย์เทียบฟอร์มให้ไม่ได้ "
-                          "โปรดดูหัวข้อบนหน้าแล้วนับจำนวนอาจารย์ด้วยตา",
+                          "หัวข้อบนหน้านี้ไม่ตรงกับลำดับหน้า อาจสลับหน้ากัน "
+                          "ระบบเทียบตามลำดับหน้าไว้ก่อน โปรดตรวจว่าหน้าลงนาม 1 "
+                          "เป็นคณะกรรมการที่ปรึกษา และหน้าลงนาม 2 เป็นคณะกรรมการสอบ",
                           "UNCERTAIN.REVIEW")
         if not expected:
             continue
@@ -1817,6 +1909,59 @@ def cover_required_items(doc_type, program_language):
         ("ชื่อมหาวิทยาลัย", "MAHIDOL UNIVERSITY"),
         ("ข้อความลิขสิทธิ์", "COPYRIGHT OF MAHIDOL UNIVERSITY"),
     )
+
+
+# "สิ่งที่ควรอยู่บนหน้าปก" — ให้คะแนนจากเนื้อความทั้งหน้า ไม่ผูกกับบรรทัดใดบรรทัดหนึ่ง
+#
+# จับข้อความเดียวแบบเป๊ะ ๆ ไม่พอ: พิมพ์ผิดตัวเดียวในบรรทัดลิขสิทธิ์ (ซึ่งเป็นความผิด
+# ที่ระบบมีไว้จับพอดี) ก็ทำให้หาหน้าปกไม่เจอทั้งหน้า วัดกับเล่มจริงแล้วยืนยัน
+# ให้นับ "สิ่งที่ควรมี" หลายอย่างแทน พิมพ์ผิดหนึ่งจุดจึงเหลืออีกสามอย่างให้ยึด
+# เก็บทั้งคำไทยและคำอังกฤษ เพื่อให้หาเจอโดยไม่ต้องรู้ภาษาของหลักสูตรก่อน
+_COVER_MARKERS = (
+    ("ลิขสิทธิ์", ("COPYRIGHT", norm("ลิขสิทธิ์"))),
+    ("บัณฑิตวิทยาลัย", (norm("FACULTY OF GRADUATE STUDIES"), norm("บัณฑิตวิทยาลัย"))),
+    ("มหาวิทยาลัยมหิดล", (norm("MAHIDOL UNIVERSITY"), norm("มหาวิทยาลัยมหิดล"))),
+    ("ข้อความประเภทงาน", (norm("SUBMITTED IN PARTIAL FULFILLMENT"),
+                          norm("เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"))),
+)
+
+# "สิ่งที่หน้าปกต้องไม่มี" — ชื่อบัณฑิตวิทยาลัยกับชื่อมหาวิทยาลัยไปโผล่บนหน้าลงนาม
+# และหน้าบทคัดย่อด้วย (2 จาก 4 ข้อ) คำกลุ่มนี้จึงเป็นตัวแยกสองหน้านั้นออกจากหน้าปก
+# วัดกับเล่มจริงสามเล่ม: หน้าปกไม่มีคำกลุ่มนี้เลยสักเล่ม ส่วนหน้าลงนาม/บทคัดย่อมีทุกหน้า
+_NOT_COVER_MARKERS = tuple(norm(w) for w in (
+    "ENTITLED", "ABSTRACT", "บทคัดย่อ", "คณะกรรมการ",
+    "ADVISORY COMMITTEE", "EXAMINATION COMMITTEE", "อาจารย์ที่ปรึกษา", "คณบดี",
+))
+
+
+def cover_page_score(text):
+    """คะแนนความเป็นหน้าปกของหน้าหนึ่ง = สิ่งที่ควรมี ลบ สิ่งที่ต้องไม่มี
+
+    ใช้หักลบแทนการตัดทิ้ง เพราะชื่อเรื่องบางเล่มอาจมีคำอย่าง ABSTRACT อยู่จริง
+    ถ้าตัดทิ้งทันทีจะหาหน้าปกของเล่มนั้นไม่เจอเลย
+    """
+    nt = norm(text)
+    want = sum(1 for _label, alts in _COVER_MARKERS if any(a in nt for a in alts))
+    avoid = sum(1 for w in _NOT_COVER_MARKERS if w in nt)
+    return want - avoid
+
+
+def find_cover_page(pages, limit=10):
+    """แผ่นไหนของไฟล์คือหน้าปก (ปกติต้องเป็นแผ่นที่ 1)
+
+    เดิมโค้ดถือว่า pages[0] คือหน้าปกเสมอ เล่มที่มีใบปะหน้า ใบรับรอง หรือหน้าว่าง
+    มาก่อนจึงถูกตรวจผิดจุดทั้งชุด (ไม่พบข้อความบังคับ ไม่พบปี ไม่พบชื่อปริญญา)
+    โดยไม่มีข้อไหนบอกสาเหตุจริงว่าหน้าปกไม่ได้อยู่แผ่นแรก
+
+    เสมอกันให้แผ่นแรกสุดชนะ และถ้าไม่มีหน้าไหนดูเป็นหน้าปกพอ คืน 0 เท่าเดิม
+    เพราะการเดาหน้าปกผิดอันตรายกว่าการไม่เดา
+    """
+    best_idx, best_score = 0, 0
+    for i, text in enumerate(pages[:limit]):
+        score = cover_page_score(text)
+        if score > best_score:
+            best_idx, best_score = i, score
+    return best_idx if best_score >= 2 else 0
 
 
 def _best_cover_match(expected, cover_text):
@@ -2606,6 +2751,24 @@ def _is_toc_major_heading(text):
 _TOC_PAGE_TOKEN = r'(?:\d{1,4}|[ivxlcdm]+|[ก-ฮ])'
 
 
+_TOC_ENTRY_TAIL = re.compile(
+    rf'\s+{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?\s*$', re.I)
+
+
+def looks_like_contents_page(text, min_entries=5):
+    """หน้านี้เป็น "รายการสารบัญ" หรือไม่ — ดูจากสิ่งที่ควรอยู่บนหน้าสารบัญ
+
+    ใช้แยกหน้าสารบัญออกจากหน้าหัวข้อจริง เพราะบรรทัดในสารบัญมีรูปเดียวกับหัวข้อที่มี
+    เลขหน้าติดมาท้ายบรรทัดเป๊ะ ๆ ("ACKNOWLEDGEMENTS iii") ถ้าไม่แยก การยอมตัดเลขหน้า
+    ท้ายบรรทัดจะทำให้หน้าสารบัญถูกนับเป็นหน้ากิตติกรรมประกาศ
+
+    วัดกับเล่มจริงสามเล่ม: หน้าสารบัญได้ 13-20 บรรทัด หน้าสารบัญตาราง/รูปได้ 3-6
+    ส่วนหน้าปก หน้าลงนาม หน้ากิตติกรรมประกาศ และหน้าบทคัดย่อได้ 0-1 บรรทัด
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return sum(1 for line in lines if _TOC_ENTRY_TAIL.search(soft(line))) >= min_entries
+
+
 def _strip_toc_page_number(text):
     s = soft(text)
     # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
@@ -2903,6 +3066,14 @@ def resolve_option(body_ch, approved, chapters_mode):
 def classify(issue):
     f, e, loc = issue.get("found", ""), issue.get("expected", ""), issue.get("location", "")
     text = f + " " + e + " " + loc
+    # กฎ "ลำดับ/ตำแหน่งของส่วนประกอบ" จัดหมวดจากรหัสกฎ ไม่ใช่จากคำในข้อความ
+    #
+    # ข้อความของกฎพวกนี้เป็น "รายการชื่อส่วนทั้งเล่ม" จึงมีคำที่กฎข้างล่างจับได้เต็มไปหมด
+    # (เช่น "บทคัดย่อภาษาไทย" ทำให้ลำดับส่วนนำตกไปหมวดภาษาไม่ครบตามหลักสูตร) และการที่
+    # หน้าปกไม่ได้อยู่แผ่นแรกก็ไม่มีคำไหนตรงเลย เลยตกหมวด "อื่นๆ" ทั้งที่เป็นเรื่อง
+    # โครงสร้างเล่มชัด ๆ
+    if issue.get("rule_id") in ("FRONT.COVER_FIRST", "FRONT.ORDER", "END.STRUCTURE"):
+        return "โครงสร้างเล่ม"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -3003,6 +3174,45 @@ class Report:
         return "ผ่าน"
 
 
+def front_section_kind(page_text):
+    """หน้าส่วนนำหน้านี้เป็นชนิดไหน — ตัดสินจากเนื้อความบนหน้า ไม่ใช่บรรทัดเป๊ะบรรทัดเดียว
+
+    คืน (ชนิด, บรรทัดหัวข้อที่พิมพ์จริง) ชนิดที่เป็นไปได้คือ
+    signature / abstract_th / abstract_en / ack / toc / list และ "" เมื่อไม่ใช่ทั้งหมด
+
+    รองรับหัวข้อที่มีเลขหน้าติดมาท้ายบรรทัด ("ACKNOWLEDGEMENTS iii") เพราะ PDF
+    บางเล่มดึงหัวกระดาษมารวมกับบรรทัดหัวข้อ วัดกับเล่มจริงแล้วพบว่าถ้าไม่รองรับ
+    เล่มที่ผ่านสะอาดจะกลายเป็นไม่ผ่านทันที 4 ข้อ (ไม่พบกิตติกรรมประกาศ ไม่พบสารบัญ
+    ไม่พบบทคัดย่อ และภาคผนวกไม่อยู่ในสารบัญ) ทั้งที่เล่มถูกทุกอย่าง
+
+    แต่ห้ามใช้รูปแบบที่ตัดเลขหน้าแล้วกับ "หน้าที่เป็นรายการสารบัญ" เพราะทุกบรรทัด
+    ในสารบัญมีรูปเดียวกันเป๊ะ หน้าสารบัญจะถูกนับเป็นหน้ากิตติกรรมประกาศแทน
+    """
+    tls = top_lines(page_text, 12)
+    nls = [norm(l) for l in tls]
+    bare = [norm(_strip_toc_page_number(l)) for l in tls]
+    alt = nls if looks_like_contents_page(page_text) else bare
+    if any(x in N_ENTITLED for x in nls) or any(x in N_ENTITLED for x in alt):
+        return "signature", soft(tls[0]) if tls else ""
+    # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
+    # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
+    for j, nl in enumerate(nls[:12]):
+        al = alt[j]
+        if N_ABSTRACT_TH in (nl, al):
+            return "abstract_th", soft(tls[j])
+        if 'ABSTRACT' in (nl, al) or any(re.match(r'^ABSTRACT\(', x) for x in (nl, al)):
+            return "abstract_en", soft(tls[j])
+        if nl in N_ACK or al in N_ACK:
+            return "ack", soft(tls[j])
+        # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ แม้บนหน้าที่เป็นรายการสารบัญเอง
+        # เพราะสารบัญไม่เคยมีบรรทัดที่ชื่อว่า "สารบัญ" อยู่ในรายการของตัวเอง
+        if nl in N_TOC or bare[j] in N_TOC:
+            return "toc", soft(tls[j])
+        if nl in N_LISTS or al in N_LISTS:
+            return "list", soft(tls[j])
+    return "", ""
+
+
 def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
               skip_identity_check=False):
     """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
@@ -3060,27 +3270,21 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     sig_pages, abs_th_pages, abs_en_pages, ack_pages, toc_pages, list_pages = [], [], [], [], [], []
     toc_heading_wrong = []      # (ดัชนีหน้า, หัวข้อที่เล่มพิมพ์) เมื่อไม่ใช่ TABLE OF CONTENTS
     for i in range(front_limit):
-        tls = top_lines(pages[i], 12)
-        nls = [norm(l) for l in tls]
-        if any(x in N_ENTITLED for x in nls):
+        kind, heading = front_section_kind(pages[i])
+        if kind == "signature":
             sig_pages.append(i)
-            continue
-        # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
-        # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
-        for j, nl in enumerate(nls[:12]):
-            if nl == N_ABSTRACT_TH:
-                abs_th_pages.append(i); break
-            if nl == 'ABSTRACT' or re.match(r'^ABSTRACT\(', nl):
-                abs_en_pages.append(i); break
-            if nl in N_ACK:
-                ack_pages.append(i); break
-            if nl in N_TOC:
-                toc_pages.append(i)
-                if nl in N_TOC_WRONG:
-                    toc_heading_wrong.append((i, soft(tls[j])))
-                break
-            if nl in N_LISTS:
-                list_pages.append(i); break
+        elif kind == "abstract_th":
+            abs_th_pages.append(i)
+        elif kind == "abstract_en":
+            abs_en_pages.append(i)
+        elif kind == "ack":
+            ack_pages.append(i)
+        elif kind == "toc":
+            toc_pages.append(i)
+            if norm(_strip_toc_page_number(heading)) in N_TOC_WRONG:
+                toc_heading_wrong.append((i, heading))
+        elif kind == "list":
+            list_pages.append(i)
 
     abs_th_idx = abs_th_pages[0] if abs_th_pages else None
     abs_en_idx = abs_en_pages[0] if abs_en_pages else None
@@ -3113,6 +3317,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if label:
             return f"หน้า {label}"
         return f"หน้าไม่ระบุเลข (แผ่นที่ {page_index + 1} ของไฟล์)"
+
+    def order_ref(page_index):
+        """ตำแหน่งสำหรับกฎ "ลำดับ" — ต้องเป็นแผ่นในไฟล์ ไม่ใช่เลขหน้าที่พิมพ์
+
+        กฎลำดับพูดถึงลำดับจริงในไฟล์ ส่วนเลขหน้าที่พิมพ์เป็นสิ่งที่เล่มผิดลำดับมัก
+        พิมพ์มาผิดอยู่แล้ว ถ้ารายงานด้วยเลขที่พิมพ์ เล่มที่รวมไฟล์สลับกันโดยไม่ได้
+        ใส่เลขใหม่จะได้ข้อความที่ดูขัดกับตัวเอง เช่น
+            "ภาคผนวก (หน้า 60) แล้ว รายการอ้างอิง (หน้า 52)"
+        ซึ่งอ่านแล้วเหมือนระบบเรียงผิดเอง ทั้งที่ระบบเรียงตามไฟล์ถูกแล้ว
+        แผ่นที่ของไฟล์มีเสมอ ไม่ซ้ำ และเป็นตัวที่เจ้าหน้าที่ใช้เปิดไปดูใน PDF จริง
+        """
+        return f"แผ่นที่ {page_index + 1} ของไฟล์"
+
+    # ---------- หน้าปกต้องเป็นแผ่นแรก ----------
+    cover_idx = find_cover_page(pages)
+    cover_text = pages[cover_idx] if pages else ""
+    if cover_idx > 0:
+        rep.add("RED", "front_matter", "หน้าปก",
+                f"หน้าปกอยู่{order_ref(cover_idx)} ไม่ใช่แผ่นแรก",
+                "หน้าปกต้องเป็นแผ่นแรกของไฟล์",
+                "ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก",
+                "FRONT.COVER_FIRST")
 
     seq = sorted(printed.items())
     arabic_sequence_ok = bool(seq) and seq[0][1] == 1 and all(
@@ -3520,9 +3746,29 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
-    elif last_major and last_major[0] != "BIO":
-        rep.add("RED", "end_matter", page_ref(last_major[1]),
-                "หลัง BIOGRAPHY ยังมีส่วนอื่น", "ประวัติผู้วิจัยต้องเป็นหน้าสุดท้าย", "ย้ายไปท้ายสุด")
+    else:
+        # ลำดับส่วนท้ายเล่มตามประกาศ: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
+        #
+        # เดิมตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" ซึ่งจับได้เฉพาะกรณีที่ประวัติ
+        # ไม่ได้อยู่ท้ายสุด เล่มที่วางภาคผนวกไว้ "ก่อน" รายการอ้างอิงจึงหลุดไป
+        # ทั้งที่ผิดลำดับเหมือนกัน — ตรวจทั้งชุดทีเดียวแบบเดียวกับลำดับส่วนนำ
+        end_sections = []
+        if ref_head:
+            # ใช้ชื่อรวมสองคำแบบเดียวกับกฎสารบัญ เพราะเล่มไทยใช้ได้ทั้ง "รายการอ้างอิง"
+            # และ "บรรณานุกรม" ถ้าเลือกคำเดียวจะไปเรียกชื่อส่วนผิดจากที่พิมพ์ในเล่ม
+            end_sections.append(("รายการอ้างอิง/บรรณานุกรม", ref_head[1]))
+        if appendix_page is not None:
+            end_sections.append(("ภาคผนวก", appendix_page))
+        end_sections.append(("ประวัติผู้วิจัย", bio_page))
+        actual_end = sorted(end_sections, key=lambda item: item[1])
+        if [n for n, _i in actual_end] != [n for n, _i in end_sections]:
+            rep.add("RED", "end_matter", "ส่วนท้ายเล่ม",
+                    "ลำดับที่พบ: " + _ORDER_JOIN.join(
+                        f"{name} ({order_ref(idx)})" for name, idx in actual_end),
+                    "ลำดับที่ต้องเป็น: " + _ORDER_JOIN.join(
+                        name for name, _i in end_sections),
+                    "ย้ายแต่ละส่วนของส่วนท้ายเล่มให้เรียงตามลำดับที่กำหนด",
+                    "END.STRUCTURE")
 
     appendix_toc_idx = next(
         (page_idx for page_idx, line in toc_lines if any(w in norm(line) for w in N_APPENDIX)),
@@ -3668,7 +3914,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())
         _report_missing_form_fields(rep, A, required_fields)
 
-        cover_text = pages[0] if pages else ""
         missing_cover_items = [
             (label, expected_text)
             for label, expected_text in cover_required_items(A.get("doc_type", ""), program_language)
@@ -3730,10 +3975,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ordered_front_sections.append(("บทที่ 1/ส่วนเนื้อหา", body_ch[0][2]))
         actual_front_sections = sorted(ordered_front_sections, key=lambda item: item[1])
         if [name for name, _idx in actual_front_sections] != [name for name, _idx in ordered_front_sections]:
-            actual_order = " → ".join(
-                f"{name} ({page_ref(page_idx)})" for name, page_idx in actual_front_sections
+            actual_order = _ORDER_JOIN.join(
+                f"{name} ({order_ref(page_idx)})" for name, page_idx in actual_front_sections
             )
-            expected_order = " → ".join(name for name, _idx in ordered_front_sections)
+            expected_order = _ORDER_JOIN.join(name for name, _idx in ordered_front_sections)
             rep.add(
                 "RED", "front_matter", "ส่วนนำ",
                 f"ลำดับที่พบ: {actual_order}",
@@ -3753,7 +3998,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ((A.get("title_en") if thai_book else A.get("title_th")) or "")
 
         if main_title:
-            spots = [("หน้าปก", pages[0] if pages else "")]
+            spots = [("หน้าปก", cover_text)]
             for k2, i2 in enumerate(sig_pages):
                 spots.append((f"หน้าลงนาม {k2+1} ({page_ref(i2)})", pages[i2]))
             main_abs = abs_th_idx if thai_book else abs_en_idx
@@ -3840,7 +4085,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # (บฑ. ของเล่มที่ 9 เขียน "พ.จ.ต. ณัชนพ เพชรสุข" แต่เล่มพิมพ์แค่ชื่อ-สกุล
             #  เดิมฟ้องแดง 5 ตำแหน่งจากสาเหตุเดียวกันหมด)
             core_name = _strip_student_title(primary_student_name)
-            name_spots = [("หน้าปก", 0, "cover")] + [
+            name_spots = [("หน้าปก", cover_idx, "cover")] + [
                 (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", idx, "signature")
                 for k, idx in enumerate(sig_pages)
             ]
@@ -3902,7 +4147,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         student_id = soft(A.get("student_id", ""))
         if student_id:
             digits_only = re.sub(r'\D', '', student_id)
-            cover_digits = re.sub(r'[^\d]', '', pages[0] if pages else "")
+            cover_digits = re.sub(r'[^\d]', '', cover_text)
             if digits_only and digits_only in cover_digits:
                 rep.add_verification("รหัสนักศึกษา", "หน้าปก (ต้องไม่มีรหัส)", "fail",
                                      "พบรหัสบนหน้าปก")
@@ -3962,30 +4207,47 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         for k, idx in enumerate(sig_pages):
             spot = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
             if norm(sig_template) in norm(pages[idx]):
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "pass")
+                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "pass")
             else:
                 # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
                 # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
-                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความตาม template" เจ้าหน้าที่จะนึกว่าระบบ
+                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความ template" เจ้าหน้าที่จะนึกว่าระบบ
                 # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
-                near = _closest_run(pages[idx], sig_template)
+                #
+                # ตัด "ชื่อปริญญา" ออกจากหน้าก่อน แล้วที่เหลือจึงเป็นข้อความ template
+                # ล้วน (ดู signature_template_zone) — ชื่อปริญญาต่อท้ายประโยคนี้พอดี
+                # ถ้าไม่ตัดออก ตัวหาช่วงจะคร่อมชื่อปริญญาเข้ามาแล้วสองประเด็นปนกัน
+                #
+                # กันอีกชั้นด้วยเกณฑ์ความใกล้เคียงที่สูงกว่าค่าปกติ (0.6) เผื่อกรณี
+                # ที่ตัดชื่อปริญญาไม่ได้ (เล่มไม่มีชื่อปริญญา หรือฟอร์มไม่ได้กรอกมา)
+                # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
+                # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
+                template_zone = signature_template_zone(pages[idx], sig_degree)
+                near = _closest_run(template_zone, sig_template,
+                                    min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+                # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
+                # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
+                # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
+                #  สิ่งที่พบ และบรรทัดที่ควรเป็น)
                 if near:
                     diff = describe_diff(near, sig_template)
-                    found_msg = f'หน้าลงนามพิมพ์ว่า "{near}"'
+                    found_msg = f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"'
                     if diff:
                         found_msg += f" {diff}"
                     detail = near
                 else:
-                    found_msg = f'ไม่พบข้อความตาม template: "{sig_template}"'
-                    detail = "ไม่พบข้อความตาม template"
-                rep.add_verification("ข้อความ template หน้าลงนาม", spot, "fail", detail)
+                    # ไม่ยกประโยคเต็มมาตรงนี้ เพราะบรรทัด "ต้องเป็น" ข้างล่างมีอยู่แล้ว
+                    # ยกสองรอบทำให้ข้อเดียวมีประโยคยาว ๆ ซ้ำกันสองครั้ง
+                    found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+                    detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
                 rep.add("RED", "front_matter", spot, found_msg,
-                        f'หน้าลงนามต้องมีข้อความ "{sig_template}" นำหน้าชื่อปริญญา',
+                        f'ต้องเป็น "{sig_template}"',
                         "", "FRONT.APPROVAL")
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
-                degree_spots.append(("หน้าปก", pages[0] if pages else "", cover_degree))
+                degree_spots.append(("หน้าปก", cover_text, cover_degree))
             if sig_degree:
                 degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], sig_degree)
                                     for k, idx in enumerate(sig_pages))
@@ -4063,7 +4325,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if A.get("exam_date"):
             _check_exam_date(rep, A["exam_date"], sig_pages, pages, page_ref)
         if A.get("year"):
-            _check_cover_year(rep, str(A["year"]), pages[0] if pages else "")
+            _check_cover_year(rep, str(A["year"]), cover_text)
 
         # ---------- รายชื่อกรรมการบนหน้าลงนาม ----------
         # ถ้ามีข้อมูลกรรมการจาก eThesis → นับจำนวนเทียบกับ บฑ.1 / บฑ.2 ของหน้านั้น
