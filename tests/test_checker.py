@@ -2195,6 +2195,278 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
                                                 self.NAMES), "")
 
 
+class ContentsPagesAndTheirContinuationAreOneHeading(unittest.TestCase):
+    """สารบัญ กับ สารบัญ (ต่อ) คือหัวข้อเดียวกัน (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    หน้าต่อของสารบัญหน้าสุดท้ายมักเหลือแค่ 1-2 รายการ คือภาคผนวกกับประวัติผู้วิจัย
+    ซึ่งไม่ถึงเกณฑ์ "3 บรรทัดที่ลงท้ายด้วยเลขหน้า" ที่ใช้หาหน้าต่อ แล้วถูกตัดทิ้งทั้งหน้า
+    ระบบจึงฟ้องผิดว่า "ไม่พบหัวข้อ ประวัติผู้วิจัย ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+
+    วัดกับเล่มจริง: ย้ายท้ายสารบัญ 2 บรรทัดไปหน้าถัดไปแล้วใส่หัวข้อ
+    "TABLE OF CONTENTS (Cont.)" ระบบฟ้องผิด 1 ข้อ หลังแก้ไม่ฟ้องแล้ว
+    """
+
+    HEADS = ("สารบัญ", "สารบัญ (ต่อ)", "TABLE OF CONTENTS",
+             "TABLE OF CONTENTS (Cont.)", "TABLE OF CONTENTS (CONT)",
+             "TABLE OF CONTENTS (cont.)", "TABLE OF CONTENTS (Continued)")
+
+    def test_every_spelling_counts_as_the_contents_heading(self):
+        for head in self.HEADS:
+            self.assertTrue(checker_module.is_toc_heading(head), head)
+
+    def test_the_page_is_classified_as_contents(self):
+        for head in self.HEADS:
+            page = NEWLINE.join(["viii", head, "APPENDIX D 95", "BIOGRAPHY 97"])
+            self.assertEqual(checker_module.front_section_kind(page)[0], "toc", head)
+
+    def test_a_short_continuation_page_is_still_part_of_the_contents(self):
+        """เกณฑ์จำนวนบรรทัดต้องไม่ตัดหน้าที่พิมพ์ "(ต่อ)" ไว้ชัด ๆ ทิ้ง"""
+        pages = [
+            NEWLINE.join(["vi", "TABLE OF CONTENTS", "ACKNOWLEDGEMENTS iii",
+                          "ABSTRACT iv", "CHAPTER 1 INTRODUCTION 1", "REFERENCES 52"]),
+            NEWLINE.join(["vii", "TABLE OF CONTENTS (Cont.)", "BIOGRAPHY 97"]),
+        ]
+        self.assertEqual(checker_module._toc_continuation_pages(pages, 0, len(pages)),
+                         [0, 1])
+
+    def test_the_continuation_heading_is_what_keeps_it(self):
+        """ควบคุมเชิงลบ: ไม่มีหัวข้อ (ต่อ) หน้าที่มีรายการเดียวจะถูกตัดทิ้งตามเกณฑ์เดิม"""
+        pages = [
+            NEWLINE.join(["vi", "TABLE OF CONTENTS", "ACKNOWLEDGEMENTS iii",
+                          "ABSTRACT iv", "CHAPTER 1 INTRODUCTION 1", "REFERENCES 52"]),
+            NEWLINE.join(["vii", "BIOGRAPHY 97"]),
+        ]
+        self.assertEqual(checker_module._toc_continuation_pages(pages, 0, len(pages)), [0])
+
+    def test_other_words_in_brackets_are_not_a_continuation(self):
+        """ต้องแคบ ห้ามเหมาว่าวงเล็บอะไรก็ได้คือหน้าต่อ"""
+        for head in ("TABLE OF CONTENTS (Chapter 3)", "LIST OF TABLES",
+                     "LIST OF TABLES (Cont.)"):
+            self.assertFalse(checker_module.is_toc_heading(head), head)
+
+    def test_the_wrong_wording_is_reported_once_not_once_per_page(self):
+        """เล่มที่เขียน CONTENTS ทั้งสองหน้า ต้องได้ข้อฟ้องถ้อยคำข้อเดียว"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("not toc_pages[:-1]", source)
+
+    def test_stripping_the_marker_leaves_the_plain_heading(self):
+        self.assertEqual(checker_module.without_continuation("TABLE OF CONTENTS (Cont.) vii"),
+                         "TABLE OF CONTENTS")
+        self.assertEqual(checker_module.without_continuation("สารบัญ (ต่อ)"), "สารบัญ")
+        self.assertEqual(checker_module.without_continuation("APPENDIX A (Data)"),
+                         "APPENDIX A (Data)")
+
+
+class AppendixSingularAndPluralAreOneHeading(unittest.TestCase):
+    """APPENDIX กับ APPENDICES คือหัวข้อเดียวกัน (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    ระบบรู้จักทั้งสองแบบอยู่แล้ว เทสต์ชุดนี้ล็อกไว้ไม่ให้หลุดตอนแก้กฎอื่น เพราะถ้าหลุด
+    เล่มที่เขียน APPENDICES จะถูกฟ้องว่า "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ" ทั้งที่มีอยู่
+    """
+
+    def test_both_spellings_are_the_appendix_entry_in_the_contents(self):
+        for line in ("APPENDIX", "APPENDICES", "APPENDIX 130", "APPENDICES 130",
+                     "APPENDIX A SUPPLEMENTARY 60", "ภาคผนวก", "ภาคผนวก ก 90"):
+            self.assertEqual(checker_module._toc_section_kind(line), "appendix", line)
+
+    def test_both_spellings_are_known_appendix_words(self):
+        for word in ("APPENDIX", "APPENDICES"):
+            self.assertTrue(any(checker_module.norm(word).startswith(term)
+                                for term in N_APPENDIX), word)
+
+    def test_the_contents_and_the_page_may_use_different_spellings(self):
+        """สารบัญเขียน APPENDICES แต่หน้าจริงเขียน APPENDIX ต้องยังจับคู่กันได้"""
+        self.assertEqual(checker_module._toc_section_kind("APPENDICES 130"),
+                         checker_module._toc_section_kind("APPENDIX 130"))
+
+
+class BookLanguageIsReadFromTemplateText(unittest.TestCase):
+    """ภาษาของเล่มตัดสินจาก "ข้อความตายตัวของ template" ไม่ใช่สัดส่วนตัวอักษรบนหน้า
+
+    เล่มไทยกับเล่มอังกฤษใช้ template คนละชุด ข้อความบังคับบนหน้าปก ประโยคบนหน้าลงนาม
+    และคำนำหน้าหัวบท จึงเป็นตัวบอกภาษาที่ตรงที่สุด ส่วนการนับสัดส่วนตัวอักษรจะโดน
+    เล่มไทยที่มีศัพท์อังกฤษเยอะหลอกได้ (ปัญหาเดียวกับที่ title_script เจอ)
+
+    วัดกับเล่มจริงสามเล่ม (นานาชาติ / ไทย-อังกฤษ / ไทย) สัญญาณทั้งสามตัวชี้ตรงกัน
+    หมดทุกเล่ม ไม่มีเล่มไหนที่สัญญาณสวนทางกันเลย
+    """
+
+    TH_COVER = ("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร@"
+                "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล@ลิขสิทธิ์ของมหาวิทยาลัยมหิดล")
+    EN_COVER = ("A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS "
+                "FOR THE DEGREE OF@FACULTY OF GRADUATE STUDIES@MAHIDOL UNIVERSITY@"
+                "COPYRIGHT OF MAHIDOL UNIVERSITY")
+    TH_SIG = "วิทยานิพนธ์@เรื่อง@ชื่อเรื่อง@นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+    EN_SIG = ("Thesis@entitled@A TITLE@was submitted to the Faculty of Graduate Studies, "
+              "Mahidol University for the degree of")
+    TH_CH = "บทที่ 1@บทนำ"
+    EN_CH = "CHAPTER 1@INTRODUCTION"
+
+    def pages(self, *blocks):
+        return [b.replace("@", NEWLINE) for b in blocks]
+
+    def signals(self, *blocks):
+        return checker_module.book_language_signals(self.pages(*blocks), 0, "THESIS")
+
+    def test_a_thai_book_is_read_as_thai(self):
+        got = self.signals(self.TH_COVER, self.TH_SIG, self.TH_CH)
+        self.assertEqual(got, {"cover": "thai", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(checker_module.book_language(got), "thai")
+
+    def test_an_english_book_is_read_as_english(self):
+        got = self.signals(self.EN_COVER, self.EN_SIG, self.EN_CH)
+        self.assertEqual(got, {"cover": "en", "signature": "en", "chapter": "en"})
+        self.assertEqual(checker_module.book_language(got), "en")
+
+    def test_two_signals_are_enough(self):
+        """ปกอ่านไม่ออก (ฟอนต์พัง หน้าสแกน) ต้องยังตัดสินได้จากอีกสองตัว"""
+        got = self.signals("", self.TH_SIG, self.TH_CH)
+        self.assertEqual(got["cover"], "")
+        self.assertEqual(checker_module.book_language(got), "thai")
+
+    def test_one_signal_alone_is_not_enough(self):
+        got = self.signals(self.TH_COVER, "", "")
+        self.assertEqual(checker_module.book_language(got), "")
+
+    def test_a_file_with_no_readable_text_decides_nothing(self):
+        self.assertEqual(checker_module.book_language(self.signals("", "", "")), "")
+
+    def test_signals_that_disagree_decide_nothing(self):
+        """ปกอังกฤษ แต่หน้าลงนามกับหัวบทเป็นไทย — ต้องไม่ฟันธงแล้วหยุดตรวจทั้งเล่ม"""
+        got = self.signals(self.EN_COVER, self.TH_SIG, self.TH_CH)
+        self.assertEqual(got, {"cover": "en", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(checker_module.book_language(got), "")
+
+    def test_the_unanimity_rule_is_what_stops_it(self):
+        """ควบคุมเชิงลบ: ถ้าตัดสินด้วยเสียงข้างมาก เคสข้างบนจะถูกฟันธงว่าเป็นเล่มไทย"""
+        got = self.signals(self.EN_COVER, self.TH_SIG, self.TH_CH)
+        votes = [v for v in got.values() if v]
+        majority = max(set(votes), key=votes.count)
+        self.assertEqual(majority, "thai")
+        self.assertNotEqual(checker_module.book_language(got), majority)
+
+    def test_a_page_carrying_both_languages_decides_nothing(self):
+        got = self.signals(self.TH_COVER + NEWLINE + self.EN_COVER.replace("@", NEWLINE),
+                           "", "")
+        self.assertEqual(got["cover"], "")
+
+
+class ApprovedBookLanguageComesFromTheProgramme(unittest.TestCase):
+    """thai_english กับ international ทำเล่มเป็นภาษาอังกฤษเหมือนกัน"""
+
+    def test_each_programme_maps_to_a_book_language(self):
+        cases = {"thai": "thai", "thai_english": "en", "international": "en"}
+        for programme, want in cases.items():
+            self.assertEqual(
+                checker_module.approved_book_language({"program_language": programme}),
+                want, programme)
+
+    def test_the_two_english_programmes_do_not_clash_with_each_other(self):
+        """เล่ม thai_english จับคู่กับข้อมูล international ต้องไม่ถูกฟ้องว่าผิดภาษา"""
+        self.assertEqual(
+            checker_module.approved_book_language({"program_language": "thai_english"}),
+            checker_module.approved_book_language({"program_language": "international"}))
+
+    def test_no_programme_means_nothing_to_compare(self):
+        for approved in ({}, {"program_language": ""}, None):
+            self.assertEqual(checker_module.approved_book_language(approved), "")
+
+
+class BookLanguageFindingComesFirstInTheReport(unittest.TestCase):
+    """ข้อ "เล่มผิดภาษา" ต้องอยู่บนสุด ก่อนข้อชื่อเรื่อง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ตำแหน่งของข้อนี้คือ "ทั้งเล่ม" ซึ่งเดิมตกกลุ่ม "เนื้อหา (บท)" กลางรายงาน
+    จึงจัดกลุ่มจากรหัสกฎแทนการเดาจากคำ แบบเดียวกับกฎลำดับส่วนประกอบ
+    """
+
+    ISSUE = {"rule_id": "FORM.BOOK_LANGUAGE", "part": "front_matter",
+             "location": "ทั้งเล่ม",
+             "found": "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ "
+                      "เล่มที่ส่งมาจัดทำเป็นภาษาไทย",
+             "expected": 'ภาษาที่ได้รับอนุมัติคือ "ภาษาอังกฤษ" '
+                         'ต้องดำเนินการจัดทำเล่มเป็น "ภาษาอังกฤษ"'}
+    TITLE_ISSUE = {"rule_id": "FORM.APPROVED_MATCH", "part": "front_matter",
+                   "location": "หน้าปก", "found": "ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ",
+                   "expected": "ต้องตรงข้อมูลอนุมัติทุกตัวอักษร"}
+
+    def test_the_group_is_the_first_one_in_the_report(self):
+        self.assertEqual(checker_module.SUMMARY_SECTIONS[0][0], "ภาษาของเล่ม")
+
+    def test_the_finding_lands_in_that_group(self):
+        self.assertEqual(summary_section(self.ISSUE), "ภาษาของเล่ม")
+        self.assertEqual(checker_module.classify(self.ISSUE), "ภาษาของเล่ม")
+
+    def test_it_sorts_ahead_of_the_title_finding(self):
+        both = sorted([self.TITLE_ISSUE, self.ISSUE], key=issue_sort_key)
+        self.assertEqual(both[0]["rule_id"], "FORM.BOOK_LANGUAGE")
+
+    def test_without_the_rule_id_shortcut_it_sinks_into_the_body_group(self):
+        """ควบคุมเชิงลบ: ถ้าเดาจากคำ ตำแหน่ง "ทั้งเล่ม" จะตกกลุ่มเนื้อหา"""
+        loose = dict(self.ISSUE, rule_id="")
+        self.assertEqual(summary_section(loose), "เนื้อหา (บท)")
+        self.assertEqual(checker_module.classify(loose), "ภาษาไม่ครบตามหลักสูตร")
+
+    def test_the_group_and_category_have_english_names(self):
+        import tools.check_i18n as i18n
+        catmap = i18n.load_catmap()
+        self.assertIn(summary_section(self.ISSUE), catmap)
+        self.assertIn(checker_module.classify(self.ISSUE), catmap)
+
+    def test_the_summary_keeps_the_wording_the_staff_asked_for(self):
+        """ห้ามย่อเหลือ 'ต้องแก้เป็น "ภาษาอังกฤษ"' — ต้องเป็นประโยคเต็มตามที่สั่ง"""
+        rep = Report()
+        rep.add("RED", "front_matter", self.ISSUE["location"], self.ISSUE["found"],
+                self.ISSUE["expected"], "", "FORM.BOOK_LANGUAGE")
+        for it in rep.zones["RED"]:
+            it["category"] = checker_module.classify(it)
+            it["section"] = summary_section(it)
+        text = plain_summary({"verdict": "ไม่ผ่าน", "issues_by_zone": rep.zones})
+        self.assertIn(self.ISSUE["expected"], text)
+        self.assertNotIn('ต้องแก้เป็น "ภาษาอังกฤษ"', text)
+
+
+class BookLanguageMismatchStopsTheWholeCheck(unittest.TestCase):
+    """เล่มผิดภาษาทั้งเล่ม = หยุดตรวจส่วนอื่น แล้วแจ้งจุดผิดข้อเดียว
+
+    วัดกับเล่มจริง: เล่มไทยที่จับคู่กับข้อมูลอนุมัติ "เล่มอังกฤษ" เคยได้แดง 24 ข้อ
+    โดยไม่มีข้อไหนบอกสาเหตุจริง และบางข้อยกชื่อเรื่องมาอ้างว่าเป็นชื่อนักศึกษา
+    หลังเพิ่มกฎเหลือแดงข้อเดียว
+    """
+
+    def _gate_source(self):
+        source = inspect.getsource(checker_module.run_check)
+        start = source.index('"FORM.BOOK_LANGUAGE")')
+        return source[start:source.index("wrong_parts = [", start)]
+
+    def test_the_gate_returns_before_any_other_rule_runs(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertLess(source.index("approved_book_language(approved)"),
+                        source.index("ไม่พบกิตติกรรมประกาศ"))
+
+    def test_the_early_return_carries_every_key_the_report_page_needs(self):
+        """report.html วน report.section_order ถ้าคีย์ขาด Jinja พังทั้งหน้า"""
+        block = self._gate_source()
+        for key in ("context", "verdict", "summary", "issues_by_zone", "info",
+                    "human_checklist", "not_checked", "verification", "section_order"):
+            self.assertIn(f'"{key}"', block, key)
+
+    def test_the_report_says_the_rest_was_not_checked(self):
+        self.assertIn("หยุดตรวจ", checker_module.BOOK_LANGUAGE_STOPPED)
+        self.assertIn("BOOK_LANGUAGE_STOPPED", self._gate_source())
+
+    def test_the_gate_is_off_for_the_translation_tool(self):
+        """check_i18n จับคู่ข้อมูลสมมติกับเล่มไหนก็ได้ ถ้าไม่ปิดจะเก็บข้อความไม่ได้"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertRegex(source, r"(?s)approved and same_student and not skip_identity_check")
+
+    def test_parts_are_joined_with_a_word_not_a_symbol(self):
+        self.assertEqual(checker_module._join_and(["หน้าปก"]), "หน้าปก")
+        self.assertEqual(checker_module._join_and(["หน้าปก", "หน้าลงนาม"]),
+                         "หน้าปก และ หน้าลงนาม")
+        for ch in "\u00b7\u2014\u2013\u2192\u2194\u2022\u2264":
+            self.assertNotIn(ch, checker_module._join_and(["หน้าปก", "หน้าลงนาม"]))
+
+
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
     """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
 

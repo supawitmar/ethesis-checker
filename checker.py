@@ -733,10 +733,19 @@ def _toc_continuation_pages(pages, toc_start, hard_stop, limit=12):
     เดิมตัดไว้แค่ 4 หน้าตายตัว เล่มที่ 4 มีสารบัญ 5 หน้า (ซ ฌ ญ ฎ ฏ) หน้าสุดท้าย
     จึงหลุด — ซึ่งเป็นหน้าที่มี บรรณานุกรม / ภาคผนวก / ประวัติผู้วิจัย พอดี
     ระบบเลยฟ้องผิดว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+
+    หน้าที่พิมพ์หัวข้อ "สารบัญ (ต่อ)" / "TABLE OF CONTENTS (Cont.)" ไว้ ให้นับเป็นหน้า
+    สารบัญทันที ไม่ต้องผ่านเกณฑ์จำนวนบรรทัด — หน้าต่อหน้าสุดท้ายมักเหลือแค่ 1-2 รายการ
+    (ภาคผนวกกับประวัติผู้วิจัย) ซึ่งไม่ถึงเกณฑ์ 3 บรรทัด แล้วถูกตัดทิ้งทั้งหน้า
+    วัดกับเล่มจริง: ย้ายท้ายสารบัญ 2 บรรทัดไปหน้าถัดไป ระบบฟ้องผิดว่า
+    "ไม่พบหัวข้อ ประวัติผู้วิจัย ในสารบัญ" ทั้งที่หน้านั้นเขียน TABLE OF CONTENTS (Cont.) ไว้
     """
     out = [toc_start]
     for idx in range(toc_start + 1, min(hard_stop, toc_start + limit, len(pages))):
         lines = [ln.strip() for ln in pages[idx].split('\n') if ln.strip()]
+        if any(is_toc_heading(ln) for ln in lines[:3]):
+            out.append(idx)
+            continue
         # ขึ้นบทแล้ว = พ้นสารบัญแน่นอน (บรรทัดแรกมักเป็นเลขหน้า หัวข้อจึงอยู่บรรทัด 2)
         # ต้องแยกจาก "บรรทัดบทในสารบัญ" ให้ออก — หน้าสารบัญหน้าที่ 2 ขึ้นต้นด้วย
         # "CHAPTER 4 RESULTS 23" ได้ตามปกติ ถ้าเหมารวมจะตัดหน้าสารบัญทิ้ง (เล่มที่ 1)
@@ -1983,6 +1992,106 @@ def cover_page_score(text):
     return want - avoid
 
 
+# ---------- "เล่มนี้ทำเป็นภาษาอะไร" ----------
+# เล่มไทยกับเล่มอังกฤษใช้ template คนละชุด "ข้อความตายตัวของ template" จึงเป็นตัวบอก
+# ภาษาของเล่มที่ตรงที่สุด ไม่ต้องเดาจากสัดส่วนตัวอักษรบนหน้า — เล่มไทยที่มีศัพท์อังกฤษ
+# เยอะจะหลอกวิธีนับสัดส่วนได้ (ปัญหาเดียวกับที่ title_script เจอ)
+#
+# ไม่ใช้ชนิดเลขหน้าส่วนนำ (ก ข ค / i ii iii) เป็นสัญญาณ เพราะ PAGE.NUMBERING ตรวจ
+# เรื่องนั้นอยู่แล้ว ถ้าเอามาปนกันจะกลายเป็นกฎเดียวที่ตัดสินสองเรื่องพร้อมกัน
+BOOK_LANGUAGE_PARTS = {
+    "cover": "หน้าปก",
+    "signature": "หน้าลงนาม",
+    "chapter": "หัวบทในเนื้อหา",
+}
+LANGUAGE_NAME = {"thai": "ภาษาไทย", "en": "ภาษาอังกฤษ"}
+# บอกให้ชัดว่าที่เหลือ "ไม่ได้ตรวจ" ไม่ใช่ "ตรวจแล้วผ่าน" — แต่ไม่นับเป็นจุดผิด
+# เพราะเจ้าหน้าที่สั่งว่ากรณีนี้ต้องมีจุดผิดข้อเดียว
+BOOK_LANGUAGE_STOPPED = ("ส่วนอื่นทั้งหมดของเล่ม "
+                         "(ระบบหยุดตรวจเมื่อภาษาของเล่มไม่ตรงกับที่ได้รับอนุมัติ)")
+
+
+def _join_and(names):
+    """ต่อรายการด้วยคำว่า "และ" ไม่ใช้สัญลักษณ์ ตามกติกาข้อความสรุป"""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return " และ ".join([", ".join(names[:-1]), names[-1]])
+
+
+def _cover_language_markers(doc_type, language):
+    return [norm(text) for _label, text in cover_required_items(doc_type, language) if text]
+
+
+def _one_sided(thai_hits, en_hits, need=1):
+    """ภาษาที่สัญญาณหนึ่งตัวชี้ — ต้องเจอข้างเดียวเท่านั้น เจอทั้งสองข้างถือว่าบอกไม่ได้"""
+    if thai_hits >= need and en_hits == 0:
+        return "thai"
+    if en_hits >= need and thai_hits == 0:
+        return "en"
+    return ""
+
+
+def book_language_signals(pages, cover_idx=0, doc_type=""):
+    """สัญญาณภาษาของเล่มสามตัว แต่ละตัวคืน "thai" / "en" / "" (บอกไม่ได้)
+
+    หน้าปก      ข้อความบังคับตาม template ของแต่ละภาษา (cover_required_items)
+    หน้าลงนาม   ประโยค template ที่ตามหลังชื่อเรื่อง (SIGNATURE_TEMPLATE_TH/_EN)
+    หัวบท       คำนำหน้าหัวบท "บทที่ N" หรือ "CHAPTER N"
+    """
+    pages = list(pages or [])
+    blank = {"cover": "", "signature": "", "chapter": ""}
+    if not pages:
+        return blank
+    cover_idx = min(max(cover_idx, 0), len(pages) - 1)
+
+    cover = norm(pages[cover_idx])
+    cover_lang = _one_sided(
+        sum(1 for m in _cover_language_markers(doc_type, "thai") if m in cover),
+        sum(1 for m in _cover_language_markers(doc_type, "international") if m in cover),
+        need=2,
+    )
+
+    # หน้าลงนามอยู่ถัดจากหน้าปกเสมอตามลำดับที่ประกาศกำหนด
+    after_cover = norm("\n".join(pages[cover_idx + 1:cover_idx + 4]))
+    sig_lang = _one_sided(int(norm(SIGNATURE_TEMPLATE_TH) in after_cover),
+                          int(norm(SIGNATURE_TEMPLATE_EN) in after_cover))
+
+    thai_ch = en_ch = 0
+    for text in pages:
+        for line in top_lines(text, 6):
+            if _chapter_match(line) is None:
+                continue
+            if norm(line).startswith("CHAPTER"):
+                en_ch += 1
+            else:
+                thai_ch += 1
+    return {"cover": cover_lang, "signature": sig_lang,
+            "chapter": _one_sided(thai_ch, en_ch)}
+
+
+def book_language(signals):
+    """ภาษาที่เล่มทำมาจริง — "" เมื่อสัญญาณขัดกันเองหรือไม่พอตัดสิน
+
+    ต้องมีสัญญาณชี้ทางเดียวกันอย่างน้อย 2 ตัว และห้ามมีตัวไหนชี้สวนทาง เพราะผลของ
+    ฟังก์ชันนี้ใช้ "หยุดตรวจทั้งเล่ม" การฟันธงผิดจึงเสียหายกว่าการไม่ฟันธง
+    """
+    votes = [v for v in (signals or {}).values() if v]
+    return votes[0] if len(votes) >= 2 and len(set(votes)) == 1 else ""
+
+
+def approved_book_language(approved):
+    """ภาษาที่เล่มต้องทำ ตามข้อมูลอนุมัติ — "thai" / "en" / "" (ไม่ได้ระบุหลักสูตร)
+
+    thai_english กับ international ทำเล่มเป็นภาษาอังกฤษเหมือนกัน ต่างกันแค่
+    thai_english ต้องมีหน้าบทคัดย่อภาษาไทยเพิ่มมาด้วย
+    """
+    language = soft((approved or {}).get("program_language", "") or "")
+    if language == "thai":
+        return "thai"
+    return "en" if language in ("thai_english", "international") else ""
+
+
 def find_cover_page(pages, limit=10):
     """แผ่นไหนของไฟล์คือหน้าปก (ปกติต้องเป็นแผ่นที่ 1)
 
@@ -2080,6 +2189,9 @@ def closest_text_line(page_text, expected):
 # ---------- ข้อความสรุปสำหรับคัดลอก ----------
 # ส่วนประกอบของเล่มเรียงตามลำดับที่ปรากฏจริง เพื่อให้เจ้าหน้าที่ไล่แก้จากหน้าแรกไปหน้าสุดท้าย
 SUMMARY_SECTIONS = [
+    # ภาษาของเล่มมาก่อนทุกอย่าง — ถ้าเล่มทำผิดภาษา ข้ออื่นไม่มีความหมาย
+    # ไม่มีตำแหน่งไหนเขียนคำนี้ กลุ่มนี้จึงถูกเติมจาก "รหัสกฎ" ใน summary_section
+    ("ภาษาของเล่ม", "ภาษาของเล่ม"),
     ("หน้าปก", "หน้าปก"),
     # หน้าลงนามถูกตั้งชื่อตามบทบาทของหน้า ไม่ได้เขียนคำว่า "หน้าลงนาม" ตรง ๆ เสมอ
     # (หน้าอาจารย์ที่ปรึกษา / หน้ากรรมการสอบ / ช่องประธานหลักสูตร / ช่องคณบดีคณะ)
@@ -2175,6 +2287,10 @@ def summary_section(issue):
     ถ้าตำแหน่งไม่เอ่ยชื่อส่วนไหนเลย (เช่น "โครงบท", "หน้า 40") ใช้ part แล้วค่อยใช้
     ชนิดเลขหน้าเป็นตัวบอก — เลขอารบิกแปลว่าอยู่ในเนื้อหา
     """
+    # ข้อ "เล่มผิดภาษา" พูดถึงทั้งเล่ม ไม่มีชื่อส่วนไหนในตำแหน่งให้จับ ถ้าปล่อยให้เดา
+    # จากคำ ตำแหน่ง "ทั้งเล่ม" จะตกกลุ่ม "เนื้อหา (บท)" ซึ่งอยู่กลางรายงาน
+    if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+        return "ภาษาของเล่ม"
     text = issue.get('location', '') or ''
     best, best_at = None, len(text) + 1
     for name, pattern in SUMMARY_SECTIONS:
@@ -2223,6 +2339,11 @@ def _corrected_value(issue):
     ต้องแก้เหมือนกัน ถือเป็น "จุดเดียว" (การครอสเช็ค 3 ทางอาจรายงานชื่อบทเดียวกัน
     ทั้งตอนเทียบสารบัญและเทียบประกาศ ซึ่งสำหรับนักศึกษาคือการแก้จุดเดียว)
     """
+    # "เล่มผิดภาษา" ไม่มีค่าเดี่ยวให้พิมพ์แก้ในเล่ม สิ่งที่ต้องทำคือจัดทำเล่มใหม่ทั้งเล่ม
+    # ถ้าดึงค่าท้ายประโยคไป สรุปจะเหลือแค่ 'ต้องแก้เป็น "ภาษาอังกฤษ"' ซึ่งกลืนถ้อยคำ
+    # ที่เจ้าหน้าที่กำหนดไว้ทั้งประโยคหายไป — ปล่อยให้ตกไปใช้ประโยค expected เต็ม ๆ
+    if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+        return ""
     raw = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
     raw = _SUMMARY_LEAD.sub("", raw)
     match = re.search(r'"([^"]+)"\s*$', raw)
@@ -2956,6 +3077,28 @@ def is_continuation_heading(line):
     return bool(found and norm(found.group(1)) in _CONTINUATION_WORDS)
 
 
+def without_continuation(line):
+    """ตัดคำว่า "(ต่อ)" / "(Cont.)" / "(CONT)" ท้ายหัวข้อออก
+
+    เจ้าหน้าที่กำหนด (ก.ย. 2569): "สารบัญ" กับ "สารบัญ (ต่อ)" และ
+    "TABLE OF CONTENTS" กับ "TABLE OF CONTENTS (Cont.)" คือหัวข้อเดียวกัน
+    """
+    head = _strip_toc_page_number(line or "")
+    found = _TRAILING_PAREN.search(head)
+    if found and norm(found.group(1)) in _CONTINUATION_WORDS:
+        return head[:found.start()].strip()
+    return head
+
+
+def is_toc_heading(line):
+    """บรรทัดนี้เป็นหัวข้อหน้าสารบัญไหม (นับหน้าต่อด้วย)
+
+    ต้องนับหน้าต่อเป็นหน้าสารบัญ ไม่งั้นรายการที่ตกไปอยู่หน้าถัดไป (มักเป็น
+    ภาคผนวกกับประวัติผู้วิจัย) จะถูกฟ้องว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+    """
+    return norm(without_continuation(line)) in N_TOC
+
+
 def _toc_section_kind(text):
     """Classify one non-chapter TOC entry using its visible heading."""
     normalized = norm(_strip_toc_page_number(text))
@@ -3213,6 +3356,9 @@ def classify(issue):
     # ไปไล่เทียบตัวอักษรกับ บฑ.1 ทั้งที่วิธีแก้คือลบข้อความออก
     if issue.get("rule_id") == "FRONT.TITLE_ONE_LANGUAGE":
         return "ภาษาของชื่อเรื่อง"
+    # "เล่มทำผิดภาษา" ไม่ใช่ "ภาษาไม่ครบตามหลักสูตร" (ซึ่งแปลว่าเล่มขาดบทคัดย่ออีกภาษา)
+    if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+        return "ภาษาของเล่ม"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -3345,7 +3491,8 @@ def front_section_kind(page_text):
             return "ack", soft(tls[j])
         # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ แม้บนหน้าที่เป็นรายการสารบัญเอง
         # เพราะสารบัญไม่เคยมีบรรทัดที่ชื่อว่า "สารบัญ" อยู่ในรายการของตัวเอง
-        if nl in N_TOC or bare[j] in N_TOC:
+        # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ และยอมให้มีคำว่า "(ต่อ)" ต่อท้ายด้วย
+        if nl in N_TOC or bare[j] in N_TOC or is_toc_heading(tls[j]):
             return "toc", soft(tls[j])
         if nl in N_LISTS or al in N_LISTS:
             return "list", soft(tls[j])
@@ -3420,7 +3567,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ack_pages.append(i)
         elif kind == "toc":
             toc_pages.append(i)
-            if norm(_strip_toc_page_number(heading)) in N_TOC_WRONG:
+            # ถ้อยคำผิดคือปัญหาเดียว ไม่ใช่ปัญหาละหน้า — หน้าต่อของสารบัญที่เขียน
+            # "CONTENTS (ต่อ)" ต้องไม่ถูกฟ้องซ้ำอีกข้อ จึงฟ้องเฉพาะหน้าแรกของสารบัญ
+            if norm(without_continuation(heading)) in N_TOC_WRONG and not toc_pages[:-1]:
                 toc_heading_wrong.append((i, heading))
         elif kind == "list":
             list_pages.append(i)
@@ -3434,6 +3583,63 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     same_student, sig_checked, _sig_found = (
         ethesis_matches_book(approved, pages)
         if approved and not skip_identity_check else (True, [], []))
+    # ---------- ภาษาของเล่มต้องตรงกับที่ได้รับอนุมัติ ----------
+    # ต้องมาก่อน rep.add ตัวแรก เพราะเมื่อเล่มทำผิดภาษา กฎอื่นแทบทุกข้อจะฟ้องพร้อมกัน
+    # หมด (ข้อความบังคับบนปก ประโยค template หน้าลงนาม ชนิดเลขหน้า ชื่อบททุกบท)
+    # วัดกับเล่มจริง: เล่มไทยที่จับคู่กับข้อมูล "เล่มอังกฤษ" ได้แดง 24 ข้อ โดยไม่มีข้อไหน
+    # บอกสาเหตุจริงเลย และบางข้ออ่านแล้วสับสน เช่นยกชื่อเรื่องมาอ้างว่าเป็นชื่อนักศึกษา
+    cover_idx = find_cover_page(pages)
+    cover_text = pages[cover_idx] if pages else ""
+    want_language = (approved_book_language(approved)
+                     if approved and same_student and not skip_identity_check else "")
+    if want_language:
+        language_signals = book_language_signals(pages, cover_idx, doc_type)
+        found_language = book_language(language_signals)
+        want_name = LANGUAGE_NAME[want_language]
+        other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
+        must_be = (f'ภาษาที่ได้รับอนุมัติคือ "{want_name}" '
+                   f'ต้องดำเนินการจัดทำเล่มเป็น "{want_name}"')
+        if found_language and found_language != want_language:
+            # ทั้งเล่มผิดภาษา — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้หยุดตรวจส่วนอื่นทั้งหมด
+            # แล้วแจ้งจุดผิดข้อเดียว
+            rep.add("RED", "front_matter", "ทั้งเล่ม",
+                    "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ "
+                    f"เล่มที่ส่งมาจัดทำเป็น{LANGUAGE_NAME[found_language]}",
+                    must_be,
+                    "ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ "
+                    "ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่",
+                    "FORM.BOOK_LANGUAGE")
+            for _z in rep.zones:
+                for _it in rep.zones[_z]:
+                    _it["category"] = classify(_it)
+                    _it["section"] = summary_section(_it)
+            return {
+                "context": {"document_type": doc_type, "option": None,
+                            "chapters_mode": chapters_mode, "n_pages": n,
+                            "approved_data": bool(approved)},
+                "verdict": rep.verdict(),
+                "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
+                "issues_by_zone": rep.zones,
+                "info": rep.info,
+                "human_checklist": rep.human_checklist,
+                "not_checked": (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED),
+                "verification": rep.verification,
+                "section_order": SUMMARY_SECTION_ORDER,
+            }
+        wrong_parts = [BOOK_LANGUAGE_PARTS[key]
+                       for key in ("cover", "signature", "chapter")
+                       if language_signals[key] and language_signals[key] != want_language]
+        if wrong_parts:
+            # สัญญาณขัดกันเอง (เช่น ปกอังกฤษ แต่หัวบทเป็น "บทที่ 1") ตัดสินภาษาทั้งเล่ม
+            # ไม่ได้ จึงไม่หยุดตรวจ แต่บางส่วนคนละภาษากับที่อนุมัติแน่นอน ต้องฟ้อง
+            rep.add("RED", "front_matter", "ทั้งเล่ม",
+                    "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ "
+                    f"ส่วนที่จัดทำเป็น{other_name}คือ {_join_and(wrong_parts)}",
+                    must_be,
+                    "ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ "
+                    "ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่",
+                    "FORM.BOOK_LANGUAGE")
+
     if not ack_pages:
         rep.add("RED", "front_matter", "ส่วนนำ", "ไม่พบกิตติกรรมประกาศ",
                 "ส่วนนำต้องมีกิตติกรรมประกาศ", "เพิ่มกิตติกรรมประกาศก่อนบทคัดย่อ",
@@ -3470,8 +3676,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         return f"แผ่นที่ {page_index + 1} ของไฟล์"
 
     # ---------- หน้าปกต้องเป็นแผ่นแรก ----------
-    cover_idx = find_cover_page(pages)
-    cover_text = pages[cover_idx] if pages else ""
+    # (cover_idx / cover_text หาไว้ตั้งแต่ก่อนด่านภาษาของเล่มแล้ว)
     if cover_idx > 0:
         rep.add("RED", "front_matter", "หน้าปก",
                 f"หน้าปกอยู่{order_ref(cover_idx)} ไม่ใช่แผ่นแรก",
