@@ -2195,6 +2195,91 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
                                                 self.NAMES), "")
 
 
+class ContentsPagesAndTheirContinuationAreOneHeading(unittest.TestCase):
+    """สารบัญ กับ สารบัญ (ต่อ) คือหัวข้อเดียวกัน (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    หน้าต่อของสารบัญหน้าสุดท้ายมักเหลือแค่ 1-2 รายการ คือภาคผนวกกับประวัติผู้วิจัย
+    ซึ่งไม่ถึงเกณฑ์ "3 บรรทัดที่ลงท้ายด้วยเลขหน้า" ที่ใช้หาหน้าต่อ แล้วถูกตัดทิ้งทั้งหน้า
+    ระบบจึงฟ้องผิดว่า "ไม่พบหัวข้อ ประวัติผู้วิจัย ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+
+    วัดกับเล่มจริง: ย้ายท้ายสารบัญ 2 บรรทัดไปหน้าถัดไปแล้วใส่หัวข้อ
+    "TABLE OF CONTENTS (Cont.)" ระบบฟ้องผิด 1 ข้อ หลังแก้ไม่ฟ้องแล้ว
+    """
+
+    HEADS = ("สารบัญ", "สารบัญ (ต่อ)", "TABLE OF CONTENTS",
+             "TABLE OF CONTENTS (Cont.)", "TABLE OF CONTENTS (CONT)",
+             "TABLE OF CONTENTS (cont.)", "TABLE OF CONTENTS (Continued)")
+
+    def test_every_spelling_counts_as_the_contents_heading(self):
+        for head in self.HEADS:
+            self.assertTrue(checker_module.is_toc_heading(head), head)
+
+    def test_the_page_is_classified_as_contents(self):
+        for head in self.HEADS:
+            page = NEWLINE.join(["viii", head, "APPENDIX D 95", "BIOGRAPHY 97"])
+            self.assertEqual(checker_module.front_section_kind(page)[0], "toc", head)
+
+    def test_a_short_continuation_page_is_still_part_of_the_contents(self):
+        """เกณฑ์จำนวนบรรทัดต้องไม่ตัดหน้าที่พิมพ์ "(ต่อ)" ไว้ชัด ๆ ทิ้ง"""
+        pages = [
+            NEWLINE.join(["vi", "TABLE OF CONTENTS", "ACKNOWLEDGEMENTS iii",
+                          "ABSTRACT iv", "CHAPTER 1 INTRODUCTION 1", "REFERENCES 52"]),
+            NEWLINE.join(["vii", "TABLE OF CONTENTS (Cont.)", "BIOGRAPHY 97"]),
+        ]
+        self.assertEqual(checker_module._toc_continuation_pages(pages, 0, len(pages)),
+                         [0, 1])
+
+    def test_the_continuation_heading_is_what_keeps_it(self):
+        """ควบคุมเชิงลบ: ไม่มีหัวข้อ (ต่อ) หน้าที่มีรายการเดียวจะถูกตัดทิ้งตามเกณฑ์เดิม"""
+        pages = [
+            NEWLINE.join(["vi", "TABLE OF CONTENTS", "ACKNOWLEDGEMENTS iii",
+                          "ABSTRACT iv", "CHAPTER 1 INTRODUCTION 1", "REFERENCES 52"]),
+            NEWLINE.join(["vii", "BIOGRAPHY 97"]),
+        ]
+        self.assertEqual(checker_module._toc_continuation_pages(pages, 0, len(pages)), [0])
+
+    def test_other_words_in_brackets_are_not_a_continuation(self):
+        """ต้องแคบ ห้ามเหมาว่าวงเล็บอะไรก็ได้คือหน้าต่อ"""
+        for head in ("TABLE OF CONTENTS (Chapter 3)", "LIST OF TABLES",
+                     "LIST OF TABLES (Cont.)"):
+            self.assertFalse(checker_module.is_toc_heading(head), head)
+
+    def test_the_wrong_wording_is_reported_once_not_once_per_page(self):
+        """เล่มที่เขียน CONTENTS ทั้งสองหน้า ต้องได้ข้อฟ้องถ้อยคำข้อเดียว"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("not toc_pages[:-1]", source)
+
+    def test_stripping_the_marker_leaves_the_plain_heading(self):
+        self.assertEqual(checker_module.without_continuation("TABLE OF CONTENTS (Cont.) vii"),
+                         "TABLE OF CONTENTS")
+        self.assertEqual(checker_module.without_continuation("สารบัญ (ต่อ)"), "สารบัญ")
+        self.assertEqual(checker_module.without_continuation("APPENDIX A (Data)"),
+                         "APPENDIX A (Data)")
+
+
+class AppendixSingularAndPluralAreOneHeading(unittest.TestCase):
+    """APPENDIX กับ APPENDICES คือหัวข้อเดียวกัน (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    ระบบรู้จักทั้งสองแบบอยู่แล้ว เทสต์ชุดนี้ล็อกไว้ไม่ให้หลุดตอนแก้กฎอื่น เพราะถ้าหลุด
+    เล่มที่เขียน APPENDICES จะถูกฟ้องว่า "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ" ทั้งที่มีอยู่
+    """
+
+    def test_both_spellings_are_the_appendix_entry_in_the_contents(self):
+        for line in ("APPENDIX", "APPENDICES", "APPENDIX 130", "APPENDICES 130",
+                     "APPENDIX A SUPPLEMENTARY 60", "ภาคผนวก", "ภาคผนวก ก 90"):
+            self.assertEqual(checker_module._toc_section_kind(line), "appendix", line)
+
+    def test_both_spellings_are_known_appendix_words(self):
+        for word in ("APPENDIX", "APPENDICES"):
+            self.assertTrue(any(checker_module.norm(word).startswith(term)
+                                for term in N_APPENDIX), word)
+
+    def test_the_contents_and_the_page_may_use_different_spellings(self):
+        """สารบัญเขียน APPENDICES แต่หน้าจริงเขียน APPENDIX ต้องยังจับคู่กันได้"""
+        self.assertEqual(checker_module._toc_section_kind("APPENDICES 130"),
+                         checker_module._toc_section_kind("APPENDIX 130"))
+
+
 class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     """ภาษาของเล่มตัดสินจาก "ข้อความตายตัวของ template" ไม่ใช่สัดส่วนตัวอักษรบนหน้า
 

@@ -733,10 +733,19 @@ def _toc_continuation_pages(pages, toc_start, hard_stop, limit=12):
     เดิมตัดไว้แค่ 4 หน้าตายตัว เล่มที่ 4 มีสารบัญ 5 หน้า (ซ ฌ ญ ฎ ฏ) หน้าสุดท้าย
     จึงหลุด — ซึ่งเป็นหน้าที่มี บรรณานุกรม / ภาคผนวก / ประวัติผู้วิจัย พอดี
     ระบบเลยฟ้องผิดว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+
+    หน้าที่พิมพ์หัวข้อ "สารบัญ (ต่อ)" / "TABLE OF CONTENTS (Cont.)" ไว้ ให้นับเป็นหน้า
+    สารบัญทันที ไม่ต้องผ่านเกณฑ์จำนวนบรรทัด — หน้าต่อหน้าสุดท้ายมักเหลือแค่ 1-2 รายการ
+    (ภาคผนวกกับประวัติผู้วิจัย) ซึ่งไม่ถึงเกณฑ์ 3 บรรทัด แล้วถูกตัดทิ้งทั้งหน้า
+    วัดกับเล่มจริง: ย้ายท้ายสารบัญ 2 บรรทัดไปหน้าถัดไป ระบบฟ้องผิดว่า
+    "ไม่พบหัวข้อ ประวัติผู้วิจัย ในสารบัญ" ทั้งที่หน้านั้นเขียน TABLE OF CONTENTS (Cont.) ไว้
     """
     out = [toc_start]
     for idx in range(toc_start + 1, min(hard_stop, toc_start + limit, len(pages))):
         lines = [ln.strip() for ln in pages[idx].split('\n') if ln.strip()]
+        if any(is_toc_heading(ln) for ln in lines[:3]):
+            out.append(idx)
+            continue
         # ขึ้นบทแล้ว = พ้นสารบัญแน่นอน (บรรทัดแรกมักเป็นเลขหน้า หัวข้อจึงอยู่บรรทัด 2)
         # ต้องแยกจาก "บรรทัดบทในสารบัญ" ให้ออก — หน้าสารบัญหน้าที่ 2 ขึ้นต้นด้วย
         # "CHAPTER 4 RESULTS 23" ได้ตามปกติ ถ้าเหมารวมจะตัดหน้าสารบัญทิ้ง (เล่มที่ 1)
@@ -3068,6 +3077,28 @@ def is_continuation_heading(line):
     return bool(found and norm(found.group(1)) in _CONTINUATION_WORDS)
 
 
+def without_continuation(line):
+    """ตัดคำว่า "(ต่อ)" / "(Cont.)" / "(CONT)" ท้ายหัวข้อออก
+
+    เจ้าหน้าที่กำหนด (ก.ย. 2569): "สารบัญ" กับ "สารบัญ (ต่อ)" และ
+    "TABLE OF CONTENTS" กับ "TABLE OF CONTENTS (Cont.)" คือหัวข้อเดียวกัน
+    """
+    head = _strip_toc_page_number(line or "")
+    found = _TRAILING_PAREN.search(head)
+    if found and norm(found.group(1)) in _CONTINUATION_WORDS:
+        return head[:found.start()].strip()
+    return head
+
+
+def is_toc_heading(line):
+    """บรรทัดนี้เป็นหัวข้อหน้าสารบัญไหม (นับหน้าต่อด้วย)
+
+    ต้องนับหน้าต่อเป็นหน้าสารบัญ ไม่งั้นรายการที่ตกไปอยู่หน้าถัดไป (มักเป็น
+    ภาคผนวกกับประวัติผู้วิจัย) จะถูกฟ้องว่า "ไม่พบหัวข้อ ... ในสารบัญ" ทั้งที่พิมพ์ไว้ครบ
+    """
+    return norm(without_continuation(line)) in N_TOC
+
+
 def _toc_section_kind(text):
     """Classify one non-chapter TOC entry using its visible heading."""
     normalized = norm(_strip_toc_page_number(text))
@@ -3460,7 +3491,8 @@ def front_section_kind(page_text):
             return "ack", soft(tls[j])
         # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ แม้บนหน้าที่เป็นรายการสารบัญเอง
         # เพราะสารบัญไม่เคยมีบรรทัดที่ชื่อว่า "สารบัญ" อยู่ในรายการของตัวเอง
-        if nl in N_TOC or bare[j] in N_TOC:
+        # หัวข้อสารบัญยอมให้ตัดเลขหน้าได้เสมอ และยอมให้มีคำว่า "(ต่อ)" ต่อท้ายด้วย
+        if nl in N_TOC or bare[j] in N_TOC or is_toc_heading(tls[j]):
             return "toc", soft(tls[j])
         if nl in N_LISTS or al in N_LISTS:
             return "list", soft(tls[j])
@@ -3535,7 +3567,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ack_pages.append(i)
         elif kind == "toc":
             toc_pages.append(i)
-            if norm(_strip_toc_page_number(heading)) in N_TOC_WRONG:
+            # ถ้อยคำผิดคือปัญหาเดียว ไม่ใช่ปัญหาละหน้า — หน้าต่อของสารบัญที่เขียน
+            # "CONTENTS (ต่อ)" ต้องไม่ถูกฟ้องซ้ำอีกข้อ จึงฟ้องเฉพาะหน้าแรกของสารบัญ
+            if norm(without_continuation(heading)) in N_TOC_WRONG and not toc_pages[:-1]:
                 toc_heading_wrong.append((i, heading))
         elif kind == "list":
             list_pages.append(i)
