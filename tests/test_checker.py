@@ -2342,6 +2342,20 @@ class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
             self.assertIn("plain_summary", report, name)
             self.assertIn("ผลการตรวจ:", report["plain_summary"], name)
 
+    def test_the_copy_box_already_holds_the_text_before_any_script_runs(self):
+        """กล่องคัดลอกต้องไม่ว่างรอ JS เติม
+
+        ถ้าสคริปต์ในหน้าพัง (เคยเจอตอน TR มีช่องว่างในอาร์เรย์ แล้วการแปลตายทั้งก้อน)
+        เจ้าหน้าที่จะได้กล่องคัดลอกว่างเปล่าโดยไม่มีอะไรบอกว่าพัง และหน้าที่บันทึก
+        หรือพิมพ์ออกมาก็ไม่มีข้อความสรุปติดไปด้วย
+        """
+        html = self._render(self._report(self.CONTEXTS["ภาษาของเล่มไม่ตรง"]))
+        found = re.search(r'<textarea class="copy-text"[^>]*>([\s\S]*?)</textarea>', html)
+        self.assertIsNotNone(found, "หา textarea ของกล่องคัดลอกไม่เจอ")
+        inside = found.group(1)
+        self.assertIn("ผลการตรวจ:", inside)
+        self.assertIn("ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ", inside)
+
     def test_dropping_a_key_really_breaks_the_page(self):
         """ควบคุมเชิงลบ: พิสูจน์ว่าเทสต์นี้จับของจริง ไม่ได้ผ่านลอย ๆ"""
         report = self._report(self.CONTEXTS["ภาษาของเล่มไม่ตรง"])

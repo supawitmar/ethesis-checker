@@ -258,7 +258,11 @@
                 data-th="✨ ให้ AI เรียบเรียงใหม่" data-en="✨ Re-run AI">✨ ให้ AI เรียบเรียงใหม่</button>
       </div>
       {% endif %}
-      <textarea class="copy-text" readonly></textarea>
+      {# ใส่ข้อความไว้ตั้งแต่ฝั่งเซิร์ฟเวอร์ ไม่ปล่อยให้กล่องว่างรอ JS เติม —
+         ถ้าสคริปต์พังเมื่อไหร่ (เคยเจอมาแล้วตอน TR มีช่องว่างในอาร์เรย์)
+         เจ้าหน้าที่จะได้กล่องคัดลอกว่างเปล่าโดยไม่มีอะไรบอกว่าพัง
+         JS เขียนทับตอนโหลดอยู่แล้ว (renderSummary) การสลับ EN/AI จึงทำงานเหมือนเดิม #}
+      <textarea class="copy-text" readonly>{{ report.plain_summary }}</textarea>
       {% if report.student_summary %}
       <div class="ai-summary-caveat" id="ai-caveat"
            data-th="ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
