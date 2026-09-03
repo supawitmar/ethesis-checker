@@ -171,6 +171,7 @@
                padding:12px 16px; font:0.82rem/1.5 ui-monospace,Consolas,monospace; resize:vertical;
                min-height:120px; background:#fbfdff; color:#22303f; white-space:pre; }
   .copy-text.plain { font:0.88rem/1.7 'Segoe UI','Sarabun',Tahoma,sans-serif; white-space:pre-wrap; }
+  .copy-print { display:none; }
   .copy-error { margin:8px 14px 12px; padding:8px 12px; border-radius:8px;
                 background:var(--red-bg); border:1px solid #f0ccc7; color:#8a2f24;
                 font-size:.85rem; line-height:1.6; }
@@ -193,6 +194,10 @@
     .actions, .cmt-btn, .note-editor, .langbtn, .logout-form { display:none !important; }
     .vf-arrow { display:none; }
     .vf-topic { cursor:default; }
+    .copy-text { display:none; }
+    .copy-print { display:block; padding:12px 16px; border-top:1px solid #dbe4ee;
+                  font:0.82rem/1.6 'Segoe UI','Sarabun',Tahoma,sans-serif;
+                  white-space:pre-wrap; color:#22303f; }
   }
   @media (max-width:640px) {
     .head, .verdict-bar, .body { padding-left:18px; padding-right:18px; }
@@ -281,6 +286,10 @@
          ตรงนี้ถูกกลืนเงียบ ๆ (เซสชันหมดอายุ เน็ตหลุด เซิร์ฟเวอร์เก่ายังไม่รีสตาร์ท)
          เจ้าหน้าที่จะเห็นแค่ "กดแล้วไม่มีอะไรเกิดขึ้น" ซึ่งแยกไม่ออกจากระบบพัง #}
       <div class="copy-error" id="copy-error" hidden></div>
+      {# textarea พิมพ์ออกกระดาษได้เฉพาะส่วนที่มองเห็นในกล่อง ที่เหลือหายไปเงียบ ๆ
+         ข้อความสรุปยาวขึ้นมากตั้งแต่มีข้อความปิดท้าย เจ้าหน้าที่ที่บันทึกรายงานเป็น PDF
+         จะได้ข้อความไม่ครบ จึงมีสำเนาสำหรับพิมพ์ที่เติมจากฝั่งเซิร์ฟเวอร์ไว้ตั้งแต่แรก #}
+      <div class="copy-print" aria-hidden="true">{{ report.plain_summary }}</div>
       {% if report.student_summary %}
       <div class="ai-summary-caveat" id="ai-caveat"
            data-th="ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
@@ -1442,6 +1451,9 @@ function renderSummary(){
   // "ผลการตรวจ: ...") ถ้าได้ค่าว่างแปลว่าอ่านข้อมูลไม่ได้ ให้คงของเดิมไว้
   const text = currentSummaryText();
   if (text) ta.value = text;
+  // สำเนาสำหรับพิมพ์ต้องเปลี่ยนตามทุกครั้ง ไม่งั้นกระดาษจะได้ข้อความก่อนกดปุ่ม
+  const printable = document.querySelector('.copy-print');
+  if (printable && text) printable.textContent = text;
   ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
   const caveat = document.getElementById('ai-caveat');
   const showAi = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE);

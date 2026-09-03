@@ -63,6 +63,9 @@ _SUMMARY_SYSTEM = """คุณคือเจ้าหน้าที่บั�
   (เคยเจอ "·" กลายเป็นรูปโทรศัพท์)
 - **ห้ามสลับทิศทางของการแก้** — ต้นฉบับบอกว่า "เล่มเป็น ก แต่ต้องเป็น ข" ผลลัพธ์ต้อง
   สั่งให้แก้เล่มเป็น ข ห้ามเขียนกลับเป็นให้แก้เป็น ก
+- **เครื่องหมาย [[KEEP-n]] ต้องคัดลอกมาตรงตัว** ห้ามแปล ห้ามขยายความ ห้ามตัดทิ้ง
+  และต้องอยู่ตำแหน่งเดิม (ข้อเดิม บรรทัดเดิม) เครื่องหมายนี้แทนถ้อยคำที่เจ้าหน้าที่
+  บัณฑิตวิทยาลัยเขียนไว้เองทั้งย่อหน้า ระบบจะใส่ข้อความจริงกลับเข้าไปแทนที่ให้เอง
 
 ตอบกลับเป็นข้อความล้วนที่พร้อมคัดลอกส่งต่อได้ทันที"""
 
@@ -88,6 +91,63 @@ def _first_text(response):
     return next((b.text for b in response.content if b.type == "text"), "")
 
 
+# ---------- ถ้อยคำที่เจ้าหน้าที่กำหนดมาเอง AI ห้ามแตะ ----------
+# บางจุดในข้อความสรุปเป็นย่อหน้าที่เจ้าหน้าที่บัณฑิตวิทยาลัยเขียนมาเองทุกคำ
+# (โครงสร้างหน้าลงนาม ข้อความปิดท้ายเรื่องค่าปรับซึ่งมี LINE ID กับอีเมลอยู่ข้างใน)
+# ระบบสั่งให้ AI "เขียนสั้น กระชับ" และ "บอกครบสามอย่าง" ซึ่งจะย่อถ้อยคำพวกนี้ทิ้ง
+# การสั่งใน prompt อย่างเดียวไม่พอ จึงถอดออกไปก่อนส่ง แล้วใส่กลับหลังเรียบเรียงเสร็จ
+_KEEP_TOKEN = "[[KEEP-%d]]"
+# เลขข้อกับย่อหน้าหน้าบรรทัด ถอดออกก่อนเทียบแล้วใส่กลับ — เกณฑ์เดียวกับ trSummary
+# ใน report.html ซึ่งแปลข้อความสรุปทีละบรรทัดเหมือนกัน
+_KEEP_LEAD = re.compile(r"^(\s*(?:\d+\.\s*)?)([\s\S]*)$")
+
+
+def _dictated_lines():
+    """บรรทัดของถ้อยคำที่เจ้าหน้าที่กำหนด — อ่านจากทะเบียนเดียวกับที่สร้างข้อความสรุป"""
+    try:
+        import checker
+    except Exception:
+        return set()
+    out = set()
+    for check in getattr(checker, "STAFF_CHECKS", ()):
+        for choice in check.get("choices", ()):
+            for field in ("text", "text_en"):
+                for line in (choice.get(field) or "").split("\n"):
+                    if line.strip():
+                        out.add(line.strip())
+    return out
+
+
+def _protect(source):
+    """แทนบรรทัดที่เจ้าหน้าที่กำหนดด้วยเครื่องหมาย คืน (ข้อความที่ป้องกันแล้ว, ของเดิม)"""
+    dictated = _dictated_lines()
+    if not dictated:
+        return source, []
+    kept, out = [], []
+    for line in source.split("\n"):
+        lead, body = _KEEP_LEAD.match(line).groups()
+        if body.strip() and body.strip() in dictated:
+            out.append(lead + (_KEEP_TOKEN % len(kept)))
+            kept.append(body)
+        else:
+            out.append(line)
+    return "\n".join(out), kept
+
+
+def _restore(text, kept):
+    """ใส่ถ้อยคำจริงกลับ — เครื่องหมายหายแม้ตัวเดียวคือเชื่อผลของ AI ไม่ได้ทั้งก้อน
+
+    คืนค่าว่างเพื่อให้ผู้เรียกตกกลับไปใช้ "ข้อความตรงตัวจากระบบ" ซึ่งถูกเสมอ
+    ดีกว่าส่งข้อความที่ถ้อยคำของเจ้าหน้าที่หายไปให้นักศึกษา
+    """
+    for index, block in enumerate(kept):
+        token = _KEEP_TOKEN % index
+        if token not in text:
+            return ""
+        text = text.replace(token, block)
+    return text
+
+
 def student_summary(report):
     """เรียบเรียงข้อความสรุปของระบบให้อ่านง่าย คืนค่าเป็นข้อความล้วน
 
@@ -96,6 +156,7 @@ def student_summary(report):
     source = (report.get("plain_summary") or "").strip()
     if not source:
         return ""
+    source, kept = _protect(source)
     response = _client().messages.create(
         model=MODEL,
         max_tokens=16000,
@@ -108,4 +169,4 @@ def student_summary(report):
                        "โดยคงข้อเท็จจริง จำนวนข้อ และลำดับเดิมไว้ทั้งหมด:\n\n" + source,
         }],
     )
-    return _first_text(response).strip()
+    return _restore(_first_text(response).strip(), kept)

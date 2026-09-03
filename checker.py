@@ -2525,7 +2525,12 @@ def staff_choices(keys, placement):
             continue
         for choice in check["choices"]:
             if choice["text"] and choice["id"] in picked:
+                # หนึ่งหัวข้อตอบได้คำตอบเดียว หน้าเว็บคุมให้อยู่แล้ว แต่ค่าที่ส่งมาเชื่อไม่ได้
+                # (หน้าเก่าค้างไว้ กดรัวจนคำขอสวนกัน หรือคำขอถูกส่งซ้ำ) ถ้าไม่คุมตรงนี้
+                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นศ. ไม่มีค่าปรับ" แล้วตามด้วย
+                # "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
                 out.append((check, choice))
+                break
     return out
 
 

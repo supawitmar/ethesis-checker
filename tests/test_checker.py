@@ -2384,30 +2384,51 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertIn("นศ. มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
         self.assertNotIn("ไม่มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
 
-    def test_two_wordings_on_the_same_page_do_not_collapse_into_one(self):
+    def test_two_topics_on_the_same_page_do_not_collapse_into_one(self):
         """ควบคุมเชิงลบของกฎรวมรายการซ้ำ — จุดพวกนี้ไม่มี "ค่าที่ต้องแก้" ให้เทียบ
 
-        เจ้าหน้าที่จะทยอยเพิ่มหัวข้อแบบนี้อีก พอมีสองจุดที่อยู่ส่วนเดียวกันของเล่ม
+        เจ้าหน้าที่จะทยอยเพิ่มหัวข้อแบบนี้อีก พอมีสองหัวข้อที่อยู่ส่วนเดียวกันของเล่ม
         ทั้งคู่จะได้กุญแจ ("หน้าลงนาม", "") เท่ากัน แล้วถูกยุบเหลือจุดเดียว ถ้ากุญแจ
-        ไม่นับถ้อยคำเข้าไปด้วย
+        ไม่นับถ้อยคำเข้าไปด้วย (คนละเรื่องกับ "หนึ่งหัวข้อตอบได้คำตอบเดียว" ข้างล่าง
+        ซึ่งคุมตัวเลือกภายในหัวข้อเดียวกัน)
         """
-        check = dict(checker_module.STAFF_CHECK_BY_ID["SIGNATURE_LAYOUT"])
-        extra = dict(check["choices"][1])
-        extra["id"] = "SIGNATURE_FONT_WRONG"
-        extra["text"] = "ในหน้าลงนาม ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ"
-        extra["text_en"] = "On the signature page, use the font set in the manual."
-        check["choices"] = list(check["choices"]) + [extra]
-        registry = [check] + [c for c in checker_module.STAFF_CHECKS
-                              if c["id"] != "SIGNATURE_LAYOUT"]
+        extra = {
+            "id": "SIGNATURE_FONT",
+            "item": "ฟอนต์หน้าลงนาม",
+            "item_en": "Signature page font",
+            "why": "-", "why_en": "-",
+            "rule_id": "FRONT.SIGNATURE_LAYOUT",
+            "placement": "section",
+            "section": "หน้าลงนาม",
+            "choices": [{
+                "id": "SIGNATURE_FONT_WRONG", "label": "ฟอนต์ผิด",
+                "label_en": "Wrong font", "tone": "fail",
+                "text": "ในหน้าลงนาม ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ",
+                "text_en": "On the signature page, use the font set in the manual.",
+            }],
+        }
+        registry = list(checker_module.STAFF_CHECKS) + [extra]
         lookup = {ch["id"]: (c, ch) for c in registry for ch in c["choices"]
                   if ch["text"]}
-        with mock.patch.object(checker_module, "STAFF_CHECKS", registry), \
-                mock.patch.object(checker_module, "STAFF_CHOICE_BY_ID", lookup):
+        with mock.patch.object(checker_module, "STAFF_CHECKS", registry),                 mock.patch.object(checker_module, "STAFF_CHOICE_BY_ID", lookup):
             text = checker_module.plain_summary(
                 self._clean_report(), staff=[self.WRONG, "SIGNATURE_FONT_WRONG"])
         self.assertIn("ทั้งหมด 2 จุด", text)
         self.assertIn("ปรับโครงสร้างของหน้า", text)
         self.assertIn("ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ", text)
+
+    def test_only_one_answer_per_topic_survives(self):
+        """ค่าที่ส่งมาจากหน้าเว็บเชื่อไม่ได้ ต้องกันข้อความที่ขัดกันเองไว้ที่ฝั่งเซิร์ฟเวอร์
+
+        หน้าเว็บกดได้ทีละอันอยู่แล้ว แต่หน้าเก่าที่ค้างไว้ คำขอที่สวนกัน หรือคำขอที่ถูก
+        ส่งซ้ำ ทำให้ส่งมาสองคำตอบพร้อมกันได้ ถ้าไม่คุม นักศึกษาจะได้ข้อความว่า
+        "นศ. ไม่มีค่าปรับ" แล้วตามด้วย "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+        """
+        text = checker_module.plain_summary(self._clean_report(),
+                                            staff=[self.FEE_NONE, self.FEE_YES])
+        heads = [line for line in text.split(NEWLINE)
+                 if "ค่าปรับในการส่งเล่มล่าช้า" in line]
+        self.assertEqual(len(heads), 1, heads)
 
     def test_an_unknown_button_id_is_ignored(self):
         """ค่าที่ส่งมาจากหน้าเว็บเชื่อไม่ได้ — id ที่ไม่มีในทะเบียนต้องไม่ทำให้พัง"""
@@ -2535,6 +2556,19 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         self.assertIn('id="copy-error"', html)
         self.assertIn("showCopyError(COPY_ERROR[kind]", html)
 
+    def test_the_printed_report_carries_the_whole_summary(self):
+        """textarea พิมพ์ออกกระดาษได้เฉพาะส่วนที่มองเห็น ที่เหลือหายเงียบ ๆ
+
+        ข้อความสรุปยาวขึ้นมากตั้งแต่มีข้อความปิดท้าย เจ้าหน้าที่ที่บันทึกรายงานเป็น PDF
+        จะได้ข้อความไม่ครบ จึงต้องมีสำเนาสำหรับพิมพ์ที่เติมไว้ตั้งแต่ฝั่งเซิร์ฟเวอร์
+        """
+        html = self._render(self._clean_result())
+        self.assertIn('<div class="copy-print" aria-hidden="true">', html)
+        self.assertIn(".copy-print { display:none; }", html)
+        self.assertIn(".copy-print { display:block;", html)
+        self.assertIn(".copy-text { display:none; }", html)
+        self.assertIn("printable.textContent = text;", html)
+
     def test_the_copy_box_is_never_wiped_blank_by_the_script(self):
         """ควบคุมเชิงลบของกล่องคัดลอกว่าง — เคยเจอจริงจากภาพหน้าจอของเจ้าหน้าที่
 
@@ -2544,6 +2578,98 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         html = self._render(self._clean_result())
         self.assertIn("if (text) ta.value = text;", html)
         self.assertIn("const fallback = box ? (box.value || '').trim() : '';", html)
+
+
+class TheAiRewriteMustNotTouchTheStaffWording(unittest.TestCase):
+    """โหมด "ภาษาเข้าใจง่าย" เรียบเรียงข้อความสรุปใหม่ทั้งก้อนด้วย AI
+
+    คำสั่งที่ให้ AI คือ "เขียนสั้น กระชับ" และ "แต่ละข้อต้องบอกครบสามอย่างเท่านั้น"
+    ซึ่งจะย่อถ้อยคำที่เจ้าหน้าที่เขียนมาเองทิ้ง รวมถึงข้อความปิดท้ายที่มี LINE ID กับ
+    อีเมลอยู่ข้างใน โหมดนี้เป็นค่าตั้งต้นเมื่อเปิด AI ไว้ เจ้าหน้าที่จึงคัดลอกข้อความที่
+    ถูกย่อไปส่งนักศึกษาได้โดยไม่รู้ตัว
+
+    สั่งใน prompt อย่างเดียวไม่พอ จึงถอดถ้อยคำออกก่อนส่ง แล้วใส่กลับหลังเรียบเรียงเสร็จ
+    """
+
+    def _summary_with_staff(self):
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า ค)",
+                "เลขหน้าของหน้านี้ไม่ถูกต้อง", 'ต้องเป็นเลขหน้า "ก"', "",
+                "PAGE.SIGNATURE_LABEL")
+        return checker_module.plain_summary(
+            checker_module.check_result(rep),
+            staff=["SIGNATURE_LAYOUT_WRONG", "LATE_FEE_YES"])
+
+    def test_the_wording_is_taken_out_before_the_ai_sees_it(self):
+        import llm_assist
+        plain = self._summary_with_staff()
+        protected, kept = llm_assist._protect(plain)
+        self.assertTrue(kept)
+        for line in kept:
+            self.assertNotIn(line, protected)
+        self.assertIn("[[KEEP-0]]", protected)
+        # ข้อของระบบต้องไม่ถูกแตะ AI ยังเรียบเรียงส่วนนั้นได้ตามเดิม
+        self.assertIn("เลขหน้าของหน้านี้ไม่ถูกต้อง", protected)
+
+    def test_putting_it_back_gives_the_original_word_for_word(self):
+        import llm_assist
+        plain = self._summary_with_staff()
+        protected, kept = llm_assist._protect(plain)
+        self.assertEqual(llm_assist._restore(protected, kept), plain)
+
+    def test_a_dropped_marker_throws_the_whole_ai_text_away(self):
+        """ถ้อยคำหายแม้จุดเดียว = เชื่อผลไม่ได้ ให้ตกกลับไปใช้ข้อความตรงตัวจากระบบ"""
+        import llm_assist
+        plain = self._summary_with_staff()
+        protected, kept = llm_assist._protect(plain)
+        mangled = protected.replace("[[KEEP-0]]", "ปรับหน้าลงนามให้ถูก")
+        self.assertEqual(llm_assist._restore(mangled, kept), "")
+
+    def test_a_summary_without_staff_wording_is_untouched(self):
+        import llm_assist
+        plain = "ผลการตรวจ: ผ่าน" + NEWLINE + NEWLINE + "ไม่พบจุดที่ต้องแก้ไข"
+        protected, kept = llm_assist._protect(plain)
+        self.assertEqual(protected, plain)
+        self.assertEqual(kept, [])
+        self.assertEqual(llm_assist._restore(plain, kept), plain)
+
+    def test_the_numbering_and_indent_survive(self):
+        """เครื่องหมายต้องแทนที่เฉพาะเนื้อความ เลขข้อกับย่อหน้าคงไว้ให้ AI เห็นโครงเดิม"""
+        import llm_assist
+        protected, _kept = llm_assist._protect(self._summary_with_staff())
+        self.assertIn("2. [[KEEP-0]]", protected)
+        self.assertIn(checker_module.SUMMARY_INDENT + "[[KEEP-1]]", protected)
+
+    def test_the_ai_is_told_about_the_marker(self):
+        import llm_assist
+        self.assertIn("[[KEEP-n]]", llm_assist._SUMMARY_SYSTEM)
+
+    def test_student_summary_protects_and_restores(self):
+        """ทั้งเส้นทาง: ถ้อยคำที่ AI คืนมาต้องเป็นของเจ้าหน้าที่คำต่อคำ"""
+        import llm_assist
+        plain = self._summary_with_staff()
+        seen = {}
+
+        class _Response:
+            content = [type("Block", (), {"type": "text", "text": ""})()]
+
+        def fake_create(**kwargs):
+            seen["sent"] = kwargs["messages"][0]["content"]
+            # AI ที่ประพฤติดี: คงเครื่องหมายไว้ครบ แต่เรียบเรียงส่วนอื่นใหม่
+            body = seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1]
+            _Response.content[0].text = body.replace(
+                "เลขหน้าของหน้านี้ไม่ถูกต้อง", "เลขหน้าหน้านี้ยังไม่ถูก")
+            return _Response()
+
+        client = type("Client", (), {"messages": type("M", (), {"create": staticmethod(fake_create)})()})()
+        with mock.patch.object(llm_assist, "_client", lambda: client):
+            out = llm_assist.student_summary({"plain_summary": plain})
+        self.assertNotIn("[[KEEP-", seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1][:0] or "")
+        self.assertIn("[[KEEP-0]]", seen["sent"])
+        self.assertNotIn("ปรับโครงสร้างของหน้า", seen["sent"])
+        self.assertIn("ปรับโครงสร้างของหน้า", out)
+        self.assertIn("supawit.mar@mahidol.ac.th", out)
+        self.assertIn("เลขหน้าหน้านี้ยังไม่ถูก", out)
 
 
 class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
