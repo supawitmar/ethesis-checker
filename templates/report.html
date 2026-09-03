@@ -101,6 +101,16 @@
   /* จุดที่เจ้าหน้าที่กดแล้วมีผลกับข้อความที่ส่งให้นักศึกษา — ขีดข้างซ้ายให้ต่างจาก
      รายการตรวจเองที่กดไว้เพื่อเป็นหลักฐานเฉย ๆ */
   .hc.sf { border-left:4px solid #9b59b6; }
+  /* สวิตช์สองทาง: กรอบเดียวสองข้าง ข้างที่เลือกอยู่ถูกถม ไม่ใช่ปุ่มแยกสองปุ่ม
+     เพราะสองหัวข้อนี้เป็น "สถานะ" ไม่ใช่คำตัดสินผ่าน/ไม่ผ่านของการตรวจ */
+  .sw { display:inline-flex; border:1.5px solid #cbb3da; border-radius:999px;
+        overflow:hidden; background:#fff; }
+  .sw .pf { border:none; border-radius:0; margin:0; padding:7px 18px; }
+  .sw .pf + .pf { border-left:1.5px solid #e3d5ee; }
+  .sw .pf.pass.on { background:var(--green); border-color:var(--green); color:#fff; }
+  .sw .pf.fail.on { background:var(--red); border-color:var(--red); color:#fff; }
+  .sf-state { margin-top:8px; font-size:.82rem; color:#4a2a5c; font-weight:600; }
+  .hc.state-fail .sf-state { color:#8a2f24; }
   .hc.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
   .hc.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
   .issue-decide { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
@@ -399,16 +409,23 @@
           <div class="w" data-th="{{ sf.why }}" data-en="{{ sf.why_en }}">{{ sf.why }}</div>
         </div>
         <div class="btns">
-          {# ปุ่มมาจากทะเบียนฝั่งเซิร์ฟเวอร์ ไม่ใช่เขียนตายในหน้า — id ของตัวเลือกที่กด
+          {# สวิตช์สองทาง ไม่ใช่ปุ่มผ่าน/ไม่ผ่าน — "มีค่าปรับ" ไม่ใช่คำตัดสินว่าเล่มผิด
+             สลับข้างแล้วถ้อยคำในข้อความสรุปเปลี่ยนตามทันที กดข้างเดิมซ้ำคือยกเลิก
+             ตัวเลือกมาจากทะเบียนฝั่งเซิร์ฟเวอร์ ไม่ใช่เขียนตายในหน้า — id ของตัวเลือกที่กด
              คือสิ่งเดียวที่ส่งกลับไป เซิร์ฟเวอร์เป็นคนตัดสินว่าถ้อยคำไหนเข้าสรุป #}
+          <div class="sw" role="group">
           {% for ch in sf.choices %}
-          <button type="button" class="pf {{ ch.tone }}" data-choice="{{ ch.id }}"
-                  onclick="setPF(this,'{{ ch.tone }}')"
-                  data-th="{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label }}"
-                  data-en="{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label_en }}">{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label }}</button>
+            <button type="button" class="pf {{ ch.tone }}" data-choice="{{ ch.id }}"
+                    {% if ch.text %}data-adds="1"{% endif %}
+                    onclick="setPF(this,'{{ ch.tone }}')"
+                    data-th="{{ ch.label }}" data-en="{{ ch.label_en }}">{{ ch.label }}</button>
           {% endfor %}
+          </div>
         </div>
       </div>
+      {# บอกให้เห็นตรงนี้เลยว่าถ้อยคำเข้าสรุปแล้ว เจ้าหน้าที่จะได้ไม่ต้องเลื่อนขึ้นไปดู
+         กล่องคัดลอกทุกครั้งที่กด (เคยสับสนว่ากดแล้วไม่มีอะไรเกิดขึ้น) #}
+      <div class="sf-state" hidden></div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
       <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
         <button type="button" class="save" onclick="saveNote(this)" data-th="บันทึก" data-en="Save">บันทึก</button></div>
@@ -1358,6 +1375,8 @@ function applyLang(){
   document.getElementById('langbtn').textContent = (LANG === 'en') ? 'ไทย' : 'EN';
   document.documentElement.lang = LANG;
   if (typeof renderSummary === 'function') renderSummary();   // ให้ข้อความสรุปสลับภาษาด้วย
+  // บรรทัดสถานะใต้สวิตช์ประกอบขึ้นจากชื่อตัวเลือก จึงต้องเขียนใหม่ตอนสลับภาษา
+  if (typeof renderAllStaffState === 'function') renderAllStaffState();
 }
 function toggleLang(){ LANG = (LANG === 'th') ? 'en' : 'th'; applyLang(); }
 
@@ -1616,8 +1635,30 @@ function setPF(btn, state){
   }
   // ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป (ส้ม/เหลืองที่ไม่ผ่าน = ต้องแก้ และจุดที่
   // ระบบตรวจเองไม่ได้ซึ่งเจ้าหน้าที่กด "ผิด")
+  if (card.classList.contains('sf')) renderStaffState(card);
   if (card.classList.contains('issue') || card.classList.contains('sf'))
     scheduleSummaryRefresh();
+}
+// บรรทัดใต้สวิตช์ที่บอกว่าตอนนี้ถ้อยคำไหนอยู่ในข้อความสรุป
+function renderStaffState(card){
+  const line = card.querySelector('.sf-state');
+  if (!line) return;
+  const picked = card.querySelector('.pf.on[data-choice]');
+  if (!picked){ line.hidden = true; line.textContent = ''; return; }
+  const label = picked.dataset[LANG] || picked.textContent.trim();
+  line.hidden = false;
+  if (picked.getAttribute('data-adds')){
+    line.textContent = (LANG === 'en')
+      ? 'Added the "' + label + '" wording to the summary above.'
+      : 'เพิ่มถ้อยคำของ "' + label + '" เข้าข้อความสรุปด้านบนแล้ว';
+  } else {
+    line.textContent = (LANG === 'en')
+      ? 'Recorded as checked. Nothing was added to the summary.'
+      : 'บันทึกว่าตรวจแล้ว ไม่มีถ้อยคำเพิ่มเข้าข้อความสรุป';
+  }
+}
+function renderAllStaffState(){
+  document.querySelectorAll('.sf').forEach(renderStaffState);
 }
 function toggleNote(btn){
   const box = btn.parentElement.querySelector('.note-editor');

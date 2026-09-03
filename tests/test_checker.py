@@ -2531,6 +2531,43 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
                 self.assertIn(choice["label"], html)
                 self.assertIn(choice["label_en"], html)
 
+    def test_the_choices_are_one_two_way_switch_not_two_verdict_buttons(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): ให้เป็นลักษณะเปิด/ปิด สลับข้างแล้วถ้อยคำเปลี่ยนตาม
+
+        "มีค่าปรับ" ไม่ใช่คำตัดสินว่าเล่มผิด จึงต้องไม่หน้าตาเหมือนปุ่มผ่าน/ไม่ผ่าน
+        """
+        html = self._render(self._clean_result())
+        self.assertIn('<div class="sw" role="group">', html)
+        self.assertIn(".sw .pf.pass.on {", html)
+        self.assertIn(".sw .pf.fail.on {", html)
+        for check in checker_module.STAFF_CHECKS:
+            for choice in check["choices"]:
+                self.assertNotIn(f'data-th="✓ {choice["label"]}"', html)
+                self.assertNotIn(f'data-th="✗ {choice["label"]}"', html)
+                self.assertIn(f'data-th="{choice["label"]}"', html)
+
+    def test_only_the_choices_that_add_wording_are_marked(self):
+        """บรรทัดสถานะต้องแยกได้ว่ากดแล้วมีถ้อยคำเข้าสรุป หรือแค่บันทึกว่าตรวจแล้ว"""
+        html = self._render(self._clean_result())
+        adds = [ch for c in checker_module.STAFF_CHECKS for ch in c["choices"]
+                if ch["text"]]
+        quiet = [ch for c in checker_module.STAFF_CHECKS for ch in c["choices"]
+                 if not ch["text"]]
+        self.assertTrue(adds and quiet)
+        for choice in adds:
+            block = html.split(f'data-choice="{choice["id"]}"', 1)[1][:200]
+            self.assertIn('data-adds="1"', block, choice["id"])
+        for choice in quiet:
+            block = html.split(f'data-choice="{choice["id"]}"', 1)[1][:200]
+            self.assertNotIn('data-adds="1"', block, choice["id"])
+
+    def test_the_card_says_the_wording_went_in(self):
+        html = self._render(self._clean_result())
+        self.assertIn('<div class="sf-state" hidden></div>', html)
+        self.assertIn("function renderStaffState(card)", html)
+        self.assertIn("if (card.classList.contains('sf')) renderStaffState(card);", html)
+        self.assertIn("renderAllStaffState();", html)
+
     def test_a_clean_book_still_gets_a_copy_box(self):
         html = self._render(self._clean_result())
         self.assertIn('class="copy-text"', html)
