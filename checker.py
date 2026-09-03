@@ -3499,6 +3499,39 @@ def front_section_kind(page_text):
     return "", ""
 
 
+def check_result(rep, context=None, not_checked=NOT_CHECKED):
+    """ผลตรวจหนึ่งชุด — **ทุกทางออกของ run_check ต้องผ่านฟังก์ชันนี้**
+
+    หน้ารายงานอ่านคีย์ชุดนี้ครบทุกตัวเสมอ ทางออกไหนตกคีย์ไปหน้ารายงานพัง 500
+    โดยตัวตรวจเองไม่มีอะไรฟ้องเลย เจอจริงตอนใช้งาน: ด่าน "ภาษาของเล่มไม่ตรงกับที่
+    อนุมัติ" คืน dict ที่คัดลอกคีย์มาจาก result ตัวหลัก แต่ result ตัวหลักเติม
+    plain_summary ทีหลัง (นอก dict literal) คีย์นั้นจึงหายไป แล้ว report.html พังที่
+    {{ report.plain_summary | tojson }} — เล่มที่ภาษาไม่ตรงเปิดรายงานไม่ได้เลย
+
+    ต้องเรียงข้อและจัดหมวดที่นี่ด้วย ไม่ใช่ให้ผู้เรียกทำเอง ด้วยเหตุผลเดียวกัน
+    """
+    for zone in rep.zones:
+        for issue in rep.zones[zone]:
+            issue["category"] = classify(issue)
+            issue["section"] = summary_section(issue)
+        # เรียงตามลำดับที่เจ้าหน้าที่ไล่แก้เล่มจริง (ส่วนประกอบตามลำดับ แล้วเลขหน้า)
+        rep.zones[zone].sort(key=issue_sort_key)
+    result = {
+        "context": dict(context or {}),
+        "verdict": rep.verdict(),
+        "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
+        "issues_by_zone": rep.zones,
+        "info": rep.info,
+        "human_checklist": rep.human_checklist,
+        "not_checked": not_checked,
+        "verification": rep.verification,
+        # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
+        "section_order": SUMMARY_SECTION_ORDER,
+    }
+    result["plain_summary"] = plain_summary(result)
+    return result
+
+
 def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
               skip_identity_check=False):
     """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
@@ -3516,10 +3549,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     rep = Report()
     if not str(pdf_path).lower().endswith(".pdf"):
         rep.add("ORANGE", "-", Path(pdf_path).name, "ไม่ใช่ไฟล์ PDF", "ระบบตรวจ PDF เท่านั้น", "ส่งไฟล์ PDF")
-        return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
-                "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
-                "verification": rep.verification,
-                "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {}}
+        return check_result(rep)
 
     _p("เปิดไฟล์ PDF")
     pages = []
@@ -3529,10 +3559,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if n == 0:
             rep.add("ORANGE", "-", Path(pdf_path).name, "ไฟล์ PDF ไม่มีหน้าเอกสาร",
                     "ต้องเป็น PDF ที่มีเนื้อหาอย่างน้อย 1 หน้า", "สร้างไฟล์ PDF ใหม่แล้วลองอีกครั้ง")
-            return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
-                    "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
-                    "verification": rep.verification,
-                    "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {"n_pages": 0}}
+            return check_result(rep, {"n_pages": 0})
         for _i, _pg in enumerate(_pdf.pages):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
@@ -3609,23 +3636,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     "ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ "
                     "ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่",
                     "FORM.BOOK_LANGUAGE")
-            for _z in rep.zones:
-                for _it in rep.zones[_z]:
-                    _it["category"] = classify(_it)
-                    _it["section"] = summary_section(_it)
-            return {
-                "context": {"document_type": doc_type, "option": None,
-                            "chapters_mode": chapters_mode, "n_pages": n,
-                            "approved_data": bool(approved)},
-                "verdict": rep.verdict(),
-                "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
-                "issues_by_zone": rep.zones,
-                "info": rep.info,
-                "human_checklist": rep.human_checklist,
-                "not_checked": (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED),
-                "verification": rep.verification,
-                "section_order": SUMMARY_SECTION_ORDER,
-            }
+            return check_result(
+                rep,
+                {"document_type": doc_type, "option": None,
+                 "chapters_mode": chapters_mode, "n_pages": n,
+                 "approved_data": bool(approved)},
+                (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
         wrong_parts = [BOOK_LANGUAGE_PARTS[key]
                        for key in ("cover", "signature", "chapter")
                        if language_signals[key] and language_signals[key] != want_language]
@@ -4907,26 +4923,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     )
 
     _p("สรุปผล")
-    # เรียงตามลำดับที่เจ้าหน้าที่ไล่แก้เล่มจริง (ส่วนประกอบตามลำดับ แล้วเลขหน้า)
-    # ไม่ใช่ตาม part กว้าง ๆ อย่างเดิมที่ข้อของหน้าเดียวกันกระจัดกระจาย
-    for z in rep.zones:
-        for it in rep.zones[z]:
-            it["category"] = classify(it)
-            it["section"] = summary_section(it)
-        rep.zones[z].sort(key=issue_sort_key)
-
-    result = {
-        "context": {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
-                    "n_pages": n, "approved_data": bool(approved)},
-        "verdict": rep.verdict(),
-        "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
-        "issues_by_zone": rep.zones,
-        "info": rep.info,
-        "human_checklist": rep.human_checklist,
-        "not_checked": NOT_CHECKED,
-        "verification": rep.verification,
-        # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
-        "section_order": SUMMARY_SECTION_ORDER,
-    }
-    result["plain_summary"] = plain_summary(result)
-    return result
+    return check_result(
+        rep,
+        {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
+         "n_pages": n, "approved_data": bool(approved)})

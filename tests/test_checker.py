@@ -2280,6 +2280,82 @@ class AppendixSingularAndPluralAreOneHeading(unittest.TestCase):
                          checker_module._toc_section_kind("APPENDIX 130"))
 
 
+class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
+    """ทุกทางออกของ run_check ต้องเปิดหน้ารายงานได้จริง
+
+    เจอตอนใช้งานจริง: ด่าน "ภาษาของเล่มไม่ตรงกับที่อนุมัติ" คืน dict ที่คัดลอกคีย์มาจาก
+    result ตัวหลัก แต่ result ตัวหลักเติม plain_summary ทีหลัง (นอก dict literal)
+    คีย์นั้นจึงหายไป หน้ารายงานพัง Internal Server Error ที่บรรทัด
+    {{ report.plain_summary | tojson }} — เล่มที่ภาษาไม่ตรงเปิดรายงานไม่ได้เลย
+    ทั้งที่ตัวตรวจทำงานถูกและด่านทดสอบทั้งสี่ผ่านหมด
+
+    เทสต์เดิมเทียบคีย์กับ "dict literal" ในโค้ด ซึ่งเป็นการเทียบผิดตัว จึงผ่านทั้งที่พัง
+    ชุดนี้เรนเดอร์ report.html ของจริงแทน ถ้าตกคีย์ไหนจะพังตรงนี้ก่อนถึงมือเจ้าหน้าที่
+    """
+
+    CONTEXTS = {
+        "ไม่ใช่ไฟล์ PDF": {},
+        "PDF ไม่มีหน้า": {"n_pages": 0},
+        "ภาษาของเล่มไม่ตรง": {"document_type": "THESIS", "option": None,
+                              "chapters_mode": "strict", "n_pages": 100,
+                              "approved_data": True},
+        "ตรวจครบตามปกติ": {"document_type": "THESIS", "option": 1,
+                            "chapters_mode": "strict", "n_pages": 100,
+                            "approved_data": True},
+    }
+
+    def _report(self, context):
+        rep = Report()
+        rep.add("RED", "front_matter", "ทั้งเล่ม",
+                "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มที่ส่งมาจัดทำเป็นภาษาไทย",
+                'ภาษาที่ได้รับอนุมัติคือ "ภาษาอังกฤษ" ต้องดำเนินการจัดทำเล่มเป็น "ภาษาอังกฤษ"',
+                "", "FORM.BOOK_LANGUAGE")
+        return checker_module.check_result(rep, context)
+
+    def _render(self, report):
+        import jinja2
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(Path(checker_module.__file__).parent
+                                               / "templates")),
+            autoescape=True)
+        return env.get_template("report.html").render(
+            report=report, zone_label={"RED": ("ไม่ผ่าน", "x"),
+                                       "ORANGE": ("รอยืนยัน", "!"),
+                                       "YELLOW": ("ข้อสังเกต", "i")},
+            job_id="test", pdf_name="book.pdf", student={})
+
+    def test_every_way_out_renders(self):
+        for name, context in self.CONTEXTS.items():
+            html = self._render(self._report(context))
+            self.assertIn("ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ", html, name)
+
+    def test_every_way_out_carries_the_same_keys(self):
+        keysets = {name: set(self._report(ctx)) for name, ctx in self.CONTEXTS.items()}
+        first = next(iter(keysets.values()))
+        for name, keys in keysets.items():
+            self.assertEqual(keys, first, name)
+
+    def test_the_summary_text_is_built_for_every_way_out(self):
+        """report.html อ่าน report.plain_summary ตรง ๆ ขาดไม่ได้สักทางออกเดียว"""
+        for name, context in self.CONTEXTS.items():
+            report = self._report(context)
+            self.assertIn("plain_summary", report, name)
+            self.assertIn("ผลการตรวจ:", report["plain_summary"], name)
+
+    def test_dropping_a_key_really_breaks_the_page(self):
+        """ควบคุมเชิงลบ: พิสูจน์ว่าเทสต์นี้จับของจริง ไม่ได้ผ่านลอย ๆ"""
+        report = self._report(self.CONTEXTS["ภาษาของเล่มไม่ตรง"])
+        report.pop("plain_summary")
+        with self.assertRaises(Exception):
+            self._render(report)
+
+    def test_run_check_has_no_hand_written_result_dict_left(self):
+        """ทางออกทุกทางต้องผ่าน check_result ไม่ใช่ประกอบ dict เอง"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn('"issues_by_zone": rep.zones', source)
+        self.assertEqual(source.count("return check_result("), 4)
+
+
 class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     """ภาษาของเล่มตัดสินจาก "ข้อความตายตัวของ template" ไม่ใช่สัดส่วนตัวอักษรบนหน้า
 
@@ -2443,12 +2519,10 @@ class BookLanguageMismatchStopsTheWholeCheck(unittest.TestCase):
         self.assertLess(source.index("approved_book_language(approved)"),
                         source.index("ไม่พบกิตติกรรมประกาศ"))
 
-    def test_the_early_return_carries_every_key_the_report_page_needs(self):
-        """report.html วน report.section_order ถ้าคีย์ขาด Jinja พังทั้งหน้า"""
-        block = self._gate_source()
-        for key in ("context", "verdict", "summary", "issues_by_zone", "info",
-                    "human_checklist", "not_checked", "verification", "section_order"):
-            self.assertIn(f'"{key}"', block, key)
+    # เทสต์ "คีย์ครบไหม" เคยอยู่ตรงนี้ โดยเทียบคีย์กับ dict literal ในโค้ด ซึ่งเทียบผิดตัว
+    # (result ตัวหลักเติม plain_summary ทีหลัง นอก literal) จึงผ่านทั้งที่หน้ารายงานพัง 500
+    # ย้ายไปเป็นการเรนเดอร์ report.html ของจริงแล้ว ดู
+    # EveryWayOutOfRunCheckRendersTheReportPage
 
     def test_the_report_says_the_rest_was_not_checked(self):
         self.assertIn("หยุดตรวจ", checker_module.BOOK_LANGUAGE_STOPPED)
