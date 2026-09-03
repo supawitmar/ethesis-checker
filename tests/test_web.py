@@ -55,6 +55,69 @@ def make_pdf(text="Hello PDF"):
     return bytes(pdf)
 
 
+class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
+    """ปุ่ม "โครงสร้างหน้าลงนามผิด" บนหน้ารายงานต้องไปถึงข้อความสรุปจริง
+
+    หน้าเว็บส่ง POST /summary/<job> พร้อม id ของจุดที่เจ้าหน้าที่กด แล้วเอาข้อความ
+    ที่ได้กลับมาใส่กล่องคัดลอก ถ้าปลายทางไม่อ่านคีย์ staff ปุ่มจะกดได้แต่ไม่มีอะไร
+    เกิดขึ้น ซึ่งเป็นอาการที่มองไม่ออกจากหน้าจอจนกว่าจะอ่านข้อความที่คัดลอกมาทั้งก้อน
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        response = cls.client.post(
+            "/login",
+            data={"password": "test-password", "next": "/"},
+            follow_redirects=False,
+        )
+        if response.status_code != 303:
+            raise RuntimeError("Test login failed")
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            main.JOBS.clear()
+
+    def _seed_clean_report(self):
+        """เล่มที่ระบบไม่พบจุดผิดเลย — กรณีที่ปุ่มนี้ต้องทำงานให้ได้แน่ ๆ"""
+        import checker
+        with main.JOBS_LOCK:
+            main.JOBS["demo"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(checker.Report()),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        return "demo"
+
+    def _summary(self, **payload):
+        job = self._seed_clean_report()
+        response = self.client.post(f"/summary/{job}", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["plain"]
+
+    def test_pressing_nothing_leaves_the_summary_alone(self):
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", self._summary(failed=[], passed=[]))
+
+    def test_pressing_the_button_adds_the_wording(self):
+        import checker
+        text = self._summary(failed=[], passed=[], staff=["SIGNATURE_LAYOUT_WRONG"])
+        wording = checker.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]["text"]
+        for line in wording.split(chr(10)):
+            if line.strip():
+                self.assertIn(line.strip(), text)
+        self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+
+    def test_the_fee_answer_is_appended_without_being_counted(self):
+        text = self._summary(failed=[], passed=[], staff=["LATE_FEE_NONE"])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertIn("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า", text)
+        self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"))
+
+    def test_a_junk_value_from_the_page_is_ignored(self):
+        text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+
+
 class WebSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

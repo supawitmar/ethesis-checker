@@ -2306,7 +2306,268 @@ def summary_section(issue):
     return "เนื้อหา (บท)" if position and position[0] == _PAGE_BUCKET_BODY else "อื่น ๆ"
 
 
-def issues_to_fix(report, failed=None, passed=None):
+# ---------- สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง แล้วกดเพิ่มถ้อยคำเข้าข้อความสรุป ----------
+# บางเรื่องระบบอ่านจากไฟล์ไม่ได้เลย (โครงสร้างหน้าลงนาม) บางเรื่องไม่ได้อยู่ในไฟล์
+# ตั้งแต่แรก (ค่าปรับส่งล่าช้า) แต่ถ้อยคำที่ส่งให้นักศึกษาเป็นชุดเดียวกันทุกเล่ม
+# เจ้าหน้าที่จึงต้องพิมพ์ย่อหน้าเดิมซ้ำเองทุกครั้ง กติกาปฏิบัติงาน (ก.ย. 2569) กำหนดให้
+# มีปุ่มกด แล้วถ้อยคำชุดนั้นเข้าข้อความคัดลอกทันที
+#
+# หนึ่งหัวข้อมีได้หลายตัวเลือก (choices) กดได้ทีละอัน กดซ้ำที่เดิมคือยกเลิก ตัวเลือกที่
+# text ว่างคือ "ไม่ต้องเพิ่มอะไร" (เช่น ปุ่ม "ถูกต้อง")
+#
+# placement บอกว่าถ้อยคำไปอยู่ตรงไหนของข้อความสรุป
+#   section = เป็นจุดที่นักศึกษาต้องแก้ นับรวมใน "กรุณาแก้ไขทั้งหมด N จุด"
+#             และไปอยู่ในกลุ่มของส่วนนั้นของเล่ม (ต้องมีชื่อกลุ่มใน SUMMARY_SECTIONS)
+#   closing = ข้อความปิดท้าย ไม่ใช่จุดผิด ต่อท้ายสุดและไม่นับเป็นจุดที่ต้องแก้
+#
+# ถ้อยคำทั้งไทยและอังกฤษเจ้าหน้าที่เขียนมาเอง ระบบห้ามเรียบเรียงใหม่หรือย่อ (หลักการ
+# เดียวกับ FORM.BOOK_LANGUAGE) **รวมถึงห้ามแก้คำที่ดูเหมือนพิมพ์ตกด้วย** — เคยแก้ให้
+# ("ทำดำเนินจัดทำ" "ทื่กำหนด" "Line Offical" "(Pages i-ii )") แล้วเจ้าหน้าที่สั่งให้คืน
+# ต้นฉบับทุกตัวอักษร มีเทสต์ล็อกคำเหล่านี้ไว้ ถ้าจะแก้ต้องได้คำสั่งจากเจ้าหน้าที่ก่อน
+# เก็บคู่กันไว้ตรงนี้ที่เดียว หน้ารายงานรับไปทั้งก้อน
+# แล้วใช้ "เทียบทั้งบรรทัด" ตอนสลับเป็นอังกฤษ คำแปลจึงหลุดจากต้นฉบับไม่ได้ และไม่ต้อง
+# พึ่ง TR ซึ่งเป็นการแทนที่เศษคำ (ถ้อยคำยาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่)
+STAFF_CHECKS = [
+    {
+        "id": "SIGNATURE_LAYOUT",
+        "item": "โครงสร้างหน้าลงนาม",
+        "item_en": "Signature page layout",
+        "why": "ระบบตรวจโครงสร้างของหน้านี้ไม่ได้ กรุณาเทียบกับ template และคู่มือ "
+               "ทั้งลำดับที่ชื่อกรรมการวางลงในช่อง กรอบตาราง ฟอนต์ "
+               "และช่องที่เหลือซึ่งต้องถมด้วยตัวอักษรสีขาว",
+        "why_en": "The system cannot check this page's layout. Compare it with the "
+                  "template and the manual: the order the committee names are placed "
+                  "in the table, the frames, the font, and the leftover slots that "
+                  "must be filled with white text.",
+        "rule_id": "FRONT.SIGNATURE_LAYOUT",
+        "placement": "section",
+        # ถ้อยคำบอกตำแหน่งไว้ในประโยคแรกอยู่แล้ว จึงไม่พิมพ์บรรทัดตำแหน่งซ้ำ
+        # ชื่อนี้ใช้จัดกลุ่มในข้อความสรุปเท่านั้น
+        "section": "หน้าลงนาม",
+        "choices": [
+            {
+                "id": "SIGNATURE_LAYOUT_OK",
+                "label": "ถูกต้อง",
+                "label_en": "Correct",
+                "tone": "pass",
+                "text": "",
+                "text_en": "",
+            },
+            {
+                "id": "SIGNATURE_LAYOUT_WRONG",
+                "label": "โครงสร้างหน้าลงนามผิด",
+                "label_en": "Layout is wrong",
+                "tone": "fail",
+                "text": ("ในหน้าลงนาม (หน้า i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า "
+                         "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
+                         "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
+                         "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
+                         "ไม่ต้องเลื่อนหรือปรับกรอบ สำหรับ "
+                         "ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่างให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
+                         "และต้องใช้ font และ template ที่กำหนดด้วย "
+                         "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด "
+                         "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
+                         "(จัดตามลูกศรสีเหลืองในคู่มือ)"
+                         "\n"
+                         "* ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
+                         "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
+                         "ให้ใส่สีขาวไว้*"),
+                "text_en": ("Regarding the signature page (Pages i-ii ), please "
+                            "restructure the page and realign each committee list to "
+                            "strictly follow the top-to-bottom sequence approved in the "
+                            "official document without shifting or modifying the frames. "
+                            "Students must format the file using the designated font and "
+                            "template, following the exact ordering sequence indicated by "
+                            "the arrows in the formatting manual."
+                            "\n"
+                            "Additionally, the template frames must be adjusted to match "
+                            "the default settings, which accommodate up to 6 names per "
+                            "side; any remaining blank slots must be changed to white "
+                            "font color"),
+            },
+        ],
+    },
+    {
+        "id": "LATE_FEE",
+        "item": "มีค่าปรับไหม",
+        "item_en": "Is there a late fine?",
+        "why": "ระบบไม่รู้เรื่องค่าปรับ เลือกให้ตรงกับข้อมูลของนักศึกษา "
+               "ข้อความปิดท้าย (ค่าปรับ วิธีส่งกลับ และช่องทางติดต่อ) "
+               "จะถูกต่อท้ายข้อความสรุป",
+        "why_en": "The system knows nothing about fines. Pick the one that matches "
+                  "the student's record. The closing text (the fine, how to "
+                  "resubmit, and who to contact) is appended to the summary.",
+        "rule_id": "FORM.LATE_FEE_NOTE",
+        "placement": "closing",
+        "choices": [
+            {
+                "id": "LATE_FEE_NONE",
+                "label": "ไม่มีค่าปรับ",
+                "label_en": "No fine",
+                "tone": "pass",
+                "text": ("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า "
+                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
+                         "กรณีที่นักศึกษามีค่าปรับ "
+                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
+                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                         "\n"
+                         "\n"
+                         "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
+                         "เสร็จสิ้นแล้ว กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง "
+                         "ในกรณีนักศึกษามีข้อสงสัยเกี่ยวกับการแก้ไขไฟล์ e-Thesis "
+                         "หรือประสงค์จะสอบถามข้อมูลเพิ่มเติมเกี่ยวกับกระบวนการส่งไฟล์ "
+                         "e-Thesis กรุณาติดต่อเจ้าหน้าที่งานบริการการศึกษา ผ่านช่องทาง "
+                         "Line Official Account ID: @600qubzh "
+                         "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบและให้ข้อมูลแก่นักศึกษาต่อไป"
+                         "\n"
+                         "\n"
+                         "หากนักศึกษาไม่สามารถ Resubmit ผ่านระบบได้ "
+                         "ขอให้นักศึกษาติดต่อเจ้าหน้าที่งานเทคโนโลยีสารสนเทศ ผ่าน Line "
+                         "Offical Account ID @322wjrbo หรือผ่านลิ้งค์ "
+                         "https://line.me/R/ti/p/@322wjrbo "
+                         "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบต่อไป"
+                         "\n"
+                         "\n"
+                         "สอบถามข้อมูลเพิ่มเติม"
+                         "\n"
+                         "supawit.mar@mahidol.ac.th"),
+                "text_en": ("You have no fine for late submission, and no additional fees "
+                            "are charged during the checking process. If a fine is "
+                            "incurred, students will receive an invoice through the "
+                            "system after the checking process is completed."
+                            "\n"
+                            "\n"
+                            "Please resubmit the document to the system once you have "
+                            "made the corrections listed in the Remarks provided by the "
+                            "staff. If students have any inquiries regarding the "
+                            "correction of e-Thesis files or wish to obtain further "
+                            "information about the e-Thesis submission process, please "
+                            "contact the Academic Services staff via the Line Official "
+                            "Account ID: @600qubzh. The staff will review the matter and "
+                            "provide appropriate assistance accordingly."
+                            "\n"
+                            "\n"
+                            "If you are unable to submit the revised file through the "
+                            "system, please contact the IT staff via Line Offical Account "
+                            "ID @322wjrbo or link: https://line.me/R/ti/p/@322wjrbo"
+                            "\n"
+                            "\n"
+                            "For more information"
+                            "\n"
+                            "supawit.mar@mahidol.ac.th"),
+            },
+            {
+                "id": "LATE_FEE_YES",
+                "label": "มีค่าปรับ",
+                "label_en": "Has a fine",
+                "tone": "fail",
+                "text": ("นศ. มีค่าปรับในการส่งเล่มล่าช้า "
+                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
+                         "กรณีที่นักศึกษามีค่าปรับ "
+                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
+                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                         "\n"
+                         "\n"
+                         "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
+                         "เสร็จสิ้นแล้ว กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง "
+                         "ในกรณีนักศึกษามีข้อสงสัยเกี่ยวกับการแก้ไขไฟล์ e-Thesis "
+                         "หรือประสงค์จะสอบถามข้อมูลเพิ่มเติมเกี่ยวกับกระบวนการส่งไฟล์ "
+                         "e-Thesis กรุณาติดต่อเจ้าหน้าที่งานบริการการศึกษา ผ่านช่องทาง "
+                         "Line Official Account ID: @600qubzh "
+                         "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบและให้ข้อมูลแก่นักศึกษาต่อไป"
+                         "\n"
+                         "\n"
+                         "หากนักศึกษาไม่สามารถ Resubmit ผ่านระบบได้ "
+                         "ขอให้นักศึกษาติดต่อเจ้าหน้าที่งานเทคโนโลยีสารสนเทศ ผ่าน Line "
+                         "Offical Account ID @322wjrbo หรือผ่านลิ้งค์ "
+                         "https://line.me/R/ti/p/@322wjrbo "
+                         "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบต่อไป"
+                         "\n"
+                         "\n"
+                         "สอบถามข้อมูลเพิ่มเติม"
+                         "\n"
+                         "supawit.mar@mahidol.ac.th"),
+                "text_en": ("You have a fine for late submission, and no additional fees "
+                            "are charged during the checking process. The invoice will be "
+                            "issued through the system after the checking process is "
+                            "completed."
+                            "\n"
+                            "\n"
+                            "Please resubmit the document to the system once you have "
+                            "made the corrections listed in the Remarks provided by the "
+                            "staff. If students have any inquiries regarding the "
+                            "correction of e-Thesis files or wish to obtain further "
+                            "information about the e-Thesis submission process, please "
+                            "contact the Academic Services staff via the Line Official "
+                            "Account ID: @600qubzh. The staff will review the matter and "
+                            "provide appropriate assistance accordingly."
+                            "\n"
+                            "\n"
+                            "If you are unable to submit the revised file through the "
+                            "system, please contact the IT staff via Line Offical Account "
+                            "ID @322wjrbo or link: https://line.me/R/ti/p/@322wjrbo"
+                            "\n"
+                            "\n"
+                            "For more information"
+                            "\n"
+                            "supawit.mar@mahidol.ac.th"),
+            },
+        ],
+    },
+]
+STAFF_CHECK_BY_ID = {check["id"]: check for check in STAFF_CHECKS}
+# ตัวเลือกที่ "มีถ้อยคำจริง" เท่านั้นที่หาเจอจากตรงนี้ ปุ่มอย่าง "ถูกต้อง" จึงไม่เพิ่มอะไร
+STAFF_CHOICE_BY_ID = {
+    choice["id"]: (check, choice)
+    for check in STAFF_CHECKS for choice in check["choices"] if choice["text"]
+}
+
+
+def staff_choices(keys, placement):
+    """ตัวเลือกที่เจ้าหน้าที่กด เรียงตามลำดับในทะเบียน ไม่ใช่ตามลำดับที่กด
+
+    ลำดับที่กดเป็นเรื่องบังเอิญของแต่ละคน ข้อความที่ส่งให้นักศึกษาต้องเรียงเหมือนกันทุกครั้ง
+    id ที่ไม่รู้จักถูกทิ้งเงียบ ๆ เพราะค่านี้มาจากหน้าเว็บ เชื่อไม่ได้
+    """
+    picked = {str(key) for key in (keys or ())}
+    out = []
+    for check in STAFF_CHECKS:
+        if check.get("placement") != placement:
+            continue
+        for choice in check["choices"]:
+            if choice["text"] and choice["id"] in picked:
+                # หนึ่งหัวข้อตอบได้คำตอบเดียว หน้าเว็บคุมให้อยู่แล้ว แต่ค่าที่ส่งมาเชื่อไม่ได้
+                # (หน้าเก่าค้างไว้ กดรัวจนคำขอสวนกัน หรือคำขอถูกส่งซ้ำ) ถ้าไม่คุมตรงนี้
+                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นศ. ไม่มีค่าปรับ" แล้วตามด้วย
+                # "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+                out.append((check, choice))
+                break
+    return out
+
+
+
+
+def staff_issue(check, choice):
+    """แปลงตัวเลือกที่เจ้าหน้าที่กด ให้อยู่ในรูปเดียวกับข้ออื่นในข้อความสรุป
+
+    summary_text = ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า ให้พิมพ์ตรงตัว ไม่ผ่านการ
+    ประกอบประโยคแบบ "ตำแหน่ง / ที่พบ / ต้องแก้เป็น" เพราะถ้อยคำชุดนี้บอกตำแหน่งไว้
+    ในประโยคแรกอยู่แล้ว และเป็นคำสั่งที่เจ้าหน้าที่เขียนมาเอง
+    """
+    return {
+        "part": "front_matter",
+        "location": check["section"],
+        "found": "",
+        "expected": "",
+        "fix": "",
+        "system_note": False,
+        "summary_text": choice["text"],
+        "staff_choice": choice["id"],
+        **rule_reference(check["rule_id"]),
+    }
+
+
+def issues_to_fix(report, failed=None, passed=None, staff=None):
     """รายการที่ต้องแก้ในสรุป
 
     - สีแดง: เข้าสรุปเสมอ
@@ -2319,10 +2580,17 @@ def issues_to_fix(report, failed=None, passed=None):
     นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย การใส่ไว้ในใบสั่งแก้ทำให้นักศึกษาสับสน
 
     failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
+    staff เป็นชุด id ของ "ตัวเลือก" ใน STAFF_CHECKS ที่เจ้าหน้าที่กด (เช่น
+    {"SIGNATURE_LAYOUT_WRONG"}) — เรื่องพวกนี้ระบบตรวจเองไม่ได้ จึงไม่มีใน
+    issues_by_zone ตัวเลือกที่ placement เป็น closing ไม่ใช่จุดผิด จึงไม่เข้ารายการนี้
     """
     failed = set(failed or ())
     passed = set(passed or ())
     items = list(report["issues_by_zone"].get("RED") or [])
+    # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
+    # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
+    for check, choice in staff_choices(staff, "section"):
+        items.append(staff_issue(check, choice))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" not in passed:
             items.append(issue)
@@ -2398,6 +2666,12 @@ def _summary_sentence(issue, skip_location=False):
     การแทนที่แบบเศษคำซึ่งให้ผลเพี้ยน (เคยได้ "page after page 93 Change to:Page 94")
     พอแยกบรรทัด แต่ละบรรทัดกลายเป็นข้อความเดี่ยวที่มีกฎเต็มประโยครองรับอยู่แล้ว
     """
+    # ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า (จุดที่กดเพิ่มเอง) พิมพ์ตรงตัวทุกคำ
+    # ห้ามประกอบใหม่หรือย่อ และย่อหน้าบรรทัดต่อ ๆ ไปให้ตรงกับข้ออื่นในสรุป
+    dictated = issue.get("summary_text")
+    if dictated:
+        return f"\n{SUMMARY_INDENT}".join(
+            line.strip() for line in dictated.split("\n") if line.strip())
     lines = [] if skip_location else [_prose_location(issue.get("location"))]
     found = _prose_found(issue.get("found"))
     if found:
@@ -2423,7 +2697,11 @@ def _dedupe_issues(items):
     kept = {}
     order = []
     for issue in items:
-        value = _corrected_value(issue) or _prose_found(issue.get("found"))
+        # จุดที่เจ้าหน้าที่กดเพิ่มไม่มีทั้ง "ค่าที่ต้องแก้" และ "สิ่งที่พบ" ถ้าไม่ใช้ถ้อยคำ
+        # เป็นกุญแจ ทุกจุดที่อยู่หน้าเดียวกันจะกลายเป็นกุญแจ ("หน้าลงนาม", "") เหมือนกัน
+        # แล้วถูกยุบเหลือจุดเดียว
+        value = (issue.get("summary_text") or _corrected_value(issue)
+                 or _prose_found(issue.get("found")))
         key = (summary_tidy(issue.get("location")), value)
         if key not in kept:
             kept[key] = issue
@@ -2434,34 +2712,45 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
-def plain_summary(report, failed=None, passed=None):
+def plain_summary(report, failed=None, passed=None, staff=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
     ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
-    items = _dedupe_issues(issues_to_fix(report, failed, passed))
-    lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
+    items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    # ข้อความปิดท้าย (เช่น เรื่องค่าปรับและช่องทางติดต่อ) ไม่ใช่จุดที่ต้องแก้ จึงไม่ถูกนับ
+    # และต้องตามไปด้วยเสมอ แม้เล่มจะไม่มีจุดต้องแก้เลย
+    closing = [choice["text"] for _check, choice in staff_choices(staff, "closing")]
+    # ผลตรวจของระบบเป็น "ผ่าน" ได้ทั้งที่มีจุดต้องแก้ เมื่อจุดนั้นมาจากคำตัดสินของ
+    # เจ้าหน้าที่ (กดไม่ผ่านข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจเองไม่ได้) ข้อความที่
+    # ส่งให้นักศึกษาจะขัดกันเองทันที — "ผลการตรวจ: ผ่าน" แล้วตามด้วย "กรุณาแก้ไข 1 จุด"
+    verdict = report.get("verdict", "")
+    if items and verdict == "ผ่าน":
+        verdict = "ไม่ผ่าน"
+    lines = [f"ผลการตรวจ: {verdict}"]
     if not items:
         lines.append("\nไม่พบจุดที่ต้องแก้ไข")
-        return "\n".join(lines).strip()
-
-    lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
-    grouped = {}
-    for issue in items:
-        grouped.setdefault(summary_section(issue), []).append(issue)
-    number = 0
-    for section in SUMMARY_SECTION_ORDER:
-        section_items = grouped.get(section)
-        if not section_items:
-            continue
-        lines.append(f"\n{section}")
-        for issue in section_items:
-            number += 1
-            # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
-            # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
-            skip_loc = _prose_location(issue.get("location")) == section
-            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+    else:
+        lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
+        grouped = {}
+        for issue in items:
+            grouped.setdefault(summary_section(issue), []).append(issue)
+        number = 0
+        for section in SUMMARY_SECTION_ORDER:
+            section_items = grouped.get(section)
+            if not section_items:
+                continue
+            lines.append(f"\n{section}")
+            for issue in section_items:
+                number += 1
+                # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
+                # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
+                skip_loc = _prose_location(issue.get("location")) == section
+                lines.append(
+                    f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+    for text in closing:
+        lines.append("\n" + text.strip())
     return "\n".join(lines).strip()
 
 
@@ -3499,6 +3788,42 @@ def front_section_kind(page_text):
     return "", ""
 
 
+def check_result(rep, context=None, not_checked=NOT_CHECKED):
+    """ผลตรวจหนึ่งชุด — **ทุกทางออกของ run_check ต้องผ่านฟังก์ชันนี้**
+
+    หน้ารายงานอ่านคีย์ชุดนี้ครบทุกตัวเสมอ ทางออกไหนตกคีย์ไปหน้ารายงานพัง 500
+    โดยตัวตรวจเองไม่มีอะไรฟ้องเลย เจอจริงตอนใช้งาน: ด่าน "ภาษาของเล่มไม่ตรงกับที่
+    อนุมัติ" คืน dict ที่คัดลอกคีย์มาจาก result ตัวหลัก แต่ result ตัวหลักเติม
+    plain_summary ทีหลัง (นอก dict literal) คีย์นั้นจึงหายไป แล้ว report.html พังที่
+    {{ report.plain_summary | tojson }} — เล่มที่ภาษาไม่ตรงเปิดรายงานไม่ได้เลย
+
+    ต้องเรียงข้อและจัดหมวดที่นี่ด้วย ไม่ใช่ให้ผู้เรียกทำเอง ด้วยเหตุผลเดียวกัน
+    """
+    for zone in rep.zones:
+        for issue in rep.zones[zone]:
+            issue["category"] = classify(issue)
+            issue["section"] = summary_section(issue)
+        # เรียงตามลำดับที่เจ้าหน้าที่ไล่แก้เล่มจริง (ส่วนประกอบตามลำดับ แล้วเลขหน้า)
+        rep.zones[zone].sort(key=issue_sort_key)
+    result = {
+        "context": dict(context or {}),
+        "verdict": rep.verdict(),
+        "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
+        "issues_by_zone": rep.zones,
+        "info": rep.info,
+        "human_checklist": rep.human_checklist,
+        "not_checked": not_checked,
+        "verification": rep.verification,
+        # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
+        "section_order": SUMMARY_SECTION_ORDER,
+        # ส่งไปทั้งก้อนเพื่อให้หน้ารายงานสร้างปุ่มเอง และใช้ถ้อยคำอังกฤษชุดเดียวกัน
+        # ตอนสลับภาษา — ไม่ใช่ให้หน้าเว็บเก็บถ้อยคำของตัวเองแล้วหลุดจากฝั่งเซิร์ฟเวอร์
+        "staff_findings": list(STAFF_CHECKS),
+    }
+    result["plain_summary"] = plain_summary(result)
+    return result
+
+
 def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
               skip_identity_check=False):
     """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
@@ -3516,10 +3841,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     rep = Report()
     if not str(pdf_path).lower().endswith(".pdf"):
         rep.add("ORANGE", "-", Path(pdf_path).name, "ไม่ใช่ไฟล์ PDF", "ระบบตรวจ PDF เท่านั้น", "ส่งไฟล์ PDF")
-        return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
-                "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
-                "verification": rep.verification,
-                "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {}}
+        return check_result(rep)
 
     _p("เปิดไฟล์ PDF")
     pages = []
@@ -3529,10 +3851,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if n == 0:
             rep.add("ORANGE", "-", Path(pdf_path).name, "ไฟล์ PDF ไม่มีหน้าเอกสาร",
                     "ต้องเป็น PDF ที่มีเนื้อหาอย่างน้อย 1 หน้า", "สร้างไฟล์ PDF ใหม่แล้วลองอีกครั้ง")
-            return {"verdict": rep.verdict(), "issues_by_zone": rep.zones, "info": rep.info,
-                    "human_checklist": rep.human_checklist, "not_checked": NOT_CHECKED,
-                    "verification": rep.verification,
-                    "summary": {z.lower(): len(v) for z, v in rep.zones.items()}, "context": {"n_pages": 0}}
+            return check_result(rep, {"n_pages": 0})
         for _i, _pg in enumerate(_pdf.pages):
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
@@ -3609,23 +3928,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     "ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ "
                     "ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่",
                     "FORM.BOOK_LANGUAGE")
-            for _z in rep.zones:
-                for _it in rep.zones[_z]:
-                    _it["category"] = classify(_it)
-                    _it["section"] = summary_section(_it)
-            return {
-                "context": {"document_type": doc_type, "option": None,
-                            "chapters_mode": chapters_mode, "n_pages": n,
-                            "approved_data": bool(approved)},
-                "verdict": rep.verdict(),
-                "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
-                "issues_by_zone": rep.zones,
-                "info": rep.info,
-                "human_checklist": rep.human_checklist,
-                "not_checked": (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED),
-                "verification": rep.verification,
-                "section_order": SUMMARY_SECTION_ORDER,
-            }
+            return check_result(
+                rep,
+                {"document_type": doc_type, "option": None,
+                 "chapters_mode": chapters_mode, "n_pages": n,
+                 "approved_data": bool(approved)},
+                (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
         wrong_parts = [BOOK_LANGUAGE_PARTS[key]
                        for key in ("cover", "signature", "chapter")
                        if language_signals[key] and language_signals[key] != want_language]
@@ -4907,26 +5215,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     )
 
     _p("สรุปผล")
-    # เรียงตามลำดับที่เจ้าหน้าที่ไล่แก้เล่มจริง (ส่วนประกอบตามลำดับ แล้วเลขหน้า)
-    # ไม่ใช่ตาม part กว้าง ๆ อย่างเดิมที่ข้อของหน้าเดียวกันกระจัดกระจาย
-    for z in rep.zones:
-        for it in rep.zones[z]:
-            it["category"] = classify(it)
-            it["section"] = summary_section(it)
-        rep.zones[z].sort(key=issue_sort_key)
-
-    result = {
-        "context": {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
-                    "n_pages": n, "approved_data": bool(approved)},
-        "verdict": rep.verdict(),
-        "summary": {z.lower(): len(v) for z, v in rep.zones.items()},
-        "issues_by_zone": rep.zones,
-        "info": rep.info,
-        "human_checklist": rep.human_checklist,
-        "not_checked": NOT_CHECKED,
-        "verification": rep.verification,
-        # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
-        "section_order": SUMMARY_SECTION_ORDER,
-    }
-    result["plain_summary"] = plain_summary(result)
-    return result
+    return check_result(
+        rep,
+        {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
+         "n_pages": n, "approved_data": bool(approved)})

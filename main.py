@@ -413,8 +413,10 @@ async def rebuild_summary(job_id: str, request: Request):
         payload = {}
     failed = [str(k) for k in (payload.get("failed") or [])][:200]
     passed = [str(k) for k in (payload.get("passed") or [])][:200]
+    # จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" (เช่น โครงสร้างหน้าลงนาม)
+    staff = [str(k) for k in (payload.get("staff") or [])][:50]
     report = job["report"]
-    plain = plain_summary(report, failed, passed)
+    plain = plain_summary(report, failed, passed, staff)
     result = {"plain": plain}
     if payload.get("ai") and llm_assist.enabled():
         # ใช้โควตางานเดียวกับการตรวจเล่ม ไม่งั้นกดปุ่มรัว ๆ จะยิง AI พร้อมกันไม่จำกัด
