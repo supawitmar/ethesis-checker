@@ -379,8 +379,8 @@
 
 
     {% if report.staff_findings %}
-    <h2 class="sec"><span data-th="✍️ จุดที่ระบบตรวจเองไม่ได้ กดแล้วเพิ่มเข้าข้อความสรุปทันที"
-        data-en="✍️ Checks only staff can make — pressing adds the wording to the summary">✍️ จุดที่ระบบตรวจเองไม่ได้ กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
+    <h2 class="sec"><span data-th="✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที"
+        data-en="✍️ Decisions only staff can make — pressing adds the wording to the summary">✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
       <span class="count"><b>{{ report.staff_findings | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for sf in report.staff_findings %}
     <div class="hc sf" data-staff="{{ sf.id }}">
@@ -390,9 +390,14 @@
           <div class="w" data-th="{{ sf.why }}" data-en="{{ sf.why_en }}">{{ sf.why }}</div>
         </div>
         <div class="btns">
-          <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ถูกต้อง" data-en="✓ Correct">✓ ถูกต้อง</button>
-          <button type="button" class="pf fail" onclick="setPF(this,'fail')"
-                  data-th="✗ {{ sf.fail_label }}" data-en="✗ {{ sf.fail_label_en }}">✗ {{ sf.fail_label }}</button>
+          {# ปุ่มมาจากทะเบียนฝั่งเซิร์ฟเวอร์ ไม่ใช่เขียนตายในหน้า — id ของตัวเลือกที่กด
+             คือสิ่งเดียวที่ส่งกลับไป เซิร์ฟเวอร์เป็นคนตัดสินว่าถ้อยคำไหนเข้าสรุป #}
+          {% for ch in sf.choices %}
+          <button type="button" class="pf {{ ch.tone }}" data-choice="{{ ch.id }}"
+                  onclick="setPF(this,'{{ ch.tone }}')"
+                  data-th="{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label }}"
+                  data-en="{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label_en }}">{{ '✓' if ch.tone == 'pass' else '✗' }} {{ ch.label }}</button>
+          {% endfor %}
         </div>
       </div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
@@ -1401,13 +1406,17 @@ var AI_STALE = false;
 var STAFF_LINE_EN = (function(){
   var map = {}, el = document.getElementById('staff-findings-data');
   if (!el) return map;
+  // จับคู่เฉพาะบรรทัดที่มีข้อความ — ถ้านับบรรทัดว่างด้วย การเว้นวรรคระหว่างย่อหน้า
+  // ที่ต่างกันนิดเดียวระหว่างไทยกับอังกฤษจะทำให้คู่เลื่อนกันทั้งก้อน
+  var lines = function(text){
+    return String(text || '').split('\n').map(function(s){ return s.trim(); })
+      .filter(function(s){ return s; });
+  };
   try {
-    (JSON.parse(el.textContent || '[]') || []).forEach(function(f){
-      var th = String(f.text || '').split('\n');
-      var en = String(f.text_en || '').split('\n');
-      th.forEach(function(line, i){
-        var key = line.trim();
-        if (key && en[i]) map[key] = String(en[i]).trim();
+    (JSON.parse(el.textContent || '[]') || []).forEach(function(check){
+      (check.choices || []).forEach(function(choice){
+        var th = lines(choice.text), en = lines(choice.text_en);
+        th.forEach(function(line, i){ if (en[i]) map[line] = en[i]; });
       });
     });
   } catch(e){}
@@ -1468,8 +1477,8 @@ function collectFailed(){
 // จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" — ถ้อยคำชุดที่กำหนดไว้จะถูกเพิ่ม
 // เข้าข้อความสรุปในส่วนของเล่มที่ระบุไว้ในทะเบียน (checker.STAFF_FINDINGS)
 function collectStaff(){
-  return Array.from(document.querySelectorAll('.sf.state-fail[data-staff]'))
-    .map(el => el.getAttribute('data-staff'));
+  return Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
+    .map(el => el.getAttribute('data-choice'));
 }
 // สีส้มที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) ให้ตัดออกจากสรุป
 function collectPassed(){

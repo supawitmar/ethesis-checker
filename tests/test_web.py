@@ -100,11 +100,18 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
 
     def test_pressing_the_button_adds_the_wording(self):
         import checker
-        text = self._summary(failed=[], passed=[], staff=["SIGNATURE_LAYOUT"])
-        wording = checker.STAFF_FINDING_BY_ID["SIGNATURE_LAYOUT"]["text"]
+        text = self._summary(failed=[], passed=[], staff=["SIGNATURE_LAYOUT_WRONG"])
+        wording = checker.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]["text"]
         for line in wording.split(chr(10)):
-            self.assertIn(line.strip(), text)
+            if line.strip():
+                self.assertIn(line.strip(), text)
         self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+
+    def test_the_fee_answer_is_appended_without_being_counted(self):
+        text = self._summary(failed=[], passed=[], staff=["LATE_FEE_NONE"])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertIn("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า", text)
+        self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"))
 
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
