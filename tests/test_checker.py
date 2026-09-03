@@ -2280,6 +2280,188 @@ class AppendixSingularAndPluralAreOneHeading(unittest.TestCase):
                          checker_module._toc_section_kind("APPENDIX 130"))
 
 
+class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
+    """จุดที่ระบบตรวจเองไม่ได้ เจ้าหน้าที่กดปุ่มแล้วถ้อยคำเข้าข้อความสรุปทันที
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569): โครงสร้างหน้าลงนาม (กรอบตาราง ลำดับการวางชื่อ ฟอนต์
+    ช่องที่ต้องถมขาว) ระบบอ่านไม่ได้ ต้องใช้สายตาคน แต่ถ้อยคำที่ส่งให้นักศึกษาเป็นชุด
+    เดียวกันทุกเล่ม จึงต้องมีปุ่มกดแทนการพิมพ์ซ้ำเอง
+
+    ถ้อยคำทั้งไทยและอังกฤษเจ้าหน้าที่เขียนมาเอง ระบบห้ามเรียบเรียงใหม่หรือย่อ
+    """
+
+    LAYOUT = "SIGNATURE_LAYOUT"
+
+    def _clean_report(self):
+        """เล่มที่ระบบไม่พบจุดผิดเลย — กรณีที่ปุ่มนี้สำคัญที่สุด"""
+        return {"verdict": "ผ่าน",
+                "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+
+    def _signature_report(self):
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า ค)",
+                "เลขหน้าของหน้านี้ไม่ถูกต้อง", 'ต้องเป็นเลขหน้า "ก"', "",
+                "PAGE.SIGNATURE_LABEL")
+        return {"verdict": "ไม่ผ่าน", "issues_by_zone": rep.zones}
+
+    def test_the_registry_is_not_empty(self):
+        self.assertTrue(checker_module.STAFF_FINDINGS)
+        self.assertIn(self.LAYOUT, checker_module.STAFF_FINDING_BY_ID)
+
+    def test_nothing_is_added_until_staff_presses(self):
+        text = checker_module.plain_summary(self._clean_report())
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertNotIn("ปรับโครงสร้างของหน้า", text)
+
+    def test_the_wording_reaches_the_summary_word_for_word(self):
+        """ถ้อยคำของเจ้าหน้าที่ต้องไปถึงนักศึกษาครบทุกคำ ไม่ถูกย่อหรือเรียบเรียงใหม่"""
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.LAYOUT])
+        for line in checker_module.STAFF_FINDING_BY_ID[self.LAYOUT]["text"].split(NEWLINE):
+            self.assertIn(line.strip(), text)
+
+    def test_it_lands_in_the_signature_group(self):
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.LAYOUT])
+        lines = text.split(NEWLINE)
+        self.assertIn("หน้าลงนาม", lines)
+        head = lines.index("หน้าลงนาม")
+        self.assertTrue(lines[head + 1].startswith("1. ในหน้าลงนาม"), lines[head + 1])
+
+    def test_it_is_counted_as_one_more_point_to_fix(self):
+        report = self._signature_report()
+        self.assertIn("ทั้งหมด 1 จุด", checker_module.plain_summary(report))
+        self.assertIn("ทั้งหมด 2 จุด",
+                      checker_module.plain_summary(report, staff=[self.LAYOUT]))
+
+    def test_two_checks_on_the_same_page_do_not_collapse_into_one(self):
+        """ควบคุมเชิงลบของกฎรวมรายการซ้ำ — จุดพวกนี้ไม่มี "ค่าที่ต้องแก้" ให้เทียบ
+
+        เจ้าหน้าที่จะทยอยเพิ่มจุดแบบนี้อีก ("1. โครงสร้างหน้าลงนาม" คือข้อแรก) พอมี
+        สองจุดที่อยู่ส่วนเดียวกันของเล่ม ทั้งคู่จะได้กุญแจ ("หน้าลงนาม", "") เท่ากัน
+        แล้วถูกยุบเหลือจุดเดียว ถ้ากุญแจไม่นับถ้อยคำเข้าไปด้วย
+        """
+        second = dict(checker_module.STAFF_FINDING_BY_ID[self.LAYOUT])
+        second["id"] = "SIGNATURE_FONT"
+        second["text"] = "ในหน้าลงนาม ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ"
+        second["text_en"] = "On the signature page, use the font set in the manual."
+        registry = list(checker_module.STAFF_FINDINGS) + [second]
+        with mock.patch.object(checker_module, "STAFF_FINDINGS", registry),                 mock.patch.object(checker_module, "STAFF_FINDING_BY_ID",
+                                  {f["id"]: f for f in registry}):
+            text = checker_module.plain_summary(self._clean_report(),
+                                                staff=[self.LAYOUT, "SIGNATURE_FONT"])
+        self.assertIn("ทั้งหมด 2 จุด", text)
+        self.assertIn("ปรับโครงสร้างของหน้า", text)
+        self.assertIn("ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ", text)
+
+    def test_an_unknown_button_id_is_ignored(self):
+        """ค่าที่ส่งมาจากหน้าเว็บเชื่อไม่ได้ — id ที่ไม่มีในทะเบียนต้องไม่ทำให้พัง"""
+        text = checker_module.plain_summary(self._clean_report(),
+                                            staff=["NOT_A_REAL_CHECK", ""])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+
+    def test_the_result_line_stops_saying_passed(self):
+        """ควบคุมเชิงลบ: ถ้าไม่แก้บรรทัดผลตรวจ ข้อความจะขัดกันเองต่อหน้านักศึกษา
+
+        "ผลการตรวจ: ผ่าน" แล้วบรรทัดถัดมา "กรุณาแก้ไขทั้งหมด 1 จุด"
+        """
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.LAYOUT])
+        self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+
+    def test_a_passing_book_with_nothing_added_still_says_passed(self):
+        self.assertTrue(checker_module.plain_summary(self._clean_report())
+                        .startswith("ผลการตรวจ: ผ่าน"))
+
+    def test_every_entry_carries_both_languages_line_for_line(self):
+        """หน้ารายงานแปลถ้อยคำนี้ด้วยการเทียบ "ทั้งบรรทัด" ไทยกับอังกฤษ
+
+        ถ้าจำนวนบรรทัดไม่เท่ากัน บรรทัดที่เกินจะไม่มีคำแปล แล้วตกไปให้ TR แทนที่
+        แบบเศษคำ ซึ่งให้ผลปนกันครึ่งไทยครึ่งอังกฤษ (วัดแล้วได้ "ในApproval pages
+        (page i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า ...")
+        """
+        for finding in checker_module.STAFF_FINDINGS:
+            for key in ("id", "item", "item_en", "why", "why_en", "fail_label",
+                        "fail_label_en", "section", "rule_id", "text", "text_en"):
+                self.assertTrue(finding.get(key), (finding.get("id"), key))
+            th = [ln for ln in finding["text"].split(NEWLINE) if ln.strip()]
+            en = [ln for ln in finding["text_en"].split(NEWLINE) if ln.strip()]
+            self.assertEqual(len(th), len(en), finding["id"])
+
+    def test_every_entry_is_filed_under_a_real_summary_group(self):
+        for finding in checker_module.STAFF_FINDINGS:
+            self.assertIn(finding["section"], checker_module.SUMMARY_SECTION_ORDER,
+                          finding["id"])
+            self.assertEqual(
+                checker_module.summary_section(checker_module.staff_issue(finding)),
+                finding["section"], finding["id"])
+
+    def test_every_entry_has_its_own_rule_in_the_catalogue(self):
+        import ethesis_rules
+        for finding in checker_module.STAFF_FINDINGS:
+            self.assertIn(finding["rule_id"], ethesis_rules.RULE_CATALOG,
+                          finding["id"])
+
+    def test_the_report_carries_the_registry_to_the_page(self):
+        rep = Report()
+        result = checker_module.check_result(rep)
+        self.assertEqual(result["staff_findings"], list(checker_module.STAFF_FINDINGS))
+
+
+class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
+    """หน้ารายงานต้องมีปุ่ม และมีกล่องสรุปให้ถ้อยคำลงเสมอ
+
+    เล่มที่ระบบไม่พบจุดผิดเลยเป็นกรณีที่พลาดง่ายที่สุด: เดิมกล่องสรุปทั้งกล่องถูกสร้าง
+    เฉพาะเมื่อมีข้อผิด เจ้าหน้าที่กดปุ่มแล้วถ้อยคำจึงไม่มีที่ไป
+    """
+
+    def _render(self, report):
+        import jinja2
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(Path(checker_module.__file__).parent
+                                               / "templates")),
+            autoescape=True)
+        return env.get_template("report.html").render(
+            report=report, zone_label={"RED": ("ไม่ผ่าน", "x"),
+                                       "ORANGE": ("รอยืนยัน", "!"),
+                                       "YELLOW": ("ข้อสังเกต", "i")},
+            job_id="test", pdf_name="book.pdf", student={})
+
+    def _clean_result(self):
+        return checker_module.check_result(Report())
+
+    def test_a_clean_book_still_gets_the_buttons(self):
+        html = self._render(self._clean_result())
+        for finding in checker_module.STAFF_FINDINGS:
+            self.assertIn(f'data-staff="{finding["id"]}"', html)
+            self.assertIn(finding["fail_label"], html)
+            self.assertIn(finding["fail_label_en"], html)
+
+    def test_a_clean_book_still_gets_a_copy_box(self):
+        html = self._render(self._clean_result())
+        self.assertIn('class="copy-text"', html)
+        self.assertIn("ผลการตรวจ:", html)
+
+    def test_the_english_wording_travels_with_the_page(self):
+        """คำแปลต้องมาจากทะเบียนเดียวกับฝั่งเซิร์ฟเวอร์ ไม่ใช่สำเนาที่หน้าเว็บเก็บเอง"""
+        html = self._render(self._clean_result())
+        self.assertIn('id="staff-findings-data"', html)
+        self.assertIn("STAFF_LINE_EN[", html)
+
+    def test_the_button_updates_the_summary(self):
+        html = self._render(self._clean_result())
+        self.assertIn("function collectStaff()", html)
+        self.assertIn("staff: collectStaff()", html)
+        self.assertIn("card.classList.contains('sf')", html)
+
+    def test_the_copy_box_is_never_wiped_blank_by_the_script(self):
+        """ควบคุมเชิงลบของกล่องคัดลอกว่าง — เคยเจอจริงจากภาพหน้าจอของเจ้าหน้าที่
+
+        ถ้าอ่านบล็อก JSON ไม่ได้ (โปรแกรมเปิดไฟล์ที่บันทึกไว้บางตัวตัดทิ้ง)
+        renderSummary จะเขียนทับข้อความที่เซิร์ฟเวอร์ใส่มาด้วยค่าว่าง
+        """
+        html = self._render(self._clean_result())
+        self.assertIn("if (text) ta.value = text;", html)
+        self.assertIn("const fallback = box ? (box.value || '').trim() : '';", html)
+
+
 class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
     """ทุกทางออกของ run_check ต้องเปิดหน้ารายงานได้จริง
 

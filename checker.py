@@ -2306,7 +2306,86 @@ def summary_section(issue):
     return "เนื้อหา (บท)" if position and position[0] == _PAGE_BUCKET_BODY else "อื่น ๆ"
 
 
-def issues_to_fix(report, failed=None, passed=None):
+# ---------- จุดที่ต้องใช้สายตาเจ้าหน้าที่ แล้วกดเพิ่มเข้าข้อความสรุปเอง ----------
+# ระบบอ่าน "โครงสร้าง" ของหน้าลงนามไม่ได้ — ตำแหน่งกรอบตาราง ลำดับที่ชื่อวางลงในช่อง
+# สีตัวอักษรของช่องที่ต้องถมขาว และฟอนต์ ล้วนเป็นเรื่องที่ต้องเอาสายตาเทียบกับ template
+# แต่ "ถ้อยคำที่ส่งให้นักศึกษา" เป็นชุดเดียวกันทุกเล่ม เจ้าหน้าที่จึงต้องพิมพ์ซ้ำเองทุกครั้ง
+# กติกาปฏิบัติงาน (ก.ย. 2569) จึงกำหนดให้มีปุ่มกด แล้วถ้อยคำชุดนี้เข้าข้อความสรุปทันที
+#
+# ถ้อยคำทั้งไทยและอังกฤษเจ้าหน้าที่เขียนมาเอง ระบบห้ามเรียบเรียงใหม่หรือย่อ (เหมือนกฎ
+# FORM.BOOK_LANGUAGE) และเก็บคู่กันไว้ตรงนี้ที่เดียว หน้ารายงานรับไปทั้งก้อนแล้วใช้
+# "เทียบทั้งบรรทัด" ตอนสลับเป็นอังกฤษ คำแปลจึงหลุดจากต้นฉบับไม่ได้ และไม่ต้องพึ่ง TR
+# ซึ่งเป็นการแทนที่เศษคำ (ถ้อยคำยาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่)
+STAFF_FINDINGS = [
+    {
+        "id": "SIGNATURE_LAYOUT",
+        "item": "โครงสร้างหน้าลงนาม",
+        "item_en": "Signature page layout",
+        "why": "ระบบตรวจโครงสร้างของหน้านี้ไม่ได้ กรุณาเทียบกับ template และคู่มือ "
+               "ทั้งลำดับที่ชื่อกรรมการวางลงในช่อง กรอบตาราง ฟอนต์ "
+               "และช่องที่เหลือซึ่งต้องถมด้วยตัวอักษรสีขาว",
+        "why_en": "The system cannot check this page's layout. Compare it with the "
+                  "template and the manual: the order the committee names are placed "
+                  "in the table, the frames, the font, and the leftover slots that "
+                  "must be filled with white text.",
+        "fail_label": "โครงสร้างหน้าลงนามผิด",
+        "fail_label_en": "Layout is wrong",
+        # ตำแหน่งนี้ใช้จัดกลุ่มในข้อความสรุปเท่านั้น (summary_section หากลุ่มจากคำนี้)
+        # ตัวถ้อยคำบอกตำแหน่งไว้ในประโยคแรกอยู่แล้ว จึงไม่พิมพ์บรรทัดตำแหน่งซ้ำ
+        "section": "หน้าลงนาม",
+        "rule_id": "FRONT.SIGNATURE_LAYOUT",
+        "text": ("ในหน้าลงนาม (หน้า i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า "
+                 "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
+                 "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
+                 "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
+                 "ไม่ต้องเลื่อนหรือปรับกรอบ "
+                 "สำหรับส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่างให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
+                 "และต้องใช้ font และ template ที่กำหนดด้วย "
+                 "ซึ่งนักศึกษาจะต้องดำเนินการจัดทำรูปเล่มตามโครงสร้างที่กำหนด "
+                 "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
+                 "(จัดตามลูกศรสีเหลืองในคู่มือ)"
+                 "\n"
+                 "* ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
+                 "จะใส่รายชื่อได้ฝั่งละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
+                 "ให้ใส่สีขาวไว้ *"),
+        "text_en": ("Regarding the signature page (Pages i-ii), please restructure "
+                    "the page and realign each committee list to strictly follow "
+                    "the top-to-bottom sequence approved in the official document "
+                    "without shifting or modifying the frames. Students must format "
+                    "the file using the designated font and template, following the "
+                    "exact ordering sequence indicated by the arrows in the "
+                    "formatting manual."
+                    "\n"
+                    "Additionally, the template frames must be adjusted to match "
+                    "the default settings, which accommodate up to 6 names per "
+                    "side; any remaining blank slots must be changed to white font "
+                    "color"),
+    },
+]
+STAFF_FINDING_BY_ID = {item["id"]: item for item in STAFF_FINDINGS}
+
+
+def staff_issue(finding):
+    """แปลงจุดที่เจ้าหน้าที่กดเพิ่ม ให้อยู่ในรูปเดียวกับข้ออื่นในข้อความสรุป
+
+    summary_text = ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า ให้พิมพ์ตรงตัว ไม่ผ่านการ
+    ประกอบประโยคแบบ "ตำแหน่ง / ที่พบ / ต้องแก้เป็น" เพราะถ้อยคำชุดนี้บอกตำแหน่งไว้
+    ในประโยคแรกอยู่แล้ว และเป็นคำสั่งที่เจ้าหน้าที่เขียนมาเอง
+    """
+    return {
+        "part": "front_matter",
+        "location": finding["section"],
+        "found": "",
+        "expected": "",
+        "fix": "",
+        "system_note": False,
+        "summary_text": finding["text"],
+        "staff_finding": finding["id"],
+        **rule_reference(finding["rule_id"]),
+    }
+
+
+def issues_to_fix(report, failed=None, passed=None, staff=None):
     """รายการที่ต้องแก้ในสรุป
 
     - สีแดง: เข้าสรุปเสมอ
@@ -2319,10 +2398,18 @@ def issues_to_fix(report, failed=None, passed=None):
     นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย การใส่ไว้ในใบสั่งแก้ทำให้นักศึกษาสับสน
 
     failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
+    staff เป็นชุด id ของ STAFF_FINDINGS ที่เจ้าหน้าที่กด "ผิด" เอง (เช่น
+    {"SIGNATURE_LAYOUT"}) — จุดพวกนี้ระบบตรวจเองไม่ได้ จึงไม่มีอยู่ใน issues_by_zone
     """
     failed = set(failed or ())
     passed = set(passed or ())
     items = list(report["issues_by_zone"].get("RED") or [])
+    # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
+    # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
+    for key in (staff or ()):
+        finding = STAFF_FINDING_BY_ID.get(str(key))
+        if finding:
+            items.append(staff_issue(finding))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" not in passed:
             items.append(issue)
@@ -2398,6 +2485,12 @@ def _summary_sentence(issue, skip_location=False):
     การแทนที่แบบเศษคำซึ่งให้ผลเพี้ยน (เคยได้ "page after page 93 Change to:Page 94")
     พอแยกบรรทัด แต่ละบรรทัดกลายเป็นข้อความเดี่ยวที่มีกฎเต็มประโยครองรับอยู่แล้ว
     """
+    # ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า (จุดที่กดเพิ่มเอง) พิมพ์ตรงตัวทุกคำ
+    # ห้ามประกอบใหม่หรือย่อ และย่อหน้าบรรทัดต่อ ๆ ไปให้ตรงกับข้ออื่นในสรุป
+    dictated = issue.get("summary_text")
+    if dictated:
+        return f"\n{SUMMARY_INDENT}".join(
+            line.strip() for line in dictated.split("\n") if line.strip())
     lines = [] if skip_location else [_prose_location(issue.get("location"))]
     found = _prose_found(issue.get("found"))
     if found:
@@ -2423,7 +2516,11 @@ def _dedupe_issues(items):
     kept = {}
     order = []
     for issue in items:
-        value = _corrected_value(issue) or _prose_found(issue.get("found"))
+        # จุดที่เจ้าหน้าที่กดเพิ่มไม่มีทั้ง "ค่าที่ต้องแก้" และ "สิ่งที่พบ" ถ้าไม่ใช้ถ้อยคำ
+        # เป็นกุญแจ ทุกจุดที่อยู่หน้าเดียวกันจะกลายเป็นกุญแจ ("หน้าลงนาม", "") เหมือนกัน
+        # แล้วถูกยุบเหลือจุดเดียว
+        value = (issue.get("summary_text") or _corrected_value(issue)
+                 or _prose_found(issue.get("found")))
         key = (summary_tidy(issue.get("location")), value)
         if key not in kept:
             kept[key] = issue
@@ -2434,14 +2531,20 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
-def plain_summary(report, failed=None, passed=None):
+def plain_summary(report, failed=None, passed=None, staff=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
     ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
-    items = _dedupe_issues(issues_to_fix(report, failed, passed))
-    lines = [f"ผลการตรวจ: {report.get('verdict', '')}"]
+    items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    # ผลตรวจของระบบเป็น "ผ่าน" ได้ทั้งที่มีจุดต้องแก้ เมื่อจุดนั้นมาจากคำตัดสินของ
+    # เจ้าหน้าที่ (กดไม่ผ่านข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจเองไม่ได้) ข้อความที่
+    # ส่งให้นักศึกษาจะขัดกันเองทันที — "ผลการตรวจ: ผ่าน" แล้วตามด้วย "กรุณาแก้ไข 1 จุด"
+    verdict = report.get("verdict", "")
+    if items and verdict == "ผ่าน":
+        verdict = "ไม่ผ่าน"
+    lines = [f"ผลการตรวจ: {verdict}"]
     if not items:
         lines.append("\nไม่พบจุดที่ต้องแก้ไข")
         return "\n".join(lines).strip()
@@ -3527,6 +3630,9 @@ def check_result(rep, context=None, not_checked=NOT_CHECKED):
         "verification": rep.verification,
         # หน้ารายงานจัดกลุ่มการ์ดตามลำดับนี้ (Jinja groupby เรียงตามตัวอักษร ใช้ไม่ได้)
         "section_order": SUMMARY_SECTION_ORDER,
+        # ส่งไปทั้งก้อนเพื่อให้หน้ารายงานสร้างปุ่มเอง และใช้ถ้อยคำอังกฤษชุดเดียวกัน
+        # ตอนสลับภาษา — ไม่ใช่ให้หน้าเว็บเก็บถ้อยคำของตัวเองแล้วหลุดจากฝั่งเซิร์ฟเวอร์
+        "staff_findings": list(STAFF_FINDINGS),
     }
     result["plain_summary"] = plain_summary(result)
     return result

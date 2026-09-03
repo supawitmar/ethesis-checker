@@ -98,6 +98,9 @@
         padding:7px 16px; border-radius:8px; cursor:pointer; font-weight:600; }
   .pf.pass.on { background:var(--green-bg); border-color:var(--green); color:var(--green); }
   .pf.fail.on { background:var(--red-bg); border-color:var(--red); color:var(--red); }
+  /* จุดที่เจ้าหน้าที่กดแล้วมีผลกับข้อความที่ส่งให้นักศึกษา — ขีดข้างซ้ายให้ต่างจาก
+     รายการตรวจเองที่กดไว้เพื่อเป็นหลักฐานเฉย ๆ */
+  .hc.sf { border-left:4px solid #9b59b6; }
   .hc.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
   .hc.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
   .issue-decide { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
@@ -168,6 +171,9 @@
                padding:12px 16px; font:0.82rem/1.5 ui-monospace,Consolas,monospace; resize:vertical;
                min-height:120px; background:#fbfdff; color:#22303f; white-space:pre; }
   .copy-text.plain { font:0.88rem/1.7 'Segoe UI','Sarabun',Tahoma,sans-serif; white-space:pre-wrap; }
+  .copy-error { margin:8px 14px 12px; padding:8px 12px; border-radius:8px;
+                background:var(--red-bg); border:1px solid #f0ccc7; color:#8a2f24;
+                font-size:.85rem; line-height:1.6; }
   .copy-modes { display:flex; gap:6px; padding:10px 16px 0; border-top:1px solid #dbe4ee; }
   .copy-modes .mode { border:1px solid #cfd8e3; background:#fff; color:#5b6b7d; cursor:pointer;
                border-radius:99px; padding:4px 14px; font-size:.78rem; font-weight:700; }
@@ -233,7 +239,15 @@
   </div>
 
   <div class="body">
-    {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW %}
+    {# ถ้อยคำของจุดที่เจ้าหน้าที่กดเพิ่มเอง ทั้งไทยและอังกฤษ มาจากทะเบียนชุดเดียว
+       กับที่ฝั่งเซิร์ฟเวอร์ใช้ประกอบข้อความสรุป (checker.STAFF_FINDINGS)
+       อยู่นอกเงื่อนไขข้างล่าง เพราะต้องใช้แปลแม้ในเล่มที่ระบบไม่พบจุดผิดเลย #}
+    {% if report.staff_findings %}
+    <script id="staff-findings-data" type="application/json">{{ report.staff_findings | tojson }}</script>
+    {% endif %}
+    {# เล่มที่ระบบไม่พบจุดผิดเลยก็ต้องมีกล่องสรุป ไม่งั้นเจ้าหน้าที่กดปุ่ม "ผิด" แล้ว
+       ถ้อยคำไม่มีที่ไป (กล่องทั้งกล่องไม่ถูกสร้าง) #}
+    {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW or report.staff_findings %}
     <script id="plain-summary-data" type="application/json">{{ report.plain_summary | tojson }}</script>
     {% if report.student_summary %}
     <script id="ai-summary-data" type="application/json">{{ report.student_summary | tojson }}</script>
@@ -263,6 +277,10 @@
          เจ้าหน้าที่จะได้กล่องคัดลอกว่างเปล่าโดยไม่มีอะไรบอกว่าพัง
          JS เขียนทับตอนโหลดอยู่แล้ว (renderSummary) การสลับ EN/AI จึงทำงานเหมือนเดิม #}
       <textarea class="copy-text" readonly>{{ report.plain_summary }}</textarea>
+      {# กดปุ่มแล้วข้อความสรุปอัปเดตไม่สำเร็จ ต้องมีอะไรบอกเสมอ — เดิมความผิดพลาด
+         ตรงนี้ถูกกลืนเงียบ ๆ (เซสชันหมดอายุ เน็ตหลุด เซิร์ฟเวอร์เก่ายังไม่รีสตาร์ท)
+         เจ้าหน้าที่จะเห็นแค่ "กดแล้วไม่มีอะไรเกิดขึ้น" ซึ่งแยกไม่ออกจากระบบพัง #}
+      <div class="copy-error" id="copy-error" hidden></div>
       {% if report.student_summary %}
       <div class="ai-summary-caveat" id="ai-caveat"
            data-th="ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
@@ -359,6 +377,31 @@
     {% endif %}
     {% endfor %}
 
+
+    {% if report.staff_findings %}
+    <h2 class="sec"><span data-th="✍️ จุดที่ระบบตรวจเองไม่ได้ กดแล้วเพิ่มเข้าข้อความสรุปทันที"
+        data-en="✍️ Checks only staff can make — pressing adds the wording to the summary">✍️ จุดที่ระบบตรวจเองไม่ได้ กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
+      <span class="count"><b>{{ report.staff_findings | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
+    {% for sf in report.staff_findings %}
+    <div class="hc sf" data-staff="{{ sf.id }}">
+      <div class="row1">
+        <div style="flex:1; min-width:220px;">
+          <div class="t" data-th="{{ sf.item }}" data-en="{{ sf.item_en }}">{{ sf.item }}</div>
+          <div class="w" data-th="{{ sf.why }}" data-en="{{ sf.why_en }}">{{ sf.why }}</div>
+        </div>
+        <div class="btns">
+          <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ถูกต้อง" data-en="✓ Correct">✓ ถูกต้อง</button>
+          <button type="button" class="pf fail" onclick="setPF(this,'fail')"
+                  data-th="✗ {{ sf.fail_label }}" data-en="✗ {{ sf.fail_label_en }}">✗ {{ sf.fail_label }}</button>
+        </div>
+      </div>
+      <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
+      <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
+        <button type="button" class="save" onclick="saveNote(this)" data-th="บันทึก" data-en="Save">บันทึก</button></div>
+      <div class="note-view"></div>
+    </div>
+    {% endfor %}
+    {% endif %}
 
     {% if report.human_checklist %}
     <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
@@ -1322,9 +1365,16 @@ window.addEventListener('afterprint', function(){
 // ข้อความสรุปสร้างจากฝั่ง server (checker.plain_summary) เพื่อให้ข้อความที่
 // เจ้าหน้าที่คัดลอก กับข้อความที่ส่งให้ AI เรียบเรียง เป็นชุดเดียวกันเสมอ
 function buildSummaryText(){
+  // ข้อความที่เซิร์ฟเวอร์ใส่ไว้ในกล่องแล้วคือตัวสำรอง — ถ้าอ่าน JSON ไม่ได้ (บาง
+  // โปรแกรมที่เปิดไฟล์ที่บันทึกไว้ตัดบล็อก <script type="application/json"> ทิ้ง)
+  // ต้องคงข้อความเดิมไว้ ห้ามเขียนทับด้วยค่าว่าง เพราะเจ้าหน้าที่จะได้กล่องเปล่า
+  // โดยไม่มีอะไรบอกว่าพัง
+  const box = document.querySelector('.copy-text');
+  const fallback = box ? (box.value || '').trim() : '';
   const el = document.getElementById('plain-summary-data');
-  if (!el) return '';
-  try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
+  if (!el) return fallback;
+  try { return (JSON.parse(el.textContent || '""') || '').trim() || fallback; }
+  catch(e){ return fallback; }
 }
 // สรุปมี 2 แบบ: AI เรียบเรียงให้อ่านง่าย กับข้อความตรงตัวจากระบบ
 // ถ้า AI ไม่ทำงาน (ไม่ได้ตั้งคีย์/ล้มเหลว) จะเหลือแบบตรงตัวอย่างเดียวโดยอัตโนมัติ
@@ -1345,10 +1395,29 @@ var AI_STALE = false;
 // ถ้าโยนทั้งก้อนเข้า trEN จะไม่มีกฎไหนตรงทั้งก้อน แล้วตกไปแทนที่แบบเศษคำ ซึ่งเพี้ยน
 // (เคยได้ "page after page 93 Change to:Page 94" แทนประโยคที่ถูกต้อง)
 // เลขข้อ ("3. ") กับย่อหน้าหน้าบรรทัดต้องถอดออกก่อนเทียบ แล้วใส่กลับหลังแปล
+// ถ้อยคำของจุดที่เจ้าหน้าที่กดเพิ่มเอง เจ้าหน้าที่เขียนมาทั้งไทยและอังกฤษ จึงเทียบ
+// "ทั้งบรรทัด" จากทะเบียนชุดเดียวกับฝั่งเซิร์ฟเวอร์ ไม่ส่งเข้า TR เพราะ TR แทนที่แบบ
+// เศษคำ ย่อหน้ายาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่ และคำแปลจะหลุดจากต้นฉบับได้
+var STAFF_LINE_EN = (function(){
+  var map = {}, el = document.getElementById('staff-findings-data');
+  if (!el) return map;
+  try {
+    (JSON.parse(el.textContent || '[]') || []).forEach(function(f){
+      var th = String(f.text || '').split('\n');
+      var en = String(f.text_en || '').split('\n');
+      th.forEach(function(line, i){
+        var key = line.trim();
+        if (key && en[i]) map[key] = String(en[i]).trim();
+      });
+    });
+  } catch(e){}
+  return map;
+})();
 function trSummary(text){
   return String(text == null ? '' : text).split('\n').map(function(line){
     var m = line.match(/^(\s*(?:\d+\.\s*)?)([\s\S]*)$/);
-    return m[2] ? m[1] + trEN(m[2]) : line;
+    if (!m[2]) return line;
+    return m[1] + (STAFF_LINE_EN[m[2].trim()] || trEN(m[2]));
   }).join('\n');
 }
 function currentSummaryText(){
@@ -1360,7 +1429,10 @@ function currentSummaryText(){
 function renderSummary(){
   const ta = document.querySelector('.copy-text');
   if (!ta) return;
-  ta.value = currentSummaryText();
+  // ข้อความสรุปว่างเปล่าไม่ใช่ผลลัพธ์ที่ถูกต้องเลยสักกรณี (อย่างน้อยต้องมีบรรทัด
+  // "ผลการตรวจ: ...") ถ้าได้ค่าว่างแปลว่าอ่านข้อมูลไม่ได้ ให้คงของเดิมไว้
+  const text = currentSummaryText();
+  if (text) ta.value = text;
   ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
   const caveat = document.getElementById('ai-caveat');
   const showAi = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE);
@@ -1393,12 +1465,37 @@ function collectFailed(){
     .map(el => el.getAttribute('data-zone') + ':' + el.getAttribute('data-idx'))
     .filter(k => k.indexOf('RED:') !== 0);   // สีแดงอยู่ในสรุปอยู่แล้ว
 }
+// จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" — ถ้อยคำชุดที่กำหนดไว้จะถูกเพิ่ม
+// เข้าข้อความสรุปในส่วนของเล่มที่ระบุไว้ในทะเบียน (checker.STAFF_FINDINGS)
+function collectStaff(){
+  return Array.from(document.querySelectorAll('.sf.state-fail[data-staff]'))
+    .map(el => el.getAttribute('data-staff'));
+}
 // สีส้มที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) ให้ตัดออกจากสรุป
 function collectPassed(){
   return Array.from(document.querySelectorAll('.issue.state-pass[data-zone="ORANGE"]'))
     .map(el => 'ORANGE:' + el.getAttribute('data-idx'));
 }
 var _summaryTimer = null;
+// ข้อความเตือนใต้กล่องคัดลอก ใช้กับความผิดพลาดของการอัปเดตอัตโนมัติ (กดผ่าน/ไม่ผ่าน)
+// แถบ ai-stale ใช้ไม่ได้ เพราะมันถูกสร้างเฉพาะเล่มที่มีข้อความจาก AI
+function showCopyError(message){
+  const box = document.getElementById('copy-error');
+  if (!box) return;
+  box.textContent = message || '';
+  box.hidden = !message;
+}
+const COPY_ERROR = {
+  login: {th: 'เซสชันหมดอายุ ข้อความสรุปจึงยังไม่รวมรายการที่เพิ่งกด '
+              + 'กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดปุ่มนั้นซ้ำ (ผลตรวจในหน้านี้ยังอยู่ครบ)',
+          en: 'Your session expired, so the summary does not include what you just '
+              + 'pressed. Log in again in another tab, then press that button once '
+              + 'more. Nothing on this page is lost.'},
+  other: {th: 'อัปเดตข้อความสรุปไม่สำเร็จ ข้อความด้านบนจึงยังไม่รวมรายการที่เพิ่งกด '
+              + 'กรุณากดปุ่มนั้นซ้ำอีกครั้ง',
+          en: 'Could not update the summary, so the text above does not include what '
+              + 'you just pressed. Please press that button again.'}
+};
 function setSummaryBusy(on){
   const box = document.querySelector('.copybox .copy-btn');
   if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
@@ -1413,7 +1510,8 @@ function refreshSummary(wantAi){
   return fetch('/summary/' + job, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({failed: collectFailed(), passed: collectPassed(), ai: !!wantAi}),
+    body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
+                          staff: collectStaff(), ai: !!wantAi}),
   }).then(function(r){
       // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
       if (r.status === 401) return Promise.reject(new Error('login'));
@@ -1427,6 +1525,7 @@ function refreshSummary(wantAi){
         else if (data.ai_busy) throw new Error('busy');
         else throw new Error('empty');
       }
+      showCopyError('');
       renderSummary();
     })
     .finally(function(){ setSummaryBusy(false); });
@@ -1458,7 +1557,14 @@ function scheduleSummaryRefresh(){
   AI_STALE = true;                 // ผลพิจารณาเปลี่ยน ข้อความ AI เดิมยังไม่รวมรายการใหม่
   renderSummary();                 // สลับไปโชว์ข้อความตรงตัวทันที พร้อมปุ่มเรียบเรียงใหม่
   clearTimeout(_summaryTimer);
-  _summaryTimer = setTimeout(function(){ refreshSummary(false).catch(function(){}); }, 600);
+  _summaryTimer = setTimeout(function(){
+    refreshSummary(false).catch(function(err){
+      // ห้ามกลืนเงียบ — ผลของการกดปุ่มอยู่ในข้อความสรุปเท่านั้น ถ้าอัปเดตไม่สำเร็จ
+      // แล้วไม่บอก เจ้าหน้าที่จะคัดลอกข้อความที่ตกรายการไปส่งนักศึกษา
+      var kind = (err && err.message === 'login') ? 'login' : 'other';
+      showCopyError(COPY_ERROR[kind][LANG === 'en' ? 'en' : 'th']);
+    });
+  }, 600);
 }
 
 function copySummary(ev, btn){
@@ -1487,8 +1593,10 @@ function setPF(btn, state){
     btn.classList.add('on');
     card.classList.add('state-' + state);
   }
-  // ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป (ส้ม/เหลืองที่ไม่ผ่าน = ต้องแก้)
-  if (card.classList.contains('issue')) scheduleSummaryRefresh();
+  // ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป (ส้ม/เหลืองที่ไม่ผ่าน = ต้องแก้ และจุดที่
+  // ระบบตรวจเองไม่ได้ซึ่งเจ้าหน้าที่กด "ผิด")
+  if (card.classList.contains('issue') || card.classList.contains('sf'))
+    scheduleSummaryRefresh();
 }
 function toggleNote(btn){
   const box = btn.parentElement.querySelector('.note-editor');
