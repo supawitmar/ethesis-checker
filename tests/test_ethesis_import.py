@@ -5,6 +5,8 @@ from ethesis_import import (
     _degree_abbr,
     _degree_abbr_th,
     _degree_name,
+    _exam_date,
+    _find,
     _fix_thai_pua,
     _looks_like_a_date,
     _spaced_degree,
@@ -237,6 +239,55 @@ class ExamDateMustLookLikeADate(unittest.TestCase):
         """เลขลอย ๆ ที่ไม่ใช่ปี ต้องไม่ผ่าน ไม่งั้นหัวข้อที่มีเลขจะกลายเป็นวันที่"""
         for value in ("12345", "202", "20269"):
             self.assertFalse(_looks_like_a_date(value), value)
+
+
+class TheExamDateFallsBackToTheExamField(unittest.TestCase):
+    """ช่อง "วันที่สอบผ่าน" ว่าง ให้ถอยไปใช้ช่อง "วันที่สอบ" (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    หน้า eThesis ของเล่มจริงเว้นช่อง "วันที่สอบผ่าน" ไว้ แต่มี "วันที่สอบ" อยู่ในตาราง
+    เดียวกัน เดิมเจ้าหน้าที่ต้องพิมพ์วันที่เองทุกครั้ง
+    """
+
+    LINES = ["วันที่สอบ", "July 7, 2026", "เวลาสอบ", "9:00 a.m.",
+             "วันที่สอบผ่าน", "การกำหนดรูปแบบรูปเล่ม"]
+
+    def test_the_two_labels_do_not_collide(self):
+        """ป้ายหนึ่งเป็นคำขึ้นต้นของอีกป้าย ถ้าชนกันจะหยิบค่าผิดช่อง"""
+        self.assertEqual(_find(self.LINES, "วันที่สอบผ่าน")[0], "การกำหนดรูปแบบรูปเล่ม")
+        self.assertEqual(_find(self.LINES, "วันที่สอบ")[0], "July 7, 2026")
+
+    def test_the_fallback_is_wired_into_the_parser(self):
+        import inspect
+        import ethesis_import
+        source = inspect.getsource(ethesis_import.parse_ethesis_pdf)
+        self.assertIn("_find(lines, 'วันที่สอบ')[0]", source)
+        self.assertIn("exam_value = ''", source)
+
+
+class TheExamDateIsWrittenDayFirst(unittest.TestCase):
+    """ช่อง "วันที่สอบ" เขียนแบบอเมริกัน แต่เล่มพิมพ์วันขึ้นก่อน
+
+    ถ้าไม่เรียงใหม่ ระบบจะฟ้องว่าวันที่ไม่ตรงทั้งที่เป็นวันเดียวกัน
+        พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "07 July 2026"
+        ที่ถูกต้องตามระบบคือ "July 7, 2026"
+    """
+
+    def test_month_first_is_reordered(self):
+        self.assertEqual(_exam_date("July 7, 2026", True), "7 July 2026")
+        self.assertEqual(_exam_date("July 07, 2026", True), "7 July 2026")
+        self.assertEqual(_exam_date("May 5 2026", True), "5 May 2026")
+
+    def test_day_first_is_left_alone(self):
+        self.assertEqual(_exam_date("25 June 2026", True), "25 June 2026")
+        self.assertEqual(_exam_date("5 May 2026", True), "5 May 2026")
+
+    def test_a_thai_date_is_untouched(self):
+        self.assertEqual(_exam_date("11 พฤษภาคม 2569", False), "11 พฤษภาคม 2569")
+
+    def test_something_that_is_not_a_date_is_left_as_is(self):
+        """ฟังก์ชันนี้ไม่ใช่ตัวกรอง หน้าที่กรองเป็นของ _looks_like_a_date"""
+        self.assertEqual(_exam_date("การกำหนดรูปแบบรูปเล่ม", True),
+                         "การกำหนดรูปแบบรูปเล่ม")
 
 
 if __name__ == "__main__":

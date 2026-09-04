@@ -254,8 +254,17 @@ def _looks_like_a_date(value):
     return bool(_DATE_LIKE.search(value or ''))
 
 
+# ช่อง "วันที่สอบ" ในหน้า eThesis เขียนแบบอเมริกัน ("July 7, 2026") ส่วนเล่มพิมพ์
+# แบบวันขึ้นก่อน ("07 July 2026") ถ้าไม่เรียงใหม่ ระบบจะฟ้องว่าวันที่ไม่ตรงทั้งที่เป็น
+# วันเดียวกัน (เลขวันมีศูนย์นำหน้าหรือไม่ ตัวเทียบยอมอยู่แล้ว)
+_MONTH_FIRST_DATE = re.compile(r'^([A-Za-z]+)\s+(\d{1,2})\s*,?\s*(25\d{2}|20\d{2})$')
+
+
 def _exam_date(value, use_english):
     v = re.sub(r'\s+', ' ', value).strip()
+    month_first = _MONTH_FIRST_DATE.match(v)
+    if month_first:
+        v = f'{int(month_first.group(2))} {month_first.group(1)} {month_first.group(3)}'
     m = re.match(r'^(\d{1,2})\s+(\S+)\s+(25\d{2}|20\d{2})$', v)
     if not use_english or not m or m.group(2) not in THAI_MONTHS:
         return v
@@ -482,8 +491,14 @@ def parse_ethesis_pdf(pdf_path):
 
     exam_value = _find(lines, 'วันที่สอบผ่าน')[0]
     use_english = data.get('program_language') != 'thai'
-    if exam_value and not _looks_like_a_date(exam_value):
-        # ช่องนี้ว่างในหน้า eThesis — ที่หยิบมาได้คือหัวข้อถัดไป ไม่ใช่วันที่
+    if not _looks_like_a_date(exam_value):
+        # ช่อง "วันที่สอบผ่าน" ว่างในหน้า eThesis บางใบ ที่หยิบมาได้จึงเป็นหัวข้อถัดไป
+        # เจ้าหน้าที่กำหนด (ก.ย. 2569) ให้ถอยไปใช้ช่อง "วันที่สอบ" แทน ซึ่งอยู่ตารางเดียวกัน
+        # (_find เจอบรรทัด "วันที่สอบ" ก่อน "วันที่สอบผ่าน" อยู่แล้วเพราะอยู่เหนือกว่า
+        #  และกันการชนกันของสองป้ายนี้ไว้แล้วในตัว _find เอง)
+        exam_value = _find(lines, 'วันที่สอบ')[0]
+    if not _looks_like_a_date(exam_value):
+        # อ่านไม่ได้ทั้งสองช่อง ปล่อยว่างให้เจ้าหน้าที่กรอกเอง ดีกว่าเติมค่าที่ไม่ใช่วันที่
         exam_value = ''
     if exam_value:
         data['exam_date'] = _exam_date(exam_value, use_english)
