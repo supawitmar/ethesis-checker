@@ -2385,8 +2385,10 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             "SIGNATURE_LAYOUT_WRONG": [
                 "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด",
                 "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง",
+                # "ฝั่ง ละ 6 รายชื่อ" ถูกแล้ว เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าฝั่งซ้าย
+                # ต้องนับชื่อนักศึกษารวมไปด้วย จึงไม่ใช่จำนวนกรรมการล้วน ๆ
                 "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ",
-                "ให้ใส่สีขาวไว้*",
+                "ให้ใส่สีขาวไว้",
             ],
             "LATE_FEE_NONE": [
                 "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
@@ -2403,6 +2405,20 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertIn("(Pages i-ii )", english)
         self.assertIn("Line Offical Account ID @322wjrbo",
                       checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
+
+    def test_the_signature_wording_is_broken_into_paragraphs(self):
+        """เจ้าหน้าที่สั่งให้แบ่งย่อหน้าและเอาดอกจันออก (ก.ย. 2569)
+
+        ของเดิมเป็นประโยคเดียวยาวเกือบ 300 ตัวอักษรที่มีคำสั่งซ้อนกันหกอย่าง
+        ส่วนดอกจันหัวท้ายตั้งใจให้เป็นตัวหนา แต่ในอีเมลกับ Word ขึ้นเป็นดาวลอย
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        for field in ("text", "text_en"):
+            lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
+            self.assertEqual(len(lines), 3, field)
+            self.assertNotIn("*", choice[field], field)
+            for line in lines:
+                self.assertLess(len(line), 260, line[:60])
 
     def test_the_english_says_whether_this_student_has_a_fine(self):
         """เจ้าหน้าที่อนุมัติให้แก้เฉพาะจุดนี้ (ก.ย. 2569)
