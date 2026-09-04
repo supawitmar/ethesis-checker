@@ -2385,8 +2385,10 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             "SIGNATURE_LAYOUT_WRONG": [
                 "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด",
                 "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง",
+                # "ฝั่ง ละ 6 รายชื่อ" ถูกแล้ว เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าฝั่งซ้าย
+                # ต้องนับชื่อนักศึกษารวมไปด้วย จึงไม่ใช่จำนวนกรรมการล้วน ๆ
                 "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ",
-                "ให้ใส่สีขาวไว้*",
+                "ให้ใส่สีขาวไว้",
             ],
             "LATE_FEE_NONE": [
                 "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
@@ -2400,9 +2402,38 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 self.assertIn(phrase, text, (choice_id, phrase))
         english = checker_module.STAFF_CHOICE_BY_ID[
             "SIGNATURE_LAYOUT_WRONG"][1]["text_en"]
-        self.assertIn("(Pages i-ii )", english)
+        self.assertIn("(Pages i - ii)", english)
         self.assertIn("Line Offical Account ID @322wjrbo",
                       checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
+
+    def test_the_signature_wording_starts_with_its_own_location_line(self):
+        """เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569): บรรทัดตำแหน่ง แล้วสามย่อหน้า
+
+        ของเดิมเป็นประโยคเดียวยาวเกือบ 300 ตัวอักษรที่มีคำสั่งซ้อนกันหกอย่าง และมี
+        ตำแหน่งฝังอยู่กลางประโยคแรก ส่วนดอกจันหัวท้ายตั้งใจให้เป็นตัวหนา แต่ในอีเมล
+        กับ Word ขึ้นเป็นดาวลอย
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        for field in ("text", "text_en"):
+            lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
+            self.assertEqual(len(lines), 4, field)
+            self.assertNotIn("*", choice[field], field)
+            # บรรทัดตำแหน่งต้องสั้น ไม่มีคำสั่งปนมา
+            self.assertLess(len(lines[0]), 60, lines[0])
+            for line in lines[1:]:
+                self.assertLess(len(line), 260, line[:60])
+        self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
+                        choice["text"][:60])
+        self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i - ii)"),
+                        choice["text_en"][:60])
+
+    def test_the_location_line_shows_first_in_the_summary(self):
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.WRONG])
+        lines = text.split(NEWLINE)
+        head = lines.index("หน้าลงนาม")
+        self.assertEqual(lines[head + 1], "1. ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)")
+        self.assertTrue(lines[head + 2].startswith(
+            checker_module.SUMMARY_INDENT + "ปรับโครงสร้างของหน้า"), lines[head + 2])
 
     def test_the_english_says_whether_this_student_has_a_fine(self):
         """เจ้าหน้าที่อนุมัติให้แก้เฉพาะจุดนี้ (ก.ย. 2569)
@@ -2667,98 +2698,6 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         self.assertIn("const fallback = box ? (box.value || '').trim() : '';", html)
 
 
-class TheAiRewriteMustNotTouchTheStaffWording(unittest.TestCase):
-    """โหมด "ภาษาเข้าใจง่าย" เรียบเรียงข้อความสรุปใหม่ทั้งก้อนด้วย AI
-
-    คำสั่งที่ให้ AI คือ "เขียนสั้น กระชับ" และ "แต่ละข้อต้องบอกครบสามอย่างเท่านั้น"
-    ซึ่งจะย่อถ้อยคำที่เจ้าหน้าที่เขียนมาเองทิ้ง รวมถึงข้อความปิดท้ายที่มี LINE ID กับ
-    อีเมลอยู่ข้างใน โหมดนี้เป็นค่าตั้งต้นเมื่อเปิด AI ไว้ เจ้าหน้าที่จึงคัดลอกข้อความที่
-    ถูกย่อไปส่งนักศึกษาได้โดยไม่รู้ตัว
-
-    สั่งใน prompt อย่างเดียวไม่พอ จึงถอดถ้อยคำออกก่อนส่ง แล้วใส่กลับหลังเรียบเรียงเสร็จ
-    """
-
-    def _summary_with_staff(self):
-        rep = Report()
-        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า ค)",
-                "เลขหน้าของหน้านี้ไม่ถูกต้อง", 'ต้องเป็นเลขหน้า "ก"', "",
-                "PAGE.SIGNATURE_LABEL")
-        return checker_module.plain_summary(
-            checker_module.check_result(rep),
-            staff=["SIGNATURE_LAYOUT_WRONG", "LATE_FEE_YES"])
-
-    def test_the_wording_is_taken_out_before_the_ai_sees_it(self):
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        self.assertTrue(kept)
-        for line in kept:
-            self.assertNotIn(line, protected)
-        self.assertIn("[[KEEP-0]]", protected)
-        # ข้อของระบบต้องไม่ถูกแตะ AI ยังเรียบเรียงส่วนนั้นได้ตามเดิม
-        self.assertIn("เลขหน้าของหน้านี้ไม่ถูกต้อง", protected)
-
-    def test_putting_it_back_gives_the_original_word_for_word(self):
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        self.assertEqual(llm_assist._restore(protected, kept), plain)
-
-    def test_a_dropped_marker_throws_the_whole_ai_text_away(self):
-        """ถ้อยคำหายแม้จุดเดียว = เชื่อผลไม่ได้ ให้ตกกลับไปใช้ข้อความตรงตัวจากระบบ"""
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        mangled = protected.replace("[[KEEP-0]]", "ปรับหน้าลงนามให้ถูก")
-        self.assertEqual(llm_assist._restore(mangled, kept), "")
-
-    def test_a_summary_without_staff_wording_is_untouched(self):
-        import llm_assist
-        plain = "ผลการตรวจ: ผ่าน" + NEWLINE + NEWLINE + "ไม่พบจุดที่ต้องแก้ไข"
-        protected, kept = llm_assist._protect(plain)
-        self.assertEqual(protected, plain)
-        self.assertEqual(kept, [])
-        self.assertEqual(llm_assist._restore(plain, kept), plain)
-
-    def test_the_numbering_and_indent_survive(self):
-        """เครื่องหมายต้องแทนที่เฉพาะเนื้อความ เลขข้อกับย่อหน้าคงไว้ให้ AI เห็นโครงเดิม"""
-        import llm_assist
-        protected, _kept = llm_assist._protect(self._summary_with_staff())
-        self.assertIn("2. [[KEEP-0]]", protected)
-        self.assertIn(checker_module.SUMMARY_INDENT + "[[KEEP-1]]", protected)
-
-    def test_the_ai_is_told_about_the_marker(self):
-        import llm_assist
-        self.assertIn("[[KEEP-n]]", llm_assist._SUMMARY_SYSTEM)
-
-    def test_student_summary_protects_and_restores(self):
-        """ทั้งเส้นทาง: ถ้อยคำที่ AI คืนมาต้องเป็นของเจ้าหน้าที่คำต่อคำ"""
-        import llm_assist
-        plain = self._summary_with_staff()
-        seen = {}
-
-        class _Response:
-            content = [type("Block", (), {"type": "text", "text": ""})()]
-
-        def fake_create(**kwargs):
-            seen["sent"] = kwargs["messages"][0]["content"]
-            # AI ที่ประพฤติดี: คงเครื่องหมายไว้ครบ แต่เรียบเรียงส่วนอื่นใหม่
-            body = seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1]
-            _Response.content[0].text = body.replace(
-                "เลขหน้าของหน้านี้ไม่ถูกต้อง", "เลขหน้าหน้านี้ยังไม่ถูก")
-            return _Response()
-
-        client = type("Client", (), {"messages": type("M", (), {"create": staticmethod(fake_create)})()})()
-        with mock.patch.object(llm_assist, "_client", lambda: client):
-            out = llm_assist.student_summary({"plain_summary": plain})
-        self.assertNotIn("[[KEEP-", seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1][:0] or "")
-        self.assertIn("[[KEEP-0]]", seen["sent"])
-        self.assertNotIn("ปรับโครงสร้างของหน้า", seen["sent"])
-        self.assertIn("ปรับโครงสร้างของหน้า", out)
-        self.assertIn("supawit.mar@mahidol.ac.th", out)
-        self.assertIn("เลขหน้าหน้านี้ยังไม่ถูก", out)
-
-
 class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
     """ทุกทางออกของ run_check ต้องเปิดหน้ารายงานได้จริง
 
@@ -2877,14 +2816,25 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     def signals(self, *blocks):
         return checker_module.book_language_signals(self.pages(*blocks), 0, "THESIS")
 
+    def template_signals(self, *blocks):
+        """เฉพาะสามสัญญาณที่มาจากข้อความตายตัวของ template
+
+        คีย์ "script" เป็นตัวสำรองคนละชนิด (สัดส่วนตัวอักษรทั้งไฟล์) ไม่ใช่ส่วนของเล่ม
+        เทสต์ในคลาสนี้พูดถึงข้อความ template เท่านั้น
+        """
+        got = self.signals(*blocks)
+        return {k: got[k] for k in ("cover", "signature", "chapter")}
+
     def test_a_thai_book_is_read_as_thai(self):
         got = self.signals(self.TH_COVER, self.TH_SIG, self.TH_CH)
-        self.assertEqual(got, {"cover": "thai", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(self.template_signals(self.TH_COVER, self.TH_SIG, self.TH_CH),
+                         {"cover": "thai", "signature": "thai", "chapter": "thai"})
         self.assertEqual(checker_module.book_language(got), "thai")
 
     def test_an_english_book_is_read_as_english(self):
         got = self.signals(self.EN_COVER, self.EN_SIG, self.EN_CH)
-        self.assertEqual(got, {"cover": "en", "signature": "en", "chapter": "en"})
+        self.assertEqual(self.template_signals(self.EN_COVER, self.EN_SIG, self.EN_CH),
+                         {"cover": "en", "signature": "en", "chapter": "en"})
         self.assertEqual(checker_module.book_language(got), "en")
 
     def test_two_signals_are_enough(self):
@@ -2903,7 +2853,8 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     def test_signals_that_disagree_decide_nothing(self):
         """ปกอังกฤษ แต่หน้าลงนามกับหัวบทเป็นไทย — ต้องไม่ฟันธงแล้วหยุดตรวจทั้งเล่ม"""
         got = self.signals(self.EN_COVER, self.TH_SIG, self.TH_CH)
-        self.assertEqual(got, {"cover": "en", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(self.template_signals(self.EN_COVER, self.TH_SIG, self.TH_CH),
+                         {"cover": "en", "signature": "thai", "chapter": "thai"})
         self.assertEqual(checker_module.book_language(got), "")
 
     def test_the_unanimity_rule_is_what_stops_it(self):
@@ -2918,6 +2869,76 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
         got = self.signals(self.TH_COVER + NEWLINE + self.EN_COVER.replace("@", NEWLINE),
                            "", "")
         self.assertEqual(got["cover"], "")
+
+
+class TheLastResortIsTheScriptOfTheWholeFile(unittest.TestCase):
+    """เล่มที่ไม่ทำตาม template เลย ก็ยังต้องบอกได้ว่าเป็นภาษาอะไร
+
+    เจ้าหน้าที่ทัก (ก.ย. 2569) ว่าระบบไม่น่าจะอ่านไม่ได้ว่าเล่มไหนเป็นภาษาไหน ถูกต้อง —
+    ไฟล์ที่ดึงข้อความไม่ได้เลยถูกปฏิเสธตั้งแต่ตอนอัปโหลด (main._pdf_readability_issue)
+    ไฟล์ที่เข้ามาถึงตัวตรวจจึงมีข้อความให้อ่านเสมอ ถ้าข้อความตายตัวของ template เงียบ
+    หมดทั้งสามจุด ยังเหลือสัดส่วนตัวอักษรทั้งไฟล์ให้ใช้เป็นตัวสำรอง
+
+    วัดกับเล่มจริง เล่มอังกฤษได้ไทย 0.1% กับ 3.7% (เล่มหลังมีบทคัดย่อไทยเต็ม ๆ)
+    เล่มไทยได้ไทย 96.1% เกณฑ์จึงเว้นช่องว่างตรงกลางไว้กว้างมาก
+    """
+
+    def _thai(self, n=40):
+        return ["ทดสอบเนื้อหาภาษาไทยของเล่มวิทยานิพนธ์ " * n]
+
+    def _english(self, n=40):
+        return ["This is the English body text of the thesis document " * n]
+
+    def test_a_thai_file_reads_as_thai(self):
+        self.assertEqual(checker_module.book_language_by_script(self._thai()), "thai")
+
+    def test_an_english_file_reads_as_english(self):
+        self.assertEqual(checker_module.book_language_by_script(self._english()), "en")
+
+    def test_a_mixed_file_still_decides_nothing(self):
+        """ครึ่งไทยครึ่งอังกฤษ = เดาไม่ได้ ห้ามฟันธง"""
+        mixed = ["ไทยไทยไทยไทยไทย English English English " * 30]
+        self.assertEqual(checker_module.book_language_by_script(mixed), "")
+
+    def test_a_file_with_almost_no_text_decides_nothing(self):
+        self.assertEqual(checker_module.book_language_by_script(["สั้นมาก"]), "")
+        self.assertEqual(checker_module.book_language_by_script([]), "")
+
+    def test_an_english_book_with_a_thai_abstract_is_still_english(self):
+        """เล่มหลักสูตรไทย-อังกฤษมีบทคัดย่อไทยเต็ม ๆ อยู่ในเล่ม ต้องไม่ถูกอ่านเป็นเล่มไทย"""
+        pages = self._english(60) + self._thai(3)
+        self.assertEqual(checker_module.book_language_by_script(pages), "en")
+
+    def test_the_fallback_only_speaks_when_the_template_is_silent(self):
+        """ควบคุมเชิงลบ: ข้อความ template แม่นกว่า ห้ามให้ตัวสำรองมาชี้ขาดทับ"""
+        # อ่านได้แค่ปก — เดิมเงียบ ต้องยังเงียบเหมือนเดิม แม้ตัวสำรองจะชี้ทางเดียวกัน
+        self.assertEqual(checker_module.book_language(
+            {"cover": "thai", "signature": "", "chapter": "", "script": "thai"}), "")
+        # สองตัวตรงกัน ตัวสำรองชี้สวนทาง ต้องเชื่อ template
+        self.assertEqual(checker_module.book_language(
+            {"cover": "thai", "signature": "thai", "chapter": "", "script": "en"}), "thai")
+        # ขัดกันเอง ต้องยังไม่ฟันธง
+        self.assertEqual(checker_module.book_language(
+            {"cover": "en", "signature": "thai", "chapter": "thai", "script": "thai"}), "")
+
+    def test_the_fallback_answers_when_the_template_says_nothing(self):
+        self.assertEqual(checker_module.book_language(
+            {"cover": "", "signature": "", "chapter": "", "script": "thai"}), "thai")
+        self.assertEqual(checker_module.book_language(
+            {"cover": "", "signature": "", "chapter": "", "script": ""}), "")
+
+    def test_the_signals_carry_the_fallback_along(self):
+        got = checker_module.book_language_signals(
+            ["ไม่มีข้อความ template แต่เป็นภาษาไทยล้วน " * 30], 0, "THESIS")
+        self.assertEqual(got["cover"], "")
+        self.assertEqual(got["script"], "thai")
+        self.assertEqual(checker_module.book_language(got), "thai")
+
+    def test_the_fallback_is_not_a_part_of_the_document(self):
+        """ห้ามโผล่ในรายชื่อ "ส่วนที่จัดทำเป็นอีกภาษา" เพราะไม่ใช่ส่วนของเล่ม"""
+        self.assertNotIn("script", checker_module.BOOK_LANGUAGE_PARTS)
+        source = inspect.getsource(checker_module.book_language_rows)
+        self.assertIn('for key in ("cover", "signature", "chapter")', source)
 
 
 class ApprovedBookLanguageComesFromTheProgramme(unittest.TestCase):
@@ -3005,7 +3026,7 @@ class BookLanguageMismatchStopsTheWholeCheck(unittest.TestCase):
     def _gate_source(self):
         source = inspect.getsource(checker_module.run_check)
         start = source.index('"FORM.BOOK_LANGUAGE")')
-        return source[start:source.index("wrong_parts = [", start)]
+        return source[start:source.index("if wrong_parts:", start)]
 
     def test_the_gate_returns_before_any_other_rule_runs(self):
         source = inspect.getsource(checker_module.run_check)
@@ -3032,6 +3053,73 @@ class BookLanguageMismatchStopsTheWholeCheck(unittest.TestCase):
                          "หน้าปก และ หน้าลงนาม")
         for ch in "\u00b7\u2014\u2013\u2192\u2194\u2022\u2264":
             self.assertNotIn(ch, checker_module._join_and(["หน้าปก", "หน้าลงนาม"]))
+
+
+class TheLanguageOfTheDocumentShowsInTheVerificationTable(unittest.TestCase):
+    """ตาราง "ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" ต้องมีหัวข้อภาษาที่เขียนด้วย
+
+    เจ้าหน้าที่ทัก (ก.ย. 2569) ว่าหัวข้อนี้หายไปจากตาราง ทั้งที่ระบบตรวจอยู่แล้ว
+    ถ้าลงเฉพาะตอนผิด เจ้าหน้าที่จะแยกไม่ออกว่า "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ"
+    และต้องเห็น **ภาษาของทั้งสองฝั่ง** ไม่ใช่บอกแค่ว่าตรงหรือไม่ตรง
+    """
+
+    TOPIC = "ภาษาที่เขียน"
+
+    def _rows(self, signals, program_language="thai"):
+        want = checker_module.approved_book_language(
+            {"program_language": program_language})
+        if not want:
+            return []
+        return [{"location": loc, "status": status, "detail": detail}
+                for loc, status, detail
+                in checker_module.book_language_rows(want, dict(signals))]
+
+    def test_run_check_files_the_rows_itself(self):
+        """ต้องถูกเรียกจริงใน run_check ไม่ใช่มีแต่ฟังก์ชันลอย ๆ"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("book_language_rows(want_language, language_signals)", source)
+        self.assertIn('rep.add_verification("ภาษาที่เขียน", where, status, detail)',
+                      source)
+
+    def test_both_sides_of_the_comparison_are_shown(self):
+        """เจ้าหน้าที่สั่งให้เห็นว่าอนุมัติภาษาอะไร และในไฟล์เป็นภาษาอะไร"""
+        rows = self._rows({"cover": "thai", "signature": "thai", "chapter": "thai"})
+        self.assertEqual([r["location"] for r in rows],
+                         ["ข้อมูลอนุมัติ", "ในไฟล์รูปเล่ม"])
+        self.assertEqual([r["detail"] for r in rows], ["ภาษาไทย", "ภาษาไทย"])
+        self.assertEqual([r["status"] for r in rows], ["pass", "pass"])
+
+    def test_a_mismatch_shows_the_two_different_languages(self):
+        rows = self._rows({"cover": "en", "signature": "en", "chapter": "en"})
+        self.assertEqual([r["status"] for r in rows], ["fail", "fail"])
+        self.assertEqual(rows[0]["detail"], "ภาษาไทย")
+        self.assertEqual(rows[1]["detail"], "ภาษาอังกฤษ")
+
+    def test_conflicting_signals_name_the_parts_that_are_wrong(self):
+        """ตัดสินทั้งเล่มไม่ได้ แต่รู้แน่ว่าส่วนไหนคนละภาษา ต้องบอกให้ชัด"""
+        rows = self._rows({"cover": "en", "signature": "thai", "chapter": "thai"})
+        self.assertEqual([r["status"] for r in rows], ["fail", "fail"])
+        self.assertEqual(rows[1]["detail"], "ภาษาอังกฤษ ในส่วน หน้าปก")
+
+    def test_a_file_the_system_cannot_read_is_pending_not_a_pass(self):
+        """อ่านไม่ออกไม่ใช่ผ่าน ถ้านับเป็นผ่านเจ้าหน้าที่จะเชื่อว่าตรวจครบแล้ว"""
+        rows = self._rows({"cover": "", "signature": "", "chapter": ""})
+        self.assertEqual([r["status"] for r in rows], ["pending", "pending"])
+        self.assertEqual(rows[1]["detail"], "ระบบอ่านภาษาจากไฟล์ไม่ได้")
+
+    def test_no_approved_programme_means_no_rows(self):
+        """ไม่มีข้อมูลอนุมัติ = ไม่มีอะไรให้เทียบ ห้ามขึ้นแถวลอย ๆ"""
+        self.assertEqual(self._rows({"cover": "thai", "signature": "thai",
+                                     "chapter": "thai"}, program_language=""), [])
+
+    def test_every_word_the_table_shows_has_an_english_translation(self):
+        """ช่องในตารางแปลด้วย TR (.tr-dyn) ถ้าไม่มีกฎ รายงานอังกฤษจะเหลือคำไทยค้าง"""
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in ("^ภาษาที่เขียน$", "^ข้อมูลอนุมัติ$", "^ในไฟล์รูปเล่ม$",
+                       "^ระบบอ่านภาษาจากไฟล์ไม่ได้$", "^ภาษาไทย$", "^ภาษาอังกฤษ$",
+                       "ในส่วน"):
+            self.assertIn(phrase, report_html, phrase)
 
 
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):

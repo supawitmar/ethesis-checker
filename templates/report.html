@@ -65,22 +65,6 @@
   .issue .expected { font-size:.85rem; color:#4a5560; }
   .issue .expected b { color:var(--navy); }
   .issue .fix { font-size:.8rem; color:#8894a0; margin-top:6px; }
-  .ai-note { font-size:.8rem; color:#3d5a80; background:#eef4fb; border-left:3px solid #6a93c9;
-        border-radius:0 6px 6px 0; padding:6px 10px; margin-top:7px; }
-  .ai-note::before { content:"🤖 "; }
-  .ai-summary { background:#f3f7fd; border:1px solid #d6e3f5; border-radius:12px;
-        padding:16px 20px; font-size:.9rem; color:#2c3e50; white-space:pre-wrap; line-height:1.65; }
-  .ai-summary-caveat { font-size:.75rem; color:#8894a0; margin-top:8px; }
-  /* แถบเตือนว่าเจ้าหน้าที่เพิ่งเปลี่ยนผลพิจารณา ข้อความ AI เดิมจึงยังไม่รวมรายการใหม่
-     ระหว่างนี้กล่องข้างล่างจะแสดง "ตรงตัวจากระบบ" ซึ่งอัปเดตแล้วเสมอ กันคัดลอกของเก่าไปส่ง */
-  .ai-stale { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0 0;
-        background:#fff7e6; border:1px solid #f0d9a8; border-radius:9px;
-        padding:9px 12px; font-size:.8rem; color:#7a5b1a; }
-  .ai-stale.err { background:#fdeeee; border-color:#f0bdbd; color:#9c3232; }
-  .ai-redo { margin-left:auto; border:1px solid var(--navy); background:var(--navy); color:#fff;
-        border-radius:7px; padding:5px 12px; font-size:.8rem; cursor:pointer; font-family:inherit; }
-  .ai-redo:hover { filter:brightness(1.12); }
-  .ai-redo[disabled] { opacity:.55; cursor:progress; }
   .rule-source { font-size:.76rem; color:#617184; margin-top:7px; padding-top:7px;
         border-top:1px dashed rgba(60,80,100,.18); }
   .rule-source b { color:var(--navy); }
@@ -180,15 +164,10 @@
   .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee;
                padding:12px 16px; font:0.82rem/1.5 ui-monospace,Consolas,monospace; resize:vertical;
                min-height:120px; background:#fbfdff; color:#22303f; white-space:pre; }
-  .copy-text.plain { font:0.88rem/1.7 'Segoe UI','Sarabun',Tahoma,sans-serif; white-space:pre-wrap; }
   .copy-print { display:none; }
   .copy-error { margin:8px 14px 12px; padding:8px 12px; border-radius:8px;
                 background:var(--red-bg); border:1px solid #f0ccc7; color:#8a2f24;
                 font-size:.85rem; line-height:1.6; }
-  .copy-modes { display:flex; gap:6px; padding:10px 16px 0; border-top:1px solid #dbe4ee; }
-  .copy-modes .mode { border:1px solid #cfd8e3; background:#fff; color:#5b6b7d; cursor:pointer;
-               border-radius:99px; padding:4px 14px; font-size:.78rem; font-weight:700; }
-  .copy-modes .mode.on { background:var(--navy); border-color:var(--navy); color:#fff; }
 
   .infobox { background:#f0f4fa; border-radius:10px; padding:10px 16px; font-size:.82rem;
              margin-bottom:8px; color:#3d4c5e; }
@@ -264,33 +243,14 @@
        ถ้อยคำไม่มีที่ไป (กล่องทั้งกล่องไม่ถูกสร้าง) #}
     {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW or report.staff_findings %}
     <script id="plain-summary-data" type="application/json">{{ report.plain_summary | tojson }}</script>
-    {% if report.student_summary %}
-    <script id="ai-summary-data" type="application/json">{{ report.student_summary | tojson }}</script>
-    {% endif %}
     <details class="copybox" open data-verdict="{{ report.verdict }}" data-job="{{ job_id }}">
       <summary class="copy-sum">📋 <span data-th="สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)" data-en="Summary of fixes (copyable)">สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)</span>
         <button type="button" class="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
       </summary>
-      {% if report.student_summary %}
-      <div class="copy-modes">
-        <button type="button" class="mode on" data-mode="ai" onclick="setSummaryMode('ai')"
-                data-th="✨ ภาษาเข้าใจง่าย" data-en="✨ Plain language">✨ ภาษาเข้าใจง่าย</button>
-        <button type="button" class="mode" data-mode="raw" onclick="setSummaryMode('raw')"
-                data-th="📋 ตรงตัวจากระบบ" data-en="📋 Exact (system)">📋 ตรงตัวจากระบบ</button>
-      </div>
-      {% endif %}
-      {% if report.student_summary %}
-      <div class="ai-stale" id="ai-stale" hidden>
-        <span id="ai-stale-msg" data-th="ผลพิจารณาของเจ้าหน้าที่เปลี่ยนไป ข้อความด้านล่างจึงแสดงแบบตรงตัวจากระบบไว้ก่อน"
-              data-en="Staff decisions changed — showing the exact system text until AI is re-run.">ผลพิจารณาของเจ้าหน้าที่เปลี่ยนไป ข้อความด้านล่างจึงแสดงแบบตรงตัวจากระบบไว้ก่อน</span>
-        <button type="button" class="ai-redo" onclick="regenerateAi()"
-                data-th="✨ ให้ AI เรียบเรียงใหม่" data-en="✨ Re-run AI">✨ ให้ AI เรียบเรียงใหม่</button>
-      </div>
-      {% endif %}
       {# ใส่ข้อความไว้ตั้งแต่ฝั่งเซิร์ฟเวอร์ ไม่ปล่อยให้กล่องว่างรอ JS เติม —
          ถ้าสคริปต์พังเมื่อไหร่ (เคยเจอมาแล้วตอน TR มีช่องว่างในอาร์เรย์)
          เจ้าหน้าที่จะได้กล่องคัดลอกว่างเปล่าโดยไม่มีอะไรบอกว่าพัง
-         JS เขียนทับตอนโหลดอยู่แล้ว (renderSummary) การสลับ EN/AI จึงทำงานเหมือนเดิม #}
+         JS เขียนทับตอนโหลดอยู่แล้ว (renderSummary) การสลับภาษาจึงทำงานเหมือนเดิม #}
       <textarea class="copy-text" readonly>{{ report.plain_summary }}</textarea>
       {# กดปุ่มแล้วข้อความสรุปอัปเดตไม่สำเร็จ ต้องมีอะไรบอกเสมอ — เดิมความผิดพลาด
          ตรงนี้ถูกกลืนเงียบ ๆ (เซสชันหมดอายุ เน็ตหลุด เซิร์ฟเวอร์เก่ายังไม่รีสตาร์ท)
@@ -300,12 +260,6 @@
          ข้อความสรุปยาวขึ้นมากตั้งแต่มีข้อความปิดท้าย เจ้าหน้าที่ที่บันทึกรายงานเป็น PDF
          จะได้ข้อความไม่ครบ จึงมีสำเนาสำหรับพิมพ์ที่เติมจากฝั่งเซิร์ฟเวอร์ไว้ตั้งแต่แรก #}
       <div class="copy-print" aria-hidden="true">{{ report.plain_summary }}</div>
-      {% if report.student_summary %}
-      <div class="ai-summary-caveat" id="ai-caveat"
-           data-th="ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา"
-           data-en="Drafted by AI from the findings above — please review before sending to the student.">
-        ข้อความนี้ AI เรียบเรียงจากผลตรวจข้างต้น เจ้าหน้าที่ควรอ่านทวนก่อนส่งต่อนักศึกษา</div>
-      {% endif %}
     </details>
     {% endif %}
     {% if report.verification %}
@@ -671,6 +625,16 @@ var TR = [
   [/ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่/g, 'Check that the programme selected on the upload page is correct; if it is, send the document back for the student to produce it again'],
   [/ส่วนอื่นทั้งหมดของเล่ม \(ระบบหยุดตรวจเมื่อภาษาของเล่มไม่ตรงกับที่ได้รับอนุมัติ\)/g, 'Everything else in the document (the check stopped because the document language does not match the approved programme)'],
   [/^(หน้าปก|หน้าลงนาม|หัวบทในเนื้อหา) และ (หน้าปก|หน้าลงนาม|หัวบทในเนื้อหา)$/g, '$1 and $2'],
+  // ชื่อตำแหน่งในตารางผลเทียบข้อมูลอนุมัติ ใช้เดี่ยว ๆ ไม่ได้อยู่กลางประโยค
+  // ต้องมาก่อนกฎเศษคำข้างล่าง ไม่งั้นจะได้ประโยคยาวมาวางในช่องตาราง
+  [/^หัวบทในเนื้อหา$/g, 'Chapter headings'],
+  [/^ภาษาที่เขียน$/g, 'Language of the document'],
+  [/^ข้อมูลอนุมัติ$/g, 'Approved data'],
+  [/^ในไฟล์รูปเล่ม$/g, 'In the submitted file'],
+  [/^ระบบอ่านภาษาจากไฟล์ไม่ได้$/g, 'The system could not read the language from the file'],
+  [/^(ภาษาไทย|ภาษาอังกฤษ) ในส่วน (.+)$/g, '$1 in $2'],
+  [/^ภาษาไทย$/g, 'Thai'],
+  [/^ภาษาอังกฤษ$/g, 'English'],
   [/หัวบทในเนื้อหา/g, 'the chapter headings in the body'],
   [/^ภาษาของเล่ม$/g, 'Document language'],
   [/ลำดับที่พบ: /g, 'Order found: '],
@@ -1409,19 +1373,7 @@ function buildSummaryText(){
   try { return (JSON.parse(el.textContent || '""') || '').trim() || fallback; }
   catch(e){ return fallback; }
 }
-// สรุปมี 2 แบบ: AI เรียบเรียงให้อ่านง่าย กับข้อความตรงตัวจากระบบ
-// ถ้า AI ไม่ทำงาน (ไม่ได้ตั้งคีย์/ล้มเหลว) จะเหลือแบบตรงตัวอย่างเดียวโดยอัตโนมัติ
-function aiSummaryText(){
-  const el = document.getElementById('ai-summary-data');
-  if (!el) return '';
-  try { return (JSON.parse(el.textContent || '""') || '').trim(); } catch(e){ return ''; }
-}
-var SUMMARY_MODE = aiSummaryText() ? 'ai' : 'raw';
 var PLAIN_TEXT = buildSummaryText();
-var AI_TEXT = aiSummaryText();
-// AI_STALE = เจ้าหน้าที่กดผ่าน/ไม่ผ่านเพิ่มหลังจาก AI เรียบเรียงครั้งล่าสุด
-// ระหว่างที่ค้างอยู่จะไม่โชว์ข้อความ AI เก่า (กันคัดลอกสรุปที่ตกรายการไปส่งนักศึกษา)
-var AI_STALE = false;
 // แปลข้อความสรุป "ทีละบรรทัด" ไม่ใช่ทั้งก้อน
 // checker.plain_summary เขียนหนึ่งจุดเป็นสามบรรทัด (ตำแหน่ง / สิ่งที่พบ / ต้องแก้เป็น)
 // แต่ละบรรทัดจึงเป็นข้อความเดี่ยวที่ trWhole มีกฎเต็มประโยครองรับอยู่แล้ว
@@ -1458,10 +1410,9 @@ function trSummary(text){
   }).join('\n');
 }
 function currentSummaryText(){
-  const base = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE) ? AI_TEXT : PLAIN_TEXT;
-  // สลับภาษาอังกฤษ: แปลข้อความสรุป (ตรงตัวจากระบบ) ด้วยพจนานุกรมเดียวกับ dropdown
+  // สลับภาษาอังกฤษ: แปลข้อความสรุปด้วยพจนานุกรมเดียวกับ dropdown
   // ค่าที่อยู่ในเครื่องหมายคำพูด (ชื่อบท/ปริญญา/เลขหน้า) ไม่ถูกแตะ คงไว้ตามเล่มจริง
-  return (LANG === 'en') ? trSummary(base) : base;
+  return (LANG === 'en') ? trSummary(PLAIN_TEXT) : PLAIN_TEXT;
 }
 function renderSummary(){
   const ta = document.querySelector('.copy-text');
@@ -1473,29 +1424,6 @@ function renderSummary(){
   // สำเนาสำหรับพิมพ์ต้องเปลี่ยนตามทุกครั้ง ไม่งั้นกระดาษจะได้ข้อความก่อนกดปุ่ม
   const printable = document.querySelector('.copy-print');
   if (printable && text) printable.textContent = text;
-  ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
-  const caveat = document.getElementById('ai-caveat');
-  const showAi = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE);
-  if (caveat) caveat.style.display = showAi ? '' : 'none';
-  document.querySelectorAll('.copy-modes .mode').forEach(function(b){
-    b.classList.toggle('on', b.getAttribute('data-mode') === SUMMARY_MODE);
-  });
-  renderStaleBar();
-}
-// แถบ "ให้ AI เรียบเรียงใหม่" โผล่เฉพาะตอนอยู่โหมด AI แล้วข้อความยังไม่ตรงผลพิจารณาล่าสุด
-function renderStaleBar(err){
-  const bar = document.getElementById('ai-stale');
-  if (!bar) return;
-  const need = (SUMMARY_MODE === 'ai') && (AI_STALE || !AI_TEXT);
-  bar.hidden = !need;
-  bar.classList.toggle('err', !!err);
-  const msg = document.getElementById('ai-stale-msg');
-  if (msg && err) msg.textContent = err;
-  else if (msg && need) msg.textContent = msg.getAttribute(LANG === 'en' ? 'data-en' : 'data-th');
-}
-function setSummaryMode(mode){
-  SUMMARY_MODE = mode;
-  renderSummary();
 }
 
 // ---- ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป ----
@@ -1517,8 +1445,7 @@ function collectPassed(){
     .map(el => 'ORANGE:' + el.getAttribute('data-idx'));
 }
 var _summaryTimer = null;
-// ข้อความเตือนใต้กล่องคัดลอก ใช้กับความผิดพลาดของการอัปเดตอัตโนมัติ (กดผ่าน/ไม่ผ่าน)
-// แถบ ai-stale ใช้ไม่ได้ เพราะมันถูกสร้างเฉพาะเล่มที่มีข้อความจาก AI
+// ข้อความเตือนใต้กล่องคัดลอก ใช้กับความผิดพลาดของการอัปเดตอัตโนมัติตอนกดปุ่ม
 function showCopyError(message){
   const box = document.getElementById('copy-error');
   if (!box) return;
@@ -1540,9 +1467,7 @@ function setSummaryBusy(on){
   const box = document.querySelector('.copybox .copy-btn');
   if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
 }
-// wantAi = true เฉพาะตอนเจ้าหน้าที่กดปุ่มเรียบเรียงใหม่เท่านั้น การกดผ่าน/ไม่ผ่าน
-// แต่ละครั้งจะอัปเดตเฉพาะข้อความตรงตัว (ฟรีและทันที) ไม่เรียก AI รัวๆ
-function refreshSummary(wantAi){
+function refreshSummary(){
   const box = document.querySelector('.copybox');
   const job = box && box.getAttribute('data-job');
   if (!job) return Promise.resolve();
@@ -1551,7 +1476,7 @@ function refreshSummary(wantAi){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
-                          staff: collectStaff(), ai: !!wantAi}),
+                          staff: collectStaff()}),
   }).then(function(r){
       // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
       if (r.status === 401) return Promise.reject(new Error('login'));
@@ -1559,46 +1484,15 @@ function refreshSummary(wantAi){
     })
     .then(function(data){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
-      if (wantAi) {
-        if (typeof data.ai === 'string' && data.ai) { AI_TEXT = data.ai; AI_STALE = false; }
-        // ai_busy = โควตางานตรวจเต็ม (มีคนกำลังตรวจเล่มอยู่) ไม่ใช่ AI ล้มเหลว
-        else if (data.ai_busy) throw new Error('busy');
-        else throw new Error('empty');
-      }
       showCopyError('');
       renderSummary();
     })
     .finally(function(){ setSummaryBusy(false); });
 }
-function regenerateAi(){
-  const btn = document.querySelector('.ai-redo');
-  if (btn) btn.disabled = true;
-  refreshSummary(true)
-    .catch(function(err){
-      if (err && err.message === 'login'){
-        renderStaleBar(LANG === 'en'
-          ? 'Session expired — please log in again in another tab, then press this button once more.'
-          : 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดปุ่มนี้ซ้ำ (ผลตรวจในหน้านี้ยังอยู่ครบ)');
-        return;
-      }
-      if (err && err.message === 'busy'){
-        renderStaleBar(LANG === 'en'
-          ? 'The system is busy checking another document — press this button again in a minute. The exact system text below is already up to date.'
-          : 'ระบบกำลังตรวจเล่มอื่นอยู่ กรุณากดปุ่มนี้อีกครั้งในอีกสักครู่ (ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว)');
-        return;
-      }
-      renderStaleBar(LANG === 'en'
-        ? 'Could not re-run AI. The exact system text below is up to date — try again or use it as is.'
-        : 'เรียบเรียงด้วย AI ไม่สำเร็จ ข้อความตรงตัวจากระบบด้านล่างเป็นข้อมูลล่าสุดแล้ว กดลองใหม่หรือใช้ข้อความนี้ได้เลย');
-    })
-    .finally(function(){ if (btn) btn.disabled = false; });
-}
 function scheduleSummaryRefresh(){
-  AI_STALE = true;                 // ผลพิจารณาเปลี่ยน ข้อความ AI เดิมยังไม่รวมรายการใหม่
-  renderSummary();                 // สลับไปโชว์ข้อความตรงตัวทันที พร้อมปุ่มเรียบเรียงใหม่
   clearTimeout(_summaryTimer);
   _summaryTimer = setTimeout(function(){
-    refreshSummary(false).catch(function(err){
+    refreshSummary().catch(function(err){
       // ห้ามกลืนเงียบ — ผลของการกดปุ่มอยู่ในข้อความสรุปเท่านั้น ถ้าอัปเดตไม่สำเร็จ
       // แล้วไม่บอก เจ้าหน้าที่จะคัดลอกข้อความที่ตกรายการไปส่งนักศึกษา
       var kind = (err && err.message === 'login') ? 'login' : 'other';

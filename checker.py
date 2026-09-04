@@ -2066,8 +2066,47 @@ def book_language_signals(pages, cover_idx=0, doc_type=""):
                 en_ch += 1
             else:
                 thai_ch += 1
+    # "script" ไม่ใช่ส่วนหนึ่งของเล่ม จึงไม่ถูกนับใน wrong_parts (ซึ่งวนเฉพาะสามคีย์แรก)
+    # เป็นตัวสำรองที่ book_language หยิบใช้ต่อเมื่อสามคีย์แรกเงียบหมด
     return {"cover": cover_lang, "signature": sig_lang,
-            "chapter": _one_sided(thai_ch, en_ch)}
+            "chapter": _one_sided(thai_ch, en_ch),
+            "script": book_language_by_script(pages)}
+
+
+# เกณฑ์ของตัวสำรอง "สัดส่วนตัวอักษร" — เว้นช่องว่างตรงกลางไว้กว้างมากโดยตั้งใจ
+# วัดกับเล่มจริง: เล่มอังกฤษได้ไทย 0.1% กับ 3.7% (เล่ม 3.7% มีบทคัดย่อไทยเต็ม ๆ อยู่ด้วย)
+# ส่วนเล่มไทยได้ไทย 96.1% ช่องว่างระหว่าง 3.7% กับ 96.1% กว้างพอให้เล่มที่มีภาคผนวก
+# ภาษาไทยยาว ๆ ในเล่มอังกฤษก็ยังไม่หลุดมาถึงเกณฑ์
+_SCRIPT_THAI_MIN = 0.60
+_SCRIPT_THAI_MAX = 0.10
+# ข้อความน้อยกว่านี้เชื่อสัดส่วนไม่ได้ (ไฟล์ที่ดึงข้อความได้แค่หยิบมือ)
+_SCRIPT_MIN_LETTERS = 200
+
+
+def book_language_by_script(pages):
+    """ภาษาของเล่มจากสัดส่วนตัวอักษรทั้งไฟล์ — **ตัวสำรองท้ายสุดเท่านั้น**
+
+    ห้ามใช้เป็นสัญญาณหลัก เพราะเล่มไทยที่มีศัพท์อังกฤษเยอะจะหลอกได้ (ปัญหาเดียวกับ
+    ที่ title_script เจอ) ใช้ต่อเมื่อข้อความตายตัวของ template เงียบหมดทั้งสามจุด
+    ซึ่งแปลว่าเล่มไม่ได้ทำตาม template เลย หรือดึงข้อความได้ไม่ครบ
+
+    ที่ต้องมีตัวสำรอง: การตอบว่า "ระบบอ่านภาษาจากไฟล์ไม่ได้" แทบไม่มีทางเกิดกับไฟล์ที่
+    ระบบรับเข้ามาตรวจอยู่แล้ว (ไฟล์ที่ดึงข้อความไม่ได้ถูกปฏิเสธตั้งแต่ตอนอัปโหลด ดู
+    main._pdf_readability_issue) ถ้ายังตอบแบบนั้นได้อยู่ เจ้าหน้าที่จะเจอช่องที่ไม่มี
+    คำตอบทั้งที่ไฟล์อ่านออก
+    """
+    text = " ".join(pages or ())
+    thai = len(_THAI_LETTER.findall(text))
+    latin = len(_LATIN_LETTER.findall(text))
+    total = thai + latin
+    if total < _SCRIPT_MIN_LETTERS:
+        return ""
+    ratio = thai / total
+    if ratio >= _SCRIPT_THAI_MIN:
+        return "thai"
+    if ratio <= _SCRIPT_THAI_MAX:
+        return "en"
+    return ""
 
 
 def book_language(signals):
@@ -2076,8 +2115,50 @@ def book_language(signals):
     ต้องมีสัญญาณชี้ทางเดียวกันอย่างน้อย 2 ตัว และห้ามมีตัวไหนชี้สวนทาง เพราะผลของ
     ฟังก์ชันนี้ใช้ "หยุดตรวจทั้งเล่ม" การฟันธงผิดจึงเสียหายกว่าการไม่ฟันธง
     """
-    votes = [v for v in (signals or {}).values() if v]
-    return votes[0] if len(votes) >= 2 and len(set(votes)) == 1 else ""
+    signals = signals or {}
+    votes = [signals.get(key) for key in ("cover", "signature", "chapter")]
+    votes = [v for v in votes if v]
+    if len(votes) >= 2 and len(set(votes)) == 1:
+        return votes[0]
+    if votes:
+        # มีข้อความ template อ่านได้อยู่บ้าง แต่ยังไม่พอหรือขัดกันเอง — ห้ามให้ตัวสำรอง
+        # มาชี้ขาดทับ เพราะสัญญาณ template แม่นกว่าสัดส่วนตัวอักษรมาก
+        return ""
+    # เงียบหมดทั้งสามจุด (เล่มไม่ทำตาม template หรือดึงข้อความได้ไม่ครบ) จึงค่อยใช้
+    # สัดส่วนตัวอักษรเป็นตัวสำรอง ดีกว่าตอบว่าอ่านภาษาไม่ได้ทั้งที่ไฟล์อ่านออก
+    return signals.get("script", "")
+
+
+def book_language_rows(want_language, signals):
+    """สองแถวของหัวข้อ "ภาษาที่เขียน" ในตารางผลเทียบข้อมูลอนุมัติรายตำแหน่ง
+
+    คืน [(ตำแหน่ง, สถานะ, รายละเอียด), ...] — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เห็น
+    **ภาษาของทั้งสองฝั่ง** ไม่ใช่บอกแค่ว่าตรงหรือไม่ตรง จะได้รู้ทันทีว่าต้องไปแก้ที่
+    ช่องหลักสูตรบนหน้าอัปโหลด หรือส่งกลับให้นักศึกษาทำเล่มใหม่
+
+    ต้องลงตารางทุกครั้งที่มีข้อมูลให้เทียบ ไม่ใช่เฉพาะตอนผิด ไม่งั้นเวลาเล่มถูกต้อง
+    หัวข้อนี้จะหายไปทั้งหัวข้อ แล้วแยกไม่ออกว่า "ตรวจแล้วผ่าน" กับ "ระบบไม่ได้ตรวจ"
+
+    อ่านภาษาจากไฟล์ไม่ได้ = "รอยืนยัน" ไม่ใช่ "ตรง" — ถ้านับเป็นตรง เจ้าหน้าที่จะเชื่อว่า
+    ระบบยืนยันให้แล้วทั้งที่ไม่ได้ยืนยัน
+    """
+    want_name = LANGUAGE_NAME[want_language]
+    other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
+    found = book_language(signals)
+    wrong_parts = [BOOK_LANGUAGE_PARTS[key]
+                   for key in ("cover", "signature", "chapter")
+                   if signals[key] and signals[key] != want_language]
+    if found == want_language:
+        status, in_file = "pass", want_name
+    elif found:
+        status, in_file = "fail", LANGUAGE_NAME[found]
+    elif wrong_parts:
+        # สัญญาณขัดกันเอง ตัดสินภาษาทั้งเล่มไม่ได้ แต่รู้แน่ว่าส่วนไหนคนละภาษา
+        status, in_file = "fail", f"{other_name} ในส่วน {_join_and(wrong_parts)}"
+    else:
+        status, in_file = "pending", "ระบบอ่านภาษาจากไฟล์ไม่ได้"
+    return [("ข้อมูลอนุมัติ", status, want_name),
+            ("ในไฟล์รูปเล่ม", status, in_file)]
 
 
 def approved_book_language(approved):
@@ -2358,32 +2439,46 @@ STAFF_CHECKS = [
                 "label": "โครงสร้างหน้าลงนามผิด",
                 "label_en": "Layout is wrong",
                 "tone": "fail",
-                "text": ("ในหน้าลงนาม (หน้า i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า "
+                # บรรทัดแรกคือ "ตำแหน่ง" แยกออกมาให้เหมือนข้ออื่นในสรุป แล้วตามด้วย
+                # สามย่อหน้าที่ย่อหน้าเข้ามา — เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569)
+                # คำทุกคำเป็นต้นฉบับ เว้นวรรครอบขีดเขียนเหมือนกันทั้งสองภาษา
+                # ("i - ii หรือ ก - ข" กับ "Pages i - ii")
+                #
+                # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ (สี่ต่อสี่) เพราะหน้ารายงานแปล
+                # ด้วยการเทียบทีละบรรทัด บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                "text": ("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"
+                         "\n"
+                         "ปรับโครงสร้างของหน้า "
                          "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
                          "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
                          "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
-                         "ไม่ต้องเลื่อนหรือปรับกรอบ สำหรับ "
-                         "ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่างให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
+                         "ไม่ต้องเลื่อนหรือปรับกรอบ"
+                         "\n"
+                         "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง"
+                         "ให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
                          "และต้องใช้ font และ template ที่กำหนดด้วย "
                          "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด "
                          "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
                          "(จัดตามลูกศรสีเหลืองในคู่มือ)"
                          "\n"
-                         "* ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
+                         "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้*"),
-                "text_en": ("Regarding the signature page (Pages i-ii ), please "
-                            "restructure the page and realign each committee list to "
-                            "strictly follow the top-to-bottom sequence approved in the "
-                            "official document without shifting or modifying the frames. "
-                            "Students must format the file using the designated font and "
-                            "template, following the exact ordering sequence indicated by "
-                            "the arrows in the formatting manual."
+                         "ให้ใส่สีขาวไว้"),
+                "text_en": ("Approval pages (Pages i - ii)"
                             "\n"
-                            "Additionally, the template frames must be adjusted to match "
-                            "the default settings, which accommodate up to 6 names per "
-                            "side; any remaining blank slots must be changed to white "
-                            "font color"),
+                            "please restructure the page and realign each committee "
+                            "list to strictly follow the top-to-bottom sequence "
+                            "approved in the official document without shifting or "
+                            "modifying the frames."
+                            "\n"
+                            "Students must format the file using the designated font "
+                            "and template, following the exact ordering sequence "
+                            "indicated by the arrows in the formatting manual."
+                            "\n"
+                            "Additionally, the template frames must be adjusted to "
+                            "match the default settings, which accommodate up to 6 "
+                            "names per side; any remaining blank slots must be "
+                            "changed to white font color"),
             },
         ],
     },
@@ -3918,6 +4013,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
         must_be = (f'ภาษาที่ได้รับอนุมัติคือ "{want_name}" '
                    f'ต้องดำเนินการจัดทำเล่มเป็น "{want_name}"')
+        wrong_parts = [BOOK_LANGUAGE_PARTS[key]
+                       for key in ("cover", "signature", "chapter")
+                       if language_signals[key] and language_signals[key] != want_language]
+        for where, status, detail in book_language_rows(want_language, language_signals):
+            rep.add_verification("ภาษาที่เขียน", where, status, detail)
         if found_language and found_language != want_language:
             # ทั้งเล่มผิดภาษา — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้หยุดตรวจส่วนอื่นทั้งหมด
             # แล้วแจ้งจุดผิดข้อเดียว
@@ -3934,9 +4034,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                  "chapters_mode": chapters_mode, "n_pages": n,
                  "approved_data": bool(approved)},
                 (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
-        wrong_parts = [BOOK_LANGUAGE_PARTS[key]
-                       for key in ("cover", "signature", "chapter")
-                       if language_signals[key] and language_signals[key] != want_language]
         if wrong_parts:
             # สัญญาณขัดกันเอง (เช่น ปกอังกฤษ แต่หัวบทเป็น "บทที่ 1") ตัดสินภาษาทั้งเล่ม
             # ไม่ได้ จึงไม่หยุดตรวจ แต่บางส่วนคนละภาษากับที่อนุมัติแน่นอน ต้องฟ้อง

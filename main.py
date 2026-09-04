@@ -23,7 +23,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
-import llm_assist
 from checker import plain_summary, run_check
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
@@ -164,15 +163,6 @@ def _run_job(job_id, tmp_path, approved, chapters_mode):
 
     try:
         report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress)
-        report["context"]["ai_assist"] = llm_assist.enabled()
-        if llm_assist.enabled():
-            # AI มีหน้าที่เดียว: เรียบเรียง "ข้อความสรุป" ให้อ่านง่าย
-            # ห้ามแตะผลตรวจหรือรายละเอียดในรายงาน — ถ้าล้มเหลวรายงานยังออกครบตามปกติ
-            try:
-                progress("AI เรียบเรียงข้อความสรุป")
-                report["student_summary"] = llm_assist.student_summary(report)
-            except Exception:
-                print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
         _update_job(job_id, report=report, stage="เสร็จสิ้น")
     except Exception:
         tb = traceback.format_exc()
@@ -402,7 +392,6 @@ async def rebuild_summary(job_id: str, request: Request):
     """สร้างข้อความสรุปใหม่ตามผลพิจารณาของเจ้าหน้าที่
 
     ส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน" จะถูกรวมเข้าไปเป็นรายการที่ต้องแก้ด้วย
-    ขอข้อความที่ AI เรียบเรียงเมื่อส่ง ai=true เท่านั้น (คุมจำนวนครั้งที่เรียก AI)
     """
     job = _get_job(job_id)
     if not job or not job.get("report"):
@@ -416,21 +405,7 @@ async def rebuild_summary(job_id: str, request: Request):
     # จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" (เช่น โครงสร้างหน้าลงนาม)
     staff = [str(k) for k in (payload.get("staff") or [])][:50]
     report = job["report"]
-    plain = plain_summary(report, failed, passed, staff)
-    result = {"plain": plain}
-    if payload.get("ai") and llm_assist.enabled():
-        # ใช้โควตางานเดียวกับการตรวจเล่ม ไม่งั้นกดปุ่มรัว ๆ จะยิง AI พร้อมกันไม่จำกัด
-        if not JOB_SLOTS.acquire(blocking=False):
-            result["ai_busy"] = True
-            return result
-        try:
-            result["ai"] = await asyncio.to_thread(
-                llm_assist.student_summary, {**report, "plain_summary": plain})
-        except Exception:
-            print(f"job {job_id}: llm summary failed\n{traceback.format_exc()}", flush=True)
-        finally:
-            JOB_SLOTS.release()
-    return result
+    return {"plain": plain_summary(report, failed, passed, staff)}
 
 
 @app.get("/result/{job_id}", response_class=HTMLResponse)
