@@ -6,6 +6,7 @@ from ethesis_import import (
     _degree_abbr_th,
     _degree_name,
     _fix_thai_pua,
+    _looks_like_a_date,
     _spaced_degree,
     _student_id,
     parse_committees,
@@ -207,6 +208,35 @@ class ThaiPuaTests(unittest.TestCase):
 
     def test_sara_am_is_recombined(self):
         self.assertEqual(_fix_thai_pua("ก" + chr(0x0E4D) + chr(0x0E32)), "กำ")
+
+
+class ExamDateMustLookLikeADate(unittest.TestCase):
+    """ช่อง "วันที่สอบผ่าน" ที่ว่างในหน้า eThesis ต้องไม่ถูกเติมด้วยหัวข้อถัดไป
+
+    เจอกับเล่มจริง (ก.ย. 2569): หน้า eThesis เว้นช่องนี้ว่าง ตัวอ่านจึงหยิบบรรทัดถัดไป
+    ซึ่งเป็นหัวข้อ "การกำหนดรูปแบบรูปเล่ม" มาเป็นวันที่ ฟอร์มเติมค่านั้นให้อัตโนมัติ
+    ถ้าเจ้าหน้าที่ไม่ทันแก้ รายงานจะฟ้องนักศึกษาว่า
+
+        พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: "07 July 2026"
+        ต้องแก้เป็น "การกำหนดรูปแบบรูปเล่ม"
+
+    ปล่อยว่างให้เจ้าหน้าที่กรอกเอง ดีกว่าเติมค่าที่ไม่ใช่วันที่
+    """
+
+    def test_real_dates_are_accepted(self):
+        for value in ("25 June 2026", "5 May 2026", "11 พฤษภาคม 2569",
+                      "07/07/2569", "7 July 2026", "1-2-2569"):
+            self.assertTrue(_looks_like_a_date(value), value)
+
+    def test_headings_and_blanks_are_rejected(self):
+        for value in ("การกำหนดรูปแบบรูปเล่ม", "อาจารย์ที่ปรึกษา", "รูปแบบที่ 1",
+                      "ผ่านแบบมีเงื่อนไข", "", None):
+            self.assertFalse(_looks_like_a_date(value), value)
+
+    def test_a_bare_number_is_not_a_year(self):
+        """เลขลอย ๆ ที่ไม่ใช่ปี ต้องไม่ผ่าน ไม่งั้นหัวข้อที่มีเลขจะกลายเป็นวันที่"""
+        for value in ("12345", "202", "20269"):
+            self.assertFalse(_looks_like_a_date(value), value)
 
 
 if __name__ == "__main__":
