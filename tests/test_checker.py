@@ -2687,6 +2687,23 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         self.assertIn(".copy-text { display:none; }", html)
         self.assertIn("printable.textContent = text;", html)
 
+    def test_the_english_report_never_shows_the_ai_written_text(self):
+        """ข้อความจาก AI เป็นร้อยแก้วไทยที่แต่งใหม่ทุกครั้ง ไม่มีกฎเต็มประโยครองรับ
+
+        พอสลับเป็นอังกฤษจึงตกไปใช้การแทนที่แบบเศษคำ แล้วได้ข้อความปนกันครึ่งไทย
+        ครึ่งอังกฤษ วัดแล้วได้จริง
+          "1. Approval page 1 page ก Exam pass dateที่พิมพ์ไว้ไม่ตรงกับข้อมูลในระบบ"
+        โหมด AI เป็นค่าตั้งต้นเมื่อเปิด AI ไว้ เจ้าหน้าที่หลักสูตรนานาชาติจึงเจอทันที
+        ที่กดปุ่ม EN แล้วคัดลอกข้อความนั้นส่งนักศึกษาได้โดยไม่รู้ตัว
+        """
+        html = self._render(self._clean_result())
+        self.assertIn("function useAiText()", html)
+        self.assertIn("AI_STALE && LANG !== 'en'", html)
+        self.assertIn("const base = useAiText() ? AI_TEXT : PLAIN_TEXT;", html)
+        # ต้องบอกเจ้าหน้าที่ด้วยว่าทำไมภาษาอังกฤษไม่ใช่ข้อความจาก AI
+        self.assertIn("The AI-written summary is in Thai only", html)
+        self.assertIn("b.disabled = (LANG === 'en');", html)
+
     def test_the_copy_box_is_never_wiped_blank_by_the_script(self):
         """ควบคุมเชิงลบของกล่องคัดลอกว่าง — เคยเจอจริงจากภาพหน้าจอของเจ้าหน้าที่
 

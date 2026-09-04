@@ -1457,8 +1457,16 @@ function trSummary(text){
     return m[1] + (STAFF_LINE_EN[m[2].trim()] || trEN(m[2]));
   }).join('\n');
 }
+// ข้อความที่ AI เรียบเรียงเป็น "ร้อยแก้วภาษาไทย" ที่แต่งใหม่ทุกครั้ง ไม่มีกฎเต็มประโยค
+// ใน TR รองรับ พอสลับเป็นอังกฤษจึงตกไปใช้การแทนที่แบบเศษคำ แล้วได้ข้อความปนกัน
+// ครึ่งไทยครึ่งอังกฤษ วัดแล้วได้จริง
+//   "1. Approval page 1 page ก Exam pass dateที่พิมพ์ไว้ไม่ตรงกับข้อมูลในระบบ"
+// ภาษาอังกฤษจึงใช้ "ข้อความตรงตัวจากระบบ" เสมอ ซึ่งมีคำแปลเต็มประโยคครบทุกบรรทัด
+function useAiText(){
+  return SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE && LANG !== 'en';
+}
 function currentSummaryText(){
-  const base = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE) ? AI_TEXT : PLAIN_TEXT;
+  const base = useAiText() ? AI_TEXT : PLAIN_TEXT;
   // สลับภาษาอังกฤษ: แปลข้อความสรุป (ตรงตัวจากระบบ) ด้วยพจนานุกรมเดียวกับ dropdown
   // ค่าที่อยู่ในเครื่องหมายคำพูด (ชื่อบท/ปริญญา/เลขหน้า) ไม่ถูกแตะ คงไว้ตามเล่มจริง
   return (LANG === 'en') ? trSummary(base) : base;
@@ -1473,12 +1481,19 @@ function renderSummary(){
   // สำเนาสำหรับพิมพ์ต้องเปลี่ยนตามทุกครั้ง ไม่งั้นกระดาษจะได้ข้อความก่อนกดปุ่ม
   const printable = document.querySelector('.copy-print');
   if (printable && text) printable.textContent = text;
-  ta.classList.toggle('plain', SUMMARY_MODE === 'ai');
+  ta.classList.toggle('plain', useAiText());
   const caveat = document.getElementById('ai-caveat');
-  const showAi = (SUMMARY_MODE === 'ai' && AI_TEXT && !AI_STALE);
-  if (caveat) caveat.style.display = showAi ? '' : 'none';
+  // ภาษาอังกฤษไม่ใช้ข้อความจาก AI ต้องบอกเจ้าหน้าที่ให้รู้ ไม่ใช่เปลี่ยนเงียบ ๆ
+  const enOnly = (LANG === 'en') && !!AI_TEXT;
+  if (caveat){
+    caveat.style.display = (useAiText() || enOnly) ? '' : 'none';
+    if (enOnly) caveat.textContent = 'The AI-written summary is in Thai only, so the '
+      + 'English version below shows the exact system text.';
+  }
   document.querySelectorAll('.copy-modes .mode').forEach(function(b){
     b.classList.toggle('on', b.getAttribute('data-mode') === SUMMARY_MODE);
+    // ปุ่มสลับโหมดใช้ไม่ได้ในภาษาอังกฤษ กดแล้วข้อความไม่เปลี่ยนจะงงกว่าปุ่มเทา
+    b.disabled = (LANG === 'en');
   });
   renderStaleBar();
 }
@@ -1486,7 +1501,8 @@ function renderSummary(){
 function renderStaleBar(err){
   const bar = document.getElementById('ai-stale');
   if (!bar) return;
-  const need = (SUMMARY_MODE === 'ai') && (AI_STALE || !AI_TEXT);
+  // ภาษาอังกฤษไม่ได้ใช้ข้อความจาก AI อยู่แล้ว ไม่ต้องชวนให้กดเรียบเรียงใหม่
+  const need = (SUMMARY_MODE === 'ai') && (LANG !== 'en') && (AI_STALE || !AI_TEXT);
   bar.hidden = !need;
   bar.classList.toggle('err', !!err);
   const msg = document.getElementById('ai-stale-msg');
