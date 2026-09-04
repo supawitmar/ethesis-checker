@@ -2402,7 +2402,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 self.assertIn(phrase, text, (choice_id, phrase))
         english = checker_module.STAFF_CHOICE_BY_ID[
             "SIGNATURE_LAYOUT_WRONG"][1]["text_en"]
-        self.assertIn("(Pages i-ii )", english)
+        self.assertIn("(Pages i - ii )", english)
         self.assertIn("Line Offical Account ID @322wjrbo",
                       checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
 
@@ -2424,7 +2424,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 self.assertLess(len(line), 260, line[:60])
         self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
                         choice["text"][:60])
-        self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i-ii )"),
+        self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i - ii )"),
                         choice["text_en"][:60])
 
     def test_the_location_line_shows_first_in_the_summary(self):
