@@ -28,6 +28,7 @@
           margin-top:16px; font-size:.88rem; }
   .stu .lb { opacity:.65; font-size:.75rem; }
   .stu .vl { font-weight:600; }
+  .stu .pages { font-weight:400; opacity:.75; margin-left:6px; }
 
   .verdict-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
           background:#fff; padding:18px 32px; border-bottom:1px solid #e4e8ee; }
@@ -217,6 +218,14 @@
         <div class="vl">{{ student.program or '-' }}</div></div>
       <div><div class="lb" data-th="วันที่สอบผ่าน" data-en="Exam pass date">วันที่สอบผ่าน</div>
         <div class="vl">{{ student.exam_date or '-' }}</div></div>
+      {# ต้องบอกว่าตรวจไฟล์ไหนไปกี่หน้า — เจ้าหน้าที่อัปโหลดผิดช่องได้ (เจอจริง ก.ย. 2569:
+         อัปโหลดไฟล์ eThesis เข้าช่องเล่ม ระบบอ่านว่าเป็นเล่มไทยแล้วหยุดตรวจ ซึ่งถูกต้อง
+         ตามที่มันเห็น แต่รายงานไม่ได้บอกชื่อไฟล์ จึงไล่ย้อนไม่ได้ว่าตรวจอะไรไป)
+         จำนวนหน้าเป็นตัวชี้ที่เร็วที่สุด ไฟล์ eThesis มี 2 หน้า เล่มจริงมีเป็นร้อย #}
+      <div style="grid-column:1/-1;"><div class="lb" data-th="ไฟล์ที่ตรวจ" data-en="File checked">ไฟล์ที่ตรวจ</div>
+        <div class="vl">{{ pdf_name or '-' }}{% if report.context and report.context.n_pages %}
+          <span class="pages" data-th="({{ report.context.n_pages }} หน้า)"
+                data-en="({{ report.context.n_pages }} pages)">({{ report.context.n_pages }} หน้า)</span>{% endif %}</div></div>
     </div>
   </div>
 

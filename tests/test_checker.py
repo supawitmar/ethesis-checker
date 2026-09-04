@@ -2581,6 +2581,52 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertEqual(result["staff_findings"], list(checker_module.STAFF_CHECKS))
 
 
+class TheReportSaysWhichFileItChecked(unittest.TestCase):
+    """รายงานต้องบอกชื่อไฟล์และจำนวนหน้าที่ตรวจไป
+
+    เจอจริง (ก.ย. 2569): เจ้าหน้าที่อัปโหลดไฟล์ eThesis เข้าช่อง "เล่ม" ระบบอ่านว่าเป็น
+    เล่มภาษาไทยแล้วหยุดตรวจ ซึ่งถูกต้องตามที่มันเห็น แต่รายงานไม่ได้บอกชื่อไฟล์เลย
+    จึงไล่ย้อนไม่ได้ว่าตรวจอะไรไป และดูเหมือนระบบอ่านภาษาผิด
+
+    จำนวนหน้าเป็นตัวชี้ที่เร็วที่สุด ไฟล์ eThesis มี 2 หน้า เล่มจริงมีเป็นร้อย
+    """
+
+    def _render(self, pdf_name="book.pdf", n_pages=124):
+        import jinja2
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(Path(checker_module.__file__).parent
+                                               / "templates")),
+            autoescape=True)
+        report = checker_module.check_result(Report(), {"n_pages": n_pages})
+        return env.get_template("report.html").render(
+            report=report, zone_label={"RED": ("ไม่ผ่าน", "x"),
+                                       "ORANGE": ("รอยืนยัน", "!"),
+                                       "YELLOW": ("ข้อสังเกต", "i")},
+            job_id="test", pdf_name=pdf_name, student={})
+
+    def test_the_file_name_is_on_the_report(self):
+        html = self._render(pdf_name="เล่มที่ 1.pdf")
+        self.assertIn("ไฟล์ที่ตรวจ", html)
+        self.assertIn("เล่มที่ 1.pdf", html)
+
+    def test_the_page_count_is_on_the_report(self):
+        html = self._render(n_pages=124)
+        self.assertIn("(124 หน้า)", html)
+        self.assertIn("(124 pages)", html)
+
+    def test_a_two_page_upload_is_obvious(self):
+        """ไฟล์ eThesis ที่อัปโหลดผิดช่อง ต้องเห็นได้ทันทีว่ามีแค่ 2 หน้า"""
+        html = self._render(pdf_name="ระบบสารสนเทศ.pdf", n_pages=2)
+        self.assertIn("ระบบสารสนเทศ.pdf", html)
+        self.assertIn("(2 หน้า)", html)
+
+    def test_a_report_with_no_page_count_still_renders(self):
+        """ทางออกที่ไม่มี n_pages (เช่น ไม่ใช่ไฟล์ PDF) ต้องไม่พังและไม่โชว์วงเล็บเปล่า"""
+        html = self._render(n_pages=0)
+        self.assertIn("ไฟล์ที่ตรวจ", html)
+        self.assertNotIn("(0 หน้า)", html)
+
+
 class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
     """หน้ารายงานต้องมีปุ่มครบ และมีกล่องสรุปให้ถ้อยคำลงเสมอ
 
