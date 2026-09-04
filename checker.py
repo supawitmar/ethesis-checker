@@ -2358,14 +2358,16 @@ STAFF_CHECKS = [
                 "label": "โครงสร้างหน้าลงนามผิด",
                 "label_en": "Layout is wrong",
                 "tone": "fail",
-                # แบ่งเป็นสามย่อหน้าและตัดเครื่องหมายดอกจันออกตามที่เจ้าหน้าที่สั่ง
-                # (ก.ย. 2569) คำทุกคำยังเป็นต้นฉบับ เปลี่ยนแค่จุดขึ้นย่อหน้า
-                # ดอกจันในอีเมลกับ Word ขึ้นเป็นดาวลอย ไม่ได้เป็นตัวหนาอย่างที่ตั้งใจ
+                # บรรทัดแรกคือ "ตำแหน่ง" แยกออกมาให้เหมือนข้ออื่นในสรุป แล้วตามด้วย
+                # สามย่อหน้าที่ย่อหน้าเข้ามา — เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569)
+                # คำทุกคำเป็นต้นฉบับ รวมถึงเว้นวรรครอบขีดของไทย ("i - ii หรือ ก - ข")
+                # ที่ไม่เหมือนฝั่งอังกฤษ ("Pages i-ii ") ซึ่งเจ้าหน้าที่เขียนมาแบบนั้น
                 #
-                # ย่อหน้าฝั่งไทยต้องเท่ากับฝั่งอังกฤษเสมอ (สามต่อสาม) เพราะหน้ารายงาน
-                # แปลด้วยการเทียบทีละบรรทัด จุดแบ่งจึงเลือกให้ตรงกับสามประโยคของ
-                # ต้นฉบับอังกฤษพอดี ไม่ต้องแก้คำอังกฤษเลยสักคำ
-                "text": ("ในหน้าลงนาม (หน้า i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า "
+                # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ (สี่ต่อสี่) เพราะหน้ารายงานแปล
+                # ด้วยการเทียบทีละบรรทัด บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                "text": ("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"
+                         "\n"
+                         "ปรับโครงสร้างของหน้า "
                          "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
                          "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
                          "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
@@ -2381,19 +2383,21 @@ STAFF_CHECKS = [
                          "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
                          "ให้ใส่สีขาวไว้"),
-                "text_en": ("Regarding the signature page (Pages i-ii ), please "
-                            "restructure the page and realign each committee list to "
-                            "strictly follow the top-to-bottom sequence approved in the "
-                            "official document without shifting or modifying the frames."
+                "text_en": ("Approval pages (Pages i-ii )"
                             "\n"
-                            "Students must format the file using the designated font and "
-                            "template, following the exact ordering sequence indicated by "
-                            "the arrows in the formatting manual."
+                            "please restructure the page and realign each committee "
+                            "list to strictly follow the top-to-bottom sequence "
+                            "approved in the official document without shifting or "
+                            "modifying the frames."
                             "\n"
-                            "Additionally, the template frames must be adjusted to match "
-                            "the default settings, which accommodate up to 6 names per "
-                            "side; any remaining blank slots must be changed to white "
-                            "font color"),
+                            "Students must format the file using the designated font "
+                            "and template, following the exact ordering sequence "
+                            "indicated by the arrows in the formatting manual."
+                            "\n"
+                            "Additionally, the template frames must be adjusted to "
+                            "match the default settings, which accommodate up to 6 "
+                            "names per side; any remaining blank slots must be "
+                            "changed to white font color"),
             },
         ],
     },

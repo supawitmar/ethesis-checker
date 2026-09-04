@@ -2406,19 +2406,34 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertIn("Line Offical Account ID @322wjrbo",
                       checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
 
-    def test_the_signature_wording_is_broken_into_paragraphs(self):
-        """เจ้าหน้าที่สั่งให้แบ่งย่อหน้าและเอาดอกจันออก (ก.ย. 2569)
+    def test_the_signature_wording_starts_with_its_own_location_line(self):
+        """เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569): บรรทัดตำแหน่ง แล้วสามย่อหน้า
 
-        ของเดิมเป็นประโยคเดียวยาวเกือบ 300 ตัวอักษรที่มีคำสั่งซ้อนกันหกอย่าง
-        ส่วนดอกจันหัวท้ายตั้งใจให้เป็นตัวหนา แต่ในอีเมลกับ Word ขึ้นเป็นดาวลอย
+        ของเดิมเป็นประโยคเดียวยาวเกือบ 300 ตัวอักษรที่มีคำสั่งซ้อนกันหกอย่าง และมี
+        ตำแหน่งฝังอยู่กลางประโยคแรก ส่วนดอกจันหัวท้ายตั้งใจให้เป็นตัวหนา แต่ในอีเมล
+        กับ Word ขึ้นเป็นดาวลอย
         """
         choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
         for field in ("text", "text_en"):
             lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
-            self.assertEqual(len(lines), 3, field)
+            self.assertEqual(len(lines), 4, field)
             self.assertNotIn("*", choice[field], field)
-            for line in lines:
+            # บรรทัดตำแหน่งต้องสั้น ไม่มีคำสั่งปนมา
+            self.assertLess(len(lines[0]), 60, lines[0])
+            for line in lines[1:]:
                 self.assertLess(len(line), 260, line[:60])
+        self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
+                        choice["text"][:60])
+        self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i-ii )"),
+                        choice["text_en"][:60])
+
+    def test_the_location_line_shows_first_in_the_summary(self):
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.WRONG])
+        lines = text.split(NEWLINE)
+        head = lines.index("หน้าลงนาม")
+        self.assertEqual(lines[head + 1], "1. ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)")
+        self.assertTrue(lines[head + 2].startswith(
+            checker_module.SUMMARY_INDENT + "ปรับโครงสร้างของหน้า"), lines[head + 2])
 
     def test_the_english_says_whether_this_student_has_a_fine(self):
         """เจ้าหน้าที่อนุมัติให้แก้เฉพาะจุดนี้ (ก.ย. 2569)
