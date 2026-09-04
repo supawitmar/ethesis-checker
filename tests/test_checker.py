@@ -2375,6 +2375,56 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertIn("นศ. ไม่มีค่าปรับ", text)
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])
 
+    def test_the_wording_is_kept_exactly_as_staff_wrote_it(self):
+        """รวมถึงคำที่ดูเหมือนพิมพ์ตก — เจ้าหน้าที่สั่งให้คงต้นฉบับทุกตัวอักษร (ก.ย. 2569)
+
+        เคยแก้ให้แล้วถูกสั่งให้คืน เทสต์นี้กันไม่ให้ใครมาแก้ให้อีกโดยไม่ได้สั่ง ถ้าเจ้าหน้าที่
+        เปลี่ยนใจให้แก้เมื่อไหร่ ให้แก้เทสต์นี้พร้อมกับถ้อยคำ
+        """
+        verbatim = {
+            "SIGNATURE_LAYOUT_WRONG": [
+                "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด",
+                "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง",
+                "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ",
+                "ให้ใส่สีขาวไว้*",
+            ],
+            "LATE_FEE_NONE": [
+                "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
+                "Line Offical Account ID @322wjrbo",
+                "หรือผ่านลิ้งค์",
+            ],
+        }
+        for choice_id, phrases in verbatim.items():
+            text = self._wording(choice_id)
+            for phrase in phrases:
+                self.assertIn(phrase, text, (choice_id, phrase))
+        english = checker_module.STAFF_CHOICE_BY_ID[
+            "SIGNATURE_LAYOUT_WRONG"][1]["text_en"]
+        self.assertIn("(Pages i-ii )", english)
+        self.assertIn("Line Offical Account ID @322wjrbo",
+                      checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
+
+    def test_the_english_says_whether_this_student_has_a_fine(self):
+        """เจ้าหน้าที่อนุมัติให้แก้เฉพาะจุดนี้ (ก.ย. 2569)
+
+        "There is no fine for late submission" อ่านว่านโยบายไม่เก็บค่าปรับ ไม่ใช่ว่า
+        นักศึกษาคนนี้ไม่มีค่าปรับ และฝั่ง "มีค่าปรับ" เดิมเขียนเป็นเงื่อนไข
+        "If a fine is incurred" ทั้งที่ประโยคก่อนหน้ายืนยันไปแล้วว่ามี
+        """
+        none_en = checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"]
+        yes_en = checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_YES"][1]["text_en"]
+        self.assertTrue(none_en.startswith("You have no fine for late submission"),
+                        none_en[:60])
+        self.assertTrue(yes_en.startswith("You have a fine for late submission"),
+                        yes_en[:60])
+        self.assertNotIn("There is no fine", none_en)
+        self.assertNotIn("There is a fine", yes_en)
+        # ฝั่งที่ยืนยันว่ามีค่าปรับ ต้องไม่พูดเป็นเงื่อนไขอีก
+        self.assertNotIn("If a fine is incurred", yes_en)
+        self.assertIn("The invoice will be issued through the system", yes_en)
+        # ฝั่งที่ไม่มีค่าปรับ ยังคงประโยคเงื่อนไขไว้ตามต้นฉบับไทย
+        self.assertIn("If a fine is incurred", none_en)
+
     def test_the_two_fee_answers_differ_only_in_the_first_sentence(self):
         """ผิดคำเดียวคือบอกนักศึกษาผิดเรื่องเงิน — ล็อกไว้ว่าต่างกันแค่ มี/ไม่มี"""
         none_lines = self._wording(self.FEE_NONE).split(NEWLINE)

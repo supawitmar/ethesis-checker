@@ -2321,7 +2321,10 @@ def summary_section(issue):
 #   closing = ข้อความปิดท้าย ไม่ใช่จุดผิด ต่อท้ายสุดและไม่นับเป็นจุดที่ต้องแก้
 #
 # ถ้อยคำทั้งไทยและอังกฤษเจ้าหน้าที่เขียนมาเอง ระบบห้ามเรียบเรียงใหม่หรือย่อ (หลักการ
-# เดียวกับ FORM.BOOK_LANGUAGE) และเก็บคู่กันไว้ตรงนี้ที่เดียว หน้ารายงานรับไปทั้งก้อน
+# เดียวกับ FORM.BOOK_LANGUAGE) **รวมถึงห้ามแก้คำที่ดูเหมือนพิมพ์ตกด้วย** — เคยแก้ให้
+# ("ทำดำเนินจัดทำ" "ทื่กำหนด" "Line Offical" "(Pages i-ii )") แล้วเจ้าหน้าที่สั่งให้คืน
+# ต้นฉบับทุกตัวอักษร มีเทสต์ล็อกคำเหล่านี้ไว้ ถ้าจะแก้ต้องได้คำสั่งจากเจ้าหน้าที่ก่อน
+# เก็บคู่กันไว้ตรงนี้ที่เดียว หน้ารายงานรับไปทั้งก้อน
 # แล้วใช้ "เทียบทั้งบรรทัด" ตอนสลับเป็นอังกฤษ คำแปลจึงหลุดจากต้นฉบับไม่ได้ และไม่ต้อง
 # พึ่ง TR ซึ่งเป็นการแทนที่เศษคำ (ถ้อยคำยาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่)
 STAFF_CHECKS = [
@@ -2359,17 +2362,17 @@ STAFF_CHECKS = [
                          "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
                          "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
                          "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
-                         "ไม่ต้องเลื่อนหรือปรับกรอบ "
-                         "สำหรับส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่างให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
+                         "ไม่ต้องเลื่อนหรือปรับกรอบ สำหรับ "
+                         "ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่างให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
                          "และต้องใช้ font และ template ที่กำหนดด้วย "
-                         "ซึ่งนักศึกษาจะต้องดำเนินการจัดทำรูปเล่มตามโครงสร้างที่กำหนด "
+                         "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด "
                          "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
                          "(จัดตามลูกศรสีเหลืองในคู่มือ)"
                          "\n"
                          "* ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
-                         "จะใส่รายชื่อได้ฝั่งละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้ *"),
-                "text_en": ("Regarding the signature page (Pages i-ii), please "
+                         "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
+                         "ให้ใส่สีขาวไว้*"),
+                "text_en": ("Regarding the signature page (Pages i-ii ), please "
                             "restructure the page and realign each committee list to "
                             "strictly follow the top-to-bottom sequence approved in the "
                             "official document without shifting or modifying the frames. "
@@ -2404,8 +2407,9 @@ STAFF_CHECKS = [
                 "tone": "pass",
                 "text": ("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า "
                          "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
-                         "กรณีที่นักศึกษามีค่าปรับ จะได้รับเอกสารแจ้งค่าปรับ (Invoice) "
-                         "ผ่านระบบเมื่อกระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                         "กรณีที่นักศึกษามีค่าปรับ "
+                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
+                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
                          "\n"
                          "\n"
                          "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
@@ -2419,13 +2423,15 @@ STAFF_CHECKS = [
                          "\n"
                          "หากนักศึกษาไม่สามารถ Resubmit ผ่านระบบได้ "
                          "ขอให้นักศึกษาติดต่อเจ้าหน้าที่งานเทคโนโลยีสารสนเทศ ผ่าน Line "
-                         "Official Account ID @322wjrbo หรือผ่านลิ้งค์ "
+                         "Offical Account ID @322wjrbo หรือผ่านลิ้งค์ "
                          "https://line.me/R/ti/p/@322wjrbo "
                          "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบต่อไป"
                          "\n"
                          "\n"
-                         "สอบถามข้อมูลเพิ่มเติม supawit.mar@mahidol.ac.th"),
-                "text_en": ("There is no fine for late submission, and no additional fees "
+                         "สอบถามข้อมูลเพิ่มเติม"
+                         "\n"
+                         "supawit.mar@mahidol.ac.th"),
+                "text_en": ("You have no fine for late submission, and no additional fees "
                             "are charged during the checking process. If a fine is "
                             "incurred, students will receive an invoice through the "
                             "system after the checking process is completed."
@@ -2442,12 +2448,13 @@ STAFF_CHECKS = [
                             "\n"
                             "\n"
                             "If you are unable to submit the revised file through the "
-                            "system, please contact the IT staff via Line Official "
-                            "Account ID @322wjrbo or link: "
-                            "https://line.me/R/ti/p/@322wjrbo"
+                            "system, please contact the IT staff via Line Offical Account "
+                            "ID @322wjrbo or link: https://line.me/R/ti/p/@322wjrbo"
                             "\n"
                             "\n"
-                            "For more information supawit.mar@mahidol.ac.th"),
+                            "For more information"
+                            "\n"
+                            "supawit.mar@mahidol.ac.th"),
             },
             {
                 "id": "LATE_FEE_YES",
@@ -2456,8 +2463,9 @@ STAFF_CHECKS = [
                 "tone": "fail",
                 "text": ("นศ. มีค่าปรับในการส่งเล่มล่าช้า "
                          "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
-                         "กรณีที่นักศึกษามีค่าปรับ จะได้รับเอกสารแจ้งค่าปรับ (Invoice) "
-                         "ผ่านระบบเมื่อกระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                         "กรณีที่นักศึกษามีค่าปรับ "
+                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
+                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
                          "\n"
                          "\n"
                          "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
@@ -2471,16 +2479,18 @@ STAFF_CHECKS = [
                          "\n"
                          "หากนักศึกษาไม่สามารถ Resubmit ผ่านระบบได้ "
                          "ขอให้นักศึกษาติดต่อเจ้าหน้าที่งานเทคโนโลยีสารสนเทศ ผ่าน Line "
-                         "Official Account ID @322wjrbo หรือผ่านลิ้งค์ "
+                         "Offical Account ID @322wjrbo หรือผ่านลิ้งค์ "
                          "https://line.me/R/ti/p/@322wjrbo "
                          "เพื่อให้เจ้าหน้าที่ดำเนินการตรวจสอบต่อไป"
                          "\n"
                          "\n"
-                         "สอบถามข้อมูลเพิ่มเติม supawit.mar@mahidol.ac.th"),
-                "text_en": ("There is a fine for late submission, and no additional fees "
-                            "are charged during the checking process. If a fine is "
-                            "incurred, students will receive an invoice through the "
-                            "system after the checking process is completed."
+                         "สอบถามข้อมูลเพิ่มเติม"
+                         "\n"
+                         "supawit.mar@mahidol.ac.th"),
+                "text_en": ("You have a fine for late submission, and no additional fees "
+                            "are charged during the checking process. The invoice will be "
+                            "issued through the system after the checking process is "
+                            "completed."
                             "\n"
                             "\n"
                             "Please resubmit the document to the system once you have "
@@ -2494,12 +2504,13 @@ STAFF_CHECKS = [
                             "\n"
                             "\n"
                             "If you are unable to submit the revised file through the "
-                            "system, please contact the IT staff via Line Official "
-                            "Account ID @322wjrbo or link: "
-                            "https://line.me/R/ti/p/@322wjrbo"
+                            "system, please contact the IT staff via Line Offical Account "
+                            "ID @322wjrbo or link: https://line.me/R/ti/p/@322wjrbo"
                             "\n"
                             "\n"
-                            "For more information supawit.mar@mahidol.ac.th"),
+                            "For more information"
+                            "\n"
+                            "supawit.mar@mahidol.ac.th"),
             },
         ],
     },
