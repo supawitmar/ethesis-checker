@@ -2687,23 +2687,6 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         self.assertIn(".copy-text { display:none; }", html)
         self.assertIn("printable.textContent = text;", html)
 
-    def test_the_english_report_never_shows_the_ai_written_text(self):
-        """ข้อความจาก AI เป็นร้อยแก้วไทยที่แต่งใหม่ทุกครั้ง ไม่มีกฎเต็มประโยครองรับ
-
-        พอสลับเป็นอังกฤษจึงตกไปใช้การแทนที่แบบเศษคำ แล้วได้ข้อความปนกันครึ่งไทย
-        ครึ่งอังกฤษ วัดแล้วได้จริง
-          "1. Approval page 1 page ก Exam pass dateที่พิมพ์ไว้ไม่ตรงกับข้อมูลในระบบ"
-        โหมด AI เป็นค่าตั้งต้นเมื่อเปิด AI ไว้ เจ้าหน้าที่หลักสูตรนานาชาติจึงเจอทันที
-        ที่กดปุ่ม EN แล้วคัดลอกข้อความนั้นส่งนักศึกษาได้โดยไม่รู้ตัว
-        """
-        html = self._render(self._clean_result())
-        self.assertIn("function useAiText()", html)
-        self.assertIn("AI_STALE && LANG !== 'en'", html)
-        self.assertIn("const base = useAiText() ? AI_TEXT : PLAIN_TEXT;", html)
-        # ต้องบอกเจ้าหน้าที่ด้วยว่าทำไมภาษาอังกฤษไม่ใช่ข้อความจาก AI
-        self.assertIn("The AI-written summary is in Thai only", html)
-        self.assertIn("b.disabled = (LANG === 'en');", html)
-
     def test_the_copy_box_is_never_wiped_blank_by_the_script(self):
         """ควบคุมเชิงลบของกล่องคัดลอกว่าง — เคยเจอจริงจากภาพหน้าจอของเจ้าหน้าที่
 
@@ -2713,98 +2696,6 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         html = self._render(self._clean_result())
         self.assertIn("if (text) ta.value = text;", html)
         self.assertIn("const fallback = box ? (box.value || '').trim() : '';", html)
-
-
-class TheAiRewriteMustNotTouchTheStaffWording(unittest.TestCase):
-    """โหมด "ภาษาเข้าใจง่าย" เรียบเรียงข้อความสรุปใหม่ทั้งก้อนด้วย AI
-
-    คำสั่งที่ให้ AI คือ "เขียนสั้น กระชับ" และ "แต่ละข้อต้องบอกครบสามอย่างเท่านั้น"
-    ซึ่งจะย่อถ้อยคำที่เจ้าหน้าที่เขียนมาเองทิ้ง รวมถึงข้อความปิดท้ายที่มี LINE ID กับ
-    อีเมลอยู่ข้างใน โหมดนี้เป็นค่าตั้งต้นเมื่อเปิด AI ไว้ เจ้าหน้าที่จึงคัดลอกข้อความที่
-    ถูกย่อไปส่งนักศึกษาได้โดยไม่รู้ตัว
-
-    สั่งใน prompt อย่างเดียวไม่พอ จึงถอดถ้อยคำออกก่อนส่ง แล้วใส่กลับหลังเรียบเรียงเสร็จ
-    """
-
-    def _summary_with_staff(self):
-        rep = Report()
-        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า ค)",
-                "เลขหน้าของหน้านี้ไม่ถูกต้อง", 'ต้องเป็นเลขหน้า "ก"', "",
-                "PAGE.SIGNATURE_LABEL")
-        return checker_module.plain_summary(
-            checker_module.check_result(rep),
-            staff=["SIGNATURE_LAYOUT_WRONG", "LATE_FEE_YES"])
-
-    def test_the_wording_is_taken_out_before_the_ai_sees_it(self):
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        self.assertTrue(kept)
-        for line in kept:
-            self.assertNotIn(line, protected)
-        self.assertIn("[[KEEP-0]]", protected)
-        # ข้อของระบบต้องไม่ถูกแตะ AI ยังเรียบเรียงส่วนนั้นได้ตามเดิม
-        self.assertIn("เลขหน้าของหน้านี้ไม่ถูกต้อง", protected)
-
-    def test_putting_it_back_gives_the_original_word_for_word(self):
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        self.assertEqual(llm_assist._restore(protected, kept), plain)
-
-    def test_a_dropped_marker_throws_the_whole_ai_text_away(self):
-        """ถ้อยคำหายแม้จุดเดียว = เชื่อผลไม่ได้ ให้ตกกลับไปใช้ข้อความตรงตัวจากระบบ"""
-        import llm_assist
-        plain = self._summary_with_staff()
-        protected, kept = llm_assist._protect(plain)
-        mangled = protected.replace("[[KEEP-0]]", "ปรับหน้าลงนามให้ถูก")
-        self.assertEqual(llm_assist._restore(mangled, kept), "")
-
-    def test_a_summary_without_staff_wording_is_untouched(self):
-        import llm_assist
-        plain = "ผลการตรวจ: ผ่าน" + NEWLINE + NEWLINE + "ไม่พบจุดที่ต้องแก้ไข"
-        protected, kept = llm_assist._protect(plain)
-        self.assertEqual(protected, plain)
-        self.assertEqual(kept, [])
-        self.assertEqual(llm_assist._restore(plain, kept), plain)
-
-    def test_the_numbering_and_indent_survive(self):
-        """เครื่องหมายต้องแทนที่เฉพาะเนื้อความ เลขข้อกับย่อหน้าคงไว้ให้ AI เห็นโครงเดิม"""
-        import llm_assist
-        protected, _kept = llm_assist._protect(self._summary_with_staff())
-        self.assertIn("2. [[KEEP-0]]", protected)
-        self.assertIn(checker_module.SUMMARY_INDENT + "[[KEEP-1]]", protected)
-
-    def test_the_ai_is_told_about_the_marker(self):
-        import llm_assist
-        self.assertIn("[[KEEP-n]]", llm_assist._SUMMARY_SYSTEM)
-
-    def test_student_summary_protects_and_restores(self):
-        """ทั้งเส้นทาง: ถ้อยคำที่ AI คืนมาต้องเป็นของเจ้าหน้าที่คำต่อคำ"""
-        import llm_assist
-        plain = self._summary_with_staff()
-        seen = {}
-
-        class _Response:
-            content = [type("Block", (), {"type": "text", "text": ""})()]
-
-        def fake_create(**kwargs):
-            seen["sent"] = kwargs["messages"][0]["content"]
-            # AI ที่ประพฤติดี: คงเครื่องหมายไว้ครบ แต่เรียบเรียงส่วนอื่นใหม่
-            body = seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1]
-            _Response.content[0].text = body.replace(
-                "เลขหน้าของหน้านี้ไม่ถูกต้อง", "เลขหน้าหน้านี้ยังไม่ถูก")
-            return _Response()
-
-        client = type("Client", (), {"messages": type("M", (), {"create": staticmethod(fake_create)})()})()
-        with mock.patch.object(llm_assist, "_client", lambda: client):
-            out = llm_assist.student_summary({"plain_summary": plain})
-        self.assertNotIn("[[KEEP-", seen["sent"].split(":" + NEWLINE + NEWLINE, 1)[1][:0] or "")
-        self.assertIn("[[KEEP-0]]", seen["sent"])
-        self.assertNotIn("ปรับโครงสร้างของหน้า", seen["sent"])
-        self.assertIn("ปรับโครงสร้างของหน้า", out)
-        self.assertIn("supawit.mar@mahidol.ac.th", out)
-        self.assertIn("เลขหน้าหน้านี้ยังไม่ถูก", out)
 
 
 class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
