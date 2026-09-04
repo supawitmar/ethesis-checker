@@ -625,6 +625,13 @@ var TR = [
   [/ตรวจว่าช่องหลักสูตรบนหน้าอัปโหลดถูกต้องหรือไม่ ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาจัดทำเล่มใหม่/g, 'Check that the programme selected on the upload page is correct; if it is, send the document back for the student to produce it again'],
   [/ส่วนอื่นทั้งหมดของเล่ม \(ระบบหยุดตรวจเมื่อภาษาของเล่มไม่ตรงกับที่ได้รับอนุมัติ\)/g, 'Everything else in the document (the check stopped because the document language does not match the approved programme)'],
   [/^(หน้าปก|หน้าลงนาม|หัวบทในเนื้อหา) และ (หน้าปก|หน้าลงนาม|หัวบทในเนื้อหา)$/g, '$1 and $2'],
+  // ชื่อตำแหน่งในตารางผลเทียบข้อมูลอนุมัติ ใช้เดี่ยว ๆ ไม่ได้อยู่กลางประโยค
+  // ต้องมาก่อนกฎเศษคำข้างล่าง ไม่งั้นจะได้ประโยคยาวมาวางในช่องตาราง
+  [/^หัวบทในเนื้อหา$/g, 'Chapter headings'],
+  [/^ภาษาที่เขียน$/g, 'Language of the document'],
+  [/^ระบบอ่านภาษาจากส่วนนี้ไม่ได้$/g, 'The system could not read the language of this part'],
+  [/^จัดทำเป็นภาษาไทย$/g, 'Produced in Thai'],
+  [/^จัดทำเป็นภาษาอังกฤษ$/g, 'Produced in English'],
   [/หัวบทในเนื้อหา/g, 'the chapter headings in the body'],
   [/^ภาษาของเล่ม$/g, 'Document language'],
   [/ลำดับที่พบ: /g, 'Order found: '],

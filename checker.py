@@ -3928,6 +3928,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if want_language:
         language_signals = book_language_signals(pages, cover_idx, doc_type)
         found_language = book_language(language_signals)
+        # ลงตารางผลเทียบทุกครั้ง ไม่ใช่เฉพาะตอนผิด — เจ้าหน้าที่ต้องเห็นว่า "ตรวจแล้ว
+        # และตรง" เหมือนหัวข้ออื่น ไม่งั้นภาษาที่เขียนจะเป็นช่องเดียวที่หายไปจากตาราง
+        # แล้วแยกไม่ออกว่าระบบไม่ได้ตรวจ หรือตรวจแล้วผ่าน
+        for part in ("cover", "signature", "chapter"):
+            signal = language_signals[part]
+            where = BOOK_LANGUAGE_PARTS[part]
+            if not signal:
+                rep.add_verification("ภาษาที่เขียน", where, "pending",
+                                     "ระบบอ่านภาษาจากส่วนนี้ไม่ได้")
+            elif signal == want_language:
+                rep.add_verification("ภาษาที่เขียน", where, "pass")
+            else:
+                rep.add_verification("ภาษาที่เขียน", where, "fail",
+                                     f"จัดทำเป็น{LANGUAGE_NAME[signal]}")
         want_name = LANGUAGE_NAME[want_language]
         other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
         must_be = (f'ภาษาที่ได้รับอนุมัติคือ "{want_name}" '

@@ -2973,6 +2973,70 @@ class BookLanguageMismatchStopsTheWholeCheck(unittest.TestCase):
             self.assertNotIn(ch, checker_module._join_and(["หน้าปก", "หน้าลงนาม"]))
 
 
+class TheLanguageOfTheDocumentShowsInTheVerificationTable(unittest.TestCase):
+    """ตาราง "ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" ต้องมีหัวข้อภาษาที่เขียนด้วย
+
+    เจ้าหน้าที่ทัก (ก.ย. 2569) ว่าหัวข้อนี้หายไปจากตาราง ทั้งที่ระบบตรวจอยู่แล้ว
+    ถ้าลงเฉพาะตอนผิด เจ้าหน้าที่จะแยกไม่ออกว่า "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ"
+    """
+
+    TOPIC = "ภาษาที่เขียน"
+    PARTS = ("หน้าปก", "หน้าลงนาม", "หัวบทในเนื้อหา")
+
+    def _run(self, signals, program_language="thai"):
+        rep = checker_module.Report()
+        with mock.patch.object(checker_module, "book_language_signals",
+                               lambda *a, **k: dict(signals)):
+            # เรียกเฉพาะท่อนที่ลงตาราง โดยจำลองเงื่อนไขเดียวกับใน run_check
+            want = checker_module.approved_book_language(
+                {"program_language": program_language})
+            found = checker_module.book_language_signals(None)
+            for part in ("cover", "signature", "chapter"):
+                signal = found[part]
+                where = checker_module.BOOK_LANGUAGE_PARTS[part]
+                if not signal:
+                    rep.add_verification(self.TOPIC, where, "pending",
+                                         "ระบบอ่านภาษาจากส่วนนี้ไม่ได้")
+                elif signal == want:
+                    rep.add_verification(self.TOPIC, where, "pass")
+                else:
+                    rep.add_verification(
+                        self.TOPIC, where, "fail",
+                        f"จัดทำเป็น{checker_module.LANGUAGE_NAME[signal]}")
+        return rep.verification[0]["checks"]
+
+    def test_run_check_files_the_rows_itself(self):
+        """ท่อนนี้ต้องอยู่ใน run_check จริง ไม่ใช่มีแต่ในเทสต์"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('rep.add_verification("ภาษาที่เขียน"', source)
+        self.assertIn('"ระบบอ่านภาษาจากส่วนนี้ไม่ได้"', source)
+
+    def test_a_matching_book_is_recorded_as_checked_and_matching(self):
+        rows = self._run({"cover": "thai", "signature": "thai", "chapter": "thai"})
+        self.assertEqual([r["location"] for r in rows], list(self.PARTS))
+        self.assertEqual([r["status"] for r in rows], ["pass"] * 3)
+
+    def test_a_wrong_language_book_says_which_language_it_is(self):
+        rows = self._run({"cover": "en", "signature": "en", "chapter": "en"})
+        self.assertEqual([r["status"] for r in rows], ["fail"] * 3)
+        for row in rows:
+            self.assertEqual(row["detail"], "จัดทำเป็นภาษาอังกฤษ")
+
+    def test_a_part_the_system_cannot_read_is_pending_not_a_pass(self):
+        """อ่านไม่ออกไม่ใช่ผ่าน ถ้านับเป็นผ่านเจ้าหน้าที่จะเชื่อว่าตรวจครบแล้ว"""
+        rows = self._run({"cover": "", "signature": "thai", "chapter": "thai"})
+        self.assertEqual([r["status"] for r in rows], ["pending", "pass", "pass"])
+        self.assertEqual(rows[0]["detail"], "ระบบอ่านภาษาจากส่วนนี้ไม่ได้")
+
+    def test_every_word_the_table_shows_has_an_english_translation(self):
+        """ช่องในตารางแปลด้วย TR (.tr-dyn) ถ้าไม่มีกฎ รายงานอังกฤษจะเหลือคำไทยค้าง"""
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in (self.TOPIC, "ระบบอ่านภาษาจากส่วนนี้ไม่ได้",
+                       "จัดทำเป็นภาษาไทย", "จัดทำเป็นภาษาอังกฤษ") + self.PARTS:
+            self.assertIn(phrase, report_html, phrase)
+
+
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
     """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
 
