@@ -2066,8 +2066,47 @@ def book_language_signals(pages, cover_idx=0, doc_type=""):
                 en_ch += 1
             else:
                 thai_ch += 1
+    # "script" ไม่ใช่ส่วนหนึ่งของเล่ม จึงไม่ถูกนับใน wrong_parts (ซึ่งวนเฉพาะสามคีย์แรก)
+    # เป็นตัวสำรองที่ book_language หยิบใช้ต่อเมื่อสามคีย์แรกเงียบหมด
     return {"cover": cover_lang, "signature": sig_lang,
-            "chapter": _one_sided(thai_ch, en_ch)}
+            "chapter": _one_sided(thai_ch, en_ch),
+            "script": book_language_by_script(pages)}
+
+
+# เกณฑ์ของตัวสำรอง "สัดส่วนตัวอักษร" — เว้นช่องว่างตรงกลางไว้กว้างมากโดยตั้งใจ
+# วัดกับเล่มจริง: เล่มอังกฤษได้ไทย 0.1% กับ 3.7% (เล่ม 3.7% มีบทคัดย่อไทยเต็ม ๆ อยู่ด้วย)
+# ส่วนเล่มไทยได้ไทย 96.1% ช่องว่างระหว่าง 3.7% กับ 96.1% กว้างพอให้เล่มที่มีภาคผนวก
+# ภาษาไทยยาว ๆ ในเล่มอังกฤษก็ยังไม่หลุดมาถึงเกณฑ์
+_SCRIPT_THAI_MIN = 0.60
+_SCRIPT_THAI_MAX = 0.10
+# ข้อความน้อยกว่านี้เชื่อสัดส่วนไม่ได้ (ไฟล์ที่ดึงข้อความได้แค่หยิบมือ)
+_SCRIPT_MIN_LETTERS = 200
+
+
+def book_language_by_script(pages):
+    """ภาษาของเล่มจากสัดส่วนตัวอักษรทั้งไฟล์ — **ตัวสำรองท้ายสุดเท่านั้น**
+
+    ห้ามใช้เป็นสัญญาณหลัก เพราะเล่มไทยที่มีศัพท์อังกฤษเยอะจะหลอกได้ (ปัญหาเดียวกับ
+    ที่ title_script เจอ) ใช้ต่อเมื่อข้อความตายตัวของ template เงียบหมดทั้งสามจุด
+    ซึ่งแปลว่าเล่มไม่ได้ทำตาม template เลย หรือดึงข้อความได้ไม่ครบ
+
+    ที่ต้องมีตัวสำรอง: การตอบว่า "ระบบอ่านภาษาจากไฟล์ไม่ได้" แทบไม่มีทางเกิดกับไฟล์ที่
+    ระบบรับเข้ามาตรวจอยู่แล้ว (ไฟล์ที่ดึงข้อความไม่ได้ถูกปฏิเสธตั้งแต่ตอนอัปโหลด ดู
+    main._pdf_readability_issue) ถ้ายังตอบแบบนั้นได้อยู่ เจ้าหน้าที่จะเจอช่องที่ไม่มี
+    คำตอบทั้งที่ไฟล์อ่านออก
+    """
+    text = " ".join(pages or ())
+    thai = len(_THAI_LETTER.findall(text))
+    latin = len(_LATIN_LETTER.findall(text))
+    total = thai + latin
+    if total < _SCRIPT_MIN_LETTERS:
+        return ""
+    ratio = thai / total
+    if ratio >= _SCRIPT_THAI_MIN:
+        return "thai"
+    if ratio <= _SCRIPT_THAI_MAX:
+        return "en"
+    return ""
 
 
 def book_language(signals):
@@ -2076,8 +2115,18 @@ def book_language(signals):
     ต้องมีสัญญาณชี้ทางเดียวกันอย่างน้อย 2 ตัว และห้ามมีตัวไหนชี้สวนทาง เพราะผลของ
     ฟังก์ชันนี้ใช้ "หยุดตรวจทั้งเล่ม" การฟันธงผิดจึงเสียหายกว่าการไม่ฟันธง
     """
-    votes = [v for v in (signals or {}).values() if v]
-    return votes[0] if len(votes) >= 2 and len(set(votes)) == 1 else ""
+    signals = signals or {}
+    votes = [signals.get(key) for key in ("cover", "signature", "chapter")]
+    votes = [v for v in votes if v]
+    if len(votes) >= 2 and len(set(votes)) == 1:
+        return votes[0]
+    if votes:
+        # มีข้อความ template อ่านได้อยู่บ้าง แต่ยังไม่พอหรือขัดกันเอง — ห้ามให้ตัวสำรอง
+        # มาชี้ขาดทับ เพราะสัญญาณ template แม่นกว่าสัดส่วนตัวอักษรมาก
+        return ""
+    # เงียบหมดทั้งสามจุด (เล่มไม่ทำตาม template หรือดึงข้อความได้ไม่ครบ) จึงค่อยใช้
+    # สัดส่วนตัวอักษรเป็นตัวสำรอง ดีกว่าตอบว่าอ่านภาษาไม่ได้ทั้งที่ไฟล์อ่านออก
+    return signals.get("script", "")
 
 
 def book_language_rows(want_language, signals):

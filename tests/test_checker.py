@@ -2816,14 +2816,25 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     def signals(self, *blocks):
         return checker_module.book_language_signals(self.pages(*blocks), 0, "THESIS")
 
+    def template_signals(self, *blocks):
+        """เฉพาะสามสัญญาณที่มาจากข้อความตายตัวของ template
+
+        คีย์ "script" เป็นตัวสำรองคนละชนิด (สัดส่วนตัวอักษรทั้งไฟล์) ไม่ใช่ส่วนของเล่ม
+        เทสต์ในคลาสนี้พูดถึงข้อความ template เท่านั้น
+        """
+        got = self.signals(*blocks)
+        return {k: got[k] for k in ("cover", "signature", "chapter")}
+
     def test_a_thai_book_is_read_as_thai(self):
         got = self.signals(self.TH_COVER, self.TH_SIG, self.TH_CH)
-        self.assertEqual(got, {"cover": "thai", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(self.template_signals(self.TH_COVER, self.TH_SIG, self.TH_CH),
+                         {"cover": "thai", "signature": "thai", "chapter": "thai"})
         self.assertEqual(checker_module.book_language(got), "thai")
 
     def test_an_english_book_is_read_as_english(self):
         got = self.signals(self.EN_COVER, self.EN_SIG, self.EN_CH)
-        self.assertEqual(got, {"cover": "en", "signature": "en", "chapter": "en"})
+        self.assertEqual(self.template_signals(self.EN_COVER, self.EN_SIG, self.EN_CH),
+                         {"cover": "en", "signature": "en", "chapter": "en"})
         self.assertEqual(checker_module.book_language(got), "en")
 
     def test_two_signals_are_enough(self):
@@ -2842,7 +2853,8 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
     def test_signals_that_disagree_decide_nothing(self):
         """ปกอังกฤษ แต่หน้าลงนามกับหัวบทเป็นไทย — ต้องไม่ฟันธงแล้วหยุดตรวจทั้งเล่ม"""
         got = self.signals(self.EN_COVER, self.TH_SIG, self.TH_CH)
-        self.assertEqual(got, {"cover": "en", "signature": "thai", "chapter": "thai"})
+        self.assertEqual(self.template_signals(self.EN_COVER, self.TH_SIG, self.TH_CH),
+                         {"cover": "en", "signature": "thai", "chapter": "thai"})
         self.assertEqual(checker_module.book_language(got), "")
 
     def test_the_unanimity_rule_is_what_stops_it(self):
@@ -2857,6 +2869,76 @@ class BookLanguageIsReadFromTemplateText(unittest.TestCase):
         got = self.signals(self.TH_COVER + NEWLINE + self.EN_COVER.replace("@", NEWLINE),
                            "", "")
         self.assertEqual(got["cover"], "")
+
+
+class TheLastResortIsTheScriptOfTheWholeFile(unittest.TestCase):
+    """เล่มที่ไม่ทำตาม template เลย ก็ยังต้องบอกได้ว่าเป็นภาษาอะไร
+
+    เจ้าหน้าที่ทัก (ก.ย. 2569) ว่าระบบไม่น่าจะอ่านไม่ได้ว่าเล่มไหนเป็นภาษาไหน ถูกต้อง —
+    ไฟล์ที่ดึงข้อความไม่ได้เลยถูกปฏิเสธตั้งแต่ตอนอัปโหลด (main._pdf_readability_issue)
+    ไฟล์ที่เข้ามาถึงตัวตรวจจึงมีข้อความให้อ่านเสมอ ถ้าข้อความตายตัวของ template เงียบ
+    หมดทั้งสามจุด ยังเหลือสัดส่วนตัวอักษรทั้งไฟล์ให้ใช้เป็นตัวสำรอง
+
+    วัดกับเล่มจริง เล่มอังกฤษได้ไทย 0.1% กับ 3.7% (เล่มหลังมีบทคัดย่อไทยเต็ม ๆ)
+    เล่มไทยได้ไทย 96.1% เกณฑ์จึงเว้นช่องว่างตรงกลางไว้กว้างมาก
+    """
+
+    def _thai(self, n=40):
+        return ["ทดสอบเนื้อหาภาษาไทยของเล่มวิทยานิพนธ์ " * n]
+
+    def _english(self, n=40):
+        return ["This is the English body text of the thesis document " * n]
+
+    def test_a_thai_file_reads_as_thai(self):
+        self.assertEqual(checker_module.book_language_by_script(self._thai()), "thai")
+
+    def test_an_english_file_reads_as_english(self):
+        self.assertEqual(checker_module.book_language_by_script(self._english()), "en")
+
+    def test_a_mixed_file_still_decides_nothing(self):
+        """ครึ่งไทยครึ่งอังกฤษ = เดาไม่ได้ ห้ามฟันธง"""
+        mixed = ["ไทยไทยไทยไทยไทย English English English " * 30]
+        self.assertEqual(checker_module.book_language_by_script(mixed), "")
+
+    def test_a_file_with_almost_no_text_decides_nothing(self):
+        self.assertEqual(checker_module.book_language_by_script(["สั้นมาก"]), "")
+        self.assertEqual(checker_module.book_language_by_script([]), "")
+
+    def test_an_english_book_with_a_thai_abstract_is_still_english(self):
+        """เล่มหลักสูตรไทย-อังกฤษมีบทคัดย่อไทยเต็ม ๆ อยู่ในเล่ม ต้องไม่ถูกอ่านเป็นเล่มไทย"""
+        pages = self._english(60) + self._thai(3)
+        self.assertEqual(checker_module.book_language_by_script(pages), "en")
+
+    def test_the_fallback_only_speaks_when_the_template_is_silent(self):
+        """ควบคุมเชิงลบ: ข้อความ template แม่นกว่า ห้ามให้ตัวสำรองมาชี้ขาดทับ"""
+        # อ่านได้แค่ปก — เดิมเงียบ ต้องยังเงียบเหมือนเดิม แม้ตัวสำรองจะชี้ทางเดียวกัน
+        self.assertEqual(checker_module.book_language(
+            {"cover": "thai", "signature": "", "chapter": "", "script": "thai"}), "")
+        # สองตัวตรงกัน ตัวสำรองชี้สวนทาง ต้องเชื่อ template
+        self.assertEqual(checker_module.book_language(
+            {"cover": "thai", "signature": "thai", "chapter": "", "script": "en"}), "thai")
+        # ขัดกันเอง ต้องยังไม่ฟันธง
+        self.assertEqual(checker_module.book_language(
+            {"cover": "en", "signature": "thai", "chapter": "thai", "script": "thai"}), "")
+
+    def test_the_fallback_answers_when_the_template_says_nothing(self):
+        self.assertEqual(checker_module.book_language(
+            {"cover": "", "signature": "", "chapter": "", "script": "thai"}), "thai")
+        self.assertEqual(checker_module.book_language(
+            {"cover": "", "signature": "", "chapter": "", "script": ""}), "")
+
+    def test_the_signals_carry_the_fallback_along(self):
+        got = checker_module.book_language_signals(
+            ["ไม่มีข้อความ template แต่เป็นภาษาไทยล้วน " * 30], 0, "THESIS")
+        self.assertEqual(got["cover"], "")
+        self.assertEqual(got["script"], "thai")
+        self.assertEqual(checker_module.book_language(got), "thai")
+
+    def test_the_fallback_is_not_a_part_of_the_document(self):
+        """ห้ามโผล่ในรายชื่อ "ส่วนที่จัดทำเป็นอีกภาษา" เพราะไม่ใช่ส่วนของเล่ม"""
+        self.assertNotIn("script", checker_module.BOOK_LANGUAGE_PARTS)
+        source = inspect.getsource(checker_module.book_language_rows)
+        self.assertIn('for key in ("cover", "signature", "chapter")', source)
 
 
 class ApprovedBookLanguageComesFromTheProgramme(unittest.TestCase):
