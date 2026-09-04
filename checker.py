@@ -2080,6 +2080,38 @@ def book_language(signals):
     return votes[0] if len(votes) >= 2 and len(set(votes)) == 1 else ""
 
 
+def book_language_rows(want_language, signals):
+    """สองแถวของหัวข้อ "ภาษาที่เขียน" ในตารางผลเทียบข้อมูลอนุมัติรายตำแหน่ง
+
+    คืน [(ตำแหน่ง, สถานะ, รายละเอียด), ...] — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เห็น
+    **ภาษาของทั้งสองฝั่ง** ไม่ใช่บอกแค่ว่าตรงหรือไม่ตรง จะได้รู้ทันทีว่าต้องไปแก้ที่
+    ช่องหลักสูตรบนหน้าอัปโหลด หรือส่งกลับให้นักศึกษาทำเล่มใหม่
+
+    ต้องลงตารางทุกครั้งที่มีข้อมูลให้เทียบ ไม่ใช่เฉพาะตอนผิด ไม่งั้นเวลาเล่มถูกต้อง
+    หัวข้อนี้จะหายไปทั้งหัวข้อ แล้วแยกไม่ออกว่า "ตรวจแล้วผ่าน" กับ "ระบบไม่ได้ตรวจ"
+
+    อ่านภาษาจากไฟล์ไม่ได้ = "รอยืนยัน" ไม่ใช่ "ตรง" — ถ้านับเป็นตรง เจ้าหน้าที่จะเชื่อว่า
+    ระบบยืนยันให้แล้วทั้งที่ไม่ได้ยืนยัน
+    """
+    want_name = LANGUAGE_NAME[want_language]
+    other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
+    found = book_language(signals)
+    wrong_parts = [BOOK_LANGUAGE_PARTS[key]
+                   for key in ("cover", "signature", "chapter")
+                   if signals[key] and signals[key] != want_language]
+    if found == want_language:
+        status, in_file = "pass", want_name
+    elif found:
+        status, in_file = "fail", LANGUAGE_NAME[found]
+    elif wrong_parts:
+        # สัญญาณขัดกันเอง ตัดสินภาษาทั้งเล่มไม่ได้ แต่รู้แน่ว่าส่วนไหนคนละภาษา
+        status, in_file = "fail", f"{other_name} ในส่วน {_join_and(wrong_parts)}"
+    else:
+        status, in_file = "pending", "ระบบอ่านภาษาจากไฟล์ไม่ได้"
+    return [("ข้อมูลอนุมัติ", status, want_name),
+            ("ในไฟล์รูปเล่ม", status, in_file)]
+
+
 def approved_book_language(approved):
     """ภาษาที่เล่มต้องทำ ตามข้อมูลอนุมัติ — "thai" / "en" / "" (ไม่ได้ระบุหลักสูตร)
 
@@ -3928,24 +3960,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if want_language:
         language_signals = book_language_signals(pages, cover_idx, doc_type)
         found_language = book_language(language_signals)
-        # ลงตารางผลเทียบทุกครั้ง ไม่ใช่เฉพาะตอนผิด — เจ้าหน้าที่ต้องเห็นว่า "ตรวจแล้ว
-        # และตรง" เหมือนหัวข้ออื่น ไม่งั้นภาษาที่เขียนจะเป็นช่องเดียวที่หายไปจากตาราง
-        # แล้วแยกไม่ออกว่าระบบไม่ได้ตรวจ หรือตรวจแล้วผ่าน
-        for part in ("cover", "signature", "chapter"):
-            signal = language_signals[part]
-            where = BOOK_LANGUAGE_PARTS[part]
-            if not signal:
-                rep.add_verification("ภาษาที่เขียน", where, "pending",
-                                     "ระบบอ่านภาษาจากส่วนนี้ไม่ได้")
-            elif signal == want_language:
-                rep.add_verification("ภาษาที่เขียน", where, "pass")
-            else:
-                rep.add_verification("ภาษาที่เขียน", where, "fail",
-                                     f"จัดทำเป็น{LANGUAGE_NAME[signal]}")
         want_name = LANGUAGE_NAME[want_language]
         other_name = LANGUAGE_NAME["en" if want_language == "thai" else "thai"]
         must_be = (f'ภาษาที่ได้รับอนุมัติคือ "{want_name}" '
                    f'ต้องดำเนินการจัดทำเล่มเป็น "{want_name}"')
+        wrong_parts = [BOOK_LANGUAGE_PARTS[key]
+                       for key in ("cover", "signature", "chapter")
+                       if language_signals[key] and language_signals[key] != want_language]
+        for where, status, detail in book_language_rows(want_language, language_signals):
+            rep.add_verification("ภาษาที่เขียน", where, status, detail)
         if found_language and found_language != want_language:
             # ทั้งเล่มผิดภาษา — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้หยุดตรวจส่วนอื่นทั้งหมด
             # แล้วแจ้งจุดผิดข้อเดียว
@@ -3962,9 +3985,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                  "chapters_mode": chapters_mode, "n_pages": n,
                  "approved_data": bool(approved)},
                 (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
-        wrong_parts = [BOOK_LANGUAGE_PARTS[key]
-                       for key in ("cover", "signature", "chapter")
-                       if language_signals[key] and language_signals[key] != want_language]
         if wrong_parts:
             # สัญญาณขัดกันเอง (เช่น ปกอังกฤษ แต่หัวบทเป็น "บทที่ 1") ตัดสินภาษาทั้งเล่ม
             # ไม่ได้ จึงไม่หยุดตรวจ แต่บางส่วนคนละภาษากับที่อนุมัติแน่นอน ต้องฟ้อง
