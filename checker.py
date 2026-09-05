@@ -2420,9 +2420,19 @@ SURVEY_URL = "https://bit.ly/4cwqxAd"
 # เข้าสู่ระบบอีกครั้ง" ไปหาคนที่ไม่มีจุดต้องแก้สักจุด เจ้าหน้าที่จึงเขียนถ้อยคำอีกชุดไว้
 # (ไฟล์ note V.2.txt) แยกตามมีค่าปรับ/ไม่มีค่าปรับ เหมือนกับปุ่มที่มีอยู่แล้ว
 #
-# ถ้อยคำทุกคำเป็นต้นฉบับของเจ้าหน้าที่ ห้ามเรียบเรียงใหม่หรือแก้คำที่ดูเหมือนพิมพ์ตก
-# (หลักการเดียวกับถ้อยคำชุดอื่นในแฟ้มนี้) — "1 .ชำระผ่าน QR Code payment" ที่เว้นวรรค
-# หน้าจุด กับดอกจันคร่อม "*ทั้งสองขั้นตอน...*" เป็นต้นฉบับ มีเทสต์ล็อกไว้
+# ถ้อยคำเป็นของเจ้าหน้าที่ ห้ามเรียบเรียงใหม่เอง แก้ได้เมื่อเจ้าหน้าที่สั่งเท่านั้น แล้ว
+# ต้องแก้เทสต์ที่ล็อกคำนั้นไว้พร้อมกัน (หลักการเดียวกับถ้อยคำชุดอื่นในแฟ้มนี้) — ดอกจัน
+# คร่อม "*ทั้งสองขั้นตอน...*" เป็นต้นฉบับ ยังคงไว้ มีเทสต์ล็อก
+#
+# รอบเกลาคำ (ก.ย. 2569) เจ้าหน้าที่อ่านถ้อยคำทั้งสี่ชุดแล้วสั่งให้แก้ห้าจุดที่ต้นฉบับ
+# ไม่สม่ำเสมอกันเอง จุดอื่นคงไว้ทุกตัวอักษร
+#   "1 .ชำระผ่าน" เว้นวรรคหน้าจุด        ->  "1. ชำระผ่าน" ให้เหมือนข้อ 2 กับ 3
+#   ชุดมีค่าปรับอังกฤษเปิดเรื่องซ้ำสองรอบ  ->  ตัด "Your E-Thesis submission has been
+#                                            successfully completed in the system."
+#                                            ที่พูดซ้ำบรรทัดแรกออก
+#   "If you meet all graduation requirements" ->  เติมจุลภาค และ "You" -> "you"
+#   "GR.5 (REQUESTING DEGREE)"          ->  "(Requesting Degree)" ให้ตรงกับอีกชุด
+#   "Mr.Supawit"                        ->  "Mr. Supawit"
 #
 # ดอกจันคู่นี้ต่างจากกรณีหน้าลงนาม ซึ่งเจ้าหน้าที่สั่งให้ถอดออกเพราะขึ้นเป็นดาวลอยใน
 # อีเมลกับ Word — ตรงนี้เจ้าหน้าที่ยืนยันให้คงไว้ (ก.ย. 2569) อย่าถอดตามกรณีนั้น
@@ -2430,9 +2440,8 @@ SURVEY_URL = "https://bit.ly/4cwqxAd"
 # บล็อกเชิญตอบแบบสอบถามเป็นชุดใหม่ (ก.ย. 2569) แทนบล็อกเดิมที่ชี้ไป forms.gle ซึ่งเป็น
 # แบบประเมินงานบริการภาพรวม คนละตัวกับแบบสอบถามกระบวนการตรวจเล่มที่ใช้อยู่ตอนนี้
 #
-# ไทยกับอังกฤษของถ้อยคำชุดนี้ขึ้นบรรทัดคนละจุด (อังกฤษแตกหน้าเสนอ/หน้าอนุมัติเป็นรายการ
-# เลข ไทยรวมเป็นประโยคเดียว) จึงจับคู่แปล "ทั้งก้อน" ไม่ใช่ทีละบรรทัด ดู STAFF_BLOCK_EN
-# ใน report.html
+# ไทยกับอังกฤษของถ้อยคำชุดนี้ขึ้นบรรทัดคนละจุดและจำนวนบรรทัดไม่เท่ากัน จึงจับคู่แปล
+# "ทั้งก้อน" ไม่ใช่ทีละบรรทัด ดู STAFF_BLOCK_EN ใน report.html
 
 _PASS_NO_FEE_TH = "\n".join([
     'การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว',
@@ -2491,7 +2500,7 @@ _PASS_NO_FEE_EN = "\n".join([
     'Survey link: ' + SURVEY_URL,
     '',
     'If you have any further questions or need clarification,',
-    'please feel free to contact Mr.Supawit at supawit.mar@mahidol.ac.th.',
+    'please feel free to contact Mr. Supawit at supawit.mar@mahidol.ac.th.',
 ])
 
 
@@ -2502,7 +2511,7 @@ _PASS_FEE_TH = "\n".join([
     'เนื่องจากนักศึกษามีค่าปรับกรณีส่ง E-thesis ล่าช้า',
     'นักศึกษาสามารถพิมพ์ใบแจ้งค่าปรับ (invoice) จากระบบเพื่อชำระเงินได้',
     'โดยสามารถเลือกช่องทางการชำระเงินได้ 3 ช่องทาง ได้แก่',
-    '1 .ชำระผ่าน QR Code payment',
+    '1. ชำระผ่าน QR Code payment',
     '2. ชำระผ่านใบแจ้งหนี้ (Invoice)',
     '3. ชำระผ่านบัตรเครดิต',
     '',
@@ -2521,7 +2530,7 @@ _PASS_FEE_TH = "\n".join([
     # ให้เท่ากัน (ก.ย. 2569) — เป็นการจัดย่อหน้า ไม่ได้แก้ถ้อยคำ
     '',
     'ในกรณีที่นักศึกษามีคุณสมบัติครบถ้วนในการเสนอขออนุมัติปริญญา',
-    'สามารถดำเนินการส่งแบบฟอร์ม GR.5 (REQUESTING DEGREE)',
+    'สามารถดำเนินการส่งแบบฟอร์ม GR.5 (Requesting Degree)',
     'ผ่านระบบออนไลน์ที่ลิงก์ด้านล่างนี้',
     'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
     '',
@@ -2542,8 +2551,7 @@ _PASS_FEE_EN = "\n".join([
     'However, there are still steps you need to complete. '
     'Please read the details below.',
     '',
-    'Your E-Thesis submission has been successfully completed in the system.',
-    'However, as there is a late submission fine, you are required to settle the payment.',
+    'As there is a late submission fine, you are required to settle the payment.',
     'The invoice for the fine can be printed from the system, and payment can be made through one of the following three methods:',
     '1. QR Code',
     '2. Invoice',
@@ -2562,8 +2570,8 @@ _PASS_FEE_EN = "\n".join([
     'from the date your E-Thesis status is shown as "Completed" in the system,',
     'so that they may be forwarded to the Dean of the FGS for signature.',
     '',
-    'If you meet all graduation requirements',
-    'You may proceed to submit the GR.5 form (Requesting Degree)',
+    'If you meet all graduation requirements,',
+    'you may proceed to submit the GR.5 form (Requesting Degree)',
     'via the online system at the following link:',
     'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
     '',
@@ -2575,7 +2583,7 @@ _PASS_FEE_EN = "\n".join([
     'Survey link: ' + SURVEY_URL,
     '',
     'If you have any further questions or need clarification,',
-    'please feel free to contact Mr.Supawit at supawit.mar@mahidol.ac.th.',
+    'please feel free to contact Mr. Supawit at supawit.mar@mahidol.ac.th.',
 ])
 
 
