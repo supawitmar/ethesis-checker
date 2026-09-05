@@ -2822,7 +2822,15 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         none_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_NONE][1]["text_en"]
         yes_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_YES][1]["text_en"]
         self.assertIn("Your E-thesis has been completed.", none_en)
-        self.assertIn("1. Entitled Page", none_en)
+        # เจ้าหน้าที่รวมท่อนหน้าลงนามฝั่งอังกฤษเป็นย่อหน้าเดียว (ก.ย. 2569)
+        # ตัดรายการ "1. Entitled Page / 2. Approval Page" ออก ให้ตรงกับฝั่งไทย
+        # ที่บอกช่วงหน้าไว้ในวงเล็บอยู่แล้ว
+        for text in (none_en, yes_en):
+            self.assertIn("signatures completed" + NEWLINE
+                          + "through the system, in the Sign off page submission tab,",
+                          text)
+            self.assertNotIn("Entitled Page", text)
+            self.assertNotIn("Submit the signed documents", text)
         self.assertIn("If you meet all graduation requirements", yes_en)
 
     def test_the_signature_pages_are_always_submitted_through_the_system(self):
