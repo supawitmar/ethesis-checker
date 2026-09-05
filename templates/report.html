@@ -231,7 +231,7 @@
 
   <div class="verdict-bar">
     <div class="verdict-label" data-th="แจ้งผลการพิจารณา" data-en="Result of consideration">แจ้งผลการพิจารณา</div>
-    <div class="verdict-pill {{ 'pass' if report.verdict=='ผ่าน' else ('fail' if report.verdict=='ไม่ผ่าน' else 'pending') }}">
+    <div class="verdict-pill {{ 'pass' if report.verdict=='ผ่าน' else ('fail' if report.verdict=='ไม่ผ่าน' else 'pending') }}" id="verdict-pill">
       {{ 'ผ่าน (Passed)' if report.verdict=='ผ่าน' else ('ไม่ผ่าน (Not passed)' if report.verdict=='ไม่ผ่าน' else 'รอยืนยัน (Pending confirmation)') }}
     </div>
     <div class="stats">
@@ -1523,6 +1523,22 @@ function clearStaffAnswer(card){
   card.classList.remove('state-pass', 'state-fail');
   renderStaffState(card);
 }
+// ป้าย "แจ้งผลการพิจารณา" ต้องตามคำตัดสินของเจ้าหน้าที่ ไม่ใช่ค้างที่ผลของระบบ
+// เจ้าหน้าที่กด "โครงสร้างหน้าลงนามผิด" กับเล่มที่ระบบว่าผ่าน แล้วข้อความสรุปเขียนว่า
+// "ไม่ผ่าน" แต่ป้ายบนหัวยังเขียน "ผ่าน (Passed)" — สองอย่างขัดกันต่อหน้าเจ้าหน้าที่
+// ส่วนตัวเลขสามกล่องข้าง ๆ เป็น "สิ่งที่ระบบตรวจพบ" คนละเรื่องกับผลพิจารณา จึงไม่แตะ
+var VERDICT_PILL = {
+  'ผ่าน':      ['pass',    'ผ่าน (Passed)'],
+  'ไม่ผ่าน':    ['fail',    'ไม่ผ่าน (Not passed)'],
+  'รอยืนยัน':   ['pending', 'รอยืนยัน (Pending confirmation)'],
+};
+function renderVerdictPill(verdict){
+  var pill = document.getElementById('verdict-pill');
+  var shown = VERDICT_PILL[verdict];
+  if (!pill || !shown) return;              // ผลตรวจที่ไม่รู้จัก ปล่อยของเดิมไว้
+  pill.className = 'verdict-pill ' + shown[0];
+  pill.textContent = shown[1];
+}
 function applyVerdictScope(verdict){
   // ผลตรวจที่รู้จักมีสามค่าเท่านั้น ค่าอื่น (หรือค่าว่าง เพราะอ่านข้อความสรุปไม่ได้)
   // แปลว่าเราไม่รู้จริง ๆ — โชว์ทุกหัวข้อไว้ก่อน ให้เจ้าหน้าที่เลือกเอง ดีกว่าเดาผิด
@@ -1563,7 +1579,10 @@ function refreshSummary(){
     })
     .then(function(data){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
-      if (typeof data.verdict === 'string') applyVerdictScope(data.verdict);
+      if (typeof data.verdict === 'string'){
+        applyVerdictScope(data.verdict);
+        renderVerdictPill(data.verdict);
+      }
       showCopyError('');
       renderSummary();
     })
@@ -1599,6 +1618,7 @@ function fallbackCopy(text){
 document.addEventListener('DOMContentLoaded', function(){
   renderSummary();
   applyVerdictScope(REPORT_VERDICT);
+  renderVerdictPill(REPORT_VERDICT);
 });
 
 function setPF(btn, state){
