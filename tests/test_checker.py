@@ -2797,9 +2797,10 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 self.assertEqual(len(th), len(en), choice["id"])
 
     def test_the_pass_wording_is_kept_exactly_as_staff_wrote_it(self):
-        """เหมือนถ้อยคำชุดอื่น — ต้นฉบับจาก note V.2.txt ทุกตัวอักษร รวมที่ดูเหมือนพิมพ์ตก
+        """เหมือนถ้อยคำชุดอื่น — ต้นฉบับจาก note V.2.txt ทุกตัวอักษร
 
-        ถ้าจะเกลา ต้องได้คำสั่งจากเจ้าหน้าที่ก่อน แล้วแก้เทสต์นี้พร้อมกับถ้อยคำ
+        เจ้าหน้าที่อ่านทั้งสี่ชุดแล้วสั่งเกลาห้าจุด (ก.ย. 2569) จุดที่เหลือยังเป็นต้นฉบับ
+        ถ้าจะเกลาเพิ่ม ต้องได้คำสั่งจากเจ้าหน้าที่ก่อน แล้วแก้เทสต์นี้พร้อมกับถ้อยคำ
         """
         none_th = checker_module.STAFF_CHOICE_BY_ID[self.PASS_NONE][1]["text"]
         yes_th = checker_module.STAFF_CHOICE_BY_ID[self.PASS_YES][1]["text"]
@@ -2809,8 +2810,14 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                        # หน้าลงนามที่สั่งให้ถอดออก อย่าถอดตามกรณีนั้น
                        "*ทั้งสองขั้นตอนสามารถดำเนินการควบคู่กันได้*"):
             self.assertIn(phrase, none_th, phrase)
-        # เว้นวรรคหน้าจุดเป็นต้นฉบับ อย่าแก้เป็น "1. ชำระผ่าน"
-        self.assertIn("1 .ชำระผ่าน QR Code payment", yes_th)
+        # ต้นฉบับพิมพ์ "1 .ชำระผ่าน" เว้นวรรคหน้าจุด ต่างจากข้อ 2 กับ 3 ในรายการเดียวกัน
+        # เจ้าหน้าที่สั่งให้เกลา (ก.ย. 2569)
+        self.assertIn("1. ชำระผ่าน QR Code payment", yes_th)
+        self.assertNotIn("1 .ชำระผ่าน", yes_th)
+        # ชื่อฟอร์มต้องพิมพ์แบบเดียวกันทั้งสองชุด ต้นฉบับชุดมีค่าปรับใช้ตัวใหญ่ทั้งคำ
+        for text in (none_th, yes_th):
+            self.assertIn("GR.5 (Requesting Degree)", text)
+            self.assertNotIn("REQUESTING DEGREE", text)
         # สองคำนี้เจ้าหน้าที่สั่งให้แก้ (ก.ย. 2569) ต่างจากคำอื่นในแฟ้มนี้ที่ให้คงต้นฉบับ
         # ของเดิมพิมพ์ว่า "การการส่งเอกสาร" (การซ้ำ) และ "เฉพาหน้า" (ตก ะ)
         for text in (none_th, yes_th):
@@ -2822,8 +2829,30 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         none_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_NONE][1]["text_en"]
         yes_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_YES][1]["text_en"]
         self.assertIn("Your E-thesis has been completed.", none_en)
-        self.assertIn("1. Entitled Page", none_en)
-        self.assertIn("If you meet all graduation requirements", yes_en)
+        # เจ้าหน้าที่รวมท่อนหน้าลงนามฝั่งอังกฤษเป็นย่อหน้าเดียว (ก.ย. 2569)
+        # ตัดรายการ "1. Entitled Page / 2. Approval Page" ออก ให้ตรงกับฝั่งไทย
+        # ที่บอกช่วงหน้าไว้ในวงเล็บอยู่แล้ว
+        for text in (none_en, yes_en):
+            self.assertIn("signatures completed" + NEWLINE
+                          + "through the system, in the Sign off page submission tab,",
+                          text)
+            self.assertNotIn("Entitled Page", text)
+            self.assertNotIn("Submit the signed documents", text)
+        self.assertIn("If you meet all graduation requirements," + NEWLINE
+                      + "you may proceed to submit the GR.5 form", yes_en)
+        # ต้นฉบับชุดมีค่าปรับเปิดเรื่องซ้ำสองรอบ บรรทัดแรกบอกว่าเสร็จแล้ว อีกสองบรรทัด
+        # ถัดมาบอกซ้ำอีกครั้ง เจ้าหน้าที่สั่งให้ตัดประโยคที่ซ้ำออก (ก.ย. 2569)
+        self.assertNotIn("Your E-Thesis submission has been successfully completed",
+                         yes_en)
+        for text in (none_en, yes_en):
+            self.assertIn("Mr. Supawit at supawit.mar@mahidol.ac.th.", text)
+            self.assertNotIn("Mr.Supawit", text)
+        # กำหนดเวลาตรวจสอบการชำระเงินต้องบอกครบทั้งสองกรณีในทั้งสองภาษา ต้นฉบับอังกฤษ
+        # มีแต่กรณีบัตรเครดิต นักศึกษาต่างชาติจึงไม่รู้ว่ากรณีทั่วไปใช้ 48 ชั่วโมง
+        self.assertIn("ภายใน 48 ชั่วโมง", yes_th)
+        self.assertIn("ภายใน 3 ชั่วโมง", yes_th)
+        self.assertIn("within 48 hours", yes_en)
+        self.assertIn("up to 3 hours", yes_en)
 
     def test_the_signature_pages_are_always_submitted_through_the_system(self):
         """หน้าลงนามส่งผ่านระบบเท่านั้น ไม่ใช่ถือเอกสารไปที่อาคารบัณฑิตวิทยาลัย
