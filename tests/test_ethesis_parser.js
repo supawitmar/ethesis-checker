@@ -23,6 +23,9 @@ MASTER OF ENGINEERING(CIVIL ENGINEERING)
 `;
 
 const actual = parseEthesisText(sample);
+// ชื่อช่องต้องตรงกับที่ main.py รับจากฟอร์ม (degree_cover_* / degree_sig_* / degree_abbr_*)
+// ชื่อชุดเก่า (degree_source / degree / degree_abbr) เลิกใช้ไปตั้งแต่ ส.ค. 2569
+// ปกของเล่มใช้ตัวพิมพ์ใหญ่ทั้งหมด ส่วนหน้าลงนามใช้ตัวพิมพ์ใหญ่ต้นคำ จึงแยกกันคนละช่อง
 const expected = {
   student_id: '6438046',
   student_name_th: 'วิสิฐ กวยะปาณิก',
@@ -30,16 +33,31 @@ const expected = {
   title_th: 'การศึกษาพฤติกรรมและสมรรถนะของบังเกอร์ UHPC ภายใต้แรงระเบิด',
   title_en: 'Blast Protection Performance of UHPC Bunkers',
   program_language: 'international',
-  degree_source: 'MASTER OF ENGINEERING(CIVIL ENGINEERING)',
-  degree: 'Master of Engineering (Civil Engineering)',
-  degree_abbr: 'M.Eng. (CIVIL ENGINEERING)',
+  program: 'วิศวกรรมศาสตรมหาบัณฑิต สาขาวิชาวิศวกรรมโยธา (หลักสูตรนานาชาติ)',
+  degree_cover_en: 'MASTER OF ENGINEERING (CIVIL ENGINEERING)',
+  degree_sig_en: 'Master of Engineering (Civil Engineering)',
+  degree_abbr_en: 'M.Eng. (CIVIL ENGINEERING)',
+  degree_cover_th: 'วิศวกรรมศาสตรมหาบัณฑิต (วิศวกรรมโยธา)',
+  degree_sig_th: 'วิศวกรรมศาสตรมหาบัณฑิต (วิศวกรรมโยธา)',
+  degree_abbr_th: 'วศ.ม. (วิศวกรรมโยธา)',
   exam_date: '7 May 2026',
   year: '2026',
   doc_type: 'THESIS'
 };
 
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-  console.error('Unexpected parser result:', actual);
+// เทียบทีละช่อง ไม่ใช่ JSON.stringify ทั้งก้อน เพราะแบบนั้นลำดับคีย์เปลี่ยนก็พังทั้งที่
+// ค่าถูกทุกช่อง และตอนพังก็อ่านไม่ออกว่าช่องไหนต่าง
+const wrong = [];
+Object.keys(expected).forEach(function (key) {
+  if (actual[key] !== expected[key]) {
+    wrong.push(`  ${key}\n    ได้      ${actual[key]}\n    ต้องเป็น ${expected[key]}`);
+  }
+});
+Object.keys(actual).forEach(function (key) {
+  if (!(key in expected)) wrong.push(`  ${key} — ช่องที่ไม่ได้คาดไว้ (${actual[key]})`);
+});
+if (wrong.length) {
+  console.error('Unexpected parser result:\n' + wrong.join('\n'));
   process.exit(1);
 }
 
