@@ -71,9 +71,11 @@ function makeCard(applies, pressed) {
 
 function load(cards, summaryText) {
   const counter = { textContent: String(cards.length) };
+  const pill = { className: 'verdict-pill pass', textContent: 'ผ่าน (Passed)' };
   const data = {
     'staff-findings-data': { textContent: JSON.stringify(REGISTRY) },
     'plain-summary-data': { textContent: JSON.stringify(summaryText || '') },
+    'verdict-pill': pill,
   };
   const noop = () => {};
   const sandbox = {
@@ -97,7 +99,7 @@ function load(cards, summaryText) {
   sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'report.html' });
-  return { sandbox, counter };
+  return { sandbox, counter, pill };
 }
 
 // ---- หัวข้อค่าปรับต้องขึ้นตามผลตรวจ ----
@@ -140,6 +142,28 @@ function load(cards, summaryText) {
   check('ผลตรวจว่าง: หัวข้อของเล่มไม่ผ่านโชว์', cards[0].hidden, false);
   check('ผลตรวจว่าง: หัวข้อของเล่มผ่านโชว์', cards[1].hidden, false);
   check('ผลตรวจว่าง: ไม่ไปล้างคำตอบที่กดไว้', cards[1].pressed(), 1);
+}
+
+// ---- ป้ายผลพิจารณาต้องตามคำตัดสินของเจ้าหน้าที่ ----
+// เจ้าหน้าที่กดเพิ่มจุดกับเล่มที่ระบบว่าผ่าน แล้วข้อความสรุปเขียนว่า "ไม่ผ่าน"
+// ป้ายบนหัวต้องเปลี่ยนตาม ไม่ใช่ค้างที่ "ผ่าน (Passed)"
+{
+  const { sandbox, pill } = load([]);
+  sandbox.renderVerdictPill('ไม่ผ่าน');
+  check('ป้ายเปลี่ยนเป็นไม่ผ่าน', pill.textContent, 'ไม่ผ่าน (Not passed)');
+  check('สีป้ายเปลี่ยนตาม', pill.className, 'verdict-pill fail');
+
+  sandbox.renderVerdictPill('รอยืนยัน');
+  check('ป้ายรอยืนยัน', pill.textContent, 'รอยืนยัน (Pending confirmation)');
+  check('สีป้ายรอยืนยัน', pill.className, 'verdict-pill pending');
+
+  sandbox.renderVerdictPill('ผ่าน');
+  check('ป้ายกลับเป็นผ่านได้', pill.textContent, 'ผ่าน (Passed)');
+  check('สีป้ายกลับเป็นผ่าน', pill.className, 'verdict-pill pass');
+
+  // ผลตรวจที่อ่านไม่ได้ ต้องไม่ไปล้างป้ายเป็นค่าว่าง
+  sandbox.renderVerdictPill('');
+  check('ผลตรวจที่อ่านไม่ได้ ปล่อยป้ายเดิมไว้', pill.textContent, 'ผ่าน (Passed)');
 }
 
 // ---- ผลตรวจอ่านจากบรรทัดแรกของข้อความสรุป ----
