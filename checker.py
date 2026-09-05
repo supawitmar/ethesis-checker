@@ -2408,6 +2408,183 @@ def summary_section(issue):
 # เก็บคู่กันไว้ตรงนี้ที่เดียว หน้ารายงานรับไปทั้งก้อน
 # แล้วใช้ "เทียบทั้งบรรทัด" ตอนสลับเป็นอังกฤษ คำแปลจึงหลุดจากต้นฉบับไม่ได้ และไม่ต้อง
 # พึ่ง TR ซึ่งเป็นการแทนที่เศษคำ (ถ้อยคำยาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่)
+# ลิงก์แบบสอบถามความพึงพอใจต่อกระบวนการตรวจรูปเล่ม (ระบบของงานบริการการศึกษาเอง)
+# ใช้ลิงก์ย่อ ไม่ใช่ URL ของ Apps Script ตรง ๆ เพราะ URL นั้นเปลี่ยนทุกครั้งที่ deploy
+# รุ่นใหม่ ข้อความที่ส่งให้นักศึกษาไปแล้วจะพาไปหน้าที่ไม่มีอยู่
+SURVEY_URL = "https://bit.ly/4cwqxAd"
+
+
+# ---------- ถ้อยคำปิดท้ายของเล่มที่ตรวจแล้ว "ผ่าน" ----------
+# เล่มที่ผ่านไม่มีอะไรให้แก้ ถ้อยคำชุด "แก้แล้วส่งกลับเข้าระบบ" จึงใช้ไม่ได้ — เคยส่ง
+# "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks เสร็จสิ้นแล้ว กรุณาส่งกลับ
+# เข้าสู่ระบบอีกครั้ง" ไปหาคนที่ไม่มีจุดต้องแก้สักจุด เจ้าหน้าที่จึงเขียนถ้อยคำอีกชุดไว้
+# (ไฟล์ note V.2.txt) แยกตามมีค่าปรับ/ไม่มีค่าปรับ เหมือนกับปุ่มที่มีอยู่แล้ว
+#
+# ถ้อยคำทุกคำเป็นต้นฉบับของเจ้าหน้าที่ ห้ามเรียบเรียงใหม่หรือแก้คำที่ดูเหมือนพิมพ์ตก
+# (หลักการเดียวกับถ้อยคำชุดอื่นในแฟ้มนี้) — "1 .ชำระผ่าน QR Code payment" ที่เว้นวรรค
+# หน้าจุด กับดอกจันคร่อม "*ทั้งสองขั้นตอน...*" เป็นต้นฉบับ มีเทสต์ล็อกไว้
+#
+# ดอกจันคู่นี้ต่างจากกรณีหน้าลงนาม ซึ่งเจ้าหน้าที่สั่งให้ถอดออกเพราะขึ้นเป็นดาวลอยใน
+# อีเมลกับ Word — ตรงนี้เจ้าหน้าที่ยืนยันให้คงไว้ (ก.ย. 2569) อย่าถอดตามกรณีนั้น
+#
+# บล็อกเชิญตอบแบบสอบถามเป็นชุดใหม่ (ก.ย. 2569) แทนบล็อกเดิมที่ชี้ไป forms.gle ซึ่งเป็น
+# แบบประเมินงานบริการภาพรวม คนละตัวกับแบบสอบถามกระบวนการตรวจเล่มที่ใช้อยู่ตอนนี้
+#
+# ไทยกับอังกฤษของถ้อยคำชุดนี้ขึ้นบรรทัดคนละจุด (อังกฤษแตกหน้าเสนอ/หน้าอนุมัติเป็นรายการ
+# เลข ไทยรวมเป็นประโยคเดียว) จึงจับคู่แปล "ทั้งก้อน" ไม่ใช่ทีละบรรทัด ดู STAFF_BLOCK_EN
+# ใน report.html
+
+_PASS_NO_FEE_TH = "\n".join([
+    'การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว',
+    'แต่ยังมีขั้นตอนที่ต้องดำเนินการต่อ กรุณาอ่านรายละเอียดด้านล่าง',
+    '',
+    'ขั้นตอนถัดไป: การส่งเอกสารหน้าลงนาม',
+    'เมื่อระบบแสดงสถานะการส่ง E-Thesis ของนักศึกษาเป็น “เสร็จสิ้น” แล้ว',
+    'ขอให้นักศึกษาดำเนินการ นำส่งเอกสารหน้าลงนาม (เฉพาะหน้า ก - ข หรือ i - ii)',
+    'ซึ่งต้องมีลายเซ็นของกรรมการทุกท่านครบถ้วนเรียบร้อย',
+    'โดยส่งผ่านระบบ ใน tab Sign off page submission',
+    'ผ่านลิงก์ https://graduate.mahidol.ac.th/ethesis/stu/login.php',
+    'ภายใน 30 วัน นับจากวันที่สถานะในระบบแสดงว่า “เสร็จสิ้น”',
+    'เพื่อเสนอเอกสารให้ คณบดีบัณฑิตวิทยาลัย ลงนามต่อไป',
+    '',
+    'กรณีที่นักศึกษามีคุณสมบัติครบถ้วนในการขออนุมัติปริญญา',
+    'สามารถดำเนินการส่งแบบฟอร์ม GR.5 (Requesting Degree)',
+    'ผ่านระบบออนไลน์ได้ที่ลิงก์ด้านล่างนี้',
+    'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
+    '',
+    '*ทั้งสองขั้นตอนสามารถดำเนินการควบคู่กันได้*',
+    '',
+    'งานบริการการศึกษา',
+    'ขอเชิญนักศึกษาตอบแบบสอบถามความพึงพอใจต่อกระบวนการตรวจรูปเล่มอิเล็กทรอนิกส์',
+    'เพื่อนำความคิดเห็นไปปรับปรุงคุณภาพการให้บริการ โดยไม่เปิดเผยชื่อผู้ตอบรายบุคคล',
+    'ลิงก์ตอบแบบสอบถาม  ' + SURVEY_URL,
+    '',
+    'สอบถามข้อมูลเพิ่มเติม',
+    'supawit.mar@mahidol.ac.th',
+])
+
+
+_PASS_NO_FEE_EN = "\n".join([
+    'Your E-thesis has been completed.',
+    'However, there are still steps you need to complete. '
+    'Please read the details below.',
+    '',
+    'Next step: submitting the signature pages',
+    'Once your E-Thesis status is shown as “Completed” in the system,',
+    'please submit the signature pages (pages i - ii only),',
+    'with all committee members’ signatures completed:',
+    '1. Entitled Page',
+    '2. Approval Page',
+    '',
+    'Submit the signed documents through the system, in the Sign off page submission tab,',
+    'at https://graduate.mahidol.ac.th/ethesis/stu/login.php within 30 days',
+    'from the date your E-Thesis status is shown as "Completed" in the system,',
+    'so that they may be forwarded to the Dean of the FGS for signature.',
+    '',
+    'If you have fulfilled all graduation requirements,',
+    'you may also proceed to submit the GR.5 form (Requesting Degree)',
+    'via the online system at the link below:',
+    'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
+    '',
+    'Both processes can be carried out simultaneously.',
+    '',
+    'Academic Service Section',
+    'We invite you to complete the satisfaction survey on the electronic file format review process,',
+    'so that your feedback can help us improve our service. No individual respondent will be identified.',
+    'Survey link: ' + SURVEY_URL,
+    '',
+    'If you have any further questions or need clarification,',
+    'please feel free to contact Mr.Supawit at supawit.mar@mahidol.ac.th.',
+])
+
+
+_PASS_FEE_TH = "\n".join([
+    'การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว',
+    'แต่ยังมีขั้นตอนที่ต้องดำเนินการต่อ กรุณาอ่านรายละเอียดด้านล่าง',
+    '',
+    'เนื่องจากนักศึกษามีค่าปรับกรณีส่ง E-thesis ล่าช้า',
+    'นักศึกษาสามารถพิมพ์ใบแจ้งค่าปรับ (invoice) จากระบบเพื่อชำระเงินได้',
+    'โดยสามารถเลือกช่องทางการชำระเงินได้ 3 ช่องทาง ได้แก่',
+    '1 .ชำระผ่าน QR Code payment',
+    '2. ชำระผ่านใบแจ้งหนี้ (Invoice)',
+    '3. ชำระผ่านบัตรเครดิต',
+    '',
+    'หมายเหตุ: ระบบจะดำเนินการตรวจสอบการชำระเงินภายใน 48 ชั่วโมง',
+    'หากนักศึกษาชำระค่าปรับผ่านบัตรเครดิต ระบบจะใช้เวลาตรวจสอบการชำระเงินภายใน 3 ชั่วโมง',
+    '',
+    'ขั้นตอนถัดไป: การส่งเอกสารหน้าลงนาม',
+    'เมื่อระบบแสดงสถานะการส่ง E-Thesis ของนักศึกษาเป็น “เสร็จสิ้น” แล้ว',
+    'ขอให้นักศึกษาดำเนินการ นำส่งเอกสารหน้าลงนาม (เฉพาะหน้า ก - ข หรือ i - ii)',
+    'ซึ่งต้องมีลายเซ็นของกรรมการทุกท่านครบถ้วนเรียบร้อย',
+    'โดยส่งผ่านระบบ ใน tab Sign off page submission',
+    'ผ่านลิงก์ https://graduate.mahidol.ac.th/ethesis/stu/login.php',
+    'ภายใน 30 วัน นับจากวันที่สถานะในระบบแสดงว่า “เสร็จสิ้น”',
+    'เพื่อเสนอเอกสารให้ คณบดีบัณฑิตวิทยาลัย ลงนามต่อไป',
+    # ต้นฉบับเว้นสองบรรทัดตรงนี้ที่เดียว ที่อื่นเว้นบรรทัดเดียว เจ้าหน้าที่ให้ลดลง
+    # ให้เท่ากัน (ก.ย. 2569) — เป็นการจัดย่อหน้า ไม่ได้แก้ถ้อยคำ
+    '',
+    'ในกรณีที่นักศึกษามีคุณสมบัติครบถ้วนในการเสนอขออนุมัติปริญญา',
+    'สามารถดำเนินการส่งแบบฟอร์ม GR.5 (REQUESTING DEGREE)',
+    'ผ่านระบบออนไลน์ที่ลิงก์ด้านล่างนี้',
+    'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
+    '',
+    '*ทั้งสองขั้นตอนสามารถดำเนินการควบคู่กันได้*',
+    '',
+    'งานบริการการศึกษา',
+    'ขอเชิญนักศึกษาตอบแบบสอบถามความพึงพอใจต่อกระบวนการตรวจรูปเล่มอิเล็กทรอนิกส์',
+    'เพื่อนำความคิดเห็นไปปรับปรุงคุณภาพการให้บริการ โดยไม่เปิดเผยชื่อผู้ตอบรายบุคคล',
+    'ลิงก์ตอบแบบสอบถาม  ' + SURVEY_URL,
+    '',
+    'สอบถามข้อมูลเพิ่มเติม',
+    'supawit.mar@mahidol.ac.th',
+])
+
+
+_PASS_FEE_EN = "\n".join([
+    'Your E-thesis has been completed.',
+    'However, there are still steps you need to complete. '
+    'Please read the details below.',
+    '',
+    'Your E-Thesis submission has been successfully completed in the system.',
+    'However, as there is a late submission fine, you are required to settle the payment.',
+    'The invoice for the fine can be printed from the system, and payment can be made through one of the following three methods:',
+    '1. QR Code',
+    '2. Invoice',
+    '3. Credit Card',
+    '',
+    'Note: If you choose to pay by credit card, the system will take up to 3 hours to verify your payment.',
+    '',
+    'This will allow our staff to verify the payment and update the status of your E-Thesis in the system accordingly.',
+    '',
+    'Next step: submitting the signature pages',
+    'Once your E-Thesis status is shown as “Completed” in the system,',
+    'please submit the signature pages (pages i - ii only),',
+    'with all committee members’ signatures completed:',
+    '1. Entitled Page',
+    '2. Approval Page',
+    '',
+    'Submit the signed documents through the system, in the Sign off page submission tab,',
+    'at https://graduate.mahidol.ac.th/ethesis/stu/login.php within 30 days',
+    'from the date your E-Thesis status is shown as "Completed" in the system,',
+    'so that they may be forwarded to the Dean of the FGS for signature.',
+    '',
+    'If you meet all graduation requirements',
+    'You may proceed to submit the GR.5 form (Requesting Degree)',
+    'via the online system at the following link:',
+    'https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php',
+    '',
+    'Both processes can be carried out simultaneously.',
+    '',
+    'Academic Service Section',
+    'We invite you to complete the satisfaction survey on the electronic file format review process,',
+    'so that your feedback can help us improve our service. No individual respondent will be identified.',
+    'Survey link: ' + SURVEY_URL,
+    '',
+    'If you have any further questions or need clarification,',
+    'please feel free to contact Mr.Supawit at supawit.mar@mahidol.ac.th.',
+])
+
+
 STAFF_CHECKS = [
     {
         "id": "SIGNATURE_LAYOUT",
@@ -2484,8 +2661,8 @@ STAFF_CHECKS = [
     },
     {
         "id": "LATE_FEE",
-        "item": "มีค่าปรับไหม",
-        "item_en": "Is there a late fine?",
+        "item": "เล่มไม่ผ่าน: มีค่าปรับไหม",
+        "item_en": "Not passed: is there a late fine?",
         "why": "ระบบไม่รู้เรื่องค่าปรับ เลือกให้ตรงกับข้อมูลของนักศึกษา "
                "ข้อความปิดท้าย (ค่าปรับ วิธีส่งกลับ และช่องทางติดต่อ) "
                "จะถูกต่อท้ายข้อความสรุป",
@@ -2494,6 +2671,7 @@ STAFF_CHECKS = [
                   "resubmit, and who to contact) is appended to the summary.",
         "rule_id": "FORM.LATE_FEE_NOTE",
         "placement": "closing",
+        "applies_to": "not_pass",
         "choices": [
             {
                 "id": "LATE_FEE_NONE",
@@ -2609,6 +2787,45 @@ STAFF_CHECKS = [
             },
         ],
     },
+    {
+        # หัวข้อนี้ขึ้นเฉพาะเล่มที่ตรวจแล้วผ่าน — คนละคำถามกับ LATE_FEE ข้างบน ซึ่งถาม
+        # เรื่องค่าปรับของเล่มที่ยังต้องแก้ ถ้อยคำสองชุดนี้ขัดกันเอง (ชุดหนึ่งบอกให้
+        # ส่งกลับมาแก้ อีกชุดบอกว่าเสร็จสิ้นแล้ว) จึงต้องแยกหัวข้อ ไม่ใช่แค่แยกปุ่ม
+        #
+        # ยังไม่กด = ข้อความสรุปมีแค่ "ผลการตรวจ: ผ่าน" กับ "ไม่พบจุดที่ต้องแก้ไข"
+        # เจ้าหน้าที่กำหนดไว้แบบนี้ (ก.ย. 2569) ขั้นตอนถัดไปทั้งชุดผูกกับการกดปุ่ม
+        "id": "PASS_FEE",
+        "item": "เล่มผ่าน: ผ่านแบบมีค่าปรับหรือไม่",
+        "item_en": "Passed: with or without a late fine?",
+        "why": "เลือกให้ตรงกับข้อมูลของนักศึกษา แล้วข้อความขั้นตอนถัดไป "
+               "(ส่งหน้าลงนามภายใน 30 วัน ขออนุมัติปริญญา และแบบสอบถาม) "
+               "จะถูกต่อท้ายข้อความสรุป ถ้าไม่กด นักศึกษาจะไม่ได้ข้อความชุดนี้เลย",
+        "why_en": "Pick the one that matches the student's record. The next-step "
+                  "text (submitting the signature pages within 30 days, requesting "
+                  "the degree, and the survey) is then appended to the summary. "
+                  "Without pressing, the student gets none of it.",
+        "rule_id": "FORM.LATE_FEE_NOTE",
+        "placement": "closing",
+        "applies_to": "pass",
+        "choices": [
+            {
+                "id": "PASS_FEE_NONE",
+                "label": "ผ่าน ไม่มีค่าปรับ",
+                "label_en": "Passed, no fine",
+                "tone": "pass",
+                "text": _PASS_NO_FEE_TH,
+                "text_en": _PASS_NO_FEE_EN,
+            },
+            {
+                "id": "PASS_FEE_YES",
+                "label": "ผ่าน มีค่าปรับ",
+                "label_en": "Passed, with a fine",
+                "tone": "fail",
+                "text": _PASS_FEE_TH,
+                "text_en": _PASS_FEE_EN,
+            },
+        ],
+    },
 ]
 STAFF_CHECK_BY_ID = {check["id"]: check for check in STAFF_CHECKS}
 # ตัวเลือกที่ "มีถ้อยคำจริง" เท่านั้นที่หาเจอจากตรงนี้ ปุ่มอย่าง "ถูกต้อง" จึงไม่เพิ่มอะไร
@@ -2618,16 +2835,36 @@ STAFF_CHOICE_BY_ID = {
 }
 
 
-def staff_choices(keys, placement):
+def check_applies(check, verdict):
+    """หัวข้อนี้ใช้กับผลตรวจนี้หรือไม่
+
+    เรื่องค่าปรับถูกถามสองที่ ด้วยถ้อยคำที่ขัดกันเอง — ชุดของเล่มที่ยังต้องแก้บอกให้
+    ส่งกลับเข้าระบบ ส่วนชุดของเล่มที่ผ่านบอกว่าเสร็จสิ้นแล้วให้ส่งหน้าลงนามต่อ ถ้าไม่กัน
+    ตามผลตรวจ นักศึกษาจะได้ทั้งสองย่อหน้าพร้อมกันเมื่อหน้าเว็บส่ง id มาทั้งคู่
+    (หน้าเก่าค้างไว้ หรือเจ้าหน้าที่กดตอนผลตรวจยังเป็นอีกอย่าง)
+    "รอยืนยัน" ไม่ใช่ผ่าน จึงนับเป็น not_pass
+    """
+    scope = check.get("applies_to")
+    if scope == "pass":
+        return verdict == "ผ่าน"
+    if scope == "not_pass":
+        return verdict != "ผ่าน"
+    return True
+
+
+def staff_choices(keys, placement, verdict=None):
     """ตัวเลือกที่เจ้าหน้าที่กด เรียงตามลำดับในทะเบียน ไม่ใช่ตามลำดับที่กด
 
     ลำดับที่กดเป็นเรื่องบังเอิญของแต่ละคน ข้อความที่ส่งให้นักศึกษาต้องเรียงเหมือนกันทุกครั้ง
     id ที่ไม่รู้จักถูกทิ้งเงียบ ๆ เพราะค่านี้มาจากหน้าเว็บ เชื่อไม่ได้
+    verdict = None คือไม่กรองตามผลตรวจ (ใช้ตอนอยากได้ทั้งทะเบียน)
     """
     picked = {str(key) for key in (keys or ())}
     out = []
     for check in STAFF_CHECKS:
         if check.get("placement") != placement:
+            continue
+        if verdict is not None and not check_applies(check, verdict):
             continue
         for choice in check["choices"]:
             if choice["text"] and choice["id"] in picked:
@@ -2638,8 +2875,6 @@ def staff_choices(keys, placement):
                 out.append((check, choice))
                 break
     return out
-
-
 
 
 def staff_issue(check, choice):
@@ -2807,6 +3042,23 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
+def summary_verdict(report, items=None, failed=None, passed=None, staff=None):
+    """ผลตรวจที่ใช้จริงในข้อความสรุป หลังรวมคำตัดสินของเจ้าหน้าที่แล้ว
+
+    ผลตรวจของระบบเป็น "ผ่าน" ได้ทั้งที่มีจุดต้องแก้ เมื่อจุดนั้นมาจากคำตัดสินของ
+    เจ้าหน้าที่ (กดไม่ผ่านข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจเองไม่ได้) ข้อความที่
+    ส่งให้นักศึกษาจะขัดกันเองทันที — "ผลการตรวจ: ผ่าน" แล้วตามด้วย "กรุณาแก้ไข 1 จุด"
+
+    หน้ารายงานเรียกฟังก์ชันนี้ผ่าน /summary ด้วย เพื่อรู้ว่าควรโชว์หัวข้อค่าปรับอันไหน
+    """
+    if items is None:
+        items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    verdict = report.get("verdict", "")
+    if items and verdict == "ผ่าน":
+        return "ไม่ผ่าน"
+    return verdict
+
+
 def plain_summary(report, failed=None, passed=None, staff=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
@@ -2814,18 +3066,23 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    verdict = summary_verdict(report, items)
     # ข้อความปิดท้าย (เช่น เรื่องค่าปรับและช่องทางติดต่อ) ไม่ใช่จุดที่ต้องแก้ จึงไม่ถูกนับ
     # และต้องตามไปด้วยเสมอ แม้เล่มจะไม่มีจุดต้องแก้เลย
-    closing = [choice["text"] for _check, choice in staff_choices(staff, "closing")]
-    # ผลตรวจของระบบเป็น "ผ่าน" ได้ทั้งที่มีจุดต้องแก้ เมื่อจุดนั้นมาจากคำตัดสินของ
-    # เจ้าหน้าที่ (กดไม่ผ่านข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจเองไม่ได้) ข้อความที่
-    # ส่งให้นักศึกษาจะขัดกันเองทันที — "ผลการตรวจ: ผ่าน" แล้วตามด้วย "กรุณาแก้ไข 1 จุด"
-    verdict = report.get("verdict", "")
-    if items and verdict == "ผ่าน":
-        verdict = "ไม่ผ่าน"
+    # ต้องอ่านค่า verdict ที่ปรับแล้วข้างบน ไม่ใช่ค่าดิบจาก report — เล่มที่ระบบว่าผ่าน
+    # แต่เจ้าหน้าที่กดเพิ่มจุด ยังต้องได้ถ้อยคำ "แก้แล้วส่งกลับ" ไม่ใช่ "เสร็จสิ้นแล้ว"
+    picked = staff_choices(staff, "closing", verdict)
+    closing = [choice["text"] for _check, choice in picked]
+    # ถ้อยคำชุด "ผ่าน" ขึ้นต้นด้วย "การส่ง E-thesis ... เสร็จสิ้นแล้ว" อยู่แล้ว
+    finished = any(check.get("applies_to") == "pass" for check, _choice in picked)
     lines = [f"ผลการตรวจ: {verdict}"]
     if not items:
-        lines.append("\nไม่พบจุดที่ต้องแก้ไข")
+        # "ผลการตรวจ: ผ่าน" ตามด้วย "ไม่พบจุดที่ต้องแก้ไข" อ่านรวมกันว่า "จบแล้ว
+        # ไม่ต้องทำอะไร" นักศึกษาหยุดอ่านตรงนั้น แล้วพลาดกำหนดส่งหน้าลงนามภายใน
+        # 30 วันที่อยู่ข้างล่าง (เจ้าหน้าที่รายงานพฤติกรรมนี้ ก.ย. 2569) เล่มที่มี
+        # ถ้อยคำชุด "ผ่าน" ต่อท้ายอยู่แล้วจึงไม่ต้องพิมพ์บรรทัดนี้ซ้ำ
+        if not finished:
+            lines.append("\nไม่พบจุดที่ต้องแก้ไข")
     else:
         lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
         grouped = {}

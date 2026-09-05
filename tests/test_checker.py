@@ -1520,7 +1520,7 @@ class PlainSummaryProseTests(unittest.TestCase):
             "part": "body/end", "location": "หน้า 40",
             "found": "พบหน้าที่ระบบดึงข้อความไม่ได้", "expected": "", "fix": "ตรวจด้วยตา",
         }]}}
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", plain_summary(report))
+        self.assertNotIn("กรุณาแก้ไขทั้งหมด", plain_summary(report))
         self.assertIn("ทั้งหมด 1 จุด", plain_summary(report, failed=["YELLOW:0"]))
 
 
@@ -2283,18 +2283,22 @@ class AppendixSingularAndPluralAreOneHeading(unittest.TestCase):
 class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
     """สิ่งที่ระบบตัดสินเองไม่ได้ เจ้าหน้าที่กดปุ่มแล้วถ้อยคำเข้าข้อความสรุปทันที
 
-    เจ้าหน้าที่สั่ง (ก.ย. 2569) สองหัวข้อ
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) สามหัวข้อ
       โครงสร้างหน้าลงนาม — ระบบอ่านกรอบตาราง ลำดับการวางชื่อ ฟอนต์ และช่องที่ต้อง
         ถมขาว จาก PDF ไม่ได้ ต้องใช้สายตาคน
-      มีค่าปรับไหม — ไม่ได้อยู่ในไฟล์ตั้งแต่แรก เป็นข้อมูลของเจ้าหน้าที่
+      เล่มไม่ผ่าน: มีค่าปรับไหม — ถ้อยคำ "แก้แล้วส่งกลับเข้าระบบ"
+      เล่มผ่าน: ผ่านแบบมีค่าปรับหรือไม่ — ถ้อยคำ "เสร็จสิ้นแล้ว" กับขั้นตอนถัดไป
 
-    ทั้งสองหัวข้อมีถ้อยคำที่ส่งให้นักศึกษาเป็นชุดเดียวกันทุกเล่ม เจ้าหน้าที่จึงพิมพ์ย่อหน้าเดิม
+    สองหัวข้อหลังถามเรื่องเดียวกัน (ค่าปรับ) แต่ถ้อยคำขัดกันเอง จึงผูกกับผลตรวจคนละค่า
+    ทุกหัวข้อมีถ้อยคำที่ส่งให้นักศึกษาเป็นชุดเดียวกันทุกเล่ม เจ้าหน้าที่จึงพิมพ์ย่อหน้าเดิม
     ซ้ำเองทุกครั้ง ถ้อยคำทั้งไทยและอังกฤษเจ้าหน้าที่เขียนมาเอง ระบบห้ามเรียบเรียงใหม่
     """
 
     WRONG = "SIGNATURE_LAYOUT_WRONG"
     FEE_NONE = "LATE_FEE_NONE"
     FEE_YES = "LATE_FEE_YES"
+    PASS_NONE = "PASS_FEE_NONE"
+    PASS_YES = "PASS_FEE_YES"
 
     def _clean_report(self):
         """เล่มที่ระบบไม่พบจุดผิดเลย — กรณีที่ปุ่มพวกนี้สำคัญที่สุด"""
@@ -2313,9 +2317,15 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
 
     def test_the_registry_holds_both_topics(self):
         self.assertEqual([c["id"] for c in checker_module.STAFF_CHECKS],
-                         ["SIGNATURE_LAYOUT", "LATE_FEE"])
-        for choice_id in (self.WRONG, self.FEE_NONE, self.FEE_YES):
+                         ["SIGNATURE_LAYOUT", "LATE_FEE", "PASS_FEE"])
+        for choice_id in (self.WRONG, self.FEE_NONE, self.FEE_YES,
+                          self.PASS_NONE, self.PASS_YES):
             self.assertIn(choice_id, checker_module.STAFF_CHOICE_BY_ID)
+        # หัวข้อค่าปรับสองอันผูกกับผลตรวจคนละค่า จะได้ไม่ออกมาพร้อมกัน
+        scopes = {c["id"]: c.get("applies_to") for c in checker_module.STAFF_CHECKS}
+        self.assertEqual(scopes["LATE_FEE"], "not_pass")
+        self.assertEqual(scopes["PASS_FEE"], "pass")
+        self.assertIsNone(scopes["SIGNATURE_LAYOUT"])
 
     def test_nothing_is_added_until_staff_presses(self):
         text = checker_module.plain_summary(self._clean_report())
@@ -2327,14 +2337,29 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         """ปุ่ม "ถูกต้อง" มีไว้บันทึกว่าตรวจแล้ว ไม่ใช่เพื่อเพิ่มถ้อยคำ"""
         text = checker_module.plain_summary(self._clean_report(),
                                             staff=["SIGNATURE_LAYOUT_OK"])
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertNotIn("ปรับโครงสร้างของหน้า", text)
+        self.assertNotIn("ค่าปรับ", text)
 
     def test_the_wording_reaches_the_summary_word_for_word(self):
-        """ถ้อยคำของเจ้าหน้าที่ต้องไปถึงนักศึกษาครบทุกคำ ไม่ถูกย่อหรือเรียบเรียงใหม่"""
+        """ถ้อยคำของเจ้าหน้าที่ต้องไปถึงนักศึกษาครบทุกคำ ไม่ถูกย่อหรือเรียบเรียงใหม่
+
+        เล่มที่ยังไม่ผ่านใช้ถ้อยคำชุด "แก้แล้วส่งกลับ" จึงต้องตรวจกับเล่มที่มีจุดผิด
+        ชุด "ผ่าน" มีเทสต์ของตัวเองข้างล่าง
+        """
         for choice_id in (self.WRONG, self.FEE_NONE, self.FEE_YES):
-            text = checker_module.plain_summary(self._clean_report(),
+            text = checker_module.plain_summary(self._signature_report(),
                                                 staff=[choice_id])
             for line in self._wording(choice_id).split(NEWLINE):
+                if line.strip():
+                    self.assertIn(line.strip(), text, choice_id)
+
+    def test_the_pass_wording_reaches_the_summary_word_for_word(self):
+        """ถ้อยคำชุด "ผ่าน" ก็ต้องไปถึงนักศึกษาครบทุกคำเช่นกัน"""
+        for choice_id in (self.PASS_NONE, self.PASS_YES):
+            text = checker_module.plain_summary(self._clean_report(),
+                                                staff=[choice_id])
+            wording = checker_module.STAFF_CHOICE_BY_ID[choice_id][1]["text"]
+            for line in wording.split(NEWLINE):
                 if line.strip():
                     self.assertIn(line.strip(), text, choice_id)
 
@@ -2368,12 +2393,207 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                         text[-80:])
 
     def test_the_fee_wording_follows_a_clean_book_too(self):
-        """เล่มที่ผ่านสะอาดก็ต้องได้ข้อความปิดท้าย ไม่ใช่หายไปเพราะไม่มีจุดผิด"""
+        """เล่มที่ผ่านสะอาดก็ต้องได้ข้อความปิดท้าย ไม่ใช่หายไปเพราะไม่มีจุดผิด
+
+        แต่เป็นชุด "เสร็จสิ้นแล้ว" ไม่ใช่ชุด "แก้แล้วส่งกลับ" (ก.ย. 2569)
+        """
         text = checker_module.plain_summary(self._clean_report(),
-                                            staff=[self.FEE_NONE])
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
-        self.assertIn("นศ. ไม่มีค่าปรับ", text)
+                                            staff=[self.PASS_NONE])
+        self.assertIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])
+
+    def test_a_finished_book_is_not_also_told_there_is_nothing_to_fix(self):
+        """"ผ่าน" + "ไม่พบจุดที่ต้องแก้ไข" อ่านรวมกันว่าจบแล้ว ไม่ต้องทำอะไรต่อ
+
+        เจ้าหน้าที่รายงาน (ก.ย. 2569) ว่านักศึกษาหยุดอ่านตรงนั้นจริง แล้วพลาดกำหนดส่ง
+        หน้าลงนามภายใน 30 วันที่อยู่ข้างล่าง ถ้อยคำชุด "ผ่าน" บอกอยู่แล้วว่าเสร็จสิ้น
+        และยังมีขั้นตอนต่อ จึงไม่ต้องมีบรรทัดนั้นซ้ำ
+        """
+        for choice_id in (self.PASS_NONE, self.PASS_YES):
+            text = checker_module.plain_summary(self._clean_report(),
+                                                staff=[choice_id])
+            self.assertNotIn("ไม่พบจุดที่ต้องแก้ไข", text, choice_id)
+            self.assertIn("แต่ยังมีขั้นตอนที่ต้องดำเนินการต่อ กรุณาอ่านรายละเอียดด้านล่าง",
+                          text, choice_id)
+            # บรรทัดผลตรวจต้องตามด้วยถ้อยคำชุดผ่านทันที
+            said = [ln for ln in text.split(NEWLINE) if ln.strip()]
+            self.assertEqual(said[0], "ผลการตรวจ: ผ่าน")
+            self.assertTrue(said[1].startswith("การส่ง E-thesis"), said[1])
+
+    def test_a_passing_book_says_only_that_until_staff_answers(self):
+        """เล่มที่ผ่านแต่ยังไม่กด ต้องได้แค่สองบรรทัด (เจ้าหน้าที่กำหนด ก.ย. 2569)
+
+        ขั้นตอนถัดไปทั้งชุดผูกกับการกดปุ่ม เพราะระบบไม่รู้ว่ามีค่าปรับหรือไม่ และถ้อยคำ
+        สองชุดต่างกันตั้งแต่ย่อหน้าแรก
+        """
+        text = checker_module.plain_summary(self._clean_report())
+        self.assertEqual(text, "ผลการตรวจ: ผ่าน\n\nไม่พบจุดที่ต้องแก้ไข")
+
+    def test_the_two_fee_topics_never_fire_on_the_same_verdict(self):
+        """หน้าเว็บส่ง id มาพร้อมกันได้ (หน้าเก่าค้าง/กดตอนผลตรวจยังเป็นอีกอย่าง)
+
+        ถ้าไม่กันตามผลตรวจ นักศึกษาจะได้ทั้ง "แก้แล้วส่งกลับเข้าระบบ" และ
+        "เสร็จสิ้นแล้ว ส่งหน้าลงนามต่อ" ในข้อความเดียวกัน
+        """
+        both = [self.FEE_NONE, self.PASS_NONE]
+        passed = checker_module.plain_summary(self._clean_report(), staff=both)
+        self.assertIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", passed)
+        self.assertNotIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", passed)
+        failed = checker_module.plain_summary(self._signature_report(), staff=both)
+        self.assertIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", failed)
+        self.assertNotIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", failed)
+
+    def test_only_closing_topics_may_be_scoped_to_a_verdict(self):
+        """ผูก applies_to กับหัวข้อ placement=section ไม่ได้ และต้องกันไว้ไม่ให้ใครลอง
+
+        จุดที่ต้องแก้ (section) ถูกนับก่อนจึงจะรู้ผลตรวจ — issues_to_fix() เรียก
+        staff_choices() โดยยังไม่มี verdict เพราะ verdict คำนวณจากผลของ issues_to_fix()
+        เอง ถ้ามีใครใส่ applies_to ให้หัวข้อ section มันจะถูกมองข้ามเงียบ ๆ แล้วถ้อยคำ
+        จะออกทุกผลตรวจทั้งที่ตั้งใจให้ออกเฉพาะบางอัน
+        """
+        for check in checker_module.STAFF_CHECKS:
+            if check["placement"] == "section":
+                self.assertIsNone(check.get("applies_to"), check["id"])
+
+    def test_the_verdict_helper_agrees_with_the_summary_it_prints(self):
+        """หน้ารายงานใช้ค่าจาก summary_verdict() เลือกหัวข้อที่จะโชว์ ส่วนนักศึกษาอ่าน
+        บรรทัดแรกของข้อความสรุป ทั้งสองค่าคำนวณคนละรอบ ถ้าเพี้ยนจากกันเมื่อไหร่
+        เจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วไม่มีผล
+        """
+        cases = [
+            (self._clean_report(), [], None),
+            (self._clean_report(), [self.PASS_NONE], None),
+            # เล่มที่ระบบว่าผ่าน แต่เจ้าหน้าที่กดเพิ่มจุด ผลตรวจต้องกลายเป็นไม่ผ่าน
+            (self._clean_report(), [self.WRONG], None),
+            (self._signature_report(), [self.FEE_YES], None),
+            ({"verdict": "รอยืนยัน",
+              "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}, [], None),
+        ]
+        for report, staff, _ in cases:
+            text = checker_module.plain_summary(report, staff=staff)
+            verdict = checker_module.summary_verdict(report, staff=staff)
+            self.assertEqual(text.split(NEWLINE)[0], "ผลการตรวจ: " + verdict,
+                             (report.get("verdict"), staff))
+
+    def test_no_english_wording_leaks_thai_letters(self):
+        """คำแปลอังกฤษต้องไม่มีอักษรไทยหลงเหลือ
+
+        หน้ารายงานแทนถ้อยคำไทยด้วยคู่แปลทั้งก้อน ไม่มีอะไรมาตรวจซ้ำทีหลัง ถ้ามีใคร
+        วางภาษาไทยลงใน text_en นักศึกษาที่อ่านฉบับอังกฤษจะเห็นไทยปนโดยไม่มีใครรู้
+        (เคยหลุดมาแล้วตอนเขียน "(pages ก - ข or i - ii only)")
+        """
+        thai = re.compile(r"[฀-๿]")
+        for check in checker_module.STAFF_CHECKS:
+            for key in ("item_en", "why_en"):
+                self.assertFalse(thai.search(check[key]), (check["id"], key))
+            for choice in check["choices"]:
+                for key in ("label_en", "text_en"):
+                    found = thai.search(choice[key])
+                    self.assertFalse(found, (choice["id"], key,
+                                             found.group(0) if found else ""))
+
+    def test_no_two_choices_share_the_same_thai_wording(self):
+        """หน้ารายงานจับคู่แปลด้วยตัวข้อความไทยเอง ไม่ได้ใช้ id
+
+        ถ้าสองตัวเลือกมีถ้อยคำไทยเหมือนกันแต่คำแปลคนละอัน อันหนึ่งจะถูกแปลผิดเงียบ ๆ
+        """
+        seen = {}
+        for check in checker_module.STAFF_CHECKS:
+            for choice in check["choices"]:
+                if not choice["text"]:
+                    continue
+                key = choice["text"].strip()
+                self.assertNotIn(key, seen, (choice["id"], seen.get(key)))
+                seen[key] = choice["id"]
+
+    def test_the_pass_topic_is_ignored_when_the_book_did_not_pass(self):
+        """รวมถึง "รอยืนยัน" ซึ่งยังไม่จบกระบวนการ"""
+        for verdict in ("ไม่ผ่าน", "รอยืนยัน"):
+            report = {"verdict": verdict,
+                      "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+            text = checker_module.plain_summary(report, staff=[self.PASS_NONE])
+            self.assertNotIn(checker_module.SURVEY_URL, text, verdict)
+            self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text, verdict)
+
+    def test_a_book_that_did_not_pass_gets_no_closing_without_a_staff_answer(self):
+        """ควบคุมเชิงลบ — ค่าตั้งต้นนี้ใช้กับเล่มที่ผ่านเท่านั้น
+
+        เล่มที่ยังไม่ผ่านต้องได้ถ้อยคำ "แก้แล้วส่งกลับ" ซึ่งขึ้นต้นด้วยเรื่องค่าปรับ
+        จึงยังต้องรอเจ้าหน้าที่กดเหมือนเดิม
+        """
+        for report in (self._signature_report(),
+                       {"verdict": "รอยืนยัน",
+                        "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}):
+            text = checker_module.plain_summary(report)
+            self.assertNotIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
+            self.assertNotIn(checker_module.SURVEY_URL, text)
+
+    def test_a_passing_book_is_never_told_to_resubmit(self):
+        """ควบคุมเชิงลบของกฎข้างบน — เคยส่ง "กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง" ไปหาคนที่
+        ไม่มีจุดต้องแก้สักจุด เพราะถ้อยคำปิดท้ายมีชุดเดียวไม่ว่าผลตรวจจะออกมาอย่างไร
+        """
+        for choice_id in (self.FEE_NONE, self.FEE_YES):
+            text = checker_module.plain_summary(self._clean_report(),
+                                                staff=[choice_id])
+            self.assertNotIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", text, choice_id)
+            self.assertNotIn("Remarks", text, choice_id)
+
+    def test_a_book_still_to_fix_is_never_told_it_is_finished(self):
+        """อีกด้านหนึ่ง — เล่มที่ยังมีจุดต้องแก้ต้องไม่ได้ถ้อยคำ "เสร็จสิ้นแล้ว"
+
+        รวมถึงเล่มที่ระบบว่าผ่านแต่เจ้าหน้าที่กดเพิ่มจุดเอง ซึ่งผลตรวจถูกลดเป็นไม่ผ่าน
+        """
+        cases = [(self._signature_report(), [self.FEE_NONE]),
+                 (self._clean_report(), [self.WRONG, self.FEE_NONE])]
+        for report, staff in cases:
+            text = checker_module.plain_summary(report, staff=staff)
+            self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+            self.assertNotIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
+            self.assertIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", text)
+
+    def test_a_pending_book_is_not_treated_as_finished(self):
+        """"รอยืนยัน" ไม่ใช่ผ่าน — ยังไม่ถึงขั้นตอนส่งหน้าลงนาม"""
+        report = {"verdict": "รอยืนยัน",
+                  "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+        text = checker_module.plain_summary(report, staff=[self.FEE_NONE])
+        self.assertNotIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
+        self.assertIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", text)
+
+    def test_the_survey_link_reaches_every_student_who_passed(self):
+        """ลิงก์แบบสอบถามต้องอยู่ในถ้อยคำชุด "ผ่าน" ทั้งสองฝั่งค่าปรับ และทั้งสองภาษา
+
+        แบบสอบถามถามว่า "ส่งตรวจรูปเล่มมาแล้วกี่รอบ" ซึ่งตอบถูกได้เมื่อจบกระบวนการแล้ว
+        เท่านั้น จึงไม่ส่งลิงก์ให้เล่มที่ยังต้องแก้ และลิงก์เดิมที่ชี้ไปแบบประเมินงาน
+        บริการภาพรวม (forms.gle) ถูกแทนที่แล้ว ต้องไม่หลงเหลืออยู่
+        """
+        owner = {"text": "งานบริการการศึกษา",
+                 "text_en": "Academic Service Section"}
+        label = {"text": "ลิงก์ตอบแบบสอบถาม  " + checker_module.SURVEY_URL,
+                 "text_en": "Survey link: " + checker_module.SURVEY_URL}
+        for choice_id in (self.PASS_NONE, self.PASS_YES):
+            choice = checker_module.STAFF_CHOICE_BY_ID[choice_id][1]
+            for field in ("text", "text_en"):
+                self.assertIn(checker_module.SURVEY_URL, choice[field],
+                              (choice_id, field))
+                self.assertNotIn("forms.gle", choice[field], (choice_id, field))
+                # คำเชิญต้องบอกว่าหน่วยงานไหนเป็นคนถาม (ก.ย. 2569)
+                self.assertIn(owner[field], choice[field], (choice_id, field))
+                # บรรทัดลิงก์ต้องจบที่ตัว URL พอดี ตัวอักษรที่หลุดมาต่อท้าย (เคยพิมพ์
+                # "ฅ" ติดมา) ทำให้ลิงก์ย่อกลายเป็นคนละอันแล้วเปิดไม่ได้
+                self.assertIn(label[field], choice[field], (choice_id, field))
+                for line in choice[field].split(NEWLINE):
+                    if checker_module.SURVEY_URL in line:
+                        self.assertTrue(line.strip().endswith(
+                            checker_module.SURVEY_URL), (choice_id, line))
+        # ชุดที่ยังต้องแก้ไม่มีลิงก์
+        for choice_id in (self.FEE_NONE, self.FEE_YES):
+            choice = checker_module.STAFF_CHOICE_BY_ID[choice_id][1]
+            for field in ("text", "text_en"):
+                self.assertNotIn(checker_module.SURVEY_URL, choice[field],
+                                 (choice_id, field))
+        text = checker_module.plain_summary(self._signature_report(),
+                                            staff=[self.FEE_NONE])
+        self.assertNotIn(checker_module.SURVEY_URL, text)
 
     def test_the_wording_is_kept_exactly_as_staff_wrote_it(self):
         """รวมถึงคำที่ดูเหมือนพิมพ์ตก — เจ้าหน้าที่สั่งให้คงต้นฉบับทุกตัวอักษร (ก.ย. 2569)
@@ -2505,17 +2725,24 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         ส่งซ้ำ ทำให้ส่งมาสองคำตอบพร้อมกันได้ ถ้าไม่คุม นักศึกษาจะได้ข้อความว่า
         "นศ. ไม่มีค่าปรับ" แล้วตามด้วย "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
         """
-        text = checker_module.plain_summary(self._clean_report(),
+        text = checker_module.plain_summary(self._signature_report(),
                                             staff=[self.FEE_NONE, self.FEE_YES])
         heads = [line for line in text.split(NEWLINE)
                  if "ค่าปรับในการส่งเล่มล่าช้า" in line]
         self.assertEqual(len(heads), 1, heads)
+        # เล่มที่ผ่านก็ต้องกันเหมือนกัน แต่ถ้อยคำคนละชุด จึงดูที่บรรทัดขึ้นต้นของชุดผ่าน
+        passed = checker_module.plain_summary(self._clean_report(),
+                                              staff=[self.PASS_NONE, self.PASS_YES])
+        opens = [line for line in passed.split(NEWLINE)
+                 if line.startswith("การส่ง E-thesis")]
+        self.assertEqual(len(opens), 1, opens)
 
     def test_an_unknown_button_id_is_ignored(self):
         """ค่าที่ส่งมาจากหน้าเว็บเชื่อไม่ได้ — id ที่ไม่มีในทะเบียนต้องไม่ทำให้พัง"""
         text = checker_module.plain_summary(self._clean_report(),
                                             staff=["NOT_A_REAL_CHECK", ""])
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])
+        self.assertNotIn("ค่าปรับ", text)
 
     def test_the_order_follows_the_registry_not_the_order_pressed(self):
         """ลำดับที่กดเป็นเรื่องบังเอิญของแต่ละคน ข้อความที่ส่งต้องเรียงเหมือนกันทุกครั้ง"""
@@ -2537,12 +2764,16 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertTrue(checker_module.plain_summary(self._clean_report())
                         .startswith("ผลการตรวจ: ผ่าน"))
 
-    def test_every_entry_carries_both_languages_line_for_line(self):
-        """หน้ารายงานแปลถ้อยคำนี้ด้วยการเทียบ "ทั้งบรรทัด" ไทยกับอังกฤษ
+    def test_every_entry_carries_both_languages(self):
+        """ทุกถ้อยคำต้องมีคู่แปล และวิธีจับคู่ต่างกันตาม placement
 
-        ถ้าจำนวนบรรทัดไม่เท่ากัน บรรทัดที่เกินจะไม่มีคำแปล แล้วตกไปให้ TR แทนที่
-        แบบเศษคำ ซึ่งให้ผลปนกันครึ่งไทยครึ่งอังกฤษ (วัดแล้วได้ "ในApproval pages
-        (page i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า ...")
+        placement = section  ถ้อยคำถูกแตกไปแทรกในรายการจุดที่ต้องแก้ทีละบรรทัด
+                             หน้ารายงานจึงจับคู่ทีละบรรทัด จำนวนบรรทัดต้องเท่ากัน
+                             ไม่งั้นบรรทัดที่เกินตกไปให้ TR แทนที่แบบเศษคำ แล้วได้ผล
+                             ปนกันครึ่งไทยครึ่งอังกฤษ (วัดแล้วได้ "ในApproval pages
+                             (page i-ii หรือ ก-ข) ปรับโครงสร้างของหน้า ...")
+        placement = closing  ถ้อยคำเข้าสรุปทั้งก้อน หน้ารายงานจับคู่ทั้งก้อน จำนวน
+                             บรรทัดจึงไม่ต้องเท่ากัน (ดู STAFF_BLOCK_EN ใน report.html)
         """
         for check in checker_module.STAFF_CHECKS:
             for key in ("id", "item", "item_en", "why", "why_en", "rule_id",
@@ -2553,9 +2784,87 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 for key in ("id", "label", "label_en", "tone"):
                     self.assertTrue(choice.get(key), (choice.get("id"), key))
                 self.assertIn(choice["tone"], ("pass", "fail"), choice["id"])
+                # ทุกชุดถ้อยคำที่มีอยู่ ต้องมีคู่แปลเสมอ ขาดข้างเดียวไม่ได้
+                for th_key, en_key in (("text", "text_en"),
+                                       ("text_pass", "text_pass_en")):
+                    self.assertEqual(bool(choice.get(th_key)),
+                                     bool(choice.get(en_key)),
+                                     (choice["id"], th_key))
+                if check["placement"] != "section":
+                    continue
                 th = [ln for ln in choice["text"].split(NEWLINE) if ln.strip()]
                 en = [ln for ln in choice["text_en"].split(NEWLINE) if ln.strip()]
                 self.assertEqual(len(th), len(en), choice["id"])
+
+    def test_the_pass_wording_is_kept_exactly_as_staff_wrote_it(self):
+        """เหมือนถ้อยคำชุดอื่น — ต้นฉบับจาก note V.2.txt ทุกตัวอักษร รวมที่ดูเหมือนพิมพ์ตก
+
+        ถ้าจะเกลา ต้องได้คำสั่งจากเจ้าหน้าที่ก่อน แล้วแก้เทสต์นี้พร้อมกับถ้อยคำ
+        """
+        none_th = checker_module.STAFF_CHOICE_BY_ID[self.PASS_NONE][1]["text"]
+        yes_th = checker_module.STAFF_CHOICE_BY_ID[self.PASS_YES][1]["text"]
+        for phrase in ("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว",
+                       "ภายใน 30 วัน นับจากวันที่สถานะในระบบแสดงว่า “เสร็จสิ้น”",
+                       # ดอกจันคู่นี้เจ้าหน้าที่ยืนยันให้คงไว้ (ก.ย. 2569) ต่างจากกรณี
+                       # หน้าลงนามที่สั่งให้ถอดออก อย่าถอดตามกรณีนั้น
+                       "*ทั้งสองขั้นตอนสามารถดำเนินการควบคู่กันได้*"):
+            self.assertIn(phrase, none_th, phrase)
+        # เว้นวรรคหน้าจุดเป็นต้นฉบับ อย่าแก้เป็น "1. ชำระผ่าน"
+        self.assertIn("1 .ชำระผ่าน QR Code payment", yes_th)
+        # สองคำนี้เจ้าหน้าที่สั่งให้แก้ (ก.ย. 2569) ต่างจากคำอื่นในแฟ้มนี้ที่ให้คงต้นฉบับ
+        # ของเดิมพิมพ์ว่า "การการส่งเอกสาร" (การซ้ำ) และ "เฉพาหน้า" (ตก ะ)
+        for text in (none_th, yes_th):
+            self.assertIn("ขั้นตอนถัดไป: การส่งเอกสารหน้าลงนาม", text)
+            self.assertIn("(เฉพาะหน้า ก - ข หรือ i - ii)", text)
+            self.assertNotIn("การการส่ง", text)
+            self.assertNotIn("เฉพาหน้า", text)
+        self.assertIn("โดยส่งผ่านระบบ ใน tab Sign off page submission", yes_th)
+        none_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_NONE][1]["text_en"]
+        yes_en = checker_module.STAFF_CHOICE_BY_ID[self.PASS_YES][1]["text_en"]
+        self.assertIn("Your E-thesis has been completed.", none_en)
+        self.assertIn("1. Entitled Page", none_en)
+        self.assertIn("If you meet all graduation requirements", yes_en)
+
+    def test_the_signature_pages_are_always_submitted_through_the_system(self):
+        """หน้าลงนามส่งผ่านระบบเท่านั้น ไม่ใช่ถือเอกสารไปที่อาคารบัณฑิตวิทยาลัย
+
+        ถ้อยคำต้นฉบับสามในสี่ชุดยังเป็นวิธีเดิม (เดินเอกสารไปศาลายา) เจ้าหน้าที่แก้เป็น
+        tab Sign off page submission ทุกชุด (ก.ย. 2569) — ส่งผิดวิธีคือนักศึกษาเสียเที่ยว
+        """
+        link = "https://graduate.mahidol.ac.th/ethesis/stu/login.php"
+        deadline = {"text": "ภายใน 30 วัน", "text_en": "within 30 days"}
+        for choice_id in (self.PASS_NONE, self.PASS_YES):
+            choice = checker_module.STAFF_CHOICE_BY_ID[choice_id][1]
+            for field in ("text", "text_en"):
+                text = choice[field]
+                self.assertIn("Sign off page submission", text, (choice_id, field))
+                self.assertIn(link, text, (choice_id, field))
+                self.assertNotIn("ศาลายา", text, (choice_id, field))
+                self.assertNotIn("Salaya", text, (choice_id, field))
+                # กำหนด 30 วันต้องมีทุกฉบับ (ก.ย. 2569) — ต้นฉบับฉบับมีค่าปรับภาษาไทย
+                # ตกไป นักศึกษากลุ่มนั้นจึงไม่รู้ว่ามีกำหนดเวลา
+                self.assertIn(deadline[field], text, (choice_id, field))
+
+    def test_the_pass_wording_points_at_the_next_step_not_at_resubmitting(self):
+        """สาระของชุด "ผ่าน" คือขั้นตอนถัดไป — ส่งหน้าลงนาม และขออนุมัติปริญญา"""
+        for choice_id in (self.PASS_NONE, self.PASS_YES):
+            choice = checker_module.STAFF_CHOICE_BY_ID[choice_id][1]
+            self.assertIn("GR.5", choice["text"], choice_id)
+            self.assertIn("https://graduate.mahidol.ac.th/e-graduate/main/formlogin.php",
+                          choice["text"], choice_id)
+            self.assertIn("GR.5", choice["text_en"], choice_id)
+
+    def test_the_pass_wording_exists_wherever_the_closing_wording_does(self):
+        """ถ้อยคำปิดท้ายทุกชุดต้องบอกได้ว่าใช้กับผลตรวจไหน
+
+        ปิดท้ายที่ไม่ระบุ applies_to จะออกทั้งเล่มผ่านและไม่ผ่าน ซึ่งถ้อยคำสองชุดนี้
+        ขัดกันเอง — ชุดหนึ่งบอกให้ส่งกลับมาแก้ อีกชุดบอกว่าเสร็จสิ้นแล้ว
+        """
+        for check in checker_module.STAFF_CHECKS:
+            if check["placement"] != "closing":
+                continue
+            self.assertIn(check.get("applies_to"), ("pass", "not_pass"),
+                          check["id"])
 
     def test_choice_ids_are_unique(self):
         ids = [ch["id"] for c in checker_module.STAFF_CHECKS for ch in c["choices"]]

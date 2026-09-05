@@ -96,7 +96,10 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         return response.json()["plain"]
 
     def test_pressing_nothing_leaves_the_summary_alone(self):
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", self._summary(failed=[], passed=[]))
+        """เล่มที่ผ่านแต่ยังไม่กด ได้แค่บรรทัดผลตรวจ ขั้นตอนถัดไปผูกกับการกดปุ่ม"""
+        text = self._summary(failed=[], passed=[])
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertNotIn("ขั้นตอนถัดไป", text)
 
     def test_pressing_the_button_adds_the_wording(self):
         import checker
@@ -108,14 +111,49 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
 
     def test_the_fee_answer_is_appended_without_being_counted(self):
-        text = self._summary(failed=[], passed=[], staff=["LATE_FEE_NONE"])
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
-        self.assertIn("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า", text)
+        """เล่มนี้ไม่มีจุดต้องแก้ ถ้อยคำที่ต่อท้ายจึงเป็นชุด "เสร็จสิ้นแล้ว"
+        ไม่ใช่ชุด "แก้แล้วส่งกลับ" — และยังไม่ถูกนับเป็นจุดที่ต้องแก้เหมือนเดิม
+        """
+        text = self._summary(failed=[], passed=[], staff=["PASS_FEE_NONE"])
+        # ถ้อยคำชุดผ่านบอกเองว่าเสร็จสิ้นและยังมีขั้นตอนต่อ จึงไม่มีบรรทัด
+        # "ไม่พบจุดที่ต้องแก้ไข" ซ้ำอีก
+        self.assertNotIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
+        self.assertNotIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", text)
+        self.assertIn("https://bit.ly/4cwqxAd", text)
         self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"))
+
+    def test_the_endpoint_returns_the_verdict_its_own_text_says(self):
+        """หน้ารายงานใช้ค่า verdict นี้เลือกหัวข้อค่าปรับที่จะโชว์
+
+        ถ้าสองค่าหลุดจากกัน เจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วฝั่งเซิร์ฟเวอร์ทิ้งทุกครั้ง
+        """
+        job = self._seed_clean_report()
+        for staff in ([], ["PASS_FEE_NONE"], ["SIGNATURE_LAYOUT_WRONG"]):
+            response = self.client.post(f"/summary/{job}",
+                                        json={"failed": [], "passed": [],
+                                              "staff": staff})
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual(body["plain"].split(chr(10))[0],
+                             "ผลการตรวจ: " + body["verdict"], staff)
+
+    def test_the_report_page_marks_which_verdict_each_topic_needs(self):
+        """หน้ารายงานซ่อนหัวข้อจาก data-applies ถ้า attribute นี้ไม่ถูกฝังมา
+        สคริปต์จะปล่อยผ่านทุกหัวข้อ แล้วหัวข้อค่าปรับสองอันจะโชว์พร้อมกัน
+        """
+        job = self._seed_clean_report()
+        html = self.client.get(f"/result/{job}").text
+        self.assertIn('data-applies="pass"', html)
+        self.assertIn('data-applies="not_pass"', html)
+        # หัวข้อที่ใช้ได้ทุกผลตรวจต้องได้ค่าว่าง ไม่ใช่คำว่า Undefined จาก Jinja
+        self.assertIn('data-applies=""', html)
+        self.assertNotIn("data-applies=\"Undefined", html)
 
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
-        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])
+        self.assertNotIn("ค่าปรับ", text)
 
 
 class WebSmokeTests(unittest.TestCase):

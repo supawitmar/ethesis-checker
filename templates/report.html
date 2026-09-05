@@ -361,11 +361,11 @@
 
 
     {% if report.staff_findings %}
-    <h2 class="sec"><span data-th="✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที"
+    <h2 class="sec" id="sf-head"><span data-th="✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที"
         data-en="✍️ Decisions only staff can make — pressing adds the wording to the summary">✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
       <span class="count"><b>{{ report.staff_findings | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for sf in report.staff_findings %}
-    <div class="hc sf" data-staff="{{ sf.id }}">
+    <div class="hc sf" data-staff="{{ sf.id }}" data-applies="{{ sf.applies_to or '' }}">
       <div class="row1">
         <div style="flex:1; min-width:220px;">
           <div class="t" data-th="{{ sf.item }}" data-en="{{ sf.item_en }}">{{ sf.item }}</div>
@@ -1383,6 +1383,14 @@ function buildSummaryText(){
   catch(e){ return fallback; }
 }
 var PLAIN_TEXT = buildSummaryText();
+// ผลตรวจที่เซิร์ฟเวอร์ใช้จริงตอนสร้างข้อความสรุป — อ่านจากบรรทัดแรกของข้อความนั้นเลย
+// ไม่ใช่ค่าดิบใน report.verdict เพราะสองค่านี้ต่างกันได้ (เล่มที่ระบบว่าผ่าน แต่มีจุด
+// ที่ต้องแก้จากคำตัดสินของเจ้าหน้าที่ ข้อความสรุปจะเขียนว่า "ไม่ผ่าน") ถ้าอ่านคนละค่า
+// หัวข้อค่าปรับที่โชว์จะไม่ตรงกับถ้อยคำที่เซิร์ฟเวอร์ยอมให้เข้าสรุป
+var REPORT_VERDICT = (function(){
+  var m = String(PLAIN_TEXT || '').match(/^ผลการตรวจ:\s*(.+)$/m);
+  return m ? m[1].trim() : '';
+})();
 // แปลข้อความสรุป "ทีละบรรทัด" ไม่ใช่ทั้งก้อน
 // checker.plain_summary เขียนหนึ่งจุดเป็นสามบรรทัด (ตำแหน่ง / สิ่งที่พบ / ต้องแก้เป็น)
 // แต่ละบรรทัดจึงเป็นข้อความเดี่ยวที่ trWhole มีกฎเต็มประโยครองรับอยู่แล้ว
@@ -1392,27 +1400,57 @@ var PLAIN_TEXT = buildSummaryText();
 // ถ้อยคำของจุดที่เจ้าหน้าที่กดเพิ่มเอง เจ้าหน้าที่เขียนมาทั้งไทยและอังกฤษ จึงเทียบ
 // "ทั้งบรรทัด" จากทะเบียนชุดเดียวกับฝั่งเซิร์ฟเวอร์ ไม่ส่งเข้า TR เพราะ TR แทนที่แบบ
 // เศษคำ ย่อหน้ายาวขนาดนี้ผ่าน TR แล้วเพี้ยนแน่ และคำแปลจะหลุดจากต้นฉบับได้
-var STAFF_LINE_EN = (function(){
-  var map = {}, el = document.getElementById('staff-findings-data');
-  if (!el) return map;
+// ถ้อยคำของเจ้าหน้าที่เข้าข้อความสรุปสองแบบ ซึ่งต้องจับคู่แปลคนละวิธี
+//   placement = section  ถูกใส่เลขข้อและย่อหน้าแทรกเข้าไปในรายการจุดที่ต้องแก้
+//                        บรรทัดจึงแยกกันอยู่ ต้องจับคู่ "ทีละบรรทัด"
+//   placement = closing  เข้าสรุปทั้งก้อนโดยไม่ถูกแตะ จับคู่ "ทั้งก้อน" ได้
+// แบบหลังต้องจับทั้งก้อนด้วย ไม่ใช่แค่ทำได้ เพราะถ้อยคำชุด "ผ่าน" ที่เจ้าหน้าที่เขียนมา
+// ขึ้นบรรทัดคนละจุดในสองภาษา (อังกฤษแตกหน้าเสนอ/หน้าอนุมัติเป็นรายการเลข ไทยรวมเป็น
+// ประโยคเดียว) จำนวนบรรทัดจึงไม่เท่ากัน และมีบรรทัดไทยที่ซ้ำกันข้ามชุดแต่คำแปลคนละอัน
+// ("สอบถามข้อมูลเพิ่มเติม" = "For more information" ในชุดแก้ไข แต่เป็นประโยคติดต่อ
+// เจ้าหน้าที่ในชุดผ่าน) จับทีละบรรทัดแล้วคำแปลจะทับกันเอง
+var STAFF_LINE_EN = {};
+var STAFF_BLOCK_EN = [];
+(function(){
+  var el = document.getElementById('staff-findings-data');
+  if (!el) return;
   // จับคู่เฉพาะบรรทัดที่มีข้อความ — ถ้านับบรรทัดว่างด้วย การเว้นวรรคระหว่างย่อหน้า
   // ที่ต่างกันนิดเดียวระหว่างไทยกับอังกฤษจะทำให้คู่เลื่อนกันทั้งก้อน
   var lines = function(text){
     return String(text || '').split('\n').map(function(s){ return s.trim(); })
       .filter(function(s){ return s; });
   };
+  var pairs = [['text', 'text_en']];
   try {
     (JSON.parse(el.textContent || '[]') || []).forEach(function(check){
+      var whole = check.placement === 'closing';
       (check.choices || []).forEach(function(choice){
-        var th = lines(choice.text), en = lines(choice.text_en);
-        th.forEach(function(line, i){ if (en[i]) map[line] = en[i]; });
+        pairs.forEach(function(pair){
+          var th = String(choice[pair[0]] || '').trim();
+          var en = String(choice[pair[1]] || '').trim();
+          if (!th || !en) return;
+          if (whole){ STAFF_BLOCK_EN.push([th, en]); return; }
+          var thLines = lines(th), enLines = lines(en);
+          thLines.forEach(function(line, i){
+            if (enLines[i]) STAFF_LINE_EN[line] = enLines[i];
+          });
+        });
       });
     });
   } catch(e){}
-  return map;
+  // ก้อนยาวก่อน กันก้อนสั้นไปตรงกับส่วนหนึ่งของก้อนยาวแล้วแปลค้างครึ่งเดียว
+  STAFF_BLOCK_EN.sort(function(a, b){ return b[0].length - a[0].length; });
 })();
 function trSummary(text){
-  return String(text == null ? '' : text).split('\n').map(function(line){
+  var out = String(text == null ? '' : text);
+  for (var i = 0; i < STAFF_BLOCK_EN.length; i++){
+    if (out.indexOf(STAFF_BLOCK_EN[i][0]) !== -1){
+      out = out.split(STAFF_BLOCK_EN[i][0]).join(STAFF_BLOCK_EN[i][1]);
+    }
+  }
+  // บรรทัดอังกฤษที่เพิ่งแทนเข้าไปผ่านลูปข้างล่างได้ปลอดภัย — ทุกกฎใน TR มีอักษรไทย
+  // อยู่ในรูปแบบที่ต้องตรง จึงไม่มีกฎไหนไปแตะข้อความอังกฤษล้วน
+  return out.split('\n').map(function(line){
     var m = line.match(/^(\s*(?:\d+\.\s*)?)([\s\S]*)$/);
     if (!m[2]) return line;
     return m[1] + (STAFF_LINE_EN[m[2].trim()] || trEN(m[2]));
@@ -1472,6 +1510,38 @@ const COPY_ERROR = {
           en: 'Could not update the summary, so the text above does not include what '
               + 'you just pressed. Please press that button again.'}
 };
+// หัวข้อค่าปรับมีสองอัน ถ้อยคำขัดกันเอง (ชุดหนึ่งบอกให้ส่งกลับมาแก้ อีกชุดบอกว่า
+// เสร็จสิ้นแล้ว) ฝั่งเซิร์ฟเวอร์กันไว้แล้วว่าจะเอาชุดไหนเข้าข้อความสรุป ตรงนี้ซ่อนหัวข้อ
+// ที่ใช้ไม่ได้ออกจากหน้าจอด้วย ไม่งั้นเจ้าหน้าที่กดแล้วไม่มีอะไรเกิดขึ้น
+// ผลตรวจเปลี่ยนได้ระหว่างทาง (กด "ไม่ผ่าน" ที่ข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจไม่ได้)
+// จึงเรียกซ้ำทุกครั้งที่ดึงข้อความสรุปใหม่ โดยใช้ผลตรวจที่เซิร์ฟเวอร์คำนวณมาให้
+function clearStaffAnswer(card){
+  // ต้องล้างให้ครบทั้งสามอย่าง ปุ่มที่กด สีของการ์ด และบรรทัดที่บอกว่าถ้อยคำเข้าสรุปแล้ว
+  // ถ้าล้างแต่ปุ่ม พอผลตรวจสลับกลับ หัวข้อจะโผล่มาพร้อมข้อความค้างว่า "เพิ่มถ้อยคำ...แล้ว"
+  // ทั้งที่ไม่มีอะไรอยู่ในข้อความสรุป
+  card.querySelectorAll('.pf.on').forEach(function(b){ b.classList.remove('on'); });
+  card.classList.remove('state-pass', 'state-fail');
+  renderStaffState(card);
+}
+function applyVerdictScope(verdict){
+  // ผลตรวจที่รู้จักมีสามค่าเท่านั้น ค่าอื่น (หรือค่าว่าง เพราะอ่านข้อความสรุปไม่ได้)
+  // แปลว่าเราไม่รู้จริง ๆ — โชว์ทุกหัวข้อไว้ก่อน ให้เจ้าหน้าที่เลือกเอง ดีกว่าเดาผิด
+  // แล้วซ่อนหัวข้อที่ถูก เหลือหัวข้อที่กดไปก็ไม่มีผล
+  var known = (verdict === 'ผ่าน' || verdict === 'ไม่ผ่าน' || verdict === 'รอยืนยัน');
+  var passed = (verdict === 'ผ่าน');
+  document.querySelectorAll('.sf[data-applies]').forEach(function(el){
+    var scope = el.getAttribute('data-applies');
+    if (!scope) return;                       // หัวข้อที่ใช้ได้ทุกผลตรวจ
+    var fits = !known || ((scope === 'pass') ? passed : !passed);
+    el.hidden = !fits;
+    // หัวข้อที่ถูกซ่อนต้องไม่ส่ง id กลับไปด้วย ไม่งั้นเจ้าหน้าที่ที่เคยกดไว้ตอนผลตรวจ
+    // ยังเป็นอีกอย่าง จะยังค้างอยู่ในคำขอ
+    if (!fits) clearStaffAnswer(el);
+  });
+  var shown = document.querySelectorAll('.sf:not([hidden])').length;
+  var count = document.querySelector('#sf-head .count b');
+  if (count) count.textContent = String(shown);
+}
 function setSummaryBusy(on){
   const box = document.querySelector('.copybox .copy-btn');
   if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
@@ -1493,6 +1563,7 @@ function refreshSummary(){
     })
     .then(function(data){
       if (typeof data.plain === 'string') PLAIN_TEXT = data.plain;
+      if (typeof data.verdict === 'string') applyVerdictScope(data.verdict);
       showCopyError('');
       renderSummary();
     })
@@ -1525,7 +1596,10 @@ function fallbackCopy(text){
   const ta = document.querySelector('.copy-text');
   if (ta){ ta.focus(); ta.select(); try { document.execCommand('copy'); } catch(e){} }
 }
-document.addEventListener('DOMContentLoaded', renderSummary);
+document.addEventListener('DOMContentLoaded', function(){
+  renderSummary();
+  applyVerdictScope(REPORT_VERDICT);
+});
 
 function setPF(btn, state){
   const card = btn.closest('.hc, .issue');
