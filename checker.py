@@ -2434,6 +2434,11 @@ SURVEY_URL = "https://bit.ly/4cwqxAd"
 #   "GR.5 (REQUESTING DEGREE)"          ->  "(Requesting Degree)" ให้ตรงกับอีกชุด
 #   "Mr.Supawit"                        ->  "Mr. Supawit"
 #
+# อีกจุดหนึ่ง ฝั่งอังกฤษของชุดมีค่าปรับ "ตก" หมายเหตุ 48 ชั่วโมงที่ฝั่งไทยมี เหลือ
+# แต่กรณีบัตรเครดิต 3 ชั่วโมง นักศึกษาต่างชาติจึงไม่รู้กำหนดของกรณีทั่วไป
+# เจ้าหน้าที่สั่งให้เติม (ก.ย. 2569) บรรทัดนี้จึงไม่มีในต้นฉบับอังกฤษ แต่แปลตาม
+# ฝั่งไทยที่มีอยู่แล้ว
+#
 # ดอกจันคู่นี้ต่างจากกรณีหน้าลงนาม ซึ่งเจ้าหน้าที่สั่งให้ถอดออกเพราะขึ้นเป็นดาวลอยใน
 # อีเมลกับ Word — ตรงนี้เจ้าหน้าที่ยืนยันให้คงไว้ (ก.ย. 2569) อย่าถอดตามกรณีนั้น
 #
@@ -2557,7 +2562,8 @@ _PASS_FEE_EN = "\n".join([
     '2. Invoice',
     '3. Credit Card',
     '',
-    'Note: If you choose to pay by credit card, the system will take up to 3 hours to verify your payment.',
+    'Note: The system will verify your payment within 48 hours.',
+    'If you choose to pay by credit card, the system will take up to 3 hours to verify your payment.',
     '',
     'This will allow our staff to verify the payment and update the status of your E-Thesis in the system accordingly.',
     '',

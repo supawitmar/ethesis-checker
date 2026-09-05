@@ -2847,6 +2847,12 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         for text in (none_en, yes_en):
             self.assertIn("Mr. Supawit at supawit.mar@mahidol.ac.th.", text)
             self.assertNotIn("Mr.Supawit", text)
+        # กำหนดเวลาตรวจสอบการชำระเงินต้องบอกครบทั้งสองกรณีในทั้งสองภาษา ต้นฉบับอังกฤษ
+        # มีแต่กรณีบัตรเครดิต นักศึกษาต่างชาติจึงไม่รู้ว่ากรณีทั่วไปใช้ 48 ชั่วโมง
+        self.assertIn("ภายใน 48 ชั่วโมง", yes_th)
+        self.assertIn("ภายใน 3 ชั่วโมง", yes_th)
+        self.assertIn("within 48 hours", yes_en)
+        self.assertIn("up to 3 hours", yes_en)
 
     def test_the_signature_pages_are_always_submitted_through_the_system(self):
         """หน้าลงนามส่งผ่านระบบเท่านั้น ไม่ใช่ถือเอกสารไปที่อาคารบัณฑิตวิทยาลัย
