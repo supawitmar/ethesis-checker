@@ -1508,6 +1508,12 @@ const COPY_ERROR = {
           en: 'Your session expired, so the summary does not include what you just '
               + 'pressed. Log in again in another tab, then press that button once '
               + 'more. Nothing on this page is lost.'},
+  gone: {th: 'ผลตรวจนี้ไม่อยู่บนเซิร์ฟเวอร์แล้ว ปุ่มบนหน้านี้จึงใช้ไม่ได้ '
+             + 'กรุณาอัปโหลดไฟล์ตรวจใหม่อีกครั้ง แล้วค่อยกดปุ่ม '
+             + '(ข้อความสรุปที่เห็นอยู่ยังคัดลอกไปใช้ได้ตามเดิม)',
+         en: 'This result is no longer on the server, so the buttons on this page do '
+             + 'not work. Please upload the file and check it again, then press the '
+             + 'button. The summary shown here can still be copied as it is.'},
   other: {th: 'อัปเดตข้อความสรุปไม่สำเร็จ ข้อความด้านบนจึงยังไม่รวมรายการที่เพิ่งกด '
               + 'กรุณากดปุ่มนั้นซ้ำอีกครั้ง',
           en: 'Could not update the summary, so the text above does not include what '
@@ -1578,6 +1584,9 @@ function refreshSummary(){
   }).then(function(r){
       // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
       if (r.status === 401) return Promise.reject(new Error('login'));
+      // ผลตรวจหลุดจากเซิร์ฟเวอร์ (เก่าเกิน หรือเซิร์ฟเวอร์เพิ่งรีสตาร์ต) — กดซ้ำกี่ครั้ง
+      // ก็ไม่มีวันสำเร็จ ต้องบอกให้ตรงว่าต้องตรวจไฟล์ใหม่ ไม่ใช่ให้ลองกดซ้ำ
+      if (r.status === 404) return Promise.reject(new Error('gone'));
       return r.ok ? r.json() : Promise.reject(new Error(r.status));
     })
     .then(function(data){
@@ -1597,7 +1606,7 @@ function scheduleSummaryRefresh(){
     refreshSummary().catch(function(err){
       // ห้ามกลืนเงียบ — ผลของการกดปุ่มอยู่ในข้อความสรุปเท่านั้น ถ้าอัปเดตไม่สำเร็จ
       // แล้วไม่บอก เจ้าหน้าที่จะคัดลอกข้อความที่ตกรายการไปส่งนักศึกษา
-      var kind = (err && err.message === 'login') ? 'login' : 'other';
+      var kind = (err && COPY_ERROR[err.message]) ? err.message : 'other';
       showCopyError(COPY_ERROR[kind][LANG === 'en' ? 'en' : 'th']);
     });
   }, 600);
