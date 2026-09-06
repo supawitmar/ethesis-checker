@@ -3465,8 +3465,13 @@ def printed_title(page_text, student_name=""):
 
 # ข้อความ template ที่พิมพ์ต่อจากชื่อนักศึกษาบนหน้าปกเสมอ ทุกภาษาและทุกประเภทเล่ม
 # ใช้ชี้ "ช่องของชื่อ" บนหน้าปก ซึ่งไม่มีรหัสนักศึกษาให้ยึดแบบหน้าบทคัดย่อ
+#
+# ไล่ดูจาก template ครบทั้ง 18 ใบ (นานาชาติ / เล่มอังกฤษของหลักสูตรไทย / เล่มไทย
+# คูณสามประเภทเล่ม คูณสองรูปแบบ) ได้ถ้อยคำ 7 แบบ — เล่มการค้นคว้าอิสระภาษาอังกฤษ
+# ใช้ "AN INDEPENDENT STUDY" ไม่ใช่ "A ..." จึงต้องรับ "AN" ด้วย
 _COVER_NAME_STOP = re.compile(
-    r'^(?:A\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION)\s+SUBMITTED'
+    r'^(?:AN?\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|INDEPENDENT\s+STUDY)'
+    r'\s+SUBMITTED'
     r'|(?:วิทยานิพนธ์|สารนิพนธ์|การค้นคว้าอิสระ)นี้เป็นส่วนหนึ่ง)', re.I)
 
 

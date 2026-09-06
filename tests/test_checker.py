@@ -5034,6 +5034,36 @@ class TheNamePrintedInTheStudentSlotIsWhatGetsReported(unittest.TestCase):
         self.assertEqual(checker_module.signature_printed_name(plain), "")
         self.assertEqual(checker_module.abstract_printed_name(plain), "")
 
+    # ถ้อยคำที่ตามหลังชื่อนักศึกษาบนหน้าปก ไล่มาจาก template ครบทั้ง 18 ใบ
+    # (นานาชาติ / เล่มอังกฤษของหลักสูตรไทย / เล่มไทย คูณสามประเภทเล่ม คูณสองรูปแบบ)
+    COVER_STOPS = [
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "A THEMATIC PAPER SUBMITTED IN PARTIAL FULFILLMENT",
+        "AN INDEPENDENT STUDY SUBMITTED IN PARTIAL FULFILLMENT",
+        "A DISSERTATION SUBMITTED IN PARTIAL FULFILLMENT",
+        "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+        "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+        "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+    ]
+
+    def test_the_cover_anchor_covers_every_template(self):
+        """เล่มการค้นคว้าอิสระภาษาอังกฤษใช้ "AN" ไม่ใช่ "A" — เคยหลุดไป 4 ใบจาก 18"""
+        for stop in self.COVER_STOPS:
+            page = NEWLINE.join(["ชื่อเรื่อง", "FIRSTNAME LASTNAME", stop,
+                                 "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"])
+            self.assertEqual(checker_module.cover_printed_name(page),
+                             "FIRSTNAME LASTNAME", stop)
+
+    def test_the_signature_anchor_covers_both_languages(self):
+        """template อังกฤษใช้ป้าย "Candidate" 24 ใบ เล่มไทยใช้ "ผู้วิจัย" 12 ใบ"""
+        for label, name in (("Candidate Ph.D (Environmental Technology)",
+                             "First Name Last name"),
+                            ("ผู้วิจัย Ph.D. (Social Science)", "ชื่อ นามสกุล")):
+            page = NEWLINE.join(["วิทยานิพนธ์", "เรื่อง", "ชื่อเรื่อง",
+                                 name + ", รองศาสตราจารย์ คนางค์ คันธมธุรพจน์,",
+                                 label])
+            self.assertEqual(checker_module.signature_printed_name(page), name)
+
     def test_all_three_slots_are_wired_into_the_check(self):
         """ควบคุมเชิงลบ: ถ้าลืมต่อสาย ตัวตรวจจะกลับไปวัดความคล้ายทั้งหน้าเงียบ ๆ"""
         source = inspect.getsource(checker_module.run_check)
