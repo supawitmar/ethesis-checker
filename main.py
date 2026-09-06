@@ -56,7 +56,14 @@ ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยื�
 
 # in-memory job store — {job_id: {stage, done, error, report, pdf_name, ts}}
 JOBS = {}
-JOB_TTL = 1800
+# ผลตรวจต้องอยู่ให้ครบวันทำงาน ไม่ใช่ครึ่งชั่วโมง — ปุ่ม "โครงสร้างหน้าลงนาม" กับ
+# "ค่าปรับ" ต้องยิง /summary กลับมาที่ job เดิม เจ้าหน้าที่เปิดรายงานเล่มหนึ่งค้างไว้
+# ไล่ดูทีละข้อ (เล่มร้อยกว่าหน้ามีหลายสิบข้อ) แล้วค่อยกดปุ่มตอนท้าย ของเดิมตั้งไว้
+# 30 นาที พอเริ่มตรวจเล่มถัดไป job เก่าถูกลบ ปุ่มบนรายงานเล่มก่อนจึงตายเงียบ ๆ
+JOB_TTL = 12 * 3600
+# กันหน่วยความจำด้วย "จำนวนที่เก็บ" แทนการตั้งเวลาให้สั้น — รายงานเล่ม 140 หน้าหนัก
+# 56 KB เก็บ 40 เล่มก็ราว 2 MB ซึ่งถูกกว่าการทำให้ปุ่มบนรายงานที่เปิดค้างไว้ใช้ไม่ได้
+MAX_KEPT_JOBS = 40
 JOBS_LOCK = threading.Lock()
 
 
@@ -149,11 +156,18 @@ def _get_job(job_id):
 
 
 def _prune_jobs():
+    """ทิ้งผลตรวจเก่า โดยเก็บ "เล่มล่าสุด" ไว้เสมอ
+
+    ทิ้งเฉพาะงานที่ตรวจเสร็จแล้ว งานที่ยังตรวจอยู่ห้ามแตะ
+    """
     now = time.time()
     with JOBS_LOCK:
-        expired = [k for k, v in JOBS.items()
-                   if v.get("done") and now - v["ts"] > JOB_TTL]
-        for k in expired:
+        done = [(v["ts"], k) for k, v in JOBS.items() if v.get("done")]
+        drop = {k for ts, k in done if now - ts > JOB_TTL}
+        # เกินจำนวนที่เก็บได้ ให้ทิ้งของเก่าที่สุดก่อน
+        keep = sorted((pair for pair in done if pair[1] not in drop), reverse=True)
+        drop.update(k for _ts, k in keep[MAX_KEPT_JOBS:])
+        for k in drop:
             JOBS.pop(k, None)
 
 

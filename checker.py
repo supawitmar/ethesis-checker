@@ -1380,6 +1380,24 @@ def student_id_line(page_text):
     return ""
 
 
+def abstract_printed_name(page_text):
+    """ชื่อนักศึกษา "ตามที่พิมพ์จริง" บนหน้าบทคัดย่อ — คืน "" ถ้าหน้านี้ไม่มีบรรทัดนั้น
+
+    template วางชื่อกับรหัสไว้บรรทัดเดียวกัน ("FIRSTNAME LASTNAME 6200000 XXXX / X")
+    ช่องของชื่อจึงคือ "ข้อความที่อยู่หน้ารหัส" ซึ่งชี้ตำแหน่งได้จากโครงสร้างของหน้า
+    ไม่ใช่ "บรรทัดไหนก็ได้ทั้งหน้าที่คล้ายชื่อที่สุด"
+
+    เล่มจริง (ก.ย. 2569) ที่ลืมแก้ placeholder จึงพิมพ์ว่า
+    "FIRSTNAME LASTNAME 6636201 PHEH/M" เคยถูกรายงานว่า "ชื่อภาษาอังกฤษในเล่ม
+    เขียนว่า ABSTRACT" เพราะการวัดความคล้ายทีละบรรทัดให้หัวข้อ "ABSTRACT" 0.385
+    แต่ให้บรรทัดชื่อจริง 0.213 (ชื่อที่ถูกคือ "NUTRADA WICHANUCHIT") เจ้าหน้าที่จึง
+    ได้คำสั่งให้ไปแก้ข้อความที่ไม่ได้อยู่ในช่องนั้นเลย
+    """
+    line = student_id_line(page_text)
+    m = _STUDENT_ID_SHAPE.search(line) if line else None
+    return soft(line[:m.start()]) if m else ""
+
+
 def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id,
                                            loc, name_label):
     """ชื่อกับรหัสต้องอยู่บรรทัดเดียวกันตาม template
@@ -3445,6 +3463,63 @@ def printed_title(page_text, student_name=""):
     return ' '.join(out).strip()
 
 
+# ข้อความ template ที่พิมพ์ต่อจากชื่อนักศึกษาบนหน้าปกเสมอ ทุกภาษาและทุกประเภทเล่ม
+# ใช้ชี้ "ช่องของชื่อ" บนหน้าปก ซึ่งไม่มีรหัสนักศึกษาให้ยึดแบบหน้าบทคัดย่อ
+#
+# ไล่ดูจาก template ครบทั้ง 18 ใบ (นานาชาติ / เล่มอังกฤษของหลักสูตรไทย / เล่มไทย
+# คูณสามประเภทเล่ม คูณสองรูปแบบ) ได้ถ้อยคำ 7 แบบ — เล่มการค้นคว้าอิสระภาษาอังกฤษ
+# ใช้ "AN INDEPENDENT STUDY" ไม่ใช่ "A ..." จึงต้องรับ "AN" ด้วย
+_COVER_NAME_STOP = re.compile(
+    r'^(?:AN?\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|INDEPENDENT\s+STUDY)'
+    r'\s+SUBMITTED'
+    r'|(?:วิทยานิพนธ์|สารนิพนธ์|การค้นคว้าอิสระ)นี้เป็นส่วนหนึ่ง)', re.I)
+
+
+def cover_printed_name(page_text, title=""):
+    """ชื่อนักศึกษา "ตามที่พิมพ์จริง" บนหน้าปก — คืน "" ถ้าชี้ช่องไม่ได้
+
+    template วางชื่อนักศึกษาไว้บรรทัดก่อน "A THESIS SUBMITTED IN PARTIAL FULFILLMENT"
+    (หรือ "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร") ช่องของชื่อจึงชี้ได้จาก
+    โครงสร้างของหน้า ไม่ใช่จาก "บรรทัดไหนก็ได้ทั้งหน้าที่คล้ายชื่อที่สุด"
+
+    เล่มจริง (ก.ย. 2569) ที่ลืมแก้ placeholder เป็น "FIRSTNAME LASTNAME" ถูกรายงานว่า
+    "ชื่อนักศึกษาในเล่มเขียนว่า OF PM2.5 IN NORTHERN THAILAND" ซึ่งเป็นบรรทัดสุดท้าย
+    ของชื่อเรื่อง เพราะการวัดความคล้ายให้เศษชื่อเรื่องคะแนนสูงกว่าบรรทัดชื่อจริง
+    """
+    lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
+    stop = next((i for i, line in enumerate(lines)
+                 if _COVER_NAME_STOP.match(line.strip())), 0)
+    if stop < 1:
+        return ""
+    candidate = lines[stop - 1]
+    # เล่มที่ไม่ได้พิมพ์ชื่อไว้เลย จะเหลือบรรทัดสุดท้ายของชื่อเรื่องยืนอยู่ตรงช่องนั้น
+    # อย่ารายงานเศษชื่อเรื่องว่าเป็นชื่อนักศึกษา ให้ถอยไปใช้วิธีเดิมแทน
+    if title and norm(candidate) and norm(candidate) in norm(title):
+        return ""
+    return candidate
+
+
+# ป้ายบทบาทที่ template พิมพ์ไว้ "ใต้ชื่อนักศึกษา" บนหน้าลงนามเสมอ
+_SIGNATURE_CANDIDATE_LABEL = re.compile(r'^(?:Candidate|ผู้วิจัย|ผู้เขียน)', re.I)
+
+
+def signature_printed_name(page_text):
+    """ชื่อนักศึกษา "ตามที่พิมพ์จริง" บนหน้าลงนาม — คืน "" ถ้าชี้ช่องไม่ได้
+
+    template พิมพ์ป้ายบทบาทไว้ใต้ชื่อนักศึกษาเสมอ ("Candidate" / "ผู้วิจัย") ช่องของชื่อ
+    จึงคือบรรทัดเหนือป้ายนั้น การดึงข้อความรวมสองคอลัมน์เป็นบรรทัดเดียว ชื่อของ
+    นักศึกษาอยู่คอลัมน์ซ้ายจึงเป็นท่อนแรกก่อนจุลภาค
+
+    ถ้าปล่อยให้วัดความคล้ายทั้งหน้าแทน เล่มที่ชื่อไม่ตรงจะถูกรายงานว่าเล่มเขียนชื่อ
+    นักศึกษาว่า "Mahidol University" หรือ "Management)" (วัดจากเล่มจริงสองเล่ม)
+    """
+    lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
+    for i, line in enumerate(lines):
+        if i and _SIGNATURE_CANDIDATE_LABEL.match(line.strip()):
+            return _strip_student_title(lines[i - 1].split(",")[0].strip())
+    return ""
+
+
 def _title_as_printed(compared, page_text, expected, student_name=""):
     """แทน "ช่วงที่ใกล้เคียงที่สุด" ด้วยชื่อเรื่องตามที่พิมพ์จริง เมื่อหาบล็อกชื่อเรื่องเจอ
 
@@ -4759,7 +4834,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if ref_head:
         if ref_head[2] > 1 or '/' in ref_head[0]:
             rep.add("RED", "end_matter", page_ref(ref_head[1]),
-                    f"หัวข้อ \"{ref_head[0]}\"", "เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY", "ลบคำที่ไม่ใช้")
+                    f'หัวข้อในหน้านี้เลือกหลายคำ: "{ref_head[0]}"',
+                    "เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY", "ลบคำที่ไม่ใช้")
     else:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
                 "ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ", "")
@@ -5084,6 +5160,30 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         f"ลบชื่อเรื่อง{other_word}ออกจากหน้านี้",
                         "FRONT.TITLE_ONE_LANGUAGE")
 
+        # ---------- หน้าบทคัดย่อต้องมีชื่อเรื่องเฉพาะภาษาของหน้านั้น ----------
+        # template วางชื่อเรื่องภาษาเดียวไว้หัวหน้าบทคัดย่อแต่ละภาษา — หน้าอังกฤษขึ้นต้น
+        # ด้วย "THESIS TITLE" หน้าไทยขึ้นต้นด้วย "หัวข้อวิทยานิพนธ์ภาษาไทย" เจ้าหน้าที่
+        # ยืนยัน (ก.ย. 2569) จากเล่มจริงที่พิมพ์ชื่อเรื่องทั้งสองภาษาซ้อนกันบนหน้าบทคัดย่อไทย
+        #
+        # กฎข้างบนครอบไม่ถึง เพราะกฎนั้นตัดสินจาก "ภาษาของเล่ม" ส่วนหน้าบทคัดย่อสองหน้า
+        # ตั้งใจใช้คนละภาษากันอยู่แล้ว จึงต้องตัดสินจาก "ภาษาของหน้า" ทีละหน้าแทน
+        abstract_title_spots = [
+            (abs_en_idx, "บทคัดย่อภาษาอังกฤษ", "ภาษาอังกฤษ", "thai", "ภาษาไทย"),
+            (abs_th_idx, "บทคัดย่อภาษาไทย", "ภาษาไทย", "en", "ภาษาอังกฤษ"),
+        ]
+        for spot_idx, spot_label, page_word, wrong_script, wrong_word in abstract_title_spots:
+            wrong_title = approved_title(A, wrong_script)
+            if spot_idx is None or not wrong_title:
+                continue
+            printed_wrong = title_printed_on_page(pages[spot_idx], wrong_title)
+            if not printed_wrong:
+                continue
+            rep.add("RED", "front_matter", f"{spot_label} ({page_ref(spot_idx)})",
+                    f'หน้านี้มีชื่อเรื่อง{wrong_word}อยู่ด้วย: "{printed_wrong[:160]}"',
+                    f"หน้าบทคัดย่อ{page_word}ต้องมีเฉพาะชื่อเรื่อง{page_word}",
+                    f"ลบชื่อเรื่อง{wrong_word}ออกจากหน้านี้",
+                    "FRONT.TITLE_ONE_LANGUAGE")
+
         if ack_pages and (student_name_th if thai_book else student_name):
             ack_start = ack_pages[0]
             ack_page_indices = range(ack_start, min(ack_start + span_of(ack_start), n))
@@ -5135,6 +5235,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             ]
             for spot_name, spot_idx, spot_kind in name_spots:
                 compared = compare_reference_text(pages[spot_idx], core_name, 'student_name')
+                if compared['status'] != 'exact':
+                    # ช่องของชื่อชี้ได้จากโครงสร้างของหน้า — ต้องรายงานสิ่งที่พิมพ์อยู่
+                    # ตรงนั้นจริง ไม่ใช่บรรทัดไหนก็ได้ทั้งหน้าที่คล้ายชื่อที่สุด
+                    printed_name = (
+                        cover_printed_name(pages[spot_idx],
+                                           approved_title(A, "thai" if thai_book else "en"))
+                        if spot_kind == "cover"
+                        else signature_printed_name(pages[spot_idx]))
+                    if printed_name:
+                        compared = compare_values(printed_name, core_name, 'student_name')
                 if compared['status'] != 'exact':
                     rep.add_verification("ชื่อนักศึกษา", spot_name, "fail",
                                          compared['actual'])
@@ -5196,6 +5306,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 continue
             core3 = _strip_student_title(nm3)
             compared = compare_reference_text(pages[aidx], core3, 'student_name')
+            if compared['status'] != 'exact':
+                # ช่องของชื่อบนหน้าบทคัดย่อคือข้อความหน้ารหัสนักศึกษา ต้องรายงานสิ่งที่
+                # พิมพ์อยู่ตรงนั้นจริง ไม่ใช่บรรทัดที่คล้ายชื่อที่สุดทั้งหน้า
+                printed_name = abstract_printed_name(pages[aidx])
+                if printed_name:
+                    compared = compare_values(printed_name, core3, 'student_name')
             if compared['status'] != 'exact':
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "fail", compared['actual'])
@@ -5517,9 +5633,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "ลบคำที่ไม่ใช้ออกจากสารบัญ ให้เหลือคำเดียว", "FRONT.TOC_CONTENT",
                         )
                     # (2) คำที่เลือกในสารบัญ ต้องตรงกับหัวข้อในหน้าอ้างอิงจริง
+                    # หน้าอ้างอิงจริงเลือกหลายคำ = กฎส่วนท้ายเล่มฟ้องที่หน้านั้นไปแล้ว
+                    # ถ้ายังเทียบต่อจะได้ประโยคที่ขัดกันเอง (เล่มจริง ก.ย. 2569 ได้
+                    # 'สารบัญใช้คำ "REFERENCES" แต่หน้าอ้างอิงจริงใช้ "REFERENCES"'
+                    # เพราะเทียบกันเป็นเซตสองคำ แต่รายงานออกมาได้คำแรกคำเดียว) แล้วยัง
+                    # สั่งให้แก้สารบัญที่ถูกอยู่แล้ว ทั้งที่ต้องไปแก้หัวข้อในหน้าอ้างอิง
                     elif toc_terms and ref_head:
                         page_terms = reference_terms(ref_head[0])
-                        if page_terms and set(toc_terms) != set(page_terms):
+                        page_one_word = len(page_terms) == 1 and '/' not in ref_head[0]
+                        if page_one_word and set(toc_terms) != set(page_terms):
                             rep.add(
                                 "RED", "front_matter",
                                 f"สารบัญ ({page_ref(entry['source_page_idx'])}) กับ"

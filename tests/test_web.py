@@ -156,6 +156,85 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         self.assertNotIn("ค่าปรับ", text)
 
 
+class TheResultStaysUsableForAWholeWorkingDay(unittest.TestCase):
+    """ปุ่มเจ้าหน้าที่ต้องยังกดได้หลังเปิดรายงานค้างไว้นาน และหลังตรวจเล่มถัดไป
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากดปุ่ม "โครงสร้างหน้าลงนาม" กับ "ค่าปรับ" ไม่ได้
+    แล้วได้ข้อความ "อัปเดตข้อความสรุปไม่สำเร็จ ... กรุณากดปุ่มนั้นซ้ำอีกครั้ง"
+    ต้นเหตุคือ JOB_TTL 30 นาที บวกกับการล้างของเก่าตอนเริ่มตรวจเล่มถัดไป — ผลตรวจ
+    ของเล่มที่เปิดค้างไว้หายจากเซิร์ฟเวอร์ POST /summary จึงได้ 404 และคำแนะนำ
+    "กดซ้ำอีกครั้ง" ก็ไม่มีวันสำเร็จ
+    """
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            main.JOBS.clear()
+
+    def _put(self, key, age_seconds, done=True):
+        with main.JOBS_LOCK:
+            main.JOBS[key] = {"stage": "เสร็จ", "done": done, "error": None,
+                              "report": {}, "pdf_name": f"{key}.pdf",
+                              "approved": {}, "ts": time.time() - age_seconds}
+
+    def test_an_hour_old_result_survives_the_next_check(self):
+        self._put("old", 3600)
+        main._prune_jobs()
+        self.assertIn("old", main.JOBS)
+
+    def test_a_result_older_than_the_ttl_is_dropped(self):
+        self._put("ancient", main.JOB_TTL + 60)
+        main._prune_jobs()
+        self.assertNotIn("ancient", main.JOBS)
+
+    def test_the_ttl_covers_a_working_day(self):
+        """ควบคุมเชิงลบ: ค่าเดิม 1800 วินาที (30 นาที) สั้นกว่าการตรวจเล่มเดียวจบ"""
+        self.assertGreaterEqual(main.JOB_TTL, 8 * 3600)
+
+    def test_only_the_oldest_are_dropped_when_there_are_too_many(self):
+        for i in range(main.MAX_KEPT_JOBS + 3):
+            self._put(f"j{i:03d}", 1000 - i)      # เลขมาก = ใหม่กว่า
+        main._prune_jobs()
+        self.assertEqual(len(main.JOBS), main.MAX_KEPT_JOBS)
+        newest = f"j{main.MAX_KEPT_JOBS + 2:03d}"
+        self.assertIn(newest, main.JOBS)
+        self.assertNotIn("j000", main.JOBS)
+
+    def test_a_job_still_running_is_never_dropped(self):
+        self._put("running", main.JOB_TTL * 10, done=False)
+        for i in range(main.MAX_KEPT_JOBS + 3):
+            self._put(f"j{i:03d}", 10)
+        main._prune_jobs()
+        self.assertIn("running", main.JOBS)
+
+
+class TheReportPageSaysWhyTheButtonFailed(unittest.TestCase):
+    """404 = ผลตรวจไม่อยู่แล้ว กดซ้ำกี่ครั้งก็ไม่สำเร็จ ต้องไม่บอกให้กดซ้ำ"""
+
+    def setUp(self):
+        from pathlib import Path
+        self.html = (Path(main.__file__).resolve().parent
+                     / "templates" / "report.html").read_text(encoding="utf-8")
+
+    def test_the_page_treats_a_missing_result_as_its_own_case(self):
+        self.assertIn("if (r.status === 404) return Promise.reject(new Error('gone'));",
+                      self.html)
+
+    def test_that_case_has_wording_in_both_languages(self):
+        self.assertIn("gone: {th:", self.html)
+        self.assertIn("ผลตรวจนี้ไม่อยู่บนเซิร์ฟเวอร์แล้ว", self.html)
+        self.assertIn("This result is no longer on the server", self.html)
+
+    def test_the_missing_result_message_does_not_tell_them_to_press_again(self):
+        gone = self.html[self.html.index("gone: {th:"):self.html.index("other: {th:")]
+        self.assertNotIn("กดปุ่มนั้นซ้ำ", gone)
+        self.assertIn("อัปโหลดไฟล์ตรวจใหม่", gone)
+
+    def test_the_handler_picks_the_message_by_error_name(self):
+        """ควบคุมเชิงลบ: ของเดิมเลือกได้แค่ login กับ other ข้อความใหม่จะไม่มีวันโผล่"""
+        self.assertIn("var kind = (err && COPY_ERROR[err.message]) "
+                      "? err.message : 'other';", self.html)
+
+
 class WebSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

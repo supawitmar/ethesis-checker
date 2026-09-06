@@ -4934,5 +4934,232 @@ class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
                                  f'แปลไม่ครบ: {thai!r} -> {self.i18n.tr_en(thai, self.pairs)!r}')
 
 
+class TheNamePrintedInTheStudentSlotIsWhatGetsReported(unittest.TestCase):
+    """ต้องรายงาน "ข้อความที่อยู่ในช่องของชื่อ" ไม่ใช่บรรทัดที่คล้ายชื่อที่สุดทั้งหน้า
+
+    เล่มจริงสองเล่มที่เจ้าหน้าที่ส่งมา (ก.ย. 2569) ลืมแก้ placeholder ของ template
+    เหลือคำว่า "FIRSTNAME LASTNAME" ไว้ทั้งบนหน้าปกและหน้าบทคัดย่อ ระบบรายงานว่า
+    เล่มเขียนชื่อนักศึกษาว่า "OF PM2.5 IN NORTHERN THAILAND" (เศษชื่อเรื่อง) และ
+    "ABSTRACT" (หัวข้อ) เพราะการวัดความคล้ายทีละบรรทัดให้คะแนนข้อความพวกนั้นสูงกว่า
+    บรรทัดชื่อจริง เจ้าหน้าที่จึงได้คำสั่งให้ไปแก้ข้อความที่ไม่ได้อยู่ในช่องนั้นเลย
+
+    ทั้งสามหน้าชี้ช่องได้จากโครงสร้างของ template: หน้าปกใช้บรรทัดก่อนข้อความ
+    "A THESIS SUBMITTED..." หน้าลงนามใช้บรรทัดเหนือป้าย "Candidate"/"ผู้วิจัย"
+    หน้าบทคัดย่อใช้ข้อความหน้ารหัสนักศึกษา
+    """
+
+    NAME = "NITTAYA CHAKHAMRUN"
+    TITLE = ("GRID BASED EMISSION INVENTORY AND REGIONAL SCALE AIR POLLUTION "
+             "MODEL OF PM2.5 IN NORTHERN THAILAND")
+    COVER = NEWLINE.join([
+        "GRID BASED EMISSION INVENTORY",
+        "AND REGIONAL SCALE AIR POLLUTION MODEL",
+        "OF PM2.5 IN NORTHERN THAILAND",
+        "FIRSTNAME LASTNAME",
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "OF THE REQUIREMENTS FOR THE DEGREE OF",
+        "DOCTOR OF PHILOSOPHY (ENVIRONMENTAL TECHNOLOGY)",
+        "FACULTY OF GRADUATE STUDIES",
+        "MAHIDOL UNIVERSITY",
+        "2026",
+        "COPYRIGHT OF MAHIDOL UNIVERSITY",
+    ])
+    THAI_COVER = NEWLINE.join([
+        "การมีส่วนร่วมของประชาชนในการประเมินผลกระทบสิ่งแวดล้อม",
+        "ชื่อ นามสกุล",
+        "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+        "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล",
+        "ลิขสิทธิ์ของมหาวิทยาลัยมหิดล",
+    ])
+    SIGNATURE = NEWLINE.join([
+        "ii",
+        "Thesis",
+        "entitled",
+        "GRID BASED EMISSION INVENTORY",
+        "was submitted to the Faculty of Graduate Studies, Mahidol University",
+        "Thesis Advisory Committees",
+        "First Name Last name, Asst.Prof Thanakrit Neamhom,",
+        "Candidate Ph.D (Environmental Technology)",
+        "Mahidol University",
+    ])
+    ABSTRACT = NEWLINE.join([
+        "v",
+        "GRID BASED EMISSION INVENTORY",
+        "AND REGIONAL SCALE AIR POLLUTION MODEL",
+        "FIRSTNAME LASTNAME 6636201 PHEH/M",
+        "Ph.D. (ENVIRONMENTAL TECHNOLOGY)",
+        "THESIS ADVISORY COMMITTEE : THANAKRIT NEAMHOM, Ph.D",
+        "ABSTRACT",
+        "Coffee cultivation and primary processing contribute significantly.",
+    ])
+
+    def test_the_cover_slot_holds_the_placeholder(self):
+        self.assertEqual(
+            checker_module.cover_printed_name(self.COVER, self.TITLE),
+            "FIRSTNAME LASTNAME")
+
+    def test_the_thai_cover_slot_is_found_by_its_own_template_wording(self):
+        self.assertEqual(
+            checker_module.cover_printed_name(self.THAI_COVER), "ชื่อ นามสกุล")
+
+    def test_the_signature_slot_holds_the_placeholder(self):
+        """สองคอลัมน์ถูกดึงมารวมบรรทัดเดียว ชื่อนักศึกษาคือท่อนซ้ายก่อนจุลภาค"""
+        self.assertEqual(
+            checker_module.signature_printed_name(self.SIGNATURE),
+            "First Name Last name")
+
+    def test_the_abstract_slot_holds_the_placeholder(self):
+        self.assertEqual(
+            checker_module.abstract_printed_name(self.ABSTRACT),
+            "FIRSTNAME LASTNAME")
+
+    def test_similarity_alone_reports_text_from_somewhere_else(self):
+        """ควบคุมเชิงลบ: วิธีเดิมได้เศษชื่อเรื่อง หัวข้อ และคุณวุฒิมาแทนชื่อ"""
+        self.assertEqual(checker_module.closest_text_line(self.COVER, self.NAME),
+                         "OF PM2.5 IN NORTHERN THAILAND")
+        for page in (self.ABSTRACT, self.SIGNATURE):
+            self.assertNotIn(
+                "LASTNAME",
+                checker_module.closest_text_line(page, self.NAME).upper())
+
+    def test_a_cover_without_any_name_does_not_blame_the_title(self):
+        """เล่มลืมพิมพ์ชื่อ = ช่องว่างเปล่า ห้ามรายงานเศษชื่อเรื่องว่าเป็นชื่อนักศึกษา"""
+        no_name = self.COVER.replace("FIRSTNAME LASTNAME" + NEWLINE, "")
+        self.assertEqual(
+            checker_module.cover_printed_name(no_name, self.TITLE), "")
+
+    def test_pages_without_the_template_anchor_say_nothing(self):
+        plain = "ABSTRACT" + NEWLINE + "Coffee cultivation."
+        self.assertEqual(checker_module.cover_printed_name(plain), "")
+        self.assertEqual(checker_module.signature_printed_name(plain), "")
+        self.assertEqual(checker_module.abstract_printed_name(plain), "")
+
+    # ถ้อยคำที่ตามหลังชื่อนักศึกษาบนหน้าปก ไล่มาจาก template ครบทั้ง 18 ใบ
+    # (นานาชาติ / เล่มอังกฤษของหลักสูตรไทย / เล่มไทย คูณสามประเภทเล่ม คูณสองรูปแบบ)
+    COVER_STOPS = [
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "A THEMATIC PAPER SUBMITTED IN PARTIAL FULFILLMENT",
+        "AN INDEPENDENT STUDY SUBMITTED IN PARTIAL FULFILLMENT",
+        "A DISSERTATION SUBMITTED IN PARTIAL FULFILLMENT",
+        "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+        "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+        "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา",
+    ]
+
+    def test_the_cover_anchor_covers_every_template(self):
+        """เล่มการค้นคว้าอิสระภาษาอังกฤษใช้ "AN" ไม่ใช่ "A" — เคยหลุดไป 4 ใบจาก 18"""
+        for stop in self.COVER_STOPS:
+            page = NEWLINE.join(["ชื่อเรื่อง", "FIRSTNAME LASTNAME", stop,
+                                 "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"])
+            self.assertEqual(checker_module.cover_printed_name(page),
+                             "FIRSTNAME LASTNAME", stop)
+
+    def test_the_signature_anchor_covers_both_languages(self):
+        """template อังกฤษใช้ป้าย "Candidate" 24 ใบ เล่มไทยใช้ "ผู้วิจัย" 12 ใบ"""
+        for label, name in (("Candidate Ph.D (Environmental Technology)",
+                             "First Name Last name"),
+                            ("ผู้วิจัย Ph.D. (Social Science)", "ชื่อ นามสกุล")):
+            page = NEWLINE.join(["วิทยานิพนธ์", "เรื่อง", "ชื่อเรื่อง",
+                                 name + ", รองศาสตราจารย์ คนางค์ คันธมธุรพจน์,",
+                                 label])
+            self.assertEqual(checker_module.signature_printed_name(page), name)
+
+    def test_all_three_slots_are_wired_into_the_check(self):
+        """ควบคุมเชิงลบ: ถ้าลืมต่อสาย ตัวตรวจจะกลับไปวัดความคล้ายทั้งหน้าเงียบ ๆ"""
+        source = inspect.getsource(checker_module.run_check)
+        for call in ("cover_printed_name(", "signature_printed_name(",
+                     "abstract_printed_name("):
+            self.assertIn(call, source)
+
+    def test_the_reported_sentence_names_the_placeholder(self):
+        compared = checker_module.compare_values(
+            checker_module.abstract_printed_name(self.ABSTRACT), self.NAME,
+            "student_name")
+        self.assertEqual(
+            checker_module.mismatch_detail("ชื่อภาษาอังกฤษ", compared, self.NAME),
+            'ชื่อภาษาอังกฤษในเล่มเขียนว่า "FIRSTNAME LASTNAME"')
+
+
+class EachAbstractPageCarriesOnlyItsOwnLanguageTitle(unittest.TestCase):
+    """หน้าบทคัดย่อไทยต้องไม่มีชื่อเรื่องภาษาอังกฤษ (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    template วางชื่อเรื่องภาษาเดียวไว้หัวหน้าบทคัดย่อแต่ละภาษา — หน้าอังกฤษขึ้นต้นด้วย
+    "THESIS TITLE" หน้าไทยขึ้นต้นด้วย "หัวข้อวิทยานิพนธ์ภาษาไทย" กฎ "ชื่อเรื่องภาษาเดียว"
+    เดิมตัดสินจากภาษาของเล่ม จึงครอบไม่ถึงหน้าบทคัดย่อที่ตั้งใจใช้คนละภาษากันอยู่แล้ว
+    """
+
+    TH = "การประเมินการปลดปล่อยก๊าซเรือนกระจกจากการเพาะปลูกกาแฟ และการแปรรูปกาแฟขั้นต้น"
+    EN = ("THE EVALUATION OF GREENHOUSE GAS EMISSIONS IN PRIMARY COFFEE "
+          "CULTIVATION AND PRIMARY PROCESSING")
+    TAIL = NEWLINE.join([
+        "ณัฐรดา วิชานุชิต 6636201 PHEH/M",
+        "วท.ม.(อนามัยสิ่งแวดล้อม)",
+        "บทคัดย่อ",
+        "การเพาะปลูกและการแปรรูปกาแฟขั้นต้นเป็นแหล่งสำคัญของการปลดปล่อยก๊าซเรือนกระจก",
+    ])
+
+    def test_a_thai_abstract_page_with_only_the_thai_title_is_clean(self):
+        page = NEWLINE.join(["vii", self.TH, self.TAIL])
+        self.assertEqual(checker_module.title_printed_on_page(page, self.EN), "")
+
+    def test_the_english_title_added_to_the_thai_abstract_is_reported(self):
+        page = NEWLINE.join(["vii", self.TH, self.EN, self.TAIL])
+        self.assertIn("GREENHOUSE GAS",
+                      checker_module.title_printed_on_page(page, self.EN))
+
+    def test_the_rule_reaches_the_abstract_pages_at_all(self):
+        """ควบคุมเชิงลบ: ถ้าลืมต่อสายหน้าบทคัดย่อเข้ากฎ จะไม่มีตำแหน่งนี้ในโค้ดเลย"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("abstract_title_spots", source)
+        self.assertIn("หน้าบทคัดย่อ", source)
+
+    def test_both_wordings_have_an_english_translation(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (
+            ("หน้าบทคัดย่อภาษาไทยต้องมีเฉพาะชื่อเรื่องภาษาไทย",
+             "The Thai abstract page must carry the Thai title only"),
+            ("หน้าบทคัดย่อภาษาอังกฤษต้องมีเฉพาะชื่อเรื่องภาษาอังกฤษ",
+             "The English abstract page must carry the English title only"),
+        ):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+
+
+class TheReferenceHeadingIsReportedOnThePageThatCarriesIt(unittest.TestCase):
+    """หน้าอ้างอิงที่เลือกสองคำ ต้องฟ้องที่หน้านั้น ไม่ใช่ฟ้องสารบัญที่ถูกอยู่แล้ว
+
+    เล่มจริง (ก.ย. 2569) พิมพ์หัวข้อหน้า 116 ว่า "REFERENCES/BIBLIOGRAPHY" ส่วนสารบัญ
+    เขียน "REFERENCES" ถูกต้อง ระบบเทียบกันเป็นเซตแล้วรายงานได้คำแรกคำเดียว จึงได้
+    ประโยคที่ขัดกันเอง 'สารบัญใช้คำ "REFERENCES" แต่หน้าอ้างอิงจริงใช้ "REFERENCES"'
+    พร้อมสั่งให้แก้สารบัญเป็นคำเดิม
+    """
+
+    def test_the_page_heading_with_two_terms_yields_two_terms(self):
+        self.assertEqual(
+            checker_module.reference_terms("REFERENCES/BIBLIOGRAPHY"),
+            ["REFERENCES", "BIBLIOGRAPHY"])
+
+    def test_a_single_term_page_still_compares_against_the_toc(self):
+        self.assertEqual(checker_module.reference_terms("BIBLIOGRAPHY"),
+                         ["BIBLIOGRAPHY"])
+        self.assertNotEqual(set(checker_module.reference_terms("REFERENCES")),
+                            set(checker_module.reference_terms("BIBLIOGRAPHY")))
+
+    def test_the_comparison_is_skipped_when_the_page_uses_more_than_one_term(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("page_one_word = len(page_terms) == 1", source)
+
+    def test_the_page_finding_says_what_is_wrong(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("หัวข้อในหน้านี้เลือกหลายคำ", source)
+
+    def test_that_wording_has_an_english_translation(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(
+            i18n.tr_en('หัวข้อในหน้านี้เลือกหลายคำ: "REFERENCES/BIBLIOGRAPHY"', pairs),
+            'The heading on this page uses multiple terms: "REFERENCES/BIBLIOGRAPHY"')
+
+
 if __name__ == "__main__":
     unittest.main()
