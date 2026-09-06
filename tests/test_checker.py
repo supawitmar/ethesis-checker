@@ -1881,11 +1881,16 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
-    def test_other_signature_page_findings_are_not_other_either(self):
-        rep = Report()
-        checker_module._report_committee_name_case(
-            rep, {1: "narisara chantratita"}, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
-        self.assertNotEqual(checker_module.classify(rep.zones["ORANGE"][0]), "อื่นๆ")
+    def test_the_case_rule_for_committee_names_is_gone(self):
+        """เจ้าหน้าที่สั่งเลิกตรวจตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม (ก.ย. 2569)
+
+        ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้าย
+        ("Weerawat Limroonreungrat, PT") แล้วตัดสินว่าไม่ใช่ Capital Case
+        ทั้งที่ชื่อถูกต้อง
+        """
+        self.assertFalse(hasattr(checker_module, "_report_committee_name_case"))
+        source = inspect.getsource(checker_module)
+        self.assertNotIn("ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ", source)
 
     def test_every_category_used_here_has_an_english_name(self):
         import tools.check_i18n as i18n

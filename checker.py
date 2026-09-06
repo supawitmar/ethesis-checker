@@ -830,27 +830,6 @@ def _page_count_issue(count_wrong, last_arabic):
     return zone, where, found
 
 
-def _report_committee_name_case(rep, members, loc):
-    """ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)
-
-    กติกาเดียวกับชื่อนักศึกษาบนหน้าเดียวกัน (นโยบายเจ้าหน้าที่ ก.ค. 2569)
-    เป็นกฎ "รูปแบบ" ของ template จึงตรวจได้แม้ไม่มีข้อมูลอนุมัติ
-    ตรวจเฉพาะชื่อภาษาอังกฤษ — ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก
-    ลงส้มเพราะระบบอ่านชื่อจากตาราง อาจอ่านคร่อมคำได้ ให้เจ้าหน้าที่ยืนยัน
-    """
-    bad = [members[k] for k in sorted(members)
-           if members.get(k) and re.search(r'[A-Za-z]', members[k])
-           and not _is_title_case(members[k])]
-    if not bad:
-        return
-    shown = ", ".join(f'"{n}"' for n in bad)
-    rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
-            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)",
-            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
-            "FRONT.COMMITTEE")
-
-
 def _committee_names(expected):
     """รายชื่อจากข้อมูลอนุมัติ — รับได้ทั้ง list ของ dict {'name': ...} และ list ของ str"""
     return [m.get("name", "") if isinstance(m, dict) else (m or "") for m in expected]
@@ -1305,8 +1284,10 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         # (ข้อฟ้องบอกว่าเทียบกับ บฑ.1 หรือ บฑ.2 ซึ่งบอกบทบาทในตัว)
         page_label = signature_page_position(sig_pages, idx)
         loc = f"{page_label} ({page_ref(idx)})"
-        # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
-        _report_committee_name_case(rep, members, loc)
+        # ไม่ตรวจตัวพิมพ์ของชื่อกรรมการบนหน้านี้ (เจ้าหน้าที่สั่งเลิก ก.ย. 2569)
+        # ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้ายมาด้วย
+        # ("Weerawat Limroonreungrat, PT" / "Assist.Prof. Hoon Kim, ATC") แล้วตัดสิน
+        # ว่าไม่ใช่ Capital Case ทั้งที่ชื่อถูกต้อง เล่มจริงจึงได้ข้อส้มซ้ำทั้งสองหน้า
         # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
         # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
         read_names = committee_name_list(members)
