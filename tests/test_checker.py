@@ -2357,6 +2357,54 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
             checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
                                                 self.NAMES), "")
 
+    def test_the_page_is_not_reported_as_a_problem(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด
+
+        เรนเดอร์หน้าจริงออกมาดูแล้ว หน้ากระดาษถูกต้องทุกตัวอักษร เห็นรหัส 6437028
+        ชัดเจน เสียแค่การดึงข้อความ (PyMuPDF ซึ่งเป็นคนละเอนจินก็ได้ JKLMNOP
+        เหมือนกัน) ข้อสีส้มใบเดิมพูดซ้ำกับตารางผลเทียบที่บันทึกไว้อยู่แล้ว และยัง
+        ลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
+        """
+        source = inspect.getsource(checker_module.run_check)
+        head = source.split("unreadable_digit_pages = {}", 1)[1][:1400]
+        self.assertIn("rep.add_info", head)
+        self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
+
+    def test_the_name_on_that_page_is_still_compared(self):
+        """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
+
+        เล่มจริงเทียบชื่อไทยบนหน้าเดียวกันได้ 1.00 เต็ม (วรรณยุกต์ที่หายไปถูก norm
+        ตัดทิ้งอยู่แล้ว) การข้ามทั้งหน้าจึงทิ้งผลที่ใช้ได้ไปเปล่า ๆ
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn(
+            "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
+            source)
+
+    def test_a_mismatched_name_on_that_page_is_never_accused(self):
+        """ควบคุมเชิงลบของข้อบน — ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่า
+        เล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ ต้องลงเป็น pending ไม่ใช่ฟ้องแดง
+        """
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split(
+            "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
+            1)[1][:700]
+        self.assertIn('"pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"', block)
+        self.assertNotIn('rep.add("RED"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
+                   "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
+                   "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
+                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว",
+                   "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
+                   "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
 
 class ContentsPagesAndTheirContinuationAreOneHeading(unittest.TestCase):
     """สารบัญ กับ สารบัญ (ต่อ) คือหัวข้อเดียวกัน (เจ้าหน้าที่สั่ง ก.ย. 2569)
