@@ -170,6 +170,20 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
             self.assertIn(f'<b id="{box}">', html)
         self.assertIn("renderZoneCounts(data.counts)", html)
 
+    def test_the_page_sends_accepted_notices_too(self):
+        """ปุ่ม ✓ ของข้อสังเกตเคยไม่ถูกส่งไปเลย กดแล้วไม่มีอะไรเกิดขึ้นสักอย่าง
+
+        เซิร์ฟเวอร์รองรับคีย์ YELLOW:n ในช่อง passed อยู่แล้ว (ตัวเลขกล่องข้อสังเกต
+        ลดลง) ที่ขาดคือหน้าเว็บไม่เคยเก็บมาส่ง เพราะตัวเลือกจำกัดไว้แค่สีส้ม
+        """
+        job = self._seed_clean_report()
+        html = self.client.get(f"/result/{job}").text
+        block = html.split("function collectPassed()", 1)[1][:400]
+        self.assertIn('[data-zone="YELLOW"]', block)
+        self.assertIn('[data-zone="ORANGE"]', block)
+        # ห้ามฝังชื่อโซนไว้ตายตัว ไม่งั้นคีย์ของสีเหลืองจะถูกส่งเป็น ORANGE:n
+        self.assertNotIn("'ORANGE:' +", block)
+
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])

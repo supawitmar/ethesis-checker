@@ -1487,10 +1487,14 @@ function collectStaff(){
   return Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
     .map(el => el.getAttribute('data-choice'));
 }
-// สีส้มที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) ให้ตัดออกจากสรุป
+// ข้อที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) — สีส้มถูกตัดออกจากข้อความสรุป ส่วนสีเหลือง
+// ไม่เคยอยู่ในสรุปอยู่แล้ว (เข้าเมื่อกด "ไม่ผ่าน" เท่านั้น) แต่ต้องส่งไปด้วย ไม่งั้น
+// ตัวเลขกล่อง "ข้อสังเกต" ไม่ขยับ แล้วปุ่ม ✓ ของข้อสีเหลืองจะกดได้โดยไม่มีอะไร
+// เกิดขึ้นเลยสักอย่าง ซึ่งแยกไม่ออกจากระบบพัง
 function collectPassed(){
-  return Array.from(document.querySelectorAll('.issue.state-pass[data-zone="ORANGE"]'))
-    .map(el => 'ORANGE:' + el.getAttribute('data-idx'));
+  return Array.from(document.querySelectorAll(
+      '.issue.state-pass[data-zone="ORANGE"], .issue.state-pass[data-zone="YELLOW"]'))
+    .map(el => el.getAttribute('data-zone') + ':' + el.getAttribute('data-idx'));
 }
 var _summaryTimer = null;
 // ข้อความเตือนใต้กล่องคัดลอก ใช้กับความผิดพลาดของการอัปเดตอัตโนมัติตอนกดปุ่ม

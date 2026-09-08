@@ -2227,6 +2227,19 @@ class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
                       "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
             self.assertEqual(checker_module.summary_verdict(report), verdict)
 
+    def test_an_accepted_notice_leaves_the_summary_alone(self):
+        """ข้อสังเกตที่กด "ผ่าน" ไม่มีอะไรหายจากสรุป เพราะไม่เคยอยู่ในสรุปตั้งแต่แรก
+
+        สีเหลืองเข้าสรุปเฉพาะตอนกด "ไม่ผ่าน" การกด "ผ่าน" จึงเป็นการยืนยันค่าตั้งต้น
+        ผลที่เห็นได้คือตัวเลขกล่อง "ข้อสังเกต" ลดลง ไม่ใช่ข้อความสรุปเปลี่ยน
+        """
+        report = self._report(orange=1, yellow=2)
+        before = checker_module.plain_summary(report)
+        after = checker_module.plain_summary(report, passed=["YELLOW:0", "YELLOW:1"])
+        self.assertEqual(before, after)
+        self.assertEqual(self._counts(report, passed=["YELLOW:0", "YELLOW:1"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+
     def test_the_verdict_still_matches_the_first_line_of_the_summary(self):
         """สองค่านี้คำนวณคนละรอบ ถ้าเพี้ยนจากกันเจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วไม่มีผล"""
         report = self._report(orange=2, yellow=1)
