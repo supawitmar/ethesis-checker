@@ -1153,6 +1153,37 @@ class SignaturePlaceholderTests(unittest.TestCase):
         self.assertNotIn("ลบข้อความตัวอย่างออกจากไฟล์", issue["expected"])
         self.assertNotIn("ให้ลบออกจากช่อง", issue["fix"])
 
+    def test_the_line_in_the_summary_stops_at_white(self):
+        """เจ้าหน้าที่สั่งว่าแค่นี้พอ (ก.ย. 2569) — เคยต่อท้ายว่า "ไม่ใช่ลบบรรทัดออก"
+        แล้วถูกสั่งให้ตัดออก บรรทัดนี้อยู่ในข้อความที่คัดลอกส่งนักศึกษา
+        """
+        rep = Report()
+        _report_sig_placeholders(rep, ["Degree (Subject)"], "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(rep.zones["ORANGE"][0]["expected"],
+                         "ช่องกรรมการที่ไม่ได้ใช้ต้องเปลี่ยนสีตัวอักษรเป็นสีขาว")
+
+    def test_a_thai_book_gets_the_same_wording(self):
+        """เล่มไทยเจอข้อความตัวอย่างคนละชุดกับเล่มอังกฤษ แต่วิธีแก้อันเดียวกัน
+
+        เล่มไทย  "ตำแหน่งทางวิชาการและชื่อ นามสกุล" / "คุณวุฒิ (ระบุสาขาวิชา)"
+        เล่มอังกฤษ "Academic rank First Name Last name" / "Degree (Subject)"
+        """
+        pairs = (["ตำแหน่งทางวิชาการและชื่อ นามสกุล", "คุณวุฒิ (ระบุสาขาวิชา)"],
+                 ["Academic rank First Name Last name", "Degree (Subject)"])
+        seen = []
+        for found in pairs:
+            rep = Report()
+            _report_sig_placeholders(rep, found, "หน้าลงนาม 1")
+            issue = rep.zones["ORANGE"][0]
+            for label in found:                 # ต้องยกข้อความที่เจอมาให้ครบ
+                self.assertIn(label, issue["found"])
+            seen.append((issue["expected"], issue["fix"]))
+        self.assertEqual(seen[0], seen[1])
+        # ข้อความตัวอย่างทั้งสี่แบบต้องอยู่ในทะเบียนเดียวกัน ไม่ใช่รู้จักแค่ฝั่งอังกฤษ
+        labels = [label for _key, label in checker_module._SIG_LEFTOVER_PLACEHOLDERS]
+        for label in pairs[0] + pairs[1]:
+            self.assertIn(label, labels)
+
     def test_the_fix_matches_the_wording_staff_already_use(self):
         """ควบคุมเชิงลบของข้อบน — ต้องพูดเรื่องเดียวกับถ้อยคำที่เจ้าหน้าที่เขียนไว้เอง
         ในหัวข้อ "โครงสร้างหน้าลงนาม" ไม่ใช่คิดคำใหม่ที่ขัดกันเอง
