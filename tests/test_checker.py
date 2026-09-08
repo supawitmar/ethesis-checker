@@ -1139,6 +1139,30 @@ class SignaturePlaceholderTests(unittest.TestCase):
         self.assertEqual(rep.zones["RED"], [])
         self.assertTrue(any("template" in i["found"] for i in rep.zones["ORANGE"]))
 
+    def test_the_fix_says_paint_it_white_not_delete_it(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) — กรอบของ template ต้องคงไว้ตามที่ set มา
+        ช่องที่ไม่มีชื่อให้ถมขาว ของเดิมบอกให้ "ลบข้อความตัวอย่างออกจากไฟล์"
+        ซึ่งสวนทางกับถ้อยคำของเจ้าหน้าที่เองใน STAFF_CHECKS
+        """
+        rep = Report()
+        _report_sig_placeholders(rep, ["Academic rank First Name Last name"],
+                                 "หน้าลงนาม 1 (หน้า i)")
+        issue = rep.zones["ORANGE"][0]
+        for line in (issue["expected"], issue["fix"]):
+            self.assertIn("สีขาว", line)
+        self.assertNotIn("ลบข้อความตัวอย่างออกจากไฟล์", issue["expected"])
+        self.assertNotIn("ให้ลบออกจากช่อง", issue["fix"])
+
+    def test_the_fix_matches_the_wording_staff_already_use(self):
+        """ควบคุมเชิงลบของข้อบน — ต้องพูดเรื่องเดียวกับถ้อยคำที่เจ้าหน้าที่เขียนไว้เอง
+        ในหัวข้อ "โครงสร้างหน้าลงนาม" ไม่ใช่คิดคำใหม่ที่ขัดกันเอง
+        """
+        staff = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]["text"]
+        self.assertIn("เปลี่ยนสีตัวอักษรเป็นสีขาว", staff)
+        rep = Report()
+        _report_sig_placeholders(rep, ["Degree (Subject)"], "หน้าลงนาม 2 (หน้า ii)")
+        self.assertIn("เปลี่ยนสีตัวอักษรเป็นสีขาว", rep.zones["ORANGE"][0]["expected"])
+
     def test_white_detection_across_colour_spaces(self):
         self.assertTrue(_is_white_fill((1,)))          # grayscale
         self.assertTrue(_is_white_fill((1, 1, 1)))     # RGB
