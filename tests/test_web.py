@@ -150,6 +150,26 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         self.assertIn('data-applies=""', html)
         self.assertNotIn("data-applies=\"Undefined", html)
 
+    def test_the_endpoint_hands_back_the_three_numbers(self):
+        """หน้ารายงานเขียนตัวเลขสามกล่องจากค่านี้ ไม่ได้นับเอง
+
+        ถ้าปลายทางไม่ส่ง counts มา ตัวเลขจะค้างที่ค่าตอนโหลดหน้าโดยไม่มีอะไรบอก
+        ทั้งที่เจ้าหน้าที่กดไปแล้ว
+        """
+        job = self._seed_clean_report()
+        body = self.client.post(f"/summary/{job}",
+                                json={"failed": [], "passed": [],
+                                      "staff": ["SIGNATURE_LAYOUT_WRONG"]}).json()
+        self.assertEqual(body["counts"], {"RED": 1, "ORANGE": 0, "YELLOW": 0})
+
+    def test_the_report_page_can_find_the_three_numbers_to_rewrite(self):
+        """สคริปต์หาช่องตัวเลขด้วย id ถ้า id หาย ปุ่มจะกดได้แต่ตัวเลขไม่ขยับ"""
+        job = self._seed_clean_report()
+        html = self.client.get(f"/result/{job}").text
+        for box in ("stat-red", "stat-orange", "stat-yellow"):
+            self.assertIn(f'<b id="{box}">', html)
+        self.assertIn("renderZoneCounts(data.counts)", html)
+
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])

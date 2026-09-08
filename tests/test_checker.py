@@ -2112,6 +2112,134 @@ class ChapterTitlesThatAreOnlyTheStartOfTheRule(unittest.TestCase):
         self.assertNotIn("norm(cand).startswith(nb)", source)
 
 
+class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
+    """กด "ไม่ผ่าน" ที่ข้อสีส้ม/เหลือง แล้วตัวเลขสามกล่องบนหัวรายงานต้องขยับตาม
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่าการกดไม่ผ่านคือตัดสินว่าข้อนั้นเป็นจุดที่นักศึกษา
+    ต้องแก้ เหมือนสีแดง ของเดิมตัวเลขค้างที่ "สิ่งที่ระบบตรวจพบ" ไม่ว่าจะกดอะไร
+    หัวรายงานจึงเขียน "ต้องแก้ 0" อยู่บรรทัดเดียวกับข้อความสรุปที่เขียนว่า
+    "กรุณาแก้ไขทั้งหมด 4 จุด"
+    """
+
+    @staticmethod
+    def _report(red=0, orange=0, yellow=0, notes=0):
+        # ตำแหน่งต้องไม่ซ้ำกัน — _dedupe_issues รวมข้อที่ตำแหน่งและค่าที่ต้องแก้
+        # เหมือนกันเป็นจุดเดียว ถ้าใช้ข้อความชุดเดียวกันหมด เทสต์จะนับไม่ตรงเอง
+        rep = checker_module.Report()
+        for i in range(red):
+            rep.add("RED", "front_matter", f"หน้าปก {i}", "พบ", f"ควรเป็น {i}")
+        for i in range(orange):
+            rep.add("ORANGE", "front_matter", f"หน้าลงนาม {i} (หน้า i)",
+                    "พบ", f"ควรเป็น {i}")
+        for i in range(notes):
+            rep.add("ORANGE", "front_matter", f"บทคัดย่อไทย {i} (หน้า vi)",
+                    "ระบบอ่านหน้านี้ไม่ออก", "ข้ามการตรวจ", "", None, system_note=True)
+        for i in range(yellow):
+            rep.add("YELLOW", "body", f"หน้า {10 + i}", "พบ", f"ควรเป็น {i}")
+        return checker_module.check_result(rep)
+
+    def _counts(self, report, failed=(), passed=(), staff=()):
+        return checker_module.zone_counts(report, failed, passed, staff)
+
+    def test_nothing_pressed_matches_what_the_system_found(self):
+        """ควบคุมเชิงบวกของทุกข้อข้างล่าง — ตอนโหลดหน้าต้องเท่าของเดิมเป๊ะ"""
+        report = self._report(red=2, orange=3, yellow=4)
+        self.assertEqual(self._counts(report), {"RED": 2, "ORANGE": 3, "YELLOW": 4})
+        self.assertEqual(checker_module.summary_verdict(report), report["verdict"])
+
+    def test_a_failed_notice_moves_into_the_must_fix_box(self):
+        report = self._report(yellow=2)
+        self.assertEqual(self._counts(report, failed=["YELLOW:0"]),
+                         {"RED": 1, "ORANGE": 0, "YELLOW": 1})
+
+    def test_a_failed_pending_item_moves_into_the_must_fix_box(self):
+        report = self._report(orange=2)
+        self.assertEqual(self._counts(report, failed=["ORANGE:1"]),
+                         {"RED": 1, "ORANGE": 1, "YELLOW": 0})
+
+    def test_an_accepted_item_leaves_every_box(self):
+        """กด "ผ่าน" = เจ้าหน้าที่รับได้แล้ว ต้องไม่ไปโผล่กล่องไหนอีก"""
+        report = self._report(orange=2, yellow=1)
+        self.assertEqual(self._counts(report, passed=["ORANGE:0", "YELLOW:0"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+
+    def test_a_staff_added_finding_counts_as_a_must_fix(self):
+        report = self._report()
+        self.assertEqual(self._counts(report, staff=["SIGNATURE_LAYOUT_WRONG"])["RED"], 1)
+
+    def test_the_closing_wording_is_not_counted_as_a_must_fix(self):
+        """ควบคุมเชิงลบของข้อบน — ถ้อยคำปิดท้าย (ค่าปรับ) ไม่ใช่จุดผิด"""
+        report = self._report()
+        self.assertEqual(self._counts(report, staff=["PASS_FEE_NONE"])["RED"], 0)
+
+    def test_the_must_fix_number_equals_the_points_in_the_summary(self):
+        """ตัวเลขกล่องแรกกับ "กรุณาแก้ไขทั้งหมด N จุด" ต้องเป็นเลขเดียวกัน
+
+        เมื่อข้อรอยืนยันถูกตัดสินครบแล้ว — ข้อที่ยังไม่ตัดสินอยู่ในสรุปโดยปริยาย
+        แต่ยังนับเป็น "รอยืนยัน" ไม่ใช่ "ต้องแก้" ซึ่งเป็นคนละคำถามกัน
+        """
+        report = self._report(red=1, orange=2, yellow=2)
+        cases = [(["ORANGE:0", "ORANGE:1"], []),
+                 (["ORANGE:0", "ORANGE:1", "YELLOW:0", "YELLOW:1"], []),
+                 (["ORANGE:0"], ["ORANGE:1"]),
+                 ([], ["ORANGE:0", "ORANGE:1"])]
+        for failed, passed in cases:
+            items = checker_module._dedupe_issues(
+                checker_module.issues_to_fix(report, failed, passed))
+            self.assertEqual(self._counts(report, failed, passed)["RED"], len(items),
+                             (failed, passed))
+
+    def test_a_system_note_never_becomes_a_must_fix(self):
+        """ข้อจำกัดของระบบไม่เคยเข้าข้อความสรุป จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน
+
+        ไม่งั้นหัวรายงานเขียนว่าต้องแก้ 1 จุด แต่ข้อความสรุปไม่มีจุดนั้นอยู่เลย
+        นักศึกษาได้ใบสั่งแก้ที่นับไม่ตรงกับรายการ
+        """
+        report = self._report(notes=1)
+        self.assertEqual(self._counts(report, failed=["ORANGE:0"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+        self.assertEqual(self._counts(report, passed=["ORANGE:0"])["ORANGE"], 0)
+
+    def test_the_book_passes_once_every_pending_item_is_accepted(self):
+        """เล่มที่ระบบว่า "รอยืนยัน" เคยค้างเป็นรอยืนยันตลอดไป
+
+        เจ้าหน้าที่กดผ่านครบทุกข้อแล้ว นักศึกษายังได้ข้อความว่า "ผลการตรวจ: รอยืนยัน"
+        """
+        report = self._report(orange=2)
+        self.assertEqual(report["verdict"], "รอยืนยัน")
+        self.assertEqual(
+            checker_module.summary_verdict(report, passed=["ORANGE:0", "ORANGE:1"]),
+            "ผ่าน")
+
+    def test_the_book_fails_once_a_pending_item_is_rejected(self):
+        report = self._report(orange=2)
+        self.assertEqual(checker_module.summary_verdict(report, failed=["ORANGE:0"]),
+                         "ไม่ผ่าน")
+
+    def test_a_report_with_no_zones_keeps_the_verdict_it_came_with(self):
+        """ควบคุมเชิงลบ — ห้ามยกระดับผลตรวจเอง เมื่อไม่มีข้อรอยืนยันให้ตัดสินสักข้อ
+
+        ทางออกก่อนกำหนดของ run_check และเทสต์อื่นส่ง report ที่โซนว่างมาพร้อม
+        verdict ของตัวเอง ถ้าคิดใหม่จากโซนเปล่า ๆ เล่มจะกลายเป็น "ผ่าน" ทันที
+        """
+        for verdict in ("ผ่าน", "รอยืนยัน", "ไม่ผ่าน"):
+            report = {"verdict": verdict,
+                      "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+            self.assertEqual(checker_module.summary_verdict(report), verdict)
+
+    def test_the_verdict_still_matches_the_first_line_of_the_summary(self):
+        """สองค่านี้คำนวณคนละรอบ ถ้าเพี้ยนจากกันเจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วไม่มีผล"""
+        report = self._report(orange=2, yellow=1)
+        for failed, passed in (([], []), (["YELLOW:0"], []), ([], ["ORANGE:0"]),
+                               ([], ["ORANGE:0", "ORANGE:1"]),
+                               (["ORANGE:0"], ["ORANGE:1"])):
+            text = checker_module.plain_summary(report, failed, passed)
+            verdict = checker_module.summary_verdict(report, failed=failed,
+                                                     passed=passed)
+            self.assertEqual(text.split(NEWLINE)[0], "ผลการตรวจ: " + verdict,
+                             (failed, passed))
+
+
 class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
     """หัวข้อบทคัดย่อที่เขียนว่า ABSTRACT IN THAI ต้องนับเป็นบทคัดย่อภาษาไทย
 

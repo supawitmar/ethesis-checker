@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
-from checker import plain_summary, run_check, summary_verdict
+from checker import plain_summary, run_check, summary_verdict, zone_counts
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
@@ -421,9 +421,14 @@ async def rebuild_summary(job_id: str, request: Request):
     report = job["report"]
     # ส่งผลตรวจที่ปรับแล้วกลับไปด้วย หน้ารายงานใช้เลือกว่าจะโชว์หัวข้อค่าปรับอันไหน
     # (เล่มผ่านกับเล่มที่ต้องแก้ใช้ถ้อยคำคนละชุด) คำนวณฝั่งเดียวกับข้อความสรุปเสมอ
+    # ตัวเลขสามกล่องบนหัวรายงานต้องตามคำตัดสินด้วย ไม่ใช่ค้างที่ผลของระบบ —
+    # คิดฝั่งเซิร์ฟเวอร์ที่เดียวกับข้อความสรุป ไม่ให้หน้าเว็บนับเอง (นับคนละทางเมื่อไหร่
+    # เจ้าหน้าที่จะเห็นตัวเลขที่ขัดกับข้อความสรุปโดยไม่มีอะไรบอกว่าอันไหนถูก)
     return {"plain": plain_summary(report, failed, passed, staff),
             "verdict": summary_verdict(report, failed=failed, passed=passed,
-                                       staff=staff)}
+                                       staff=staff),
+            "counts": zone_counts(report, failed=failed, passed=passed,
+                                  staff=staff)}
 
 
 @app.get("/result/{job_id}", response_class=HTMLResponse)
