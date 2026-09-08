@@ -1881,11 +1881,16 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
-    def test_other_signature_page_findings_are_not_other_either(self):
-        rep = Report()
-        checker_module._report_committee_name_case(
-            rep, {1: "narisara chantratita"}, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
-        self.assertNotEqual(checker_module.classify(rep.zones["ORANGE"][0]), "อื่นๆ")
+    def test_the_case_rule_for_committee_names_is_gone(self):
+        """เจ้าหน้าที่สั่งเลิกตรวจตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม (ก.ย. 2569)
+
+        ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้าย
+        ("Weerawat Limroonreungrat, PT") แล้วตัดสินว่าไม่ใช่ Capital Case
+        ทั้งที่ชื่อถูกต้อง
+        """
+        self.assertFalse(hasattr(checker_module, "_report_committee_name_case"))
+        source = inspect.getsource(checker_module)
+        self.assertNotIn("ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ", source)
 
     def test_every_category_used_here_has_an_english_name(self):
         import tools.check_i18n as i18n
@@ -2107,6 +2112,147 @@ class ChapterTitlesThatAreOnlyTheStartOfTheRule(unittest.TestCase):
         self.assertNotIn("norm(cand).startswith(nb)", source)
 
 
+class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
+    """กด "ไม่ผ่าน" ที่ข้อสีส้ม/เหลือง แล้วตัวเลขสามกล่องบนหัวรายงานต้องขยับตาม
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่าการกดไม่ผ่านคือตัดสินว่าข้อนั้นเป็นจุดที่นักศึกษา
+    ต้องแก้ เหมือนสีแดง ของเดิมตัวเลขค้างที่ "สิ่งที่ระบบตรวจพบ" ไม่ว่าจะกดอะไร
+    หัวรายงานจึงเขียน "ต้องแก้ 0" อยู่บรรทัดเดียวกับข้อความสรุปที่เขียนว่า
+    "กรุณาแก้ไขทั้งหมด 4 จุด"
+    """
+
+    @staticmethod
+    def _report(red=0, orange=0, yellow=0, notes=0):
+        # ตำแหน่งต้องไม่ซ้ำกัน — _dedupe_issues รวมข้อที่ตำแหน่งและค่าที่ต้องแก้
+        # เหมือนกันเป็นจุดเดียว ถ้าใช้ข้อความชุดเดียวกันหมด เทสต์จะนับไม่ตรงเอง
+        rep = checker_module.Report()
+        for i in range(red):
+            rep.add("RED", "front_matter", f"หน้าปก {i}", "พบ", f"ควรเป็น {i}")
+        for i in range(orange):
+            rep.add("ORANGE", "front_matter", f"หน้าลงนาม {i} (หน้า i)",
+                    "พบ", f"ควรเป็น {i}")
+        for i in range(notes):
+            rep.add("ORANGE", "front_matter", f"บทคัดย่อไทย {i} (หน้า vi)",
+                    "ระบบอ่านหน้านี้ไม่ออก", "ข้ามการตรวจ", "", None, system_note=True)
+        for i in range(yellow):
+            rep.add("YELLOW", "body", f"หน้า {10 + i}", "พบ", f"ควรเป็น {i}")
+        return checker_module.check_result(rep)
+
+    def _counts(self, report, failed=(), passed=(), staff=()):
+        return checker_module.zone_counts(report, failed, passed, staff)
+
+    def test_nothing_pressed_matches_what_the_system_found(self):
+        """ควบคุมเชิงบวกของทุกข้อข้างล่าง — ตอนโหลดหน้าต้องเท่าของเดิมเป๊ะ"""
+        report = self._report(red=2, orange=3, yellow=4)
+        self.assertEqual(self._counts(report), {"RED": 2, "ORANGE": 3, "YELLOW": 4})
+        self.assertEqual(checker_module.summary_verdict(report), report["verdict"])
+
+    def test_a_failed_notice_moves_into_the_must_fix_box(self):
+        report = self._report(yellow=2)
+        self.assertEqual(self._counts(report, failed=["YELLOW:0"]),
+                         {"RED": 1, "ORANGE": 0, "YELLOW": 1})
+
+    def test_a_failed_pending_item_moves_into_the_must_fix_box(self):
+        report = self._report(orange=2)
+        self.assertEqual(self._counts(report, failed=["ORANGE:1"]),
+                         {"RED": 1, "ORANGE": 1, "YELLOW": 0})
+
+    def test_an_accepted_item_leaves_every_box(self):
+        """กด "ผ่าน" = เจ้าหน้าที่รับได้แล้ว ต้องไม่ไปโผล่กล่องไหนอีก"""
+        report = self._report(orange=2, yellow=1)
+        self.assertEqual(self._counts(report, passed=["ORANGE:0", "YELLOW:0"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+
+    def test_a_staff_added_finding_counts_as_a_must_fix(self):
+        report = self._report()
+        self.assertEqual(self._counts(report, staff=["SIGNATURE_LAYOUT_WRONG"])["RED"], 1)
+
+    def test_the_closing_wording_is_not_counted_as_a_must_fix(self):
+        """ควบคุมเชิงลบของข้อบน — ถ้อยคำปิดท้าย (ค่าปรับ) ไม่ใช่จุดผิด"""
+        report = self._report()
+        self.assertEqual(self._counts(report, staff=["PASS_FEE_NONE"])["RED"], 0)
+
+    def test_the_must_fix_number_equals_the_points_in_the_summary(self):
+        """ตัวเลขกล่องแรกกับ "กรุณาแก้ไขทั้งหมด N จุด" ต้องเป็นเลขเดียวกัน
+
+        เมื่อข้อรอยืนยันถูกตัดสินครบแล้ว — ข้อที่ยังไม่ตัดสินอยู่ในสรุปโดยปริยาย
+        แต่ยังนับเป็น "รอยืนยัน" ไม่ใช่ "ต้องแก้" ซึ่งเป็นคนละคำถามกัน
+        """
+        report = self._report(red=1, orange=2, yellow=2)
+        cases = [(["ORANGE:0", "ORANGE:1"], []),
+                 (["ORANGE:0", "ORANGE:1", "YELLOW:0", "YELLOW:1"], []),
+                 (["ORANGE:0"], ["ORANGE:1"]),
+                 ([], ["ORANGE:0", "ORANGE:1"])]
+        for failed, passed in cases:
+            items = checker_module._dedupe_issues(
+                checker_module.issues_to_fix(report, failed, passed))
+            self.assertEqual(self._counts(report, failed, passed)["RED"], len(items),
+                             (failed, passed))
+
+    def test_a_system_note_never_becomes_a_must_fix(self):
+        """ข้อจำกัดของระบบไม่เคยเข้าข้อความสรุป จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน
+
+        ไม่งั้นหัวรายงานเขียนว่าต้องแก้ 1 จุด แต่ข้อความสรุปไม่มีจุดนั้นอยู่เลย
+        นักศึกษาได้ใบสั่งแก้ที่นับไม่ตรงกับรายการ
+        """
+        report = self._report(notes=1)
+        self.assertEqual(self._counts(report, failed=["ORANGE:0"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+        self.assertEqual(self._counts(report, passed=["ORANGE:0"])["ORANGE"], 0)
+
+    def test_the_book_passes_once_every_pending_item_is_accepted(self):
+        """เล่มที่ระบบว่า "รอยืนยัน" เคยค้างเป็นรอยืนยันตลอดไป
+
+        เจ้าหน้าที่กดผ่านครบทุกข้อแล้ว นักศึกษายังได้ข้อความว่า "ผลการตรวจ: รอยืนยัน"
+        """
+        report = self._report(orange=2)
+        self.assertEqual(report["verdict"], "รอยืนยัน")
+        self.assertEqual(
+            checker_module.summary_verdict(report, passed=["ORANGE:0", "ORANGE:1"]),
+            "ผ่าน")
+
+    def test_the_book_fails_once_a_pending_item_is_rejected(self):
+        report = self._report(orange=2)
+        self.assertEqual(checker_module.summary_verdict(report, failed=["ORANGE:0"]),
+                         "ไม่ผ่าน")
+
+    def test_a_report_with_no_zones_keeps_the_verdict_it_came_with(self):
+        """ควบคุมเชิงลบ — ห้ามยกระดับผลตรวจเอง เมื่อไม่มีข้อรอยืนยันให้ตัดสินสักข้อ
+
+        ทางออกก่อนกำหนดของ run_check และเทสต์อื่นส่ง report ที่โซนว่างมาพร้อม
+        verdict ของตัวเอง ถ้าคิดใหม่จากโซนเปล่า ๆ เล่มจะกลายเป็น "ผ่าน" ทันที
+        """
+        for verdict in ("ผ่าน", "รอยืนยัน", "ไม่ผ่าน"):
+            report = {"verdict": verdict,
+                      "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+            self.assertEqual(checker_module.summary_verdict(report), verdict)
+
+    def test_an_accepted_notice_leaves_the_summary_alone(self):
+        """ข้อสังเกตที่กด "ผ่าน" ไม่มีอะไรหายจากสรุป เพราะไม่เคยอยู่ในสรุปตั้งแต่แรก
+
+        สีเหลืองเข้าสรุปเฉพาะตอนกด "ไม่ผ่าน" การกด "ผ่าน" จึงเป็นการยืนยันค่าตั้งต้น
+        ผลที่เห็นได้คือตัวเลขกล่อง "ข้อสังเกต" ลดลง ไม่ใช่ข้อความสรุปเปลี่ยน
+        """
+        report = self._report(orange=1, yellow=2)
+        before = checker_module.plain_summary(report)
+        after = checker_module.plain_summary(report, passed=["YELLOW:0", "YELLOW:1"])
+        self.assertEqual(before, after)
+        self.assertEqual(self._counts(report, passed=["YELLOW:0", "YELLOW:1"]),
+                         {"RED": 0, "ORANGE": 1, "YELLOW": 0})
+
+    def test_the_verdict_still_matches_the_first_line_of_the_summary(self):
+        """สองค่านี้คำนวณคนละรอบ ถ้าเพี้ยนจากกันเจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วไม่มีผล"""
+        report = self._report(orange=2, yellow=1)
+        for failed, passed in (([], []), (["YELLOW:0"], []), ([], ["ORANGE:0"]),
+                               ([], ["ORANGE:0", "ORANGE:1"]),
+                               (["ORANGE:0"], ["ORANGE:1"])):
+            text = checker_module.plain_summary(report, failed, passed)
+            verdict = checker_module.summary_verdict(report, failed=failed,
+                                                     passed=passed)
+            self.assertEqual(text.split(NEWLINE)[0], "ผลการตรวจ: " + verdict,
+                             (failed, passed))
+
+
 class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
     """หัวข้อบทคัดย่อที่เขียนว่า ABSTRACT IN THAI ต้องนับเป็นบทคัดย่อภาษาไทย
 
@@ -2141,6 +2287,36 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
         for line in ("ABSTRACT REASONING IN CHILDREN", "LIST OF ABSTRACTS"):
             self.assertNotIn(checker_module._toc_section_kind(line),
                              ("abstract_th", "abstract_en"), line)
+
+    def test_the_two_wordings_are_treated_as_one_heading(self):
+        """เจ้าหน้าที่ตัดสิน (ก.ย. 2569) ว่า ABSTRACT IN THAI ถือเป็นเรื่องเดียวกับ
+        ABSTRACT (THAI) — ทุกทางที่ระบบอ่านหัวข้อต้องให้ผลเท่ากันทั้งสองถ้อยคำ
+        """
+        body = "ความเป็นมาและความสำคัญของการศึกษา"
+        for book, template in (("ABSTRACT IN THAI", "ABSTRACT (THAI)"),
+                               ("ABSTRACT IN ENGLISH", "ABSTRACT (ENGLISH)")):
+            self.assertEqual(checker_module._toc_section_kind(book + " vi"),
+                             checker_module._toc_section_kind(template + " vi"), book)
+            self.assertEqual(checker_module._is_abstract_heading(book),
+                             checker_module._is_abstract_heading(template), book)
+            kinds = [checker_module.front_section_kind(
+                NEWLINE.join(["vi", head, body]))[0] for head in (book, template)]
+            self.assertEqual(kinds[0], kinds[1], book)
+
+    def test_the_wording_has_no_fix_it_list_of_its_own(self):
+        """ปล่อยผ่านหมายถึงไม่ฟ้องสีไหนเลย
+
+        ต่างจากหัวข้อสารบัญที่เขียน CONTENTS ซึ่งมี N_TOC_WRONG คอยฟ้องให้แก้เป็น
+        TABLE OF CONTENTS — ถ้อยคำของหัวข้อบทคัดย่อต้องไม่มีรายการแบบนั้น
+        ความต่างนี้ตั้งใจ ดู RULES_AND_SOURCES.md หัวข้อ
+        "หัวข้อบทคัดย่อที่เขียนเป็นภาษาอังกฤษ"
+        """
+        self.assertIn("CONTENTS", checker_module.N_TOC_WRONG)   # ฝั่งที่ยังฟ้อง
+        terms = set(checker_module.N_ABSTRACT_TH_EN) | set(checker_module.N_ABSTRACT_EN_EN)
+        for name, value in vars(checker_module).items():
+            if not name.endswith("_WRONG") or not isinstance(value, (list, tuple, set)):
+                continue
+            self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
 class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
@@ -2193,6 +2369,54 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         self.assertEqual(
             checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
                                                 self.NAMES), "")
+
+    def test_the_page_is_not_reported_as_a_problem(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด
+
+        เรนเดอร์หน้าจริงออกมาดูแล้ว หน้ากระดาษถูกต้องทุกตัวอักษร เห็นรหัส 6437028
+        ชัดเจน เสียแค่การดึงข้อความ (PyMuPDF ซึ่งเป็นคนละเอนจินก็ได้ JKLMNOP
+        เหมือนกัน) ข้อสีส้มใบเดิมพูดซ้ำกับตารางผลเทียบที่บันทึกไว้อยู่แล้ว และยัง
+        ลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
+        """
+        source = inspect.getsource(checker_module.run_check)
+        head = source.split("unreadable_digit_pages = {}", 1)[1][:1400]
+        self.assertIn("rep.add_info", head)
+        self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
+
+    def test_the_name_on_that_page_is_still_compared(self):
+        """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
+
+        เล่มจริงเทียบชื่อไทยบนหน้าเดียวกันได้ 1.00 เต็ม (วรรณยุกต์ที่หายไปถูก norm
+        ตัดทิ้งอยู่แล้ว) การข้ามทั้งหน้าจึงทิ้งผลที่ใช้ได้ไปเปล่า ๆ
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn(
+            "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
+            source)
+
+    def test_a_mismatched_name_on_that_page_is_never_accused(self):
+        """ควบคุมเชิงลบของข้อบน — ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่า
+        เล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ ต้องลงเป็น pending ไม่ใช่ฟ้องแดง
+        """
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split(
+            "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
+            1)[1][:700]
+        self.assertIn('"pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"', block)
+        self.assertNotIn('rep.add("RED"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
+                   "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
+                   "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
+                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว",
+                   "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
+                   "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
 class ContentsPagesAndTheirContinuationAreOneHeading(unittest.TestCase):

@@ -150,6 +150,66 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         self.assertIn('data-applies=""', html)
         self.assertNotIn("data-applies=\"Undefined", html)
 
+    def test_the_endpoint_hands_back_the_three_numbers(self):
+        """หน้ารายงานเขียนตัวเลขสามกล่องจากค่านี้ ไม่ได้นับเอง
+
+        ถ้าปลายทางไม่ส่ง counts มา ตัวเลขจะค้างที่ค่าตอนโหลดหน้าโดยไม่มีอะไรบอก
+        ทั้งที่เจ้าหน้าที่กดไปแล้ว
+        """
+        job = self._seed_clean_report()
+        body = self.client.post(f"/summary/{job}",
+                                json={"failed": [], "passed": [],
+                                      "staff": ["SIGNATURE_LAYOUT_WRONG"]}).json()
+        self.assertEqual(body["counts"], {"RED": 1, "ORANGE": 0, "YELLOW": 0})
+
+    def test_the_report_page_can_find_the_three_numbers_to_rewrite(self):
+        """สคริปต์หาช่องตัวเลขด้วย id ถ้า id หาย ปุ่มจะกดได้แต่ตัวเลขไม่ขยับ"""
+        job = self._seed_clean_report()
+        html = self.client.get(f"/result/{job}").text
+        for box in ("stat-red", "stat-orange", "stat-yellow"):
+            self.assertIn(f'<b id="{box}">', html)
+        self.assertIn("renderZoneCounts(data.counts)", html)
+
+    def test_the_page_sends_accepted_notices_too(self):
+        """ปุ่ม ✓ ของข้อสังเกตเคยไม่ถูกส่งไปเลย กดแล้วไม่มีอะไรเกิดขึ้นสักอย่าง
+
+        เซิร์ฟเวอร์รองรับคีย์ YELLOW:n ในช่อง passed อยู่แล้ว (ตัวเลขกล่องข้อสังเกต
+        ลดลง) ที่ขาดคือหน้าเว็บไม่เคยเก็บมาส่ง เพราะตัวเลือกจำกัดไว้แค่สีส้ม
+        """
+        job = self._seed_clean_report()
+        html = self.client.get(f"/result/{job}").text
+        block = html.split("function collectPassed()", 1)[1][:400]
+        self.assertIn('[data-zone="YELLOW"]', block)
+        self.assertIn('[data-zone="ORANGE"]', block)
+        # ห้ามฝังชื่อโซนไว้ตายตัว ไม่งั้นคีย์ของสีเหลืองจะถูกส่งเป็น ORANGE:n
+        self.assertNotIn("'ORANGE:' +", block)
+
+    def test_the_purple_list_has_no_pass_fail_buttons(self):
+        """เจ้าหน้าที่สั่งเอาออก (ก.ย. 2569) — ปุ่ม ✗ ของการ์ดสีม่วงเคยกดได้แต่ไม่ส่ง
+        อะไรไปเลย เพราะ setPF เรียกอัปเดตสรุปเฉพาะการ์ด .issue กับ .sf
+
+        ปุ่มของข้อสีส้ม/เหลืองและของหัวข้อที่เจ้าหน้าที่ตัดสินเองต้องอยู่ครบเหมือนเดิม
+        การกด "ไม่ผ่าน" ตรงนั้นมีค่าเท่าสีแดง จะเอาออกไม่ได้
+        """
+        import checker
+        rep = checker.Report()
+        rep.add_human("หน้าลงนาม 1 (หน้า i)", "โปรดทานรายชื่อกรรมการเอง")
+        with main.JOBS_LOCK:
+            main.JOBS["purple"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        html = self.client.get("/result/purple").text
+        # ต้องมีการ์ดสีม่วงจริง ไม่งั้นเทสต์ผ่านลอย ๆ โดยไม่ได้ตรวจอะไรเลย
+        self.assertIn('<div class="hc">', html)
+        # ตัดแค่ตัวการ์ด — ถ้าปล่อยยาวจะไปเจอ setPF ในสคริปต์ท้ายหน้าแล้วตกทุกครั้ง
+        card = html.split('<div class="hc">', 1)[1].split('note-view', 1)[0]
+        self.assertNotIn("setPF", card)
+        # การ์ดของหัวข้อที่เจ้าหน้าที่ตัดสินเองยังต้องมีปุ่มอยู่
+        self.assertIn('<div class="hc sf"', html)
+        self.assertIn("setPF", html.split('<div class="hc sf"', 1)[1][:1500])
+
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])

@@ -235,9 +235,9 @@
       {{ 'ผ่าน (Passed)' if report.verdict=='ผ่าน' else ('ไม่ผ่าน (Not passed)' if report.verdict=='ไม่ผ่าน' else 'รอยืนยัน (Pending confirmation)') }}
     </div>
     <div class="stats">
-      <div class="stat r"><b>{{ report.issues_by_zone.RED | length }}</b><span data-th="ต้องแก้" data-en="Must fix">ต้องแก้</span></div>
-      <div class="stat o"><b>{{ report.issues_by_zone.ORANGE | length }}</b><span data-th="รอยืนยัน" data-en="Pending">รอยืนยัน</span></div>
-      <div class="stat y"><b>{{ report.issues_by_zone.YELLOW | length }}</b><span data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span></div>
+      <div class="stat r"><b id="stat-red">{{ report.issues_by_zone.RED | length }}</b><span data-th="ต้องแก้" data-en="Must fix">ต้องแก้</span></div>
+      <div class="stat o"><b id="stat-orange">{{ report.issues_by_zone.ORANGE | length }}</b><span data-th="รอยืนยัน" data-en="Pending">รอยืนยัน</span></div>
+      <div class="stat y"><b id="stat-yellow">{{ report.issues_by_zone.YELLOW | length }}</b><span data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span></div>
     </div>
   </div>
 
@@ -401,13 +401,13 @@
     <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
       <span class="count"><b>{{ report.human_checklist | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for hc in report.human_checklist %}
+    {# ไม่มีปุ่มผ่าน/ไม่ผ่านในรายการนี้ (เจ้าหน้าที่สั่ง ก.ย. 2569) — ปุ่ม ✗ ของการ์ด
+       สีม่วงเคยกดได้แต่ไม่ส่งอะไรไปเลย เพราะ setPF เรียกอัปเดตสรุปเฉพาะการ์ด .issue
+       กับ .sf กดแล้วเปลี่ยนแค่สีบนจอ ซึ่งแยกไม่ออกจากระบบพัง
+       รายการนี้เป็น "ข้อมูลให้ทานเทียบ" ไม่ใช่คำตัดสิน จึงเหลือแค่ช่องความเห็น #}
     <div class="hc">
       <div class="row1">
         <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div></div>
-        <div class="btns">
-          <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
-          <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
-        </div>
       </div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
       <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
@@ -623,9 +623,10 @@ var TR = [
   [/ลบชื่อเรื่องภาษาไทยออกจากหน้านี้/g, 'Remove the Thai title from this page'],
   [/หน้าบทคัดย่อภาษาไทยต้องมีเฉพาะชื่อเรื่องภาษาไทย/g, 'The Thai abstract page must carry the Thai title only'],
   [/หน้าบทคัดย่อภาษาอังกฤษต้องมีเฉพาะชื่อเรื่องภาษาอังกฤษ/g, 'The English abstract page must carry the English title only'],
-  [/ระบบอ่านตัวเลขบนหน้านี้ไม่ออก ฟอนต์ในไฟล์ทำให้รหัสนักศึกษากลายเป็นตัวอักษร (.+)/g, 'The numbers on this page could not be read: a font in the file turned the student ID into letters $1'],
-  [/ระบบจึงข้ามการตรวจชื่อและรหัสนักศึกษาบนหน้านี้/g, 'The name and student ID on this page were therefore not checked'],
-  [/เจ้าหน้าที่เปิดหน้านี้ดูเองว่าชื่อและรหัสนักศึกษาถูกต้องหรือไม่/g, 'Staff to open this page and confirm the name and student ID'],
+  [/ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น "(.+?)" ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว/g, 'A font embedded in the file makes the digits extract as "$1", while the printed page itself is correct; the student ID was verified against the approved data on other pages'],
+  [/ระบบไม่ได้เทียบรหัสนักศึกษาที่ /g, 'Student ID not verified on '],
+  [/ระบบอ่านตัวเลขบนหน้านี้ไม่ออก/g, 'The numbers on this page could not be read'],
+  [/ระบบอ่านข้อความบนหน้านี้ไม่ครบ/g, 'Not all text on this page could be read'],
   [/^ภาษาของชื่อเรื่อง$/g, 'Title language'],
   [/ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มที่ส่งมาจัดทำเป็นภาษาไทย/g, 'The language of the document does not match the approved programme: the file submitted is produced in Thai'],
   [/ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มที่ส่งมาจัดทำเป็นภาษาอังกฤษ/g, 'The language of the document does not match the approved programme: the file submitted is produced in English'],
@@ -702,9 +703,6 @@ var TR = [
   [/ \/ ชื่อเรื่อง\)/g, ' / Thesis title)'],
   [/^ชื่อเรื่อง$/g, 'Thesis title'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
-  [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
-  [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'Committee names on the approval pages must be in Capital Case'],
-  [/แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Capital Case; staff to confirm'],
   // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Capital Case ----
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้พิมพ์ว่า/g, 'The name printed on this page is'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE) with no title prefix:'],
@@ -1489,10 +1487,14 @@ function collectStaff(){
   return Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
     .map(el => el.getAttribute('data-choice'));
 }
-// สีส้มที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) ให้ตัดออกจากสรุป
+// ข้อที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) — สีส้มถูกตัดออกจากข้อความสรุป ส่วนสีเหลือง
+// ไม่เคยอยู่ในสรุปอยู่แล้ว (เข้าเมื่อกด "ไม่ผ่าน" เท่านั้น) แต่ต้องส่งไปด้วย ไม่งั้น
+// ตัวเลขกล่อง "ข้อสังเกต" ไม่ขยับ แล้วปุ่ม ✓ ของข้อสีเหลืองจะกดได้โดยไม่มีอะไร
+// เกิดขึ้นเลยสักอย่าง ซึ่งแยกไม่ออกจากระบบพัง
 function collectPassed(){
-  return Array.from(document.querySelectorAll('.issue.state-pass[data-zone="ORANGE"]'))
-    .map(el => 'ORANGE:' + el.getAttribute('data-idx'));
+  return Array.from(document.querySelectorAll(
+      '.issue.state-pass[data-zone="ORANGE"], .issue.state-pass[data-zone="YELLOW"]'))
+    .map(el => el.getAttribute('data-zone') + ':' + el.getAttribute('data-idx'));
 }
 var _summaryTimer = null;
 // ข้อความเตือนใต้กล่องคัดลอก ใช้กับความผิดพลาดของการอัปเดตอัตโนมัติตอนกดปุ่ม
@@ -1535,7 +1537,6 @@ function clearStaffAnswer(card){
 // ป้าย "แจ้งผลการพิจารณา" ต้องตามคำตัดสินของเจ้าหน้าที่ ไม่ใช่ค้างที่ผลของระบบ
 // เจ้าหน้าที่กด "โครงสร้างหน้าลงนามผิด" กับเล่มที่ระบบว่าผ่าน แล้วข้อความสรุปเขียนว่า
 // "ไม่ผ่าน" แต่ป้ายบนหัวยังเขียน "ผ่าน (Passed)" — สองอย่างขัดกันต่อหน้าเจ้าหน้าที่
-// ส่วนตัวเลขสามกล่องข้าง ๆ เป็น "สิ่งที่ระบบตรวจพบ" คนละเรื่องกับผลพิจารณา จึงไม่แตะ
 var VERDICT_PILL = {
   'ผ่าน':      ['pass',    'ผ่าน (Passed)'],
   'ไม่ผ่าน':    ['fail',    'ไม่ผ่าน (Not passed)'],
@@ -1547,6 +1548,19 @@ function renderVerdictPill(verdict){
   if (!pill || !shown) return;              // ผลตรวจที่ไม่รู้จัก ปล่อยของเดิมไว้
   pill.className = 'verdict-pill ' + shown[0];
   pill.textContent = shown[1];
+}
+// ตัวเลขสามกล่องข้าง ๆ ก็ต้องตามคำตัดสิน — เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากด "ไม่ผ่าน"
+// ที่ข้อส้ม/เหลือง คือตัดสินว่าเป็นจุดที่นักศึกษาต้องแก้ ข้อนั้นจึงต้องย้ายไปนับกับสีแดง
+// ของเดิมตัวเลขค้างที่ "สิ่งที่ระบบตรวจพบ" หัวรายงานจึงเขียน "ต้องแก้ 0" อยู่บรรทัดเดียว
+// กับข้อความสรุปที่เขียนว่า "กรุณาแก้ไขทั้งหมด 4 จุด" — เซิร์ฟเวอร์คิดตัวเลขมาให้แล้ว
+// ที่นี่แค่เขียนลงหน้า ห้ามนับเอง จะได้ไม่หลุดจากข้อความสรุป
+var ZONE_STAT_ID = {RED: 'stat-red', ORANGE: 'stat-orange', YELLOW: 'stat-yellow'};
+function renderZoneCounts(counts){
+  if (!counts) return;
+  Object.keys(ZONE_STAT_ID).forEach(function(zone){
+    var el = document.getElementById(ZONE_STAT_ID[zone]);
+    if (el && typeof counts[zone] === 'number') el.textContent = String(counts[zone]);
+  });
 }
 function applyVerdictScope(verdict){
   // ผลตรวจที่รู้จักมีสามค่าเท่านั้น ค่าอื่น (หรือค่าว่าง เพราะอ่านข้อความสรุปไม่ได้)
@@ -1595,6 +1609,7 @@ function refreshSummary(){
         applyVerdictScope(data.verdict);
         renderVerdictPill(data.verdict);
       }
+      renderZoneCounts(data.counts);
       showCopyError('');
       renderSummary();
     })
@@ -1633,6 +1648,8 @@ document.addEventListener('DOMContentLoaded', function(){
   renderVerdictPill(REPORT_VERDICT);
 });
 
+// การ์ดที่มีปุ่มนี้เหลือสองแบบ: ข้อสีส้ม/เหลือง (.issue) กับหัวข้อที่เจ้าหน้าที่ต้อง
+// ตัดสินเอง (.hc.sf) — ทั้งสองแบบส่งผลถึงข้อความสรุปจริง ส่วนรายการสีม่วงไม่มีปุ่มแล้ว
 function setPF(btn, state){
   const card = btn.closest('.hc, .issue');
   const already = btn.classList.contains('on');

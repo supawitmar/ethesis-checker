@@ -14,7 +14,6 @@ from checker import (
     Report,
     _compose_thai_line,
     classify,
-    _report_committee_name_case,
     _report_student_name_style,
     _strip_student_title,
     _rejoin_thai_marks,
@@ -840,39 +839,6 @@ class TocEntriesMayCarryAPageRange(unittest.TestCase):
     def test_single_page_label_still_works(self):
         self.assertEqual(_toc_page_label("REFERENCES 48"), "48")
         self.assertEqual(_strip_toc_page_number("REFERENCES 48"), "REFERENCES")
-
-
-class CommitteeNamesOnSignaturePageAreCapitalCase(unittest.TestCase):
-    """ชื่อกรรมการบนหน้าลงนามใช้กติกาตัวพิมพ์เดียวกับชื่อนักศึกษาบนหน้าเดียวกัน
-
-    "รายชื่ออาจารย์ในหน้าลงนามที่ตรวจก็ควรต้องเป็น Capital Case"
-    """
-
-    def _found(self, members):
-        rep = Report()
-        _report_committee_name_case(rep, members, "หน้าอาจารย์ที่ปรึกษา (หน้า i)")
-        self.assertEqual(rep.zones["RED"], [])      # เป็นข้อสังเกต ไม่ตีตกเล่ม
-        return [i["found"] for i in rep.zones["ORANGE"]]
-
-    def test_capital_case_names_pass(self):
-        self.assertEqual(self._found({1: "Naphat Ketphat",
-                                      2: "Phumin Kirawanich"}), [])
-
-    def test_all_caps_and_lowercase_are_flagged(self):
-        out = self._found({1: "NAPHAT KETPHAT", 2: "Phumin Kirawanich"})
-        self.assertEqual(len(out), 1)
-        self.assertIn('"NAPHAT KETPHAT"', out[0])
-        self.assertNotIn("Phumin", out[0])          # คนที่ถูกต้องต้องไม่ถูกพาดพิง
-        self.assertTrue(self._found({1: "naphat ketphat"}))
-
-    def test_every_offending_name_is_listed_in_one_issue(self):
-        out = self._found({1: "NAPHAT KETPHAT", 2: "phumin kirawanich"})
-        self.assertEqual(len(out), 1)               # ข้อเดียวต่อหน้า ไม่ฟ้องรายคน
-        self.assertIn('"NAPHAT KETPHAT"', out[0])
-        self.assertIn('"phumin kirawanich"', out[0])
-
-    def test_thai_committee_names_are_skipped(self):
-        self.assertEqual(self._found({1: "มยุรี หอมสนิท", 2: "ถิรจิต บุญแสน"}), [])
 
 
 class ChapterTitleIssuesAreNotReportedTwice(unittest.TestCase):

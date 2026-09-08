@@ -830,27 +830,6 @@ def _page_count_issue(count_wrong, last_arabic):
     return zone, where, found
 
 
-def _report_committee_name_case(rep, members, loc):
-    """ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)
-
-    กติกาเดียวกับชื่อนักศึกษาบนหน้าเดียวกัน (นโยบายเจ้าหน้าที่ ก.ค. 2569)
-    เป็นกฎ "รูปแบบ" ของ template จึงตรวจได้แม้ไม่มีข้อมูลอนุมัติ
-    ตรวจเฉพาะชื่อภาษาอังกฤษ — ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก
-    ลงส้มเพราะระบบอ่านชื่อจากตาราง อาจอ่านคร่อมคำได้ ให้เจ้าหน้าที่ยืนยัน
-    """
-    bad = [members[k] for k in sorted(members)
-           if members.get(k) and re.search(r'[A-Za-z]', members[k])
-           and not _is_title_case(members[k])]
-    if not bad:
-        return
-    shown = ", ".join(f'"{n}"' for n in bad)
-    rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
-            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case)",
-            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
-            "FRONT.COMMITTEE")
-
-
 def _committee_names(expected):
     """รายชื่อจากข้อมูลอนุมัติ — รับได้ทั้ง list ของ dict {'name': ...} และ list ของ str"""
     return [m.get("name", "") if isinstance(m, dict) else (m or "") for m in expected]
@@ -1305,8 +1284,10 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         # (ข้อฟ้องบอกว่าเทียบกับ บฑ.1 หรือ บฑ.2 ซึ่งบอกบทบาทในตัว)
         page_label = signature_page_position(sig_pages, idx)
         loc = f"{page_label} ({page_ref(idx)})"
-        # กฎรูปแบบของ template — ตรวจได้แม้ยังไม่มีข้อมูลอนุมัติของหน้านี้
-        _report_committee_name_case(rep, members, loc)
+        # ไม่ตรวจตัวพิมพ์ของชื่อกรรมการบนหน้านี้ (เจ้าหน้าที่สั่งเลิก ก.ย. 2569)
+        # ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้ายมาด้วย
+        # ("Weerawat Limroonreungrat, PT" / "Assist.Prof. Hoon Kim, ATC") แล้วตัดสิน
+        # ว่าไม่ใช่ Capital Case ทั้งที่ชื่อถูกต้อง เล่มจริงจึงได้ข้อส้มซ้ำทั้งสองหน้า
         # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
         # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
         read_names = committee_name_list(members)
@@ -3068,20 +3049,78 @@ def _dedupe_issues(items):
     return [kept[key] for key in order]
 
 
-def summary_verdict(report, items=None, failed=None, passed=None, staff=None):
+def zone_counts(report, failed=None, passed=None, staff=None):
+    """ตัวเลขสามกล่องบนหัวรายงาน หลังรวมผลพิจารณาของเจ้าหน้าที่แล้ว
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากด "ไม่ผ่าน" ที่ข้อสีส้ม/เหลือง แล้วตัวเลขต้องขยับ
+    เพราะการกดไม่ผ่านคือตัดสินว่าข้อนั้น "เป็นจุดที่นักศึกษาต้องแก้" เหมือนสีแดง
+    ของเดิมตัวเลขค้างที่ "สิ่งที่ระบบตรวจพบ" ไม่ว่าจะกดอะไร หัวรายงานจึงเขียน
+    ต้องแก้ 0 ทั้งที่ข้อความสรุปข้างล่างเขียนว่า "กรุณาแก้ไขทั้งหมด 4 จุด"
+
+    กติกาเดียวกับ issues_to_fix ทุกประการ ตัวเลขกล่องแรกจึงเท่ากับจำนวนจุดใน
+    ข้อความสรุปเสมอ ห้ามคิดคนละทาง ไม่งั้นเจ้าหน้าที่เห็นสองตัวเลขที่ขัดกันเอง
+        กด "ไม่ผ่าน"   ย้ายไปนับกับสีแดง
+        กด "ผ่าน"      หายไปจากทุกกล่อง (เจ้าหน้าที่รับได้แล้ว)
+        ยังไม่กด       อยู่กล่องเดิม
+
+    ข้อ system_note (ข้อจำกัดของระบบ เช่น อ่านหน้านั้นไม่ออก) ไม่เคยเข้าข้อความสรุป
+    เพราะนักศึกษาแก้เล่มยังไงก็ไม่หาย จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน —
+    ค้างไว้ที่ "รอยืนยัน" ตามความจริงว่ายังไม่มีข้อสรุป ส่วนกด "ผ่าน" ถือว่าดูแล้ว
+    """
+    failed, passed = set(failed or ()), set(passed or ())
+    zones = report.get("issues_by_zone") or {}
+    # จุดที่เจ้าหน้าที่กดเพิ่มเองเป็นคำตัดสินว่าเล่มผิด นับรวมกับสีแดงเหมือนใน
+    # issues_to_fix (ตัวเลือก placement=closing เป็นข้อความปิดท้าย ไม่ใช่จุดผิด)
+    red = len(zones.get("RED") or []) + len(staff_choices(staff, "section"))
+    pending = notice = 0
+    for index, issue in enumerate(zones.get("ORANGE") or []):
+        key = f"ORANGE:{index}"
+        if issue.get("system_note"):
+            pending += key not in passed
+        elif key in failed:
+            red += 1
+        elif key not in passed:
+            pending += 1
+    for index, issue in enumerate(zones.get("YELLOW") or []):
+        key = f"YELLOW:{index}"
+        if key in failed:
+            red += 1
+        elif key not in passed:
+            notice += 1
+    return {"RED": red, "ORANGE": pending, "YELLOW": notice}
+
+
+def summary_verdict(report, failed=None, passed=None, staff=None):
     """ผลตรวจที่ใช้จริงในข้อความสรุป หลังรวมคำตัดสินของเจ้าหน้าที่แล้ว
 
     ผลตรวจของระบบเป็น "ผ่าน" ได้ทั้งที่มีจุดต้องแก้ เมื่อจุดนั้นมาจากคำตัดสินของ
     เจ้าหน้าที่ (กดไม่ผ่านข้อสังเกต หรือกดเพิ่มจุดที่ระบบตรวจเองไม่ได้) ข้อความที่
     ส่งให้นักศึกษาจะขัดกันเองทันที — "ผลการตรวจ: ผ่าน" แล้วตามด้วย "กรุณาแก้ไข 1 จุด"
 
+    และของเดิมค้างที่ "รอยืนยัน" ตลอดไป เพราะปรับเฉพาะขา ผ่าน -> ไม่ผ่าน เท่านั้น
+    เล่มที่ระบบว่ารอยืนยัน แล้วเจ้าหน้าที่กดไม่ผ่านครบทุกข้อ ยังได้ข้อความสรุปว่า
+    "ผลการตรวจ: รอยืนยัน" ส่งไปถึงนักศึกษา ทั้งที่ตัดสินไปแล้วว่าไม่ผ่าน และเล่มที่
+    กดผ่านครบทุกข้อก็ไม่เคยขึ้นเป็น "ผ่าน" — คิดจากตัวเลขสามกล่องหลังคำตัดสินแทน
+    ซึ่งเป็นกติกาเดียวกับ Report.verdict() เมื่อยังไม่มีใครกดอะไร
+
     หน้ารายงานเรียกฟังก์ชันนี้ผ่าน /summary ด้วย เพื่อรู้ว่าควรโชว์หัวข้อค่าปรับอันไหน
     """
-    if items is None:
-        items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
     verdict = report.get("verdict", "")
-    if items and verdict == "ผ่าน":
+    counts = zone_counts(report, failed, passed, staff)
+    if counts["RED"]:
         return "ไม่ผ่าน"
+    # เล่มที่ระบบว่า "รอยืนยัน" ค้างอยู่อย่างนั้นตลอดไปในของเดิม เพราะปรับเฉพาะขา
+    # ผ่าน -> ไม่ผ่าน เท่านั้น เจ้าหน้าที่กดครบทุกข้อแล้วนักศึกษายังได้ข้อความว่า
+    # "ผลการตรวจ: รอยืนยัน" ทั้งที่ตัดสินไปแล้ว — ขึ้นเป็น "ผ่าน" เมื่อข้อรอยืนยัน
+    # ถูกตัดสินครบทุกข้อและไม่มีข้อไหนกลายเป็นจุดต้องแก้
+    #
+    # ต้องเห็นว่า "เคยมีข้อรอยืนยันแล้วหมดไป" ไม่ใช่แค่ "ตอนนี้ไม่มี" เพราะผลตรวจ
+    # ของระบบเป็นตัวตั้งเสมอ ผู้เรียกที่ส่ง report มาโดยไม่มีรายการในโซน (เช่นเทสต์
+    # หรือทางออกก่อนกำหนดของ run_check) ต้องได้ผลตรวจเดิมกลับไปไม่ถูกยกระดับเอง
+    if verdict == "รอยืนยัน" and not counts["ORANGE"]:
+        pending_found = len((report.get("issues_by_zone") or {}).get("ORANGE") or [])
+        if pending_found:
+            return "ผ่าน"
     return verdict
 
 
@@ -3092,7 +3131,7 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
-    verdict = summary_verdict(report, items)
+    verdict = summary_verdict(report, failed, passed, staff)
     # ข้อความปิดท้าย (เช่น เรื่องค่าปรับและช่องทางติดต่อ) ไม่ใช่จุดที่ต้องแก้ จึงไม่ถูกนับ
     # และต้องตามไปด้วยเสมอ แม้เล่มจะไม่มีจุดต้องแก้เลย
     # ต้องอ่านค่า verdict ที่ปรับแล้วข้างบน ไม่ใช่ค่าดิบจาก report — เล่มที่ระบบว่าผ่าน
@@ -3903,7 +3942,10 @@ N_ABSTRACT_TH = norm('บทคัดย่อ')
 # แต่เล่มจริงเขียน ABSTRACT IN THAI ด้วย (สำรวจ 11 เล่ม พบทั้งสองแบบ) ต้องรู้จักทั้งคู่
 # ไม่งั้นสารบัญที่มีรายการนี้อยู่จริงจะถูกฟ้องว่า "ไม่พบหัวข้อบทคัดย่อภาษาไทยในสารบัญ"
 # และหัวเรื่องบนหน้าถูกฟ้องเป็น "ข้อความตัวหนาที่ไม่ใช่หัวข้อ" ทั้งที่เป็นหัวข้อจริง
-# (กติกาเดียวกับ N_TOC_WRONG: รู้จักไว้เพื่อให้การตรวจทั้งชุดทำงานต่อได้)
+#
+# ต่างจาก N_TOC_WRONG ตรงที่ "ไม่มีข้อฟ้องตามหลัง" — เจ้าหน้าที่ตัดสิน (ก.ย. 2569) ว่า
+# ABSTRACT IN THAI ถือเป็นเรื่องเดียวกับ ABSTRACT (THAI) ปล่อยผ่านได้ ส่วน CONTENTS
+# ยังต้องฟ้องให้แก้เป็น TABLE OF CONTENTS ความต่างนี้ตั้งใจ ห้ามไล่ให้เหมือนกัน
 N_ABSTRACT_TH_EN = ('ABSTRACTTHAI', 'ABSTRACTINTHAI')
 N_ABSTRACT_EN_EN = ('ABSTRACTENGLISH', 'ABSTRACTINENGLISH')
 N_ACK = [norm('กิตติกรรมประกาศ'), 'ACKNOWLEDGEMENT', 'ACKNOWLEDGEMENTS']
@@ -5260,8 +5302,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # ---------- หน้าที่ระบบอ่านตัวเลขไม่ออก ----------
         # ฟอนต์ย่อยที่ตาราง ToUnicode ผิดทำให้ตัวเลขบนหน้ากลายเป็นตัวอักษรอังกฤษ
         # ถ้าปล่อยไว้ หน้านั้นจะโดนฟ้องแดงสองข้อพร้อมกัน (ชื่อสะกดผิด + ไม่พบรหัส)
-        # แล้วสั่งให้นักศึกษาแก้ข้อความที่ถูกต้องอยู่แล้ว จึงฟ้องเป็นข้อเดียวว่า
-        # "ระบบอ่านหน้านี้ไม่ออก" แล้วข้ามการตรวจชื่อกับรหัสบนหน้านั้นไป
+        # แล้วสั่งให้นักศึกษาแก้ข้อความที่ถูกต้องอยู่แล้ว
+        #
+        # แต่ "หน้ากระดาษถูกต้องทุกตัวอักษร" — เรนเดอร์หน้านั้นออกมาดูแล้วเห็นรหัส
+        # 6437028 ชัดเจน คนอ่านไม่มีทางเห็นความผิดปกติ เสียแค่การดึงข้อความ
+        # (PyMuPDF ซึ่งเป็นคนละเอนจินกับ pdfplumber ก็ได้ JKLMNOP เหมือนกัน
+        #  แปลว่าตาราง ToUnicode ในไฟล์ผิดจริง ไม่ใช่ตัวอ่านของเราเพี้ยน)
+        # เจ้าหน้าที่จึงสั่ง (ก.ย. 2569) ว่าห้ามฟ้องเป็นจุดผิด — บันทึกเป็นข้อมูล
+        # ประกอบแทน ดู RULES_AND_SOURCES.md หัวข้อ "ฟอนต์ในไฟล์ทำให้อ่านตัวเลขไม่ออก"
         unreadable_digit_pages = {}
         for _aidx in (abs_en_idx, abs_th_idx):
             if _aidx is None:
@@ -5273,12 +5321,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         for _aidx, _misread in sorted(unreadable_digit_pages.items()):
             _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
                     f" ({page_ref(_aidx)})")
-            rep.add(UNCERTAIN_ZONE, "front_matter", _loc,
-                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก ฟอนต์ในไฟล์ทำให้รหัสนักศึกษา"
-                    f'กลายเป็นตัวอักษร "{_misread}"',
-                    "ระบบจึงข้ามการตรวจชื่อและรหัสนักศึกษาบนหน้านี้",
-                    "เจ้าหน้าที่เปิดหน้านี้ดูเองว่าชื่อและรหัสนักศึกษาถูกต้องหรือไม่",
-                    "UNCERTAIN.REVIEW", system_note=True)
+            # ตารางผลเทียบข้อมูลอนุมัติบันทึกไว้อยู่แล้วว่าช่องนี้ยังไม่ได้เทียบ
+            # ("รหัสนักศึกษา ... ระบบอ่านตัวเลขบนหน้านี้ไม่ออก") ข้อสีส้มอีกใบจึงเป็น
+            # การพูดซ้ำ และยังลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
+            # เว้นวรรคหน้าตำแหน่งไว้ให้คำแปลจับ "คำนำ" กับ "ชื่อตำแหน่ง" แยกกันได้
+            # (ชื่อตำแหน่งมีคำแปลของตัวเองอยู่แล้ว ถ้ามัดรวมเป็นประโยคเดียวจะแปลไม่ออก)
+            rep.add_info("front_matter", f"ระบบไม่ได้เทียบรหัสนักศึกษาที่ {_loc}",
+                         "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น "
+                         f'"{_misread}" ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ '
+                         "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
@@ -5300,12 +5351,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("ชื่อนักศึกษา", albl, "pending",
                                      f"เล่มไม่มีหน้า{albl}")
                 continue
-            if aidx in unreadable_digit_pages:
+            core3 = _strip_student_title(nm3)
+            compared = compare_reference_text(pages[aidx], core3, 'student_name')
+            if aidx in unreadable_digit_pages and compared['status'] != 'exact':
+                # หน้าที่ฟอนต์เสีย ตรวจ "สิ่งที่อ่านได้" ตามปกติ แต่ห้ามฟ้อง — ชื่อที่
+                # เทียบไม่ตรงบนหน้าแบบนี้แยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ
+                # ของเดิมข้ามทั้งหน้า ทั้งที่เล่มจริงเทียบชื่อไทยได้ 1.00 เต็มบนหน้า
+                # เดียวกับที่อ่านตัวเลขไม่ออก — ทิ้งผลที่ใช้ได้ไปเปล่า ๆ
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ")
                 continue
-            core3 = _strip_student_title(nm3)
-            compared = compare_reference_text(pages[aidx], core3, 'student_name')
             if compared['status'] != 'exact':
                 # ช่องของชื่อบนหน้าบทคัดย่อคือข้อความหน้ารหัสนักศึกษา ต้องรายงานสิ่งที่
                 # พิมพ์อยู่ตรงนั้นจริง ไม่ใช่บรรทัดที่คล้ายชื่อที่สุดทั้งหน้า
