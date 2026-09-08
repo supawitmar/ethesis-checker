@@ -1202,6 +1202,40 @@ class SignaturePlaceholderTests(unittest.TestCase):
         self.assertFalse(_is_white_fill(None))
 
 
+class ThePageSequenceFindingIsOrange(unittest.TestCase):
+    """เลขหน้าส่วนนำที่เรียงไม่ต่อเนื่อง = สีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เจ้าหน้าที่ส่งภาพข้อที่ฟ้องว่า กระโดดจาก "v" ไป "vii" มาแล้วสั่งว่าขอเป็นสีส้ม
+    ข้ออื่นของเลขหน้ายังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่เปลี่ยนทั้ง
+    PAGE.NUMBERING ซึ่งคุมชนิดเลขหน้าและเลขหน้าเนื้อหาอยู่ด้วย
+    """
+
+    def test_the_zone_comes_from_the_rule_catalog(self):
+        self.assertEqual(RULE_CATALOG["PAGE.NUMBERING_SEQUENCE"]["failure_zone"],
+                         "ORANGE")
+        self.assertEqual(checker_module.PAGE_SEQUENCE_ZONE, "ORANGE")
+
+    def test_the_finding_uses_that_zone(self):
+        source = inspect.getsource(checker_module)
+        block = source.split('"เลขหน้าไม่ต่อเนื่อง: " + " และ "', 1)[0][-260:]
+        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", block)
+        self.assertNotIn('rep.add("RED", "front_matter", "ส่วนนำ",' + NEWLINE
+                         + '                    "เลขหน้าไม่ต่อเนื่อง', source)
+
+    def test_the_other_page_number_rules_stay_red(self):
+        """ควบคุมเชิงลบ — ห้ามลากข้ออื่นของเลขหน้าเป็นสีส้มไปด้วย
+
+        ชนิดเลขหน้าผิด (ก ข ค ปนกับ i ii iii) และเลขหน้าเนื้อหาที่กระโดด
+        ยังเป็นสีแดง เจ้าหน้าที่สั่งเฉพาะข้อความต่อเนื่องของส่วนนำ
+        """
+        self.assertNotIn("failure_zone", RULE_CATALOG["PAGE.NUMBERING"])
+        source = inspect.getsource(checker_module)
+        for phrase in ('f"มีเลขหน้าเป็น{found_names} ',
+                       'f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}"'):
+            before = source.split(phrase, 1)[0][-200:]
+            self.assertIn('rep.add("RED"', before, phrase)
+
+
 class FrontPageNumberTests(unittest.TestCase):
     """เลขหน้าส่วนนำ: เล่มอังกฤษ=โรมัน เล่มไทย=พยัญชนะ และต้องเรียงต่อเนื่อง"""
 
@@ -1255,15 +1289,16 @@ class FrontPageNumberTests(unittest.TestCase):
     def test_duplicate_labels_reported_once(self):
         # เล่มจริง (ไทย) ที่พบ: ค, ค, ค, ง, จ — ต้องรวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
         rep = self._run(["", "ค", "ค", "ค", "ง", "จ"], style="thai")
-        reds = [i["found"] for i in rep.zones["RED"]]
-        self.assertEqual(len(reds), 1)
-        self.assertIn('ถูกใช้ซ้ำ 3 หน้า', reds[0])
+        # ข้อความต่อเนื่องของเลขหน้าส่วนนำเป็นสีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
+        self.assertEqual(len(found), 1)
+        self.assertIn('ถูกใช้ซ้ำ 3 หน้า', found[0])
 
     def test_skipped_label_reported(self):
         rep = self._run(["", "i", "ii", "v", "vi"], style="roman")
-        reds = [i["found"] for i in rep.zones["RED"]]
-        self.assertEqual(len(reds), 1)
-        self.assertIn('กระโดดจาก "ii" ไป "v"', reds[0])
+        found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
+        self.assertEqual(len(found), 1)
+        self.assertIn('กระโดดจาก "ii" ไป "v"', found[0])
 
     def test_arabic_in_front_matter_flagged(self):
         rep = self._run(["", "i", "ii", "3", "4"], style="roman")
@@ -1312,12 +1347,14 @@ class FrontPageNumberTests(unittest.TestCase):
         # i, (อ่านไม่ออก), iii -> หน้าที่คั่นคือ ii พอดี ไม่ใช่การกระโดด
         ok = self._run(["", "i", "", "iii", "iv"], style="roman",
                        texts=["ปก", "หน้า i", "", "หน้า iii", "หน้า iv"])
-        self.assertEqual([i["found"] for i in ok.zones["RED"]], [])
+        # กรองเฉพาะข้อความต่อเนื่อง — โซนส้มมีข้อ "อ่านเลขหน้าไม่ได้" ของหน้าที่คั่นอยู่ด้วย
+        self.assertEqual([i["found"] for i in ok.zones[checker_module.PAGE_SEQUENCE_ZONE]
+                          if "เลขหน้าไม่ต่อเนื่อง" in i["found"]], [])
         # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
         bad = self._run(["", "i", "", "v", "vi"], style="roman",
                         texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
         self.assertTrue(any('กระโดดจาก "i" ไป "v"' in i["found"]
-                            for i in bad.zones["RED"]))
+                            for i in bad.zones[checker_module.PAGE_SEQUENCE_ZONE]))
 
     def test_skipped_when_body_start_unknown(self):
         # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ

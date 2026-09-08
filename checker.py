@@ -40,6 +40,10 @@ TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
+# เลขหน้าส่วนนำที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569)
+# กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด ไม่มีเลขหน้า เลขหน้าเนื้อหาไม่ต่อเนื่อง)
+# ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
+PAGE_SEQUENCE_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE", "ORANGE")
 
 # ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
 # ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
@@ -1897,10 +1901,10 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         if problems:
             more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
             observed = ", ".join(lab for _i, lab, _s, _v in seq)
-            rep.add("RED", "front_matter", "ส่วนนำ",
+            rep.add(PAGE_SEQUENCE_ZONE, "front_matter", "ส่วนนำ",
                     "เลขหน้าไม่ต่อเนื่อง: " + " และ ".join(problems[:5]) + more,
                     f"เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
-                    "", "PAGE.NUMBERING")
+                    "", "PAGE.NUMBERING_SEQUENCE")
 
     if unread:
         # แยกสองแบบ เพราะวิธีแก้คนละอย่าง
