@@ -2475,6 +2475,15 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         self.assertIn("rep.add_info", head)
         self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
 
+    def test_staff_are_told_to_open_the_page_themselves(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ปล่อยผ่าน ทำเพียงแจ้งบอกว่าเกิดปัญหาอะไร
+        ให้เจ้าหน้าที่ทราบและต้องไปดูเอง" — คำสั่งให้ไปดูต้องอยู่ในบรรทัดนั้นด้วย
+        ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
+        """
+        source = inspect.getsource(checker_module.run_check)
+        head = source.split("unreadable_digit_pages = {}", 1)[1][:1800]
+        self.assertIn("กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง", head)
+
     def test_the_name_on_that_page_is_still_compared(self):
         """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
 
@@ -2503,7 +2512,8 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
                    "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
                    "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
-                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว",
+                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
+                   "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง",
                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
                    "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
             en = i18n.tr_en(th, pairs)
