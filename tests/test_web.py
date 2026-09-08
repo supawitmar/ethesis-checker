@@ -184,6 +184,32 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         # ห้ามฝังชื่อโซนไว้ตายตัว ไม่งั้นคีย์ของสีเหลืองจะถูกส่งเป็น ORANGE:n
         self.assertNotIn("'ORANGE:' +", block)
 
+    def test_the_purple_list_has_no_pass_fail_buttons(self):
+        """เจ้าหน้าที่สั่งเอาออก (ก.ย. 2569) — ปุ่ม ✗ ของการ์ดสีม่วงเคยกดได้แต่ไม่ส่ง
+        อะไรไปเลย เพราะ setPF เรียกอัปเดตสรุปเฉพาะการ์ด .issue กับ .sf
+
+        ปุ่มของข้อสีส้ม/เหลืองและของหัวข้อที่เจ้าหน้าที่ตัดสินเองต้องอยู่ครบเหมือนเดิม
+        การกด "ไม่ผ่าน" ตรงนั้นมีค่าเท่าสีแดง จะเอาออกไม่ได้
+        """
+        import checker
+        rep = checker.Report()
+        rep.add_human("หน้าลงนาม 1 (หน้า i)", "โปรดทานรายชื่อกรรมการเอง")
+        with main.JOBS_LOCK:
+            main.JOBS["purple"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        html = self.client.get("/result/purple").text
+        # ต้องมีการ์ดสีม่วงจริง ไม่งั้นเทสต์ผ่านลอย ๆ โดยไม่ได้ตรวจอะไรเลย
+        self.assertIn('<div class="hc">', html)
+        # ตัดแค่ตัวการ์ด — ถ้าปล่อยยาวจะไปเจอ setPF ในสคริปต์ท้ายหน้าแล้วตกทุกครั้ง
+        card = html.split('<div class="hc">', 1)[1].split('note-view', 1)[0]
+        self.assertNotIn("setPF", card)
+        # การ์ดของหัวข้อที่เจ้าหน้าที่ตัดสินเองยังต้องมีปุ่มอยู่
+        self.assertIn('<div class="hc sf"', html)
+        self.assertIn("setPF", html.split('<div class="hc sf"', 1)[1][:1500])
+
     def test_a_junk_value_from_the_page_is_ignored(self):
         text = self._summary(failed=[], passed=[], staff=["nope", 1, None])
         self.assertTrue(text.startswith("ผลการตรวจ: ผ่าน"), text[:40])

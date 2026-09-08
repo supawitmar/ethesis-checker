@@ -401,13 +401,13 @@
     <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
       <span class="count"><b>{{ report.human_checklist | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for hc in report.human_checklist %}
+    {# ไม่มีปุ่มผ่าน/ไม่ผ่านในรายการนี้ (เจ้าหน้าที่สั่ง ก.ย. 2569) — ปุ่ม ✗ ของการ์ด
+       สีม่วงเคยกดได้แต่ไม่ส่งอะไรไปเลย เพราะ setPF เรียกอัปเดตสรุปเฉพาะการ์ด .issue
+       กับ .sf กดแล้วเปลี่ยนแค่สีบนจอ ซึ่งแยกไม่ออกจากระบบพัง
+       รายการนี้เป็น "ข้อมูลให้ทานเทียบ" ไม่ใช่คำตัดสิน จึงเหลือแค่ช่องความเห็น #}
     <div class="hc">
       <div class="row1">
         <div style="flex:1; min-width:220px;"><div class="t tr-dyn">{{ hc.item }}</div><div class="w tr-dyn">{{ hc.why }}</div></div>
-        <div class="btns">
-          <button type="button" class="pf pass" onclick="setPF(this,'pass')" data-th="✓ ผ่าน" data-en="✓ Pass">✓ ผ่าน</button>
-          <button type="button" class="pf fail" onclick="setPF(this,'fail')" data-th="✗ ไม่ผ่าน" data-en="✗ Fail">✗ ไม่ผ่าน</button>
-        </div>
       </div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
       <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
@@ -1648,6 +1648,8 @@ document.addEventListener('DOMContentLoaded', function(){
   renderVerdictPill(REPORT_VERDICT);
 });
 
+// การ์ดที่มีปุ่มนี้เหลือสองแบบ: ข้อสีส้ม/เหลือง (.issue) กับหัวข้อที่เจ้าหน้าที่ต้อง
+// ตัดสินเอง (.hc.sf) — ทั้งสองแบบส่งผลถึงข้อความสรุปจริง ส่วนรายการสีม่วงไม่มีปุ่มแล้ว
 function setPF(btn, state){
   const card = btn.closest('.hc, .issue');
   const already = btn.classList.contains('on');
