@@ -1222,17 +1222,26 @@ class ThePageSequenceFindingIsOrange(unittest.TestCase):
         self.assertNotIn('rep.add("RED", "front_matter", "ส่วนนำ",' + NEWLINE
                          + '                    "เลขหน้าไม่ต่อเนื่อง', source)
 
+    def test_the_body_page_sequence_is_orange_too(self):
+        """เจ้าหน้าที่สั่งเพิ่ม (ก.ย. 2569) ว่าเลขหน้าเนื้อหาที่กระโดดก็เป็นสีส้ม
+        เหมือนส่วนนำ — เป็นเรื่องเดียวกันคือความต่อเนื่องของเลขหน้า
+        """
+        source = inspect.getsource(checker_module)
+        before = source.split(
+            'f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}"', 1)[0][-200:]
+        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", before)
+
     def test_the_other_page_number_rules_stay_red(self):
         """ควบคุมเชิงลบ — ห้ามลากข้ออื่นของเลขหน้าเป็นสีส้มไปด้วย
 
-        ชนิดเลขหน้าผิด (ก ข ค ปนกับ i ii iii) และเลขหน้าเนื้อหาที่กระโดด
-        ยังเป็นสีแดง เจ้าหน้าที่สั่งเฉพาะข้อความต่อเนื่องของส่วนนำ
+        ชนิดเลขหน้าผิด (ก ข ค ปนกับ i ii iii) และเลขหน้าอารบิกที่ไม่เริ่มที่บทที่ 1
+        ยังเป็นสีแดง เจ้าหน้าที่สั่งเฉพาะเรื่อง "ความต่อเนื่อง"
         """
         self.assertNotIn("failure_zone", RULE_CATALOG["PAGE.NUMBERING"])
         source = inspect.getsource(checker_module)
         for phrase in ('f"มีเลขหน้าเป็น{found_names} ',
-                       'f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}"'):
-            before = source.split(phrase, 1)[0][-200:]
+                       '"เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1"'):
+            before = source.split(phrase, 1)[0][-220:]
             self.assertIn('rep.add("RED"', before, phrase)
 
 
@@ -3009,8 +3018,15 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         # ฝั่งที่ไม่มีค่าปรับ ตัดประโยคเงื่อนไขออกแล้ว (เจ้าหน้าที่สั่ง ก.ย. 2569)
         # เพราะขัดกับประโยคแรกที่เพิ่งบอกว่าไม่มีค่าปรับ ทั้งสองภาษาตัดพร้อมกัน
         self.assertNotIn("If a fine is incurred", none_en)
-        self.assertNotIn("กรณีที่นักศึกษามีค่าปรับ",
-                         checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text"])
+        # ทั้งสองชุดไม่มีคำนี้แล้ว — ชุด "มีค่าปรับ" ตัดออกทีหลัง (เจ้าหน้าที่สั่งให้
+        # สองภาษาเท่ากัน) เพราะประโยคแรกยืนยันไปแล้วว่ามี จะพูดเป็นเงื่อนไขซ้ำอีกไม่ได้
+        for cid in ("LATE_FEE_NONE", "LATE_FEE_YES"):
+            self.assertNotIn("กรณีที่นักศึกษามีค่าปรับ",
+                             checker_module.STAFF_CHOICE_BY_ID[cid][1]["text"], cid)
+        # ฝั่งที่มีค่าปรับต้องยังบอกเรื่องใบแจ้งหนี้อยู่ ทั้งสองภาษา
+        yes = checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_YES"][1]
+        self.assertIn("เอกสารแจ้งค่าปรับ(Invoice)", yes["text"])
+        self.assertIn("The invoice will be issued", yes["text_en"])
 
     def test_the_wording_uses_the_full_word_for_student(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ใช้คำว่า "นักศึกษา" ทั้งหมด ไม่ใช้ตัวย่อ
