@@ -2147,6 +2147,36 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertNotIn(checker_module._toc_section_kind(line),
                              ("abstract_th", "abstract_en"), line)
 
+    def test_the_two_wordings_are_treated_as_one_heading(self):
+        """เจ้าหน้าที่ตัดสิน (ก.ย. 2569) ว่า ABSTRACT IN THAI ถือเป็นเรื่องเดียวกับ
+        ABSTRACT (THAI) — ทุกทางที่ระบบอ่านหัวข้อต้องให้ผลเท่ากันทั้งสองถ้อยคำ
+        """
+        body = "ความเป็นมาและความสำคัญของการศึกษา"
+        for book, template in (("ABSTRACT IN THAI", "ABSTRACT (THAI)"),
+                               ("ABSTRACT IN ENGLISH", "ABSTRACT (ENGLISH)")):
+            self.assertEqual(checker_module._toc_section_kind(book + " vi"),
+                             checker_module._toc_section_kind(template + " vi"), book)
+            self.assertEqual(checker_module._is_abstract_heading(book),
+                             checker_module._is_abstract_heading(template), book)
+            kinds = [checker_module.front_section_kind(
+                NEWLINE.join(["vi", head, body]))[0] for head in (book, template)]
+            self.assertEqual(kinds[0], kinds[1], book)
+
+    def test_the_wording_has_no_fix_it_list_of_its_own(self):
+        """ปล่อยผ่านหมายถึงไม่ฟ้องสีไหนเลย
+
+        ต่างจากหัวข้อสารบัญที่เขียน CONTENTS ซึ่งมี N_TOC_WRONG คอยฟ้องให้แก้เป็น
+        TABLE OF CONTENTS — ถ้อยคำของหัวข้อบทคัดย่อต้องไม่มีรายการแบบนั้น
+        ความต่างนี้ตั้งใจ ดู RULES_AND_SOURCES.md หัวข้อ
+        "หัวข้อบทคัดย่อที่เขียนเป็นภาษาอังกฤษ"
+        """
+        self.assertIn("CONTENTS", checker_module.N_TOC_WRONG)   # ฝั่งที่ยังฟ้อง
+        terms = set(checker_module.N_ABSTRACT_TH_EN) | set(checker_module.N_ABSTRACT_EN_EN)
+        for name, value in vars(checker_module).items():
+            if not name.endswith("_WRONG") or not isinstance(value, (list, tuple, set)):
+                continue
+            self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
+
 
 class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
     """หน้าที่ฟอนต์ทำให้ตัวเลขกลายเป็นตัวอักษร ต้องไม่ถูกฟ้องว่าเล่มพิมพ์ผิด
