@@ -2660,7 +2660,8 @@ STAFF_CHECKS = [
                          "และต้องใช้ font และ template ที่กำหนดด้วย "
                          "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด "
                          "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
-                         "(จัดตามลูกศรสีเหลืองในคู่มือ)"
+                         "(จัดตามลูกศรสีเหลืองในคู่มือ) "
+                         "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
                          "\n"
                          "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
@@ -2674,7 +2675,8 @@ STAFF_CHECKS = [
                             "\n"
                             "Students must format the file using the designated font "
                             "and template, following the exact ordering sequence "
-                            "indicated by the arrows in the formatting manual."
+                            "indicated by the arrows in the formatting manual: "
+                            "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
                             "\n"
                             "Additionally, the template frames must be adjusted to "
                             "match the default settings, which accommodate up to 6 "
@@ -2702,11 +2704,8 @@ STAFF_CHECKS = [
                 "label": "ไม่มีค่าปรับ",
                 "label_en": "No fine",
                 "tone": "pass",
-                "text": ("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า "
-                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
-                         "กรณีที่นักศึกษามีค่าปรับ "
-                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
-                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                "text": ("นักศึกษาไม่มีค่าปรับในการส่งเล่มล่าช้า "
+                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม"
                          "\n"
                          "\n"
                          "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
@@ -2729,9 +2728,7 @@ STAFF_CHECKS = [
                          "\n"
                          "supawit.mar@mahidol.ac.th"),
                 "text_en": ("You have no fine for late submission, and no additional fees "
-                            "are charged during the checking process. If a fine is "
-                            "incurred, students will receive an invoice through the "
-                            "system after the checking process is completed."
+                            "are charged during the checking process."
                             "\n"
                             "\n"
                             "Please resubmit the document to the system once you have "
@@ -2758,7 +2755,7 @@ STAFF_CHECKS = [
                 "label": "มีค่าปรับ",
                 "label_en": "Has a fine",
                 "tone": "fail",
-                "text": ("นศ. มีค่าปรับในการส่งเล่มล่าช้า "
+                "text": ("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า "
                          "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
                          "กรณีที่นักศึกษามีค่าปรับ "
                          "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
@@ -2894,8 +2891,8 @@ def staff_choices(keys, placement, verdict=None):
             if choice["text"] and choice["id"] in picked:
                 # หนึ่งหัวข้อตอบได้คำตอบเดียว หน้าเว็บคุมให้อยู่แล้ว แต่ค่าที่ส่งมาเชื่อไม่ได้
                 # (หน้าเก่าค้างไว้ กดรัวจนคำขอสวนกัน หรือคำขอถูกส่งซ้ำ) ถ้าไม่คุมตรงนี้
-                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นศ. ไม่มีค่าปรับ" แล้วตามด้วย
-                # "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นักศึกษาไม่มีค่าปรับ" แล้วตามด้วย
+                # "นักศึกษามีค่าปรับ" ในย่อหน้าถัดไป
                 out.append((check, choice))
                 break
     return out

@@ -2660,14 +2660,14 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         report = self._signature_report()
         text = checker_module.plain_summary(report, staff=[self.FEE_YES])
         self.assertIn("ทั้งหมด 1 จุด", text)
-        self.assertIn("นศ. มีค่าปรับในการส่งเล่มล่าช้า", text)
+        self.assertIn("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า", text)
 
     def test_the_fee_wording_comes_last(self):
         report = self._signature_report()
         text = checker_module.plain_summary(report,
                                             staff=[self.WRONG, self.FEE_NONE])
         self.assertLess(text.index("ปรับโครงสร้างของหน้า"),
-                        text.index("นศ. ไม่มีค่าปรับ"))
+                        text.index("นักศึกษาไม่มีค่าปรับ"))
         self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"),
                         text[-80:])
 
@@ -2890,9 +2890,13 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 "ให้ใส่สีขาวไว้",
             ],
             "LATE_FEE_NONE": [
-                "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
                 "Line Offical Account ID @322wjrbo",
                 "หรือผ่านลิ้งค์",
+            ],
+            # ประโยคใบแจ้งหนี้เหลืออยู่เฉพาะชุด "มีค่าปรับ" แล้ว (เจ้าหน้าที่สั่งตัด
+            # ออกจากชุด "ไม่มีค่าปรับ" ก.ย. 2569 เพราะขัดกับประโยคแรกของชุดนั้นเอง)
+            "LATE_FEE_YES": [
+                "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
             ],
         }
         for choice_id, phrases in verbatim.items():
@@ -2920,7 +2924,10 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             # บรรทัดตำแหน่งต้องสั้น ไม่มีคำสั่งปนมา
             self.assertLess(len(lines[0]), 60, lines[0])
             for line in lines[1:]:
-                self.assertLess(len(line), 260, line[:60])
+                # วัดเฉพาะเนื้อความ ไม่นับลิงก์ — ที่ห้ามคือประโยคยาวจนอ่านไม่จบ
+                # ส่วนลิงก์คู่มือยาวตามที่มันเป็น จะตัดให้สั้นเองไม่ได้
+                prose = re.sub(r"https?://\S+", "", line).strip()
+                self.assertLess(len(prose), 260, prose[:60])
         self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
                         choice["text"][:60])
         self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i - ii)"),
@@ -2952,16 +2959,44 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         # ฝั่งที่ยืนยันว่ามีค่าปรับ ต้องไม่พูดเป็นเงื่อนไขอีก
         self.assertNotIn("If a fine is incurred", yes_en)
         self.assertIn("The invoice will be issued through the system", yes_en)
-        # ฝั่งที่ไม่มีค่าปรับ ยังคงประโยคเงื่อนไขไว้ตามต้นฉบับไทย
-        self.assertIn("If a fine is incurred", none_en)
+        # ฝั่งที่ไม่มีค่าปรับ ตัดประโยคเงื่อนไขออกแล้ว (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        # เพราะขัดกับประโยคแรกที่เพิ่งบอกว่าไม่มีค่าปรับ ทั้งสองภาษาตัดพร้อมกัน
+        self.assertNotIn("If a fine is incurred", none_en)
+        self.assertNotIn("กรณีที่นักศึกษามีค่าปรับ",
+                         checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text"])
+
+    def test_the_wording_uses_the_full_word_for_student(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ใช้คำว่า "นักศึกษา" ทั้งหมด ไม่ใช้ตัวย่อ
+
+        ข้อความชุดนี้ส่งถึงนักศึกษาโดยตรง ตัวย่อในจดหมายราชการอ่านแล้วห้วน
+        """
+        for check in checker_module.STAFF_CHECKS:
+            for choice in check["choices"]:
+                for field in ("text", "text_en"):
+                    self.assertNotIn("นศ.", choice.get(field) or "", choice["id"])
+
+    def test_the_formatting_manual_comes_with_a_link(self):
+        """เจ้าหน้าที่ส่งลิงก์คู่มือมาให้ (ก.ย. 2569) — เดิมเขียนว่า "คู่มือการจัดฯ"
+        ลอย ๆ นักศึกษาเปิดไม่ได้ว่าอยู่ที่ไหน ต้องมีทั้งสองภาษา
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        for field in ("text", "text_en"):
+            self.assertIn("https://www.canva.com/design/DAHA0Rwyb84/",
+                          choice[field], field)
+        # ลิงก์ต้องอยู่ย่อหน้าเดียวกับที่พูดถึงคู่มือ ไม่ใช่ขึ้นบรรทัดใหม่ —
+        # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ หน้ารายงานแปลทีละบรรทัด
+        for field, marker in (("text", "คู่มือการจัดฯ"),
+                              ("text_en", "formatting manual")):
+            para = next(ln for ln in choice[field].split(NEWLINE) if marker in ln)
+            self.assertIn("https://www.canva.com/", para, field)
 
     def test_the_two_fee_answers_differ_only_in_the_first_sentence(self):
         """ผิดคำเดียวคือบอกนักศึกษาผิดเรื่องเงิน — ล็อกไว้ว่าต่างกันแค่ มี/ไม่มี"""
         none_lines = self._wording(self.FEE_NONE).split(NEWLINE)
         yes_lines = self._wording(self.FEE_YES).split(NEWLINE)
         self.assertEqual(none_lines[1:], yes_lines[1:])
-        self.assertIn("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า", none_lines[0])
-        self.assertIn("นศ. มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
+        self.assertIn("นักศึกษาไม่มีค่าปรับในการส่งเล่มล่าช้า", none_lines[0])
+        self.assertIn("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
         self.assertNotIn("ไม่มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
 
     def test_two_topics_on_the_same_page_do_not_collapse_into_one(self):
@@ -3002,7 +3037,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
 
         หน้าเว็บกดได้ทีละอันอยู่แล้ว แต่หน้าเก่าที่ค้างไว้ คำขอที่สวนกัน หรือคำขอที่ถูก
         ส่งซ้ำ ทำให้ส่งมาสองคำตอบพร้อมกันได้ ถ้าไม่คุม นักศึกษาจะได้ข้อความว่า
-        "นศ. ไม่มีค่าปรับ" แล้วตามด้วย "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+        "นักศึกษาไม่มีค่าปรับ" แล้วตามด้วย "นักศึกษามีค่าปรับ" ในย่อหน้าถัดไป
         """
         text = checker_module.plain_summary(self._signature_report(),
                                             staff=[self.FEE_NONE, self.FEE_YES])
