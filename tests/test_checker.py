@@ -1202,6 +1202,164 @@ class SignaturePlaceholderTests(unittest.TestCase):
         self.assertFalse(_is_white_fill(None))
 
 
+class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
+    """ชื่อปริญญาต้องตรงเป๊ะ ห้ามมีคำเกิน (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เล่มจริงที่ทำให้ออกกฎนี้
+        หน้าปก    "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)"
+        บทคัดย่อ  "Dr.PH (PUBLIC HEALTH)"   ข้อมูลอนุมัติคือ "Dr. P.H."
+    ของเดิมผ่านทั้งคู่ เพราะถามแค่ว่า "ข้อความที่อนุมัติอยู่บนหน้านี้ไหม"
+    """
+
+    COVER = NEWLINE.join([
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "OF THE REQUIREMENTS FOR THE DEGREE OF",
+        "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)",
+        "FACULTY OF GRADUATE STUDIES",
+    ])
+
+    def test_extra_words_on_the_cover_are_returned(self):
+        self.assertEqual(
+            checker_module.degree_line_extras(self.COVER, "DOCTOR OF PUBLIC HEALTH"),
+            "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)")
+
+    def test_a_clean_line_returns_nothing(self):
+        """ควบคุมเชิงบวก — บรรทัดที่ตรงพอดีต้องเงียบ"""
+        page = self.COVER.replace(" (INTERNATIONAL PROGRAM)", "")
+        self.assertEqual(
+            checker_module.degree_line_extras(page, "DOCTOR OF PUBLIC HEALTH"), "")
+
+    def test_spacing_alone_is_not_extra_text(self):
+        """เว้นวรรคต่างกันยอมรับได้ (เจ้าหน้าที่สั่ง) — ยังต้องคืน "" """
+        self.assertEqual(
+            checker_module.degree_line_extras("Dr.PH", "Dr. P.H."), "")
+
+    def test_spacing_plus_extra_words_is_still_extra(self):
+        """เคสของเล่มจริง — ต่างวรรคตอน *และ* มีคำเกิน ต้องจับได้"""
+        page = NEWLINE.join(["NGUYEN THI NGA 6637019 PHPH/D",
+                             "Dr.PH (PUBLIC HEALTH)",
+                             "THESIS ADVISORY COMMITTEE: SUPA PENGPID, Dr.PH,"])
+        self.assertEqual(checker_module.degree_line_extras(page, "Dr. P.H."),
+                         "Dr.PH (PUBLIC HEALTH)")
+
+    def test_the_shortest_matching_line_wins(self):
+        """ควบคุมเชิงลบของข้อบน — บรรทัดรายชื่อกรรมการก็มีชื่อปริญญาอยู่
+
+        ถ้าเลือกบรรทัดแรกที่เจอ จะไปยกบรรทัดกรรมการมาอ้างว่าเป็นบรรทัดชื่อปริญญา
+        """
+        page = NEWLINE.join(["THESIS ADVISORY COMMITTEE: SUPA PENGPID, Dr.PH, X, Y",
+                             "Dr.PH (PUBLIC HEALTH)"])
+        self.assertEqual(checker_module.degree_line_extras(page, "Dr. P.H."),
+                         "Dr.PH (PUBLIC HEALTH)")
+
+    def test_the_thai_template_prefix_is_not_extra(self):
+        """หน้าปกเล่มไทยขึ้นบรรทัดว่า "ปริญญา<ชื่อปริญญา>" ตาม template
+
+        ข้อมูลอนุมัติเก็บไว้แค่ชื่อปริญญา ถ้าไม่ยกเว้นคำนี้ เล่มไทยที่ถูกต้องจะโดนฟ้อง
+        ทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
+        """
+        page = NEWLINE.join(["วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+                             "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)",
+                             "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"])
+        self.assertEqual(
+            checker_module.degree_line_extras(
+                page, "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"), "")
+
+    def test_the_thai_prefix_does_not_hide_real_extras(self):
+        """ควบคุมเชิงลบ — ยกเว้นแค่คำว่า "ปริญญา" ไม่ใช่ยกเว้นทั้งบรรทัด"""
+        page = "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม) (ภาคพิเศษ)"
+        self.assertTrue(checker_module.degree_line_extras(
+            page, "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
+
+    def test_both_call_sites_actually_use_the_helper(self):
+        """ล็อกการต่อสาย ไม่ใช่ล็อกแค่ตัว helper
+
+        เทสต์ชุดนี้รอบแรกเรียก degree_line_extras ตรง ๆ อย่างเดียว พอลองปิดการต่อสาย
+        ใน run_check เทสต์ผ่านหมดโดยที่กฎไม่ทำงานเลย
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn(
+            "extras = degree_line_extras(spot_text, expected_degree) if own_line",
+            source)
+        self.assertIn("extras = degree_line_extras(abstract_text, abbr)", source)
+        for marker in ('บรรทัดชื่อปริญญามีข้อความเกิน',
+                       'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน'):
+            block = source.split(marker, 1)[0][-260:]
+            self.assertIn('rep.add("RED", "front_matter"', block, marker)
+
+    def test_the_signature_page_is_left_alone(self):
+        """หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template จึงห้ามตรวจคำเกิน"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("degree_spots = []", 1)[1][:900]
+        self.assertIn('("หน้าปก", cover_text, cover_degree, True)', block)
+        self.assertIn("sig_degree, False", block)
+
+
+class ChapterHeadingsMustUseArabicNumerals(unittest.TestCase):
+    """หัวบทต้องใช้เลขอารบิก (เจ้าหน้าที่สั่ง ก.ย. 2569) แดง ฟ้องรายบท
+
+    ระบบรู้จักเลขโรมันไว้เพื่อหาบทให้เจออยู่แล้ว แต่ไม่เคยฟ้อง เล่มจริงเล่มหนึ่งพิมพ์
+    CHAPTER I, II, III, IV, 5, VI คือปนกันเองด้วยซ้ำ แล้วรายงานเงียบสนิท
+    """
+
+    def test_arabic_headings_pass(self):
+        for line in ("CHAPTER 2", "บทที่ 2", "CHAPTER 12"):
+            self.assertTrue(checker_module.chapter_number_is_arabic(line), line)
+
+    def test_roman_and_thai_numerals_fail(self):
+        """เล่มไทยใช้เลขอารบิก ไม่ใช่เลขไทย (เจ้าหน้าที่ยืนยัน ก.ย. 2569)"""
+        for line in ("CHAPTER II", "CHAPTER IV", "บทที่ ๒", "บทที่ ๑๐"):
+            self.assertFalse(checker_module.chapter_number_is_arabic(line), line)
+
+    def test_the_rule_is_wired_in_per_chapter(self):
+        """ฟ้องรายบท ไม่รวมเป็นข้อเดียว — แต่ละบทไปแก้คนละหน้า"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if not chapter_number_is_arabic(l):", source)
+        block = source.split("for _cn, _head, _idx in non_arabic_heads:", 1)[1][:420]
+        self.assertIn('rep.add("RED", "body", f"บทที่ {_cn} ({page_ref(_idx)})"', block)
+        self.assertIn("BODY.CHAPTER_NUMBER", block)
+
+    def test_the_rule_is_in_the_catalog(self):
+        self.assertIn("BODY.CHAPTER_NUMBER", RULE_CATALOG)
+        self.assertNotIn("failure_zone", RULE_CATALOG["BODY.CHAPTER_NUMBER"])
+
+
+class TooManyCommitteeNamesIsRed(unittest.TestCase):
+    """ขาด = ส้ม · เกิน = แดง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ขาดเป็นส้มเพราะระบบอาจอ่านบางช่องไม่ออก แต่เกินฟันธงได้ — การอ่านไม่ครบทำให้ได้
+    ชื่อน้อยกว่า ไม่มีทางทำให้ได้มากกว่าที่พิมพ์ไว้จริง เล่มจริงพิมพ์กรรมการซ้ำสองคน
+    คนละสองครั้ง จึงได้ 7 ชื่อจากที่อนุมัติไว้ 5
+    """
+
+    APPROVED = [{"name": "BRIAN EDUARD VAN WYK"}, {"name": "SUPA PENGPID"},
+                {"name": "KARL PELTZER"}]
+
+    def _run(self, count):
+        rep = checker_module.Report()
+        checker_module._report_committee_count(
+            rep, self.APPROVED, [f"name {k}" for k in range(count)],
+            "หน้าลงนาม 2 (หน้า ii)", "บฑ.2", "FRONT.COMMITTEE")
+        return rep
+
+    def test_too_many_names_is_red(self):
+        rep = self._run(5)
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn("รายชื่อเกิน", rep.zones["RED"][0]["found"])
+        self.assertIn("ลบรายชื่อที่เกินออก", rep.zones["RED"][0]["fix"])
+
+    def test_too_few_names_stays_orange(self):
+        """ควบคุมเชิงลบ — ขาดยังเป็นส้มเหมือนเดิม เพราะอาจเป็นการอ่านไม่ครบ"""
+        rep = self._run(2)
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        self.assertIn("ระบบอ่านบางช่องไม่ออก", rep.zones["ORANGE"][0]["fix"])
+
+    def test_the_right_count_says_nothing(self):
+        rep = self._run(3)
+        self.assertEqual(rep.zones["RED"] + rep.zones["ORANGE"], [])
+
+
 class ThePageSequenceFindingIsOrange(unittest.TestCase):
     """เลขหน้าส่วนนำที่เรียงไม่ต่อเนื่อง = สีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
 
@@ -3038,6 +3196,18 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 for field in ("text", "text_en"):
                     self.assertNotIn("นศ.", choice.get(field) or "", choice["id"])
 
+    def test_the_layout_wording_tells_them_to_remove_the_position(self):
+        """เจ้าหน้าที่สั่งเพิ่มท่อนนี้ (ก.ย. 2569) ต้องมีทั้งสองภาษา
+
+        จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ จึงต้องต่อท้ายย่อหน้าเดิม ไม่ขึ้นบรรทัดใหม่
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        self.assertIn("and remove the position below the degree", choice["text_en"])
+        self.assertIn("และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก", choice["text"])
+        for field in ("text", "text_en"):
+            lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
+            self.assertEqual(len(lines), 4, field)
+
     def test_the_formatting_manual_comes_with_a_link(self):
         """เจ้าหน้าที่ส่งลิงก์คู่มือมาให้ (ก.ย. 2569) — เดิมเขียนว่า "คู่มือการจัดฯ"
         ลอย ๆ นักศึกษาเปิดไม่ได้ว่าอยู่ที่ไหน ต้องมีทั้งสองภาษา
@@ -4669,7 +4839,8 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
         self.assertIn("หน้านี้มี 2 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
     def test_too_many_names_says_the_list_is_over(self):
-        issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["ORANGE"][0]
+        # เกิน = สีแดง (เจ้าหน้าที่สั่ง ก.ย. 2569) ส่วนขาดยังเป็นสีส้ม
+        issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["RED"][0]
         self.assertIn("รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 4 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 

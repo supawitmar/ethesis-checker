@@ -951,22 +951,31 @@ def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
 
     "ควรมีชื่ออะไรบ้าง" อยู่ในบรรทัดที่ควรเป็น ดึงจากฟอร์มต้นทางโดยตรง
 
-    จำนวนไม่ตรง = **ส้ม ไม่ใช่แดง** เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม
-    ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม
+    **ขาด = ส้ม · เกิน = แดง** (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ขาดเป็นส้มเพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม ระบบยืนยันเองไม่ได้
+    ว่าเป็นความผิดของเล่ม แต่ **เกินฟันธงได้** — การอ่านไม่ครบทำให้ได้ชื่อ *น้อยกว่า*
+    ไม่มีทางทำให้ได้ *มากกว่า* ที่พิมพ์ไว้จริง
+
+    เล่มจริงที่เจอ (ก.ย. 2569) หน้าลงนาม 2 พิมพ์กรรมการซ้ำสองคน คนละสองครั้ง
+    (Tran Kiem Hao กับ Karl Peltzer บรรทัดคุณวุฒิเขียน "Ph.D." กับ "PhD" ต่างกัน)
+    จึงได้ 7 ชื่อจากที่อนุมัติไว้ 5 — ของเดิมเป็นส้มพร้อมคำแนะนำว่า "ถ้าครบแล้วแปลว่า
+    ระบบอ่านบางช่องไม่ออก ให้ผ่านได้" ซึ่งชี้ผิดทางสำหรับกรณีเกิน
     """
     want = _committee_names(expected)
     if not want or len(found_names) == len(want):
         return
     listed = "  ".join(f'{k}. {_display_committee_name(n)}'
                        for k, n in enumerate(want, start=1))
-    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}"
-            if len(found_names) < len(want) else
+    short = len(found_names) < len(want)
+    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}" if short else
             f"รายชื่อเกินจากที่ได้รับอนุมัติใน {form}")
-    rep.add("ORANGE", "front_matter", loc,
+    rep.add("ORANGE" if short else "RED", "front_matter", loc,
             f"{lead}: หน้านี้มี {len(found_names)} ชื่อ แต่อนุมัติไว้ {len(want)} ชื่อ",
             f"ต้องมีรายชื่อครบตาม {form} คือ {listed}",
-            "ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ "
-            "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
+            ("ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ "
+             "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้") if short else
+            "ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อที่ได้รับอนุมัติ",
             rule_id)
 
 
@@ -2669,7 +2678,7 @@ STAFF_CHECKS = [
                          "\n"
                          "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้"),
+                         "ให้ใส่สีขาวไว้ และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก"),
                 "text_en": ("Approval pages (Pages i - ii)"
                             "\n"
                             "please restructure the page and realign each committee "
@@ -2685,7 +2694,8 @@ STAFF_CHECKS = [
                             "Additionally, the template frames must be adjusted to "
                             "match the default settings, which accommodate up to 6 "
                             "names per side; any remaining blank slots must be "
-                            "changed to white font color"),
+                            "changed to white font color and remove the position "
+                            "below the degree"),
             },
         ],
     },
@@ -3215,6 +3225,49 @@ _DEGREE_SEARCH_STOP = re.compile(
 
 # ตัวย่อคุณวุฒิที่มีจุดคั่นตั้งแต่สองท่อน เช่น Ph.D. / M.Sc. / ปร.ด. / วท.ม.
 _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2,}')
+
+
+# คำนำหน้าที่ template เขียนไว้เอง ไม่ใช่คำที่นักศึกษาเติมเกิน — หน้าปกเล่มไทยขึ้นบรรทัด
+# ว่า "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ส่วนข้อมูลอนุมัติเก็บไว้แค่
+# "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ถ้าไม่ตัดคำนี้ก่อน เล่มไทยที่ถูกต้อง
+# จะโดนฟ้องว่ามีข้อความเกินทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
+_DEGREE_LINE_TEMPLATE_PREFIXES = (norm("ปริญญา"),)
+
+
+def degree_line_extras(page_text, expected):
+    """ข้อความบนบรรทัดชื่อปริญญาที่ "เกิน" จากข้อมูลอนุมัติ — คืน "" ถ้าบรรทัดตรงพอดี
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าชื่อปริญญาต้องตรงเป๊ะและห้ามมีคำเกิน ส่วนการเว้นวรรค
+    จะเว้นหรือไม่เว้นยอมรับได้ จึงเทียบด้วย norm() ซึ่งตัดวรรคตอนกับช่องว่างทิ้งก่อน
+
+    เล่มจริงที่เจอ (ก.ย. 2569)
+        หน้าปก      "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)"
+                    ข้อมูลอนุมัติคือ "DOCTOR OF PUBLIC HEALTH"
+        บทคัดย่อ    "Dr.PH (PUBLIC HEALTH)"  ข้อมูลอนุมัติคือ "Dr. P.H."
+    ของเดิมปล่อยผ่านทั้งคู่ เพราะถามแค่ว่า "ข้อความที่อนุมัติอยู่บนหน้านี้ไหม"
+    ไม่ได้ถามว่า "บรรทัดนั้นเท่ากับที่อนุมัติไหม"
+
+    เลือก **บรรทัดที่สั้นที่สุด** ที่มีข้อความนั้นอยู่ — หน้าบทคัดย่อมีชื่อปริญญาโผล่ใน
+    บรรทัดรายชื่อกรรมการด้วย ("... SUPA PENGPID, Dr.PH, ...") ถ้าเลือกบรรทัดแรกที่เจอ
+    อาจไปยกบรรทัดกรรมการมาอ้างว่าเป็นบรรทัดชื่อปริญญา
+
+    ใช้เฉพาะช่องที่ template วางชื่อปริญญาไว้ "บรรทัดของมันเอง" (หน้าปก และบรรทัด
+    ชื่อย่อในบทคัดย่อ) — หน้าลงนามไม่ใช้ เพราะชื่อปริญญาอยู่กลางประโยค template
+    ("for the degree of ...") ซึ่งมีคำอื่นล้อมรอบโดยชอบอยู่แล้ว
+    """
+    want = norm(expected)
+    if not want:
+        return ""
+    hits = []
+    for line in (page_text or "").splitlines():
+        nl = norm(line)
+        for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
+            if prefix and nl.startswith(prefix):
+                nl = nl[len(prefix):]
+                break
+        if want in nl and nl != want:
+            hits.append(soft(line))
+    return min(hits, key=len) if hits else ""
 
 
 def _looks_like_degree_line(line):
@@ -4095,6 +4148,25 @@ def _roman_to_int(text):
     return total if 1 <= total <= 49 else None
 
 
+# หัวบทที่เขียนเลขเป็นอารบิกล้วน — norm() ตัดช่องว่างกับจุดทิ้งไปแล้ว
+# เลขไทย (๑-๙) รอดจาก norm() เพราะอยู่ในช่วง ก-๙ จึงต้องระบุ 0-9 ให้ชัด
+_ARABIC_CHAPTER_HEAD = re.compile(r'(?:CHAPTER|บทท)[0-9]{1,2}')
+
+
+def chapter_number_is_arabic(line):
+    """หัวบทบรรทัดนี้ใช้เลขอารบิกไหม — "CHAPTER II" กับ "บทที่ ๒" คืน False
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าหัวบทต้องใช้เลขอารบิกเสมอ **ทั้งเล่มไทยและเล่มอังกฤษ**
+    เล่มไทยก็ใช้เลขอารบิก ไม่ใช่เลขไทย
+
+    ระบบรู้จักเลขโรมันกับเลขไทยไว้เพื่อ "หาบทให้เจอ" อยู่แล้ว (ดู _chapter_match)
+    แต่เดิมรู้จักแล้วเงียบ ไม่เคยฟ้อง — เล่มจริงเล่มหนึ่งพิมพ์
+    CHAPTER I, II, III, IV, 5, VI คือปนกันเองด้วยซ้ำ แล้วรายงานไม่มีข้อนี้เลย
+    (กติกาเดียวกับ N_TOC_WRONG: รู้จักไว้ให้การตรวจเดินต่อได้ แล้วค่อยฟ้องแยก)
+    """
+    return bool(_ARABIC_CHAPTER_HEAD.fullmatch(norm(line)))
+
+
 def _chapter_match(line):
     """Return chapter number if the (normalized) line is 'CHAPTER n' / 'บทที่ n'.
 
@@ -4616,6 +4688,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                        source_page_idx, next_toc_line))
 
     body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no, next_line)
+    non_arabic_heads = []   # (เลขบท, บรรทัดหัวบทตามที่พิมพ์, ดัชนีหน้า)
     for i, t in enumerate(pages):
         tls = top_lines(t, BODY_RULES['heading_scan_lines'])
         for j, l in enumerate(tls):
@@ -4628,7 +4701,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if not re.match(r'\d', title):
                     body_ch.append((cn, title, i, printed.get(i),
                                     tls[j + 2] if j + 2 < len(tls) else ""))
+                    if not chapter_number_is_arabic(l):
+                        non_arabic_heads.append((cn, soft(l), i))
                 break
+    # ฟ้อง "รายบท" ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ไม่รวมเป็นข้อเดียว — แต่ละบท
+    # ต้องไปแก้คนละหน้า และเล่มจริงปนกันเองได้ (I, II, III, IV, 5, VI)
+    for _cn, _head, _idx in non_arabic_heads:
+        _want = f"CHAPTER {_cn}" if norm(_head).startswith("CHAPTER") else f"บทที่ {_cn}"
+        rep.add("RED", "body", f"บทที่ {_cn} ({page_ref(_idx)})",
+                f'หัวบทเขียนว่า "{_head}"',
+                f'หัวบทต้องใช้เลขอารบิก คือ "{_want}"',
+                "แก้เลขบทให้เป็นเลขอารบิก", "BODY.CHAPTER_NUMBER")
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
@@ -5517,12 +5600,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
-                degree_spots.append(("หน้าปก", cover_text, cover_degree))
+                # หน้าปกวางชื่อปริญญาไว้บรรทัดของมันเอง จึงตรวจคำเกินได้
+                degree_spots.append(("หน้าปก", cover_text, cover_degree, True))
             if sig_degree:
-                degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], sig_degree)
+                # หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template ("for the degree of ...")
+                # มีคำอื่นล้อมรอบโดยชอบ จึงตรวจคำเกินไม่ได้
+                degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx],
+                                     sig_degree, False)
                                     for k, idx in enumerate(sig_pages))
-            for spot_name, spot_text, expected_degree in degree_spots:
+            for spot_name, spot_text, expected_degree, own_line in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
+                extras = degree_line_extras(spot_text, expected_degree) if own_line else ""
+                if extras:
+                    # ตรงเป๊ะแต่มีคำเกิน = แดง (เจ้าหน้าที่สั่ง ก.ย. 2569) ต้องมาก่อน
+                    # กิ่ง exact เพราะ exact ตอบแค่ว่า "มีข้อความนี้อยู่บนหน้า"
+                    rep.add_verification("ชื่อปริญญา", spot_name, "fail",
+                                         f"มีข้อความเกิน: {extras}")
+                    rep.add("RED", "front_matter", spot_name,
+                            f'บรรทัดชื่อปริญญามีข้อความเกิน: "{extras}"',
+                            f'บรรทัดนี้ต้องเป็น "{expected_degree}" เท่านั้น '
+                            "ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
+                    continue
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
@@ -5552,19 +5651,19 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True)
             vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
             box = f"{lang} ({page_ref(abstract_idx)})"
-            if compared['status'] == 'exact':
-                # ชื่อย่อพบครบ แต่บรรทัดนั้นต้องไม่มีคำอื่นเกิน เช่น "DEGREE M.Sc. (...)"
-                abbr_lines = [soft(line) for line in abstract_text.splitlines()
-                              if abbr in soft(line)]
-                if abbr_lines and not any(norm(line) == norm(abbr) for line in abbr_lines):
-                    rep.add_verification("ชื่อปริญญา", vloc, "fail",
-                                         f"มีข้อความเกิน: {abbr_lines[0]}")
-                    rep.add("RED", "front_matter", box,
-                            f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{abbr_lines[0]}"',
-                            f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
-                            "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
-                else:
-                    rep.add_verification("ชื่อปริญญา", vloc, "pass")
+            # ต้องตรวจคำเกินก่อนทุกกิ่ง — ของเดิมตรวจเฉพาะตอนเทียบได้ exact และเทียบ
+            # ด้วย substring ดิบ ๆ เล่มที่เว้นวรรคต่างด้วย ("Dr.PH (PUBLIC HEALTH)"
+            # กับ "Dr. P.H.") จึงหลุดไปกิ่ง "ต่างเฉพาะวรรคตอน" แล้วได้เหลืองผ่าน
+            extras = degree_line_extras(abstract_text, abbr)
+            if extras:
+                rep.add_verification("ชื่อปริญญา", vloc, "fail",
+                                     f"มีข้อความเกิน: {extras}")
+                rep.add("RED", "front_matter", box,
+                        f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{extras}"',
+                        f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                        "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
+            elif compared['status'] == 'exact':
+                rep.add_verification("ชื่อปริญญา", vloc, "pass")
             elif norm(abbr) in norm(abstract_text):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
