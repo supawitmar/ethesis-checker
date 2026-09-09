@@ -2578,6 +2578,57 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
+class TwoColumnsOnTheSameRowStayOnOneLine(unittest.TestCase):
+    """หน้าลงนามเป็นสองคอลัมน์ อักขระที่อยู่แถวเดียวกันต้องอยู่บรรทัดเดียวกัน
+
+    ของเดิมจัดบรรทัดด้วย round(top / 3.0) ซึ่งมีขอบช่องตายตัว เล่มจริง (ก.ย. 2569)
+    ชื่อสองคอลัมน์อยู่ที่ top 283.4 กับ 283.9 ห่างกันแค่ 0.5 pt แต่คร่อมขอบช่องพอดี
+    จึงถูกแยกเป็นสองบรรทัด แล้วบรรทัดเหนือคำว่า Candidate กลายเป็นชื่อของคอลัมน์ขวา
+
+        First Name Last name,      <- ช่องชื่อนักศึกษา (ยังไม่ได้กรอก)
+        Chayanan Sittibusaya,      <- ประธานกรรมการ คอลัมน์ขวา
+        Candidate MD.
+
+    ระบบจึงรายงานว่า "ชื่อนักศึกษาในเล่มเขียนว่า Chayanan Sittibusaya"
+    ทั้งที่เจ้าหน้าที่เห็นว่าเป็น "First Name Last name"
+    """
+
+    @staticmethod
+    def _chars(rows):
+        out = []
+        for top, x0, text in rows:
+            out.append({"text": text, "top": top, "x0": x0, "x1": x0 + 6,
+                        "size": 16.0, "upright": True})
+        return out
+
+    def test_half_a_point_apart_is_the_same_line(self):
+        rows = [(283.4, 48.0, "A"), (283.9, 310.8, "B")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertEqual(len(lines), 1)
+
+    def test_a_real_next_line_still_splits(self):
+        """ควบคุมเชิงลบ — ระยะบรรทัดจริงของเล่มห่าง 13-18 pt ต้องไม่ถูกยุบรวม"""
+        rows = [(283.4, 48.0, "A"), (297.1, 48.0, "B")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertEqual(len(lines), 2)
+
+    def test_a_long_line_does_not_creep_into_the_next_one(self):
+        """เทียบระยะกับตัวแรกของบรรทัด ไม่ใช่ตัวก่อนหน้า ไม่งั้นไหลไปทีละ 3 pt เรื่อย ๆ"""
+        rows = [(100.0, 10.0, "A"), (102.0, 20.0, "B"), (104.0, 30.0, "C"),
+                (106.0, 40.0, "D")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertGreater(len(lines), 1)
+
+    def test_the_student_slot_is_the_left_column(self):
+        page = NEWLINE.join([
+            "……………………………………… ………………………………………",
+            "First Name Last name, Chayanan Sittibusaya,",
+            "Candidate MD.",
+        ])
+        self.assertEqual(checker_module.signature_printed_name(page),
+                         "First Name Last name")
+
+
 class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
     """หน้าที่ฟอนต์ทำให้ตัวเลขกลายเป็นตัวอักษร ต้องไม่ถูกฟ้องว่าเล่มพิมพ์ผิด
 
@@ -2628,6 +2679,30 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         self.assertEqual(
             checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
                                                 self.NAMES), "")
+
+    def test_digits_turned_into_punctuation_are_caught_too(self):
+        """อีกเล่มหนึ่ง (ก.ย. 2569) ฟอนต์เดียวกันเพี้ยนคนละแบบ
+
+        เลข "6636480" ออกมาเป็น ",,-,./0" คือกลายเป็นเครื่องหมายวรรคตอน และรหัส
+        หลักสูตรถูกแทรกช่องว่างเป็น "PHIE / M" จนแตกเป็นสามคำ ของเดิมจับได้เฉพาะ
+        ตัวอักษรอังกฤษล้วนกับรหัสหลักสูตรคำเดียว เล่มนี้จึงโดนฟ้องแดงว่าไม่พบรหัส
+        ทั้งที่พิมพ์อยู่ครบ
+        """
+        line = "อรณิชา หนูนาค ,,-,./0 PHIE / M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(
+                line, "6636480 PHIE/M", ("ONNICHA NOONAK", "อรณิชา หนูนาค")),
+            ",,-,./0")
+
+    def test_a_thai_surname_in_the_slot_is_not_mistaken_for_broken_digits(self):
+        """ควบคุมเชิงลบ — เล่มไทยที่ลืมพิมพ์รหัสจะเหลือนามสกุลไทยอยู่ตรงนั้น
+
+        ยาวเท่าจำนวนหลักพอดีได้ จึงต้องกันด้วย "ห้ามมีอักษรไทย" ไม่ใช่ความยาวอย่างเดียว
+        """
+        self.assertEqual(
+            checker_module.unreadable_id_digits(
+                "อรณิชา หนูนาคสกุล PHIE / M", "6636480 PHIE/M",
+                ("ONNICHA NOONAK",)), "")
 
     def test_the_page_is_not_reported_as_a_problem(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด

@@ -87,15 +87,45 @@ def _page_text(page):
     chars = getattr(page, 'chars', None)
     if not chars:
         return page.extract_text() or ''
-    rows = {}
-    for c in _thai_chars(chars):
-        rows.setdefault(round(c['top'] / 3.0), []).append(c)
     out_lines = []
-    for key in sorted(rows):
-        line = _compose_thai_line(rows[key])
+    for row in _group_into_lines(_thai_chars(chars)):
+        line = _compose_thai_line(row)
         if line:
             out_lines.append(line)
     return '\n'.join(out_lines)
+
+
+# ความสูงสูงสุดที่ถือว่าอักขระยังอยู่ "บรรทัดเดียวกัน" — ระยะบรรทัดจริงของเล่มห่างกัน
+# 13-18 pt ส่วนสองคอลัมน์ในแถวเดียวกันเยื้องกันไม่ถึง 2 pt ค่านี้จึงแยกสองอย่างได้ชัด
+_LINE_TOLERANCE = 3.0
+
+
+def _group_into_lines(chars):
+    """จัดอักขระเป็นบรรทัดด้วย "ระยะห่างจริง" ไม่ใช่ช่องตายตัว
+
+    ของเดิมใช้ round(top / 3.0) เป็นกุญแจ ซึ่งมีขอบช่องตายตัว อักขระที่ห่างกันแค่
+    0.5 pt จึงตกคนละช่องได้ถ้าบังเอิญคร่อมขอบพอดี — หน้าลงนามเล่มจริง (ก.ย. 2569)
+    ชื่อสองคอลัมน์อยู่แถวเดียวกัน (top 283.4 กับ 283.9) แต่ถูกแยกเป็นสองบรรทัด
+
+        First Name Last name,          <- ช่องชื่อนักศึกษา (คอลัมน์ซ้าย)
+        Chayanan Sittibusaya,          <- ประธานกรรมการ (คอลัมน์ขวา)
+        Candidate MD.                  <- ป้ายสองคอลัมน์ รวมกันถูกต้อง
+
+    บรรทัดเหนือคำว่า Candidate จึงกลายเป็นชื่อของคอลัมน์ขวา ระบบเลยรายงานว่า
+    "ชื่อนักศึกษาในเล่มเขียนว่า Chayanan Sittibusaya" ทั้งที่ช่องนั้นเป็น placeholder
+    ที่ยังไม่ได้กรอก ("First Name Last name")
+
+    เทียบระยะกับ "ตัวแรกของบรรทัด" ไม่ใช่ตัวก่อนหน้า เพื่อไม่ให้บรรทัดยาวไหลไปเรื่อย ๆ
+    ทีละ 3 pt จนกลืนบรรทัดถัดไป
+    """
+    lines, start = [], None
+    for c in sorted(chars, key=lambda c: (float(c['top']), float(c['x0']))):
+        top = float(c['top'])
+        if start is None or top - start > _LINE_TOLERANCE:
+            lines.append([])
+            start = top
+        lines[-1].append(c)
+    return lines
 
 
 def _thai_chars(chars):
@@ -1431,6 +1461,11 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
             "", "FORM.APPROVED_MATCH")
 
 
+# อักษรไทย (ไม่รวมเลขไทยกับวรรณยุกต์) — ใช้แยก "ช่องรหัสที่ฟอนต์ทำเพี้ยน" ออกจาก
+# "นามสกุลไทยที่ค้างอยู่ตรงนั้นเพราะเล่มลืมพิมพ์รหัส"
+_THAI_LETTER = re.compile('[ก-ฮ]')
+
+
 def unreadable_id_digits(page_text, student_id, names=()):
     """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
 
@@ -1439,11 +1474,18 @@ def unreadable_id_digits(page_text, student_id, names=()):
     glyph ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกันใช้อีกฟอนต์ อ่านได้ "6437028 PHPH/M"
     ถูกต้อง เล่มไม่ได้พิมพ์ผิด ระบบอ่านไม่ออกเอง
 
+    อีกเล่มหนึ่ง (ก.ย. 2569) ฟอนต์เดียวกันแต่เพี้ยนคนละแบบ เลข "6636480" ออกมาเป็น
+    ",,-,./0" คือกลายเป็น **เครื่องหมายวรรคตอน** ไม่ใช่ตัวอักษร และรหัสหลักสูตร
+    "PHIE/M" ถูกแทรกช่องว่างเป็น "PHIE / M" จนกลายเป็นสามคำ ของเดิมจับได้เฉพาะแบบ
+    ตัวอักษรอังกฤษล้วนและรหัสหลักสูตรที่เป็นคำเดียว เล่มนี้จึงหลุด แล้วโดนฟ้องแดงว่า
+    "ไม่พบรหัสนักศึกษาบนหน้านี้" ทั้งที่พิมพ์อยู่ครบ
+
     ตัวชี้ขาดคือ "รหัสหลักสูตรอ่านได้ แต่ตัวเลขที่ต้องอยู่ข้างหน้ามันไม่ใช่ตัวเลข"
     ไม่ใช่การนับสถิติตัวอักษรทั้งหน้า เพราะกฎนี้ใช้ยกเลิกการฟ้อง จึงต้องแคบไว้ก่อน
 
-    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสองอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
-    และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (เล่มที่ลืมรหัสจะเหลือนามสกุลติดอยู่ตรงนั้น)
+    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสามอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
+    · ต้องไม่มีอักษรไทยปน (เล่มที่ลืมรหัสบนหน้าไทยจะเหลือนามสกุลไทยติดอยู่ตรงนั้น)
+    · และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (หน้าอังกฤษจะเหลือนามสกุลอังกฤษ)
     """
     student_id = soft(student_id)
     digits = re.sub(r'\D', '', student_id)
@@ -1457,12 +1499,15 @@ def unreadable_id_digits(page_text, student_id, names=()):
     for line in (page_text or "").splitlines():
         tokens = soft(line).split()
         for k in range(1, len(tokens)):
-            if norm(tokens[k]) != want_tail:
+            # รหัสหลักสูตรอาจถูกแทรกช่องว่างจนแตกเป็นหลายคำ ("PHIE / M") จึงต่อคำ
+            # ไปข้างหน้าทีละคำแล้วเทียบด้วย norm() ซึ่งตัดช่องว่างกับ "/" ทิ้งอยู่แล้ว
+            if not any(norm("".join(tokens[k:k + span])) == want_tail
+                       for span in range(1, min(4, len(tokens) - k + 1))):
                 continue
             slot = tokens[k - 1]
-            if not re.fullmatch(r'[A-Za-z]+', slot) or len(slot) != len(digits):
+            if len(slot) != len(digits) or _THAI_LETTER.search(slot):
                 continue
-            if any(norm(slot) in name for name in known):
+            if any(norm(slot) in name for name in known if name):
                 continue
             return slot
     return ""
