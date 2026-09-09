@@ -972,12 +972,12 @@ class AbstractCommitteeTests(unittest.TestCase):
                                     {"name": "ธเนศ ข", "role": ""}]}
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ"]
         rep = self._run(committees, [], [0], pages)
-        self.assertEqual(self._reds(rep), [])          # จำนวนไม่ตรง = ส้ม ไม่ใช่แดง
-        found = [i["found"] for i in rep.zones["ORANGE"]]
+        # จำนวนไม่ตรง = แดง ตั้งแต่ ก.ย. 2569 (เดิมขาดเป็นส้ม)
+        found = [i["found"] for i in rep.zones["RED"]]
         self.assertTrue(any("หน้านี้มี 1 ชื่อ แต่อนุมัติไว้ 2 ชื่อ" in f for f in found),
                         found)
         # ต้องบอกด้วยว่าควรมีชื่ออะไรบ้าง (ดึงจากฟอร์มต้นทาง)
-        expected = [i["expected"] for i in rep.zones["ORANGE"]]
+        expected = [i["expected"] for i in rep.zones["RED"]]
         self.assertTrue(any("ธเนศ ข" in e for e in expected), expected)
 
     def test_committee_list_is_printed_for_staff_to_check_by_eye(self):
@@ -1348,12 +1348,16 @@ class TooManyCommitteeNamesIsRed(unittest.TestCase):
         self.assertIn("รายชื่อเกิน", rep.zones["RED"][0]["found"])
         self.assertIn("ลบรายชื่อที่เกินออก", rep.zones["RED"][0]["fix"])
 
-    def test_too_few_names_stays_orange(self):
-        """ควบคุมเชิงลบ — ขาดยังเป็นส้มเหมือนเดิม เพราะอาจเป็นการอ่านไม่ครบ"""
+    def test_too_few_names_is_red_too(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าไม่ครบก็ต้องแจ้งสีแดง — เดิมเป็นส้ม
+
+        ยอมรับความเสี่ยงแล้วว่าถ้าระบบอ่านตารางไม่ครบจะฟ้องแดงทั้งที่เล่มถูก
+        เจ้าหน้าที่จึงต้องเปิดหน้านั้นดูก่อนส่งกลับ
+        """
         rep = self._run(2)
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
-        self.assertIn("ระบบอ่านบางช่องไม่ออก", rep.zones["ORANGE"][0]["fix"])
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertEqual(rep.zones["ORANGE"], [])
+        self.assertIn("เพิ่มรายชื่อที่ขาด", rep.zones["RED"][0]["fix"])
 
     def test_the_right_count_says_nothing(self):
         rep = self._run(3)
@@ -2132,7 +2136,7 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
     def _count_issue(self, loc, form="บฑ.2"):
         rep = Report()
         checker_module._report_committee_count(rep, self.FORM3, ["ก ก", "ข ข"], loc, form)
-        return rep.zones["ORANGE"][0]
+        return rep.zones["RED"][0]
 
     def test_the_count_finding_is_filed_as_a_data_mismatch(self):
         for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
@@ -2140,16 +2144,48 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
-    def test_the_case_rule_for_committee_names_is_gone(self):
-        """เจ้าหน้าที่สั่งเลิกตรวจตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม (ก.ย. 2569)
+    def test_the_case_rule_is_back_with_the_credential_stripped(self):
+        """เจ้าหน้าที่สั่งให้เอากฎกลับมา (ก.ย. 2569) พร้อมตัดคุณวุฒิท้ายชื่อออกก่อน
 
-        ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้าย
-        ("Weerawat Limroonreungrat, PT") แล้วตัดสินว่าไม่ใช่ Capital Case
-        ทั้งที่ชื่อถูกต้อง
+        กฎนี้เคยถูกถอดออกทั้งกฎ เพราะระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง คุณวุฒิ
+        ที่พิมพ์ต่อท้ายจึงติดมาด้วย แล้วชื่อที่ถูกต้องถูกตัดสินว่าผิด
         """
-        self.assertFalse(hasattr(checker_module, "_report_committee_name_case"))
-        source = inspect.getsource(checker_module)
-        self.assertNotIn("ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ", source)
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "Weerawat Limroonreungrat, PT",
+                  2: "Assist.Prof. Hoon Kim, ATC"}, "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(rep.zones["ORANGE"], [], "ชื่อที่ถูกต้องต้องไม่ถูกฟ้อง")
+
+    def test_an_all_uppercase_committee_name_is_reported(self):
+        """positive control — อาการที่กฎนี้มีไว้จับ
+
+        นักศึกษาที่คัดรายชื่อจากหน้าบทคัดย่อ (ซึ่งต้องเป็น UPPERCASE) มาวางบน
+        หน้าลงนาม จะได้ตัวพิมพ์ใหญ่ทั้งบรรทัด
+        """
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL, Ph.D.",
+                  2: "Hathaichon Inchai,"}, "หน้าลงนาม 2 (หน้า ii)")
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        found = rep.zones["ORANGE"][0]["found"]
+        self.assertIn("MATHUROS TIPAYAMONGKHOLGUL", found)
+        self.assertNotIn("Hathaichon", found)
+        self.assertNotIn("Ph.D.", found)
+
+    def test_thai_committee_names_are_left_alone(self):
+        """ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก"""
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "ฉัตรภา หัตถโกศล, ส.ด."}, "หน้าลงนาม 1 (หน้า ก)")
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_the_credential_is_what_gets_stripped(self):
+        for raw, core in (("Weerawat Limroonreungrat, PT", "Weerawat Limroonreungrat"),
+                          ("Assoc. Prof. Mathuros Tipayamongkholgul,",
+                           "Mathuros Tipayamongkholgul"),
+                          ("Prof. Chartchalerm Isarankura-Na-Ayudhya,",
+                           "Chartchalerm Isarankura-Na-Ayudhya")):
+            self.assertEqual(checker_module.committee_name_for_case(raw), core, raw)
 
     def test_every_category_used_here_has_an_english_name(self):
         import tools.check_i18n as i18n
@@ -2628,6 +2664,49 @@ class EveryDamagedPageIsReported(unittest.TestCase):
             en = i18n.tr_en(th, pairs)
             left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class AShortCommitteeListIsReportedInRed(unittest.TestCase):
+    """รายชื่อกรรมการที่ไม่ครบ = แดง และต้องอ้างถึง บฑ.1 / บฑ.2
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ถ้าไม่ครบก็ต้องแจ้งสีแดง และอ้างอิงถึง บฑ.1
+    หรือ บฑ.2" — ของเดิมขาดเป็นส้ม เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านตารางออกครบไหม
+    เจ้าหน้าที่รับความเสี่ยงนั้นแล้ว
+    """
+
+    EXPECTED = ["Chatrapa Hudthagosol", "Promluck Sanporkha", "Karl Peltzer"]
+
+    def _run(self, found):
+        rep = Report()
+        checker_module._report_committee_count(
+            rep, self.EXPECTED, found, "หน้าลงนาม 2 (หน้า ii)", "บฑ.2",
+            "FRONT.COMMITTEE")
+        return rep
+
+    def test_a_short_list_is_red(self):
+        rep = self._run(["Chatrapa Hudthagosol", "Promluck Sanporkha"])
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_an_over_long_list_is_red_too(self):
+        rep = self._run([f"Name {k}" for k in range(1, 6)])
+        self.assertEqual(len(rep.zones["RED"]), 1)
+
+    def test_both_directions_cite_the_form(self):
+        for found in (["a"], [f"n{k}" for k in range(1, 6)]):
+            issue = self._run(found).zones["RED"][0]
+            self.assertIn("บฑ.2", issue["found"])
+            self.assertIn("บฑ.2", issue["expected"])
+            self.assertIn("บฑ.2", issue["fix"])
+            # ต้องยกรายชื่อตามฟอร์มมาให้ครบ ไม่ใช่บอกแค่จำนวน
+            for name in self.EXPECTED:
+                self.assertIn(name, issue["expected"])
+
+    def test_a_matching_count_reports_nothing(self):
+        """ควบคุมเชิงลบ — ครบพอดีต้องเงียบ กฎนี้ไม่เทียบชื่อ"""
+        rep = self._run(["ใครก็ได้", "อีกคน", "คนที่สาม"])
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["ORANGE"], [])
 
 
 class TheKeywordListIsCountedAcrossLines(unittest.TestCase):
@@ -5061,7 +5140,8 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
             th = [] if lang == "อังกฤษ" else [0]
             _check_abstract_committees(rep, committees, en, th, [page],
                                        lambda i: "หน้า iv")
-            found = " ".join(i["found"] for i in rep.zones["ORANGE"])
+            found = " ".join(i["found"] for i in
+                             rep.zones["RED"] + rep.zones["ORANGE"])
             self.assertIn("บฑ.1", found, lang)
             self.assertNotIn("บฑ.2", found, lang)
 
@@ -5076,25 +5156,26 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
             self.assertFalse(hasattr(checker_module, gone), gone)
 
     def test_too_few_names_says_the_list_is_incomplete(self):
-        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        issue = self._count(["ก ก", "ข ข"]).zones["RED"][0]
         self.assertIn("รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 2 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
     def test_too_many_names_says_the_list_is_over(self):
-        # เกิน = สีแดง (เจ้าหน้าที่สั่ง ก.ย. 2569) ส่วนขาดยังเป็นสีส้ม
+        # ทั้งขาดและเกิน = สีแดง (เจ้าหน้าที่สั่ง ก.ย. 2569)
         issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["RED"][0]
         self.assertIn("รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 4 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
     def test_the_finding_lists_who_should_be_there(self):
         """เจ้าหน้าที่สั่งให้บอกด้วยว่าควรมีชื่ออะไรบ้าง ดึงจากฟอร์มต้นทาง"""
-        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        issue = self._count(["ก ก", "ข ข"]).zones["RED"][0]
         for name in ("คนางค์ คันธมธุรพจน์", "ธเนศ เกษศิลป์", "สุภาภรณ์ สงค์ประชา"):
             self.assertIn(name, issue["expected"], name)
         self.assertIn("ตาม บฑ.2", issue["expected"])
 
     def test_the_right_count_says_nothing(self):
-        self.assertEqual(self._count(["ก ก", "ข ข", "ค ค"]).zones["ORANGE"], [])
+        rep = self._count(["ก ก", "ข ข", "ค ค"])
+        self.assertEqual(rep.zones["RED"] + rep.zones["ORANGE"], [])
 
     def test_only_cells_holding_a_name_are_counted(self):
         # ช่องคงที่ของ template ถูกคัดออกตั้งแต่ _sig_clean_name (คืน None)
