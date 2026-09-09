@@ -2578,6 +2578,97 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
+class TheKeywordListIsCountedAcrossLines(unittest.TestCase):
+    """รายการ keyword ที่ยาวเกินบรรทัดเดียว ต้องนับให้ครบ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เล่มจริงฝั่งอังกฤษมี 6 คำ แต่คำที่ 5-6 ตกไปบรรทัดถัดไป ระบบอ่านแค่บรรทัดแรกจึง
+    นับได้ 4 แล้วปล่อยผ่าน ทั้งที่ฝั่งไทยของเล่มเดียวกันโดนฟ้อง 6 คำ
+
+        KEYWORDS: E-cigarette control policy / Electronic cigarettes / Prevalence / Forecasting /
+        Markov model / Population Attributable Fraction
+        64 pages
+
+    สำรวจเล่มจริง 5 เล่ม (ทั้งไทยและอังกฤษ) รายการ keyword จบด้วยบรรทัด
+    "N pages" / "N หน้า" เสมอ จึงใช้บรรทัดนั้นเป็นจุดหยุดได้
+    """
+
+    def test_the_page_count_line_is_the_stop_signal(self):
+        for line in ("64 pages", "157 pages", "106 หน้า", "79 หน้า"):
+            self.assertTrue(checker_module.is_page_count_line(line), line)
+
+    def test_ordinary_keyword_lines_are_not_mistaken_for_it(self):
+        """ควบคุมเชิงลบ — ถ้าจับผิด รายการ keyword จะถูกตัดกลางคัน"""
+        for line in ("Markov model / Population Attributable Fraction",
+                     "ควบคุมบุหรีไฟฟ้า",
+                     "Immunomodulation / Lactiplantibacillus plantarum"):
+            self.assertFalse(checker_module.is_page_count_line(line), line)
+
+    def test_the_reader_stops_at_the_page_count(self):
+        """โครงของตัวนับต้องหยุดที่บรรทัดจำนวนหน้า ไม่ใช่กวาดไปทั้งหน้า"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("nl.startswith('KEYWORD')", 1)[1][:900]
+        self.assertIn("is_page_count_line(more)", block)
+        self.assertIn("raws[kw_idx + 1:kw_idx + 4]", block)
+
+
+class OneMisspelledTocHeadingIsOneFinding(unittest.TestCase):
+    """หัวข้อสารบัญที่สะกดผิด ต้องฟ้องข้อเดียว ไม่ใช่สองข้อจากสองกฎ
+
+    เล่มจริง (ก.ย. 2569) เขียน "LIST OF TABLES (If any)" แล้วได้สองการ์ด
+
+        FRONT.TOC          หัวข้อสารบัญในเล่มเขียนว่า "LIST OF TABLES (If any)"
+        FRONT.TOC_CONTENT  สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "..." มี "(If any)" เกินมา
+
+    ข้อความสรุปที่ส่งนักศึกษารวมให้อยู่แล้ว แต่หน้ารายงานฝั่งเจ้าหน้าที่ยังเห็นซ้ำ
+    เจ้าหน้าที่สั่งให้ยุบเหลือของ FRONT.TOC_CONTENT เพราะบอกได้ว่าเกินคำไหน
+    """
+
+    def test_the_generic_rule_waits_for_the_specific_one(self):
+        source = inspect.getsource(checker_module.run_check)
+        # เก็บไว้ก่อน ไม่ฟ้องทันทีตอนเจอ
+        self.assertIn("toc_list_typos.append(", source)
+        # กรองด้วยหัวข้อที่กฎเจาะจงฟ้องไปแล้ว
+        self.assertIn("if norm(t[1]) not in toc_typos_reported]", source)
+
+    def test_the_generic_rule_is_not_deleted(self):
+        """ควบคุมเชิงลบ — ยังต้องฟ้องได้ ถ้ากฎเจาะจงไม่ได้แตะหัวข้อนั้น
+
+        กฎเจาะจงทำงานเฉพาะกับส่วนที่ "มีอยู่จริงในเล่มแต่หายจากสารบัญ" ส่วนหัวข้อ
+        LIST OF ... ที่สะกดผิดโดยไม่มีส่วนนั้นในเล่ม ยังต้องพึ่งกฎนี้อยู่
+        """
+        source = inspect.getsource(checker_module.run_check)
+        tail = source.split("for _idx, _visible, _expected, _compared in toc_list_typos:",
+                            1)[1][:400]
+        self.assertIn('"FRONT.TOC"', tail)
+        self.assertIn("แก้การสะกดหัวข้อสารบัญ", tail)
+
+
+class DecisionsThatDeliberatelyChangeNothing(unittest.TestCase):
+    """คำตัดสินของเจ้าหน้าที่ที่ "ให้คงไว้อย่างเดิม" (ก.ย. 2569)
+
+    เขียนเป็นเทสต์ไว้เพราะการคงไว้ก็เป็นคำตัดสิน ไม่ใช่เรื่องที่ยังไม่ได้พิจารณา
+    ถ้าไม่ล็อกไว้ คนที่มาอ่านทีหลังจะเห็นว่า "น่าจะปรับได้" แล้วเปลี่ยนโดยไม่รู้
+    """
+
+    def test_a_toc_entry_without_a_page_number_stays_yellow_per_chapter(self):
+        """เล่มจริงได้ข้อสังเกต 6 ข้อจากรูปแบบสารบัญเดียวกัน เจ้าหน้าที่สั่งว่า
+        "ตรวจเหมือนเดิม แต่ฟ้องเหลือง" คือไม่ยุบเป็นข้อเดียว และไม่ยกระดับสี
+        """
+        self.assertEqual(checker_module.TOC_PAGE_ZONE, "YELLOW")
+        self.assertEqual(RULE_CATALOG["FRONT.TOC_PAGE_REF"]["failure_zone"], "YELLOW")
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split('if not entry["page_label"]:', 1)[1][:320]
+        self.assertIn("TOC_PAGE_ZONE", block)
+
+    def test_stray_text_in_the_running_head_stays_orange(self):
+        """ชื่อรูปที่วางล้ำเข้าเขตหัวกระดาษ — เจ้าหน้าที่ยืนยันว่าสีส้มถูกแล้ว
+        (เล่มจริงหน้า 38 วางชื่อรูปที่ top 48.6 ซึ่งอยู่ในขอบบน 72 pt)
+        """
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ", 1)[0][-400:]
+        self.assertIn('rep.add("ORANGE"', block)
+
+
 class TwoColumnsOnTheSameRowStayOnOneLine(unittest.TestCase):
     """หน้าลงนามเป็นสองคอลัมน์ อักขระที่อยู่แถวเดียวกันต้องอยู่บรรทัดเดียวกัน
 
@@ -3176,7 +3267,9 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 # "ฝั่ง ละ 6 รายชื่อ" ถูกแล้ว เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าฝั่งซ้าย
                 # ต้องนับชื่อนักศึกษารวมไปด้วย จึงไม่ใช่จำนวนกรรมการล้วน ๆ
                 "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ",
-                "ให้ใส่สีขาวไว้",
+                # เจ้าหน้าที่อนุมัติถ้อยคำไทยท่อนนี้แล้ว (ก.ย. 2569) คู่กับฝั่งอังกฤษ
+                # "and remove the position below the degree" ที่เจ้าหน้าที่เขียนมาเอง
+                "ให้ใส่สีขาวไว้ และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก",
             ],
             "LATE_FEE_NONE": [
                 "Line Offical Account ID @322wjrbo",

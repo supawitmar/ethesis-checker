@@ -1466,6 +1466,16 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
 _THAI_LETTER = re.compile('[ก-ฮ]')
 
 
+def is_page_count_line(line):
+    """บรรทัด "97 pages" / "106 หน้า" ที่ปิดท้ายบทคัดย่อ
+
+    ใช้เป็นจุดหยุดของรายการ keyword — สำรวจเล่มจริง 5 เล่ม (ทั้งไทยและอังกฤษ)
+    พบว่ารายการ keyword จบด้วยบรรทัดนี้เสมอ ไม่มีเล่มไหนต่างออกไป
+    """
+    return bool(re.search(r'(\d{1,4})\s*PAGES?', line or "", re.I)
+                or re.search(r'(\d{1,4})(หนา)', norm(line)))
+
+
 def unreadable_id_digits(page_text, student_id, names=()):
     """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
 
@@ -4877,6 +4887,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # ชื่อบทตามประกาศ (option/enforced_chapters คำนวณไว้ก่อนหน้าแล้ว)
     # ตรวจ typo เฉพาะหัวข้อหลักในสารบัญ ไม่อ่านหรือพิสูจน์อักษรเนื้อหาแต่ละย่อหน้า
+    # เก็บไว้ก่อน ยังไม่ฟ้อง — กฎ "หัวข้อบังคับหายจากสารบัญ" (FRONT.TOC_CONTENT)
+    # ข้างล่างจับหัวข้อเดียวกันได้ด้วย และบอกได้ว่าเกินคำไหน ("มี (If any) เกินมา")
+    # ถ้าฟ้องทั้งสองกฎ เจ้าหน้าที่เห็นการ์ดสองใบจากความผิดเดียว (เจ้าหน้าที่สั่งยุบ
+    # ก.ย. 2569 ให้เหลือของ FRONT.TOC_CONTENT) — แต่กฎนี้ยังต้องอยู่ เพราะครอบคลุม
+    # หัวข้อ LIST OF ... ที่ไม่มีส่วนนั้นอยู่ในเล่ม ซึ่งกฎข้างล่างไม่แตะ
+    toc_list_typos = []
     for toc_page_idx, raw in toc_lines:
         visible = _strip_toc_page_number(raw)
         if norm(visible).startswith('LISTOF'):
@@ -4886,9 +4902,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             )
             compared = compare_values(visible, expected, 'toc_heading')
             if compared['status'] != 'exact':
-                rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)})",
-                        mismatch_detail("หัวข้อสารบัญ", compared, expected),
-                        f"ควรเป็น \"{expected}\"", "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
+                toc_list_typos.append((toc_page_idx, visible, expected, compared))
 
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_chapter_count']:
         if option == 1 and len(body_ch) != 6:
@@ -5125,10 +5139,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
-            for raw in pages[sp].split('\n'):
+            raws = pages[sp].split('\n')
+            for kw_idx, raw in enumerate(raws):
                 nl = norm(raw)
                 if nl.startswith('KEYWORD') or nl.startswith(norm('คำสำคัญ')):
                     tail = raw.split(':', 1)[1] if ':' in raw else raw
+                    # รายการ keyword ยาวเกินบรรทัดเดียวได้ — เล่มจริง (ก.ย. 2569)
+                    # ฝั่งอังกฤษมี 6 คำ แต่คำที่ 5-6 ตกไปบรรทัดถัดไป ระบบอ่านแค่
+                    # บรรทัดแรกจึงนับได้ 4 แล้วปล่อยผ่าน ทั้งที่ฝั่งไทยของเล่มเดียวกัน
+                    # โดนฟ้อง 6 คำ — ต่อบรรทัดถัดไปจนถึงบรรทัด "N pages / N หน้า"
+                    # ซึ่งปิดท้ายบทคัดย่อเสมอ (สำรวจ 5 เล่ม ไม่มีเล่มไหนต่างออกไป)
+                    for more in raws[kw_idx + 1:kw_idx + 4]:
+                        if not soft(more) or is_page_count_line(more):
+                            break
+                        tail += " " + more
                     kws = [k for k in re.split(r'[,;/]', tail) if k.strip()]
                     if len(kws) > 5:
                         rep.add("RED", "front_matter",
@@ -5816,6 +5840,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             appendix_labels = {page_labels.get(i, "") for i in appendix_pages}
             appendix_labels.discard("")
 
+            # หัวข้อที่กฎนี้ฟ้องว่า "สะกดผิด" ไปแล้ว กฎ FRONT.TOC ข้างบนต้องไม่ฟ้องซ้ำ
+            toc_typos_reported = set()
             for section_kind, (section_label, actual_page_idx) in actual_toc_sections.items():
                 candidates = toc_entries_by_kind.get(section_kind, [])
                 if not candidates:
@@ -5825,6 +5851,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if typo:
                         head, typo_idx = typo
                         found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
+                        toc_typos_reported.add(norm(head))
                         diff = describe_diff(head, section_label)
                         if diff:
                             found_msg += f" {diff}"
@@ -5910,6 +5937,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "FRONT.TOC_PAGE_REF",
                         )
 
+            # เหลือเฉพาะหัวข้อที่กฎข้างล่างไม่ได้ฟ้อง
+            toc_list_typos = [t for t in toc_list_typos
+                              if norm(t[1]) not in toc_typos_reported]
             for optional_kind in ("list_tables", "list_figures", "list_abbreviations"):
                 if optional_kind in toc_entries_by_kind and optional_kind not in actual_toc_sections:
                     entry = toc_entries_by_kind[optional_kind][0]
@@ -5920,6 +5950,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ลบหัวข้อออกจากสารบัญ หรือเพิ่มส่วนดังกล่าวในเล่ม",
                         "FRONT.TOC_CONTENT",
                     )
+
+    # ฟ้องหัวข้อ LIST OF ... ที่สะกดผิด เฉพาะที่กฎ FRONT.TOC_CONTENT ไม่ได้ฟ้องไปแล้ว
+    # ต้องอยู่ท้ายสุด เพราะกฎนั้นทำงานหลังบล็อกที่เก็บรายการนี้ไว้
+    for _idx, _visible, _expected, _compared in toc_list_typos:
+        rep.add("RED", "front_matter", f"สารบัญ ({page_ref(_idx)})",
+                mismatch_detail("หัวข้อสารบัญ", _compared, _expected),
+                f'ควรเป็น "{_expected}"', "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
 
     _p("สรุปผล")
     return check_result(
