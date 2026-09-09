@@ -3406,6 +3406,28 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         self.assertIn("เอกสารแจ้งค่าปรับ(Invoice)", yes["text"])
         self.assertIn("The invoice will be issued", yes["text_en"])
 
+    def test_the_two_frame_sentences_do_not_contradict(self):
+        """ย่อหน้า 2 กับ 4 เคยอ่านแล้วขัดกันเอง เจ้าหน้าที่สั่งให้ปรับ (ก.ย. 2569)
+
+            ย่อหน้า 2  "...ไม่ต้องเลื่อนหรือปรับกรอบ"
+            ย่อหน้า 4  "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้..."
+
+        ทั้งสองย่อหน้าพูดคนละเรื่อง — ย่อหน้า 2 ห้ามขยับเพื่อให้พอดีกับจำนวนชื่อของ
+        ตัวเอง ส่วนย่อหน้า 4 บอกว่ากรอบต้องเป็นค่ามาตรฐานของ template
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        th = [ln for ln in choice["text"].split(NEWLINE) if ln.strip()]
+        en = [ln for ln in choice["text_en"].split(NEWLINE) if ln.strip()]
+        # ห้ามกลับไปเป็นคำสั่งลอย ๆ ที่อ่านแล้วขัดกับย่อหน้าที่ 4
+        self.assertNotIn("ไม่ต้องเลื่อนหรือปรับกรอบ", th[1])
+        self.assertNotIn("without shifting or modifying the frames", en[1])
+        # ต้องบอกด้วยว่าห้ามขยับ "เพื่ออะไร"
+        self.assertIn("เพื่อให้พอดีกับจำนวนชื่อ", th[1])
+        self.assertIn("to fit them", en[1])
+        # ย่อหน้า 4 ยังต้องสั่งให้กรอบตรงกับ template เหมือนเดิม
+        self.assertIn("ให้ตรงกันกับที่ set ไว้", th[3])
+        self.assertIn("match the default settings", en[3])
+
     def test_the_wording_uses_the_full_word_for_student(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ใช้คำว่า "นักศึกษา" ทั้งหมด ไม่ใช้ตัวย่อ
 

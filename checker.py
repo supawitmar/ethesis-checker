@@ -2741,13 +2741,19 @@ STAFF_CHECKS = [
                 #
                 # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ (สี่ต่อสี่) เพราะหน้ารายงานแปล
                 # ด้วยการเทียบทีละบรรทัด บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                #
+                # ย่อหน้า 2 กับ 4 เคยอ่านแล้วขัดกันเอง — "ไม่ต้องเลื่อนหรือปรับกรอบ"
+                # กับ "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้" เจ้าหน้าที่สั่งให้
+                # ปรับให้สอดคล้องกัน (ก.ย. 2569) ทั้งสองย่อหน้าพูดคนละเรื่อง
+                #   ย่อหน้า 2  ห้ามขยับ "เพื่อให้พอดีกับจำนวนชื่อของตัวเอง"
+                #   ย่อหน้า 4  กรอบต้องเป็นค่ามาตรฐานของ template (ฝั่งละ 6 รายชื่อ)
                 "text": ("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"
                          "\n"
                          "ปรับโครงสร้างของหน้า "
                          "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
                          "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
                          "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
-                         "ไม่ต้องเลื่อนหรือปรับกรอบ"
+                         "ไม่ต้องเลื่อนชื่อหรือย่อขยายกรอบเพื่อให้พอดีกับจำนวนชื่อ"
                          "\n"
                          "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง"
                          "ให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
@@ -2764,8 +2770,8 @@ STAFF_CHECKS = [
                             "\n"
                             "please restructure the page and realign each committee "
                             "list to strictly follow the top-to-bottom sequence "
-                            "approved in the official document without shifting or "
-                            "modifying the frames."
+                            "approved in the official document without shifting the "
+                            "names or resizing the frames to fit them."
                             "\n"
                             "Students must format the file using the designated font "
                             "and template, following the exact ordering sequence "
