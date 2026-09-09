@@ -2578,6 +2578,86 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
+class TheUploadedFileMustBeAThesis(unittest.TestCase):
+    """ไฟล์ที่ไม่ใช่เล่มวิทยานิพนธ์ ต้องบอกตรง ๆ ไม่ใช่ฟ้องอย่างอื่นแทน
+
+    เจ้าหน้าที่ชี้แหล่งเองว่าดูจากข้อความ template ของหน้าปก หน้าลงนาม และหน้าบทคัดย่อ
+    (ก.ย. 2569) ไฟล์ที่หยิบผิดบ่อยที่สุดคือไฟล์ eThesis เพราะอัปโหลดคู่กันอยู่แล้ว
+
+    ของเดิมเมื่ออัปโหลดไฟล์ eThesis มาผิดช่อง
+        มีข้อมูลอนุมัติ   ฟ้องว่า "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ" ซึ่งชี้ผิดทาง
+        ไม่มีข้อมูลอนุมัติ ฟ้องแดง 5 ข้อ (ไม่พบหน้าลงนาม/กิตติกรรมประกาศ/สารบัญ/
+                          รายการอ้างอิง/ประวัติผู้วิจัย) ไม่มีข้อไหนบอกสาเหตุจริง
+    """
+
+    THESIS = ["A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS "
+              "FOR THE DEGREE OF",
+              "was submitted to the Faculty of Graduate Studies, Mahidol University "
+              "for the degree of",
+              "ABSTRACT"]
+
+    def test_a_real_thesis_passes_the_gate(self):
+        pages = [line + " " + "x" * 400 for line in self.THESIS]
+        ok, marks = checker_module.looks_like_a_thesis(pages)
+        self.assertTrue(ok)
+        self.assertEqual(marks, {"ปก", "ลงนาม", "บทคัดย่อ"})
+
+    def test_a_thai_thesis_passes_too(self):
+        pages = ["วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร " + "ก" * 300,
+                 "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร " + "ข" * 300,
+                 "บทคัดย่อ " + "ค" * 300]
+        ok, marks = checker_module.looks_like_a_thesis(pages)
+        self.assertTrue(ok, marks)
+
+    def test_one_lonely_mark_is_not_enough(self):
+        """ไฟล์ eThesis จริงได้ 1 ใน 3 (มีแต่คำว่า ABSTRACT) — เส้นแบ่งอยู่ที่ 2"""
+        pages = ["ABSTRACT " + "x" * 600]
+        ok, marks = checker_module.looks_like_a_thesis(pages)
+        self.assertFalse(ok)
+        self.assertEqual(marks, {"บทคัดย่อ"})
+
+    def test_two_marks_are_enough(self):
+        """ควบคุมเชิงลบของข้อบน — เล่มที่ขาดหน้าปกไปต้องไม่ถูกหยุดตรวจ
+        กฎ "ไม่พบหน้าปก" รับเรื่องนั้นไปแล้ว
+        """
+        pages = ["was submitted to the Faculty of Graduate Studies, Mahidol "
+                 "University for the degree of " + "x" * 400,
+                 "ABSTRACT " + "x" * 400]
+        self.assertTrue(checker_module.looks_like_a_thesis(pages)[0])
+
+    def test_a_scanned_file_is_given_the_benefit_of_the_doubt(self):
+        """อ่านข้อความแทบไม่ได้เลย = ไม่มีข้อมูลพอจะฟันธง ห้ามหยุดตรวจ
+
+        การฟันธงผิดตรงนี้เสียหายกว่า เพราะกฎนี้หยุดการตรวจทั้งเล่ม
+        """
+        ok, marks = checker_module.looks_like_a_thesis(["", "  ", "12"])
+        self.assertTrue(ok)
+        self.assertEqual(marks, set())
+
+    def test_the_gate_stops_the_whole_check(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("_is_thesis, _marks = looks_like_a_thesis(pages)", 1)[1][:1500]
+        self.assertIn('"FILE.NOT_A_THESIS"', block)
+        self.assertIn("NOT_A_THESIS_STOPPED", block)
+        self.assertIn("return check_result(", block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("ไฟล์นี้ไม่ใช่เล่มวิทยานิพนธ์ — พบเฉพาะข้อความของหน้าบทคัดย่อ",
+                   "ไฟล์นี้ไม่ใช่เล่มวิทยานิพนธ์ — "
+                   "ไม่พบข้อความของ template เล่มวิทยานิพนธ์เลยสักอย่าง",
+                   "ไฟล์ที่ตรวจต้องเป็นเล่มฉบับสมบูรณ์ "
+                   "ซึ่งมีข้อความ template ของหน้าปก หน้าลงนาม และหน้าบทคัดย่อ",
+                   "ตรวจว่าเลือกไฟล์ถูกช่องหรือไม่ "
+                   "(ช่องนี้ใช้ไฟล์รูปเล่ม ไม่ใช่ไฟล์ eThesis) แล้วอัปโหลดใหม่",
+                   checker_module.NOT_A_THESIS_STOPPED,
+                   "ไฟล์ที่อัปโหลด"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
 class EveryDamagedPageIsReported(unittest.TestCase):
     """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "หน้าไหนเพี้ยนควรแจ้ง"
 
@@ -3958,7 +4038,9 @@ class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
         """ทางออกทุกทางต้องผ่าน check_result ไม่ใช่ประกอบ dict เอง"""
         source = inspect.getsource(checker_module.run_check)
         self.assertNotIn('"issues_by_zone": rep.zones', source)
-        self.assertEqual(source.count("return check_result("), 4)
+        # 5 ทางออก: ไฟล์ว่าง · ไฟล์ไม่ใช่เล่มวิทยานิพนธ์ · เล่มผิดภาษา ·
+        # ไม่มีหน้าปก · ทางออกปกติ — เพิ่มทางออกใหม่ต้องมาแก้เลขนี้พร้อมกัน
+        self.assertEqual(source.count("return check_result("), 5)
 
 
 class BookLanguageIsReadFromTemplateText(unittest.TestCase):
