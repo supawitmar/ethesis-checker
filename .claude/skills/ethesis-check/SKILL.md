@@ -84,6 +84,10 @@ python tools/check_i18n.py --lint
 python tools/check_i18n.py --corpus
 ```
 
+```bash
+python tools/smoke_web.py
+```
+
 - **regression เปลี่ยนตัวเลข** ต้อง**อธิบายได้ว่าทำไม** ถ้าอธิบายไม่ได้ = ยังไม่เสร็จ
   ห้าม commit · ถ้าเป็นการเปลี่ยนที่ตั้งใจ ให้บันทึกฐานใหม่ด้วย `--save`
 - **positive test**: กฎใหม่ต้องพิสูจน์ว่า "ฟ้องจริง" ด้วย — เล่มทดสอบส่วนใหญ่สะอาด
