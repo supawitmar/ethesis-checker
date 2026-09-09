@@ -2578,6 +2578,58 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
+class EveryDamagedPageIsReported(unittest.TestCase):
+    """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "หน้าไหนเพี้ยนควรแจ้ง"
+
+    ของเดิมบอกเฉพาะหน้าบทคัดย่อที่อ่านรหัสนักศึกษาไม่ออก หน้าอื่นเงียบสนิท
+    เล่มจริงเล่มหนึ่งฟอนต์เพี้ยน 38 หน้า แต่รายงานพูดถึงหน้าเดียว
+    """
+
+    class _Page:
+        def __init__(self, chars):
+            self.chars = chars
+
+    @staticmethod
+    def _char(text, width):
+        return {"text": text, "x0": 10.0, "x1": 10.0 + width, "top": 100.0}
+
+    def test_a_clean_page_scores_zero(self):
+        """ควบคุมเชิงลบ — เล่มที่ถูกต้อง 4 เล่มได้ 0 ทุกหน้า ห้ามมี false positive"""
+        page = self._Page([self._char("ก", 7.0), self._char(" ", 3.5),
+                           self._char("ั", 0.0), self._char("่", 0.0)])
+        self.assertEqual(checker_module.font_damage_score(page, "กัน ปกติ"), 0)
+
+    def test_a_zero_width_letter_is_a_damaged_font(self):
+        """ฟอนต์ map วรรณยุกต์ไปเป็นตัวอักษรอื่น ตัวนั้นจะกว้างศูนย์ทั้งที่ไม่ใช่วรรณยุกต์"""
+        page = self._Page([self._char("ก", 7.0), self._char("B", 0.0)])
+        self.assertEqual(checker_module.font_damage_score(page, "กB"), 1)
+
+    def test_an_unmapped_glyph_counts_too(self):
+        page = self._Page([self._char("ก", 7.0)])
+        self.assertEqual(
+            checker_module.font_damage_score(page, "ก(cid:127)(cid:128)"), 2)
+
+    def test_the_report_lists_the_pages(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if font_damaged:", source)
+        block = source.split("if font_damaged:", 1)[1][:700]
+        self.assertIn("page_ref(i) for i in font_damaged[:12]", block)
+        self.assertIn("rep.add_info", block)          # เป็นข้อมูลประกอบ ไม่ใช่จุดผิด
+        self.assertNotIn('rep.add("RED"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน 9 หน้า",
+                   "หน้าที่พบคือ หน้า vi, หน้า vii และอีก 26 หน้า "
+                   "หน้ากระดาษแสดงผลถูกต้องตามปกติ "
+                   "เสียเฉพาะการดึงข้อความออกจากไฟล์ "
+                   "กรุณาเปิดหน้าเหล่านี้ดูด้วยตาอีกครั้ง"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
 class TheKeywordListIsCountedAcrossLines(unittest.TestCase):
     """รายการ keyword ที่ยาวเกินบรรทัดเดียว ต้องนับให้ครบ (เจ้าหน้าที่สั่ง ก.ย. 2569)
 
@@ -2814,7 +2866,7 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
         """
         source = inspect.getsource(checker_module.run_check)
-        head = source.split("unreadable_digit_pages = {}", 1)[1][:1800]
+        head = source.split("unreadable_digit_pages = {}", 1)[1][:3200]
         self.assertIn("กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง", head)
 
     def test_the_name_on_that_page_is_still_compared(self):

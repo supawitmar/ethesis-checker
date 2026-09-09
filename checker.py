@@ -128,6 +128,32 @@ def _group_into_lines(chars):
     return lines
 
 
+_CID_GLYPH = re.compile(r'\(cid:\d+\)')
+
+
+def font_damage_score(page, text=None):
+    """หน้านี้มีร่องรอยว่า "ฟอนต์ในไฟล์บอกอักขระผิด" กี่ตัว — 0 = ปกติ
+
+    สองสัญญาณที่ฟันธงได้ ไม่ใช่การเดา
+
+    1. อักขระกว้างศูนย์ที่ไม่ใช่สระ/วรรณยุกต์ — ฟอนต์ map วรรณยุกต์ไปเป็นตัวอักษรอื่น
+       (ดูเหตุผลเต็มใน _thai_chars ซึ่งทิ้งอักขระพวกนี้ก่อนประกอบข้อความอยู่แล้ว)
+    2. (cid:N) — pdfminer หาคำแปลของ glyph นั้นไม่ได้เลย
+
+    วัดกับเล่มจริง 6 เล่ม: เล่มที่ถูกต้อง 4 เล่มได้ 0 ทุกหน้า ไม่มี false positive เลย
+    ส่วนเล่มที่ฟอนต์เพี้ยนจับได้ทั้งสองเล่ม (เล่มหนึ่ง 38 หน้า อีกเล่ม 9 หน้า) ตรงกับ
+    หน้าที่ตรวจด้วยตาแล้วพบว่าเพี้ยนจริง
+    """
+    bad = 0
+    for c in (getattr(page, 'chars', None) or []):
+        t = c.get('text') or ''
+        if not t or t == ' ' or _TH_MARKS.match(t):
+            continue
+        if float(c.get('x1', 0)) - float(c.get('x0', 0)) < 0.5:
+            bad += 1
+    return bad + len(_CID_GLYPH.findall(text or ''))
+
+
 def _thai_chars(chars):
     """แปลง "ช่องว่างกว้างศูนย์" ให้เป็นนิคหิต ก่อนประกอบข้อความ
 
@@ -4470,6 +4496,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("เปิดไฟล์ PDF")
     pages = []
     header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้า)
+    font_damaged = []          # ดัชนีหน้าที่ฟอนต์ในไฟล์ทำให้อ่านข้อความเพี้ยน
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -4480,6 +4507,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
             pages.append(_page_text(_pg))
+            try:
+                if font_damage_score(_pg, pages[-1]):
+                    font_damaged.append(_i)
+            except Exception:
+                pass
             try:
                 header_extras.append(header_extra_text(_pg))
             except Exception:
@@ -5493,6 +5525,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                             (student_name, student_name_th))
             if _misread:
                 unreadable_digit_pages[_aidx] = _misread
+        # เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "หน้าไหนเพี้ยนควรแจ้ง" — เดิมบอกเฉพาะหน้า
+        # บทคัดย่อที่อ่านรหัสนักศึกษาไม่ออก ส่วนหน้าอื่นเงียบสนิท เล่มจริงเล่มหนึ่ง
+        # เพี้ยน 38 หน้า แต่รายงานพูดถึงหน้าเดียว
+        if font_damaged:
+            _shown = ", ".join(page_ref(i) for i in font_damaged[:12])
+            if len(font_damaged) > 12:
+                _shown += f" และอีก {len(font_damaged) - 12} หน้า"
+            rep.add_info("-", f"ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน {len(font_damaged)} หน้า",
+                         f"หน้าที่พบคือ {_shown} "
+                         "หน้ากระดาษแสดงผลถูกต้องตามปกติ เสียเฉพาะการดึงข้อความออกจากไฟล์ "
+                         "กรุณาเปิดหน้าเหล่านี้ดูด้วยตาอีกครั้ง")
         for _aidx, _misread in sorted(unreadable_digit_pages.items()):
             _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
                     f" ({page_ref(_aidx)})")
