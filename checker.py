@@ -2044,49 +2044,6 @@ def person_name_sentence_case(name):
     return ' '.join(part[:1].upper() + part[1:].lower() for part in name.split())
 
 
-# ข้อความ template ที่ "เล่มวิทยานิพนธ์เท่านั้นที่มี" — ใช้ยืนยันว่าไฟล์ที่อัปโหลดเป็นเล่มจริง
-# ไม่ใช่ไฟล์อื่นที่หยิบมาผิด เจ้าหน้าที่ชี้แหล่งเองว่าดูจากหน้าปก หน้าลงนาม และหน้าบทคัดย่อ
-_THESIS_MIN_TEXT = 500     # ตัวอักษรขั้นต่ำที่ยืนยันว่า "อ่านไฟล์นี้ออก"
-
-
-def thesis_template_marks(pages):
-    """ตระกูลข้อความ template ที่พบในไฟล์นี้ — คืน set ของ "ปก" / "ลงนาม" / "บทคัดย่อ"
-
-    วัดกับไฟล์จริง 7 ไฟล์: เล่มวิทยานิพนธ์ 5 เล่มได้ครบ 3/3 ทุกเล่ม ส่วนไฟล์ eThesis
-    (ซึ่งเจ้าหน้าที่หยิบมาผิดช่องได้ง่ายที่สุด เพราะอัปโหลดคู่กันอยู่แล้ว) ได้ 1/3
-    ทั้งสองไฟล์ — ห่างกันชัดพอที่จะตั้งเส้นแบ่งไว้ที่ 2
-
-    ตรวจข้อความของ **ทั้งสองภาษาและทุกประเภทงาน** เพราะจุดนี้ยังไม่รู้ว่าเล่มเป็น
-    ภาษาอะไร (ด่านภาษาทำงานทีหลังและต้องใช้ข้อมูลอนุมัติ ซึ่งอาจไม่มี)
-    """
-    joined = norm("\n".join(pages))
-    marks = set()
-    for language in ("thai", "en"):
-        for kind in ("THESIS", "THEMATIC PAPER", "INDEPENDENT STUDY"):
-            if any(text and norm(text) in joined
-                   for _label, text in cover_required_items(kind, language)):
-                marks.add("ปก")
-                break
-    if any(norm(t) in joined for t in (SIGNATURE_TEMPLATE_TH, SIGNATURE_TEMPLATE_EN)):
-        marks.add("ลงนาม")
-    if "ABSTRACT" in joined or N_ABSTRACT_TH in joined:
-        marks.add("บทคัดย่อ")
-    return marks
-
-
-def looks_like_a_thesis(pages):
-    """ไฟล์นี้เป็นเล่มวิทยานิพนธ์ไหม — คืน (ใช่ไหม, ตระกูลที่พบ)
-
-    ถ้าอ่านข้อความจากไฟล์แทบไม่ได้เลย (หน้าสแกนทั้งเล่ม) ให้ถือว่า "ใช่" ไว้ก่อน
-    เพราะไม่มีข้อมูลพอจะฟันธง — กฎ "ระบบดึงข้อความไม่ได้" รับเรื่องนั้นไปแล้ว
-    การฟันธงผิดตรงนี้เสียหายกว่า เพราะกฎนี้หยุดการตรวจทั้งเล่ม
-    """
-    if len(norm("\n".join(pages))) < _THESIS_MIN_TEXT:
-        return True, set()
-    marks = thesis_template_marks(pages)
-    return len(marks) >= 2, marks
-
-
 def cover_required_items(doc_type, program_language):
     """Return display labels and exact fixed cover text required by the selected template."""
     if program_language == "thai":
@@ -2162,8 +2119,6 @@ LANGUAGE_NAME = {"thai": "ภาษาไทย", "en": "ภาษาอัง�
 # เพราะเจ้าหน้าที่สั่งว่ากรณีนี้ต้องมีจุดผิดข้อเดียว
 BOOK_LANGUAGE_STOPPED = ("ส่วนอื่นทั้งหมดของเล่ม "
                          "(ระบบหยุดตรวจเมื่อภาษาของเล่มไม่ตรงกับที่ได้รับอนุมัติ)")
-NOT_A_THESIS_STOPPED = ("ส่วนอื่นทั้งหมดของเล่ม "
-                        "(ระบบหยุดตรวจเมื่อไฟล์ที่อัปโหลดไม่ใช่เล่มวิทยานิพนธ์)")
 
 
 def _join_and(names):
@@ -4575,31 +4530,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     all_norm = norm("\n".join(pages))
     doc_type = next((t for t, ms in TYPE_MARKERS.items()
                      if any(norm(m) in all_norm for m in ms)), None)
-
-    # ---------- ไฟล์ที่อัปโหลดต้องเป็นเล่มวิทยานิพนธ์ ----------
-    # ต้องมาก่อนกฎอื่นทั้งหมด เพราะไฟล์ที่ไม่ใช่เล่มจะทำให้กฎแทบทุกข้อฟ้องพร้อมกัน
-    # (ไม่พบหน้าปก ไม่พบหน้าลงนาม ไม่พบบทคัดย่อ ไม่พบสารบัญ ชื่อบทไม่ครบ ...)
-    # ได้รายงานแดงยาวเป็นสิบข้อที่ไม่มีข้อไหนบอกสาเหตุจริง — หลักเดียวกับด่านภาษา
-    # ไฟล์ที่หยิบผิดบ่อยที่สุดคือไฟล์ eThesis เพราะอัปโหลดคู่กันอยู่แล้วบนหน้าเดียวกัน
-    _is_thesis, _marks = looks_like_a_thesis(pages)
-    if not _is_thesis:
-        _found = f"พบเฉพาะข้อความของหน้า{_join_and(sorted(_marks))}" if _marks else \
-                 "ไม่พบข้อความของ template เล่มวิทยานิพนธ์เลยสักอย่าง"
-        # ตำแหน่งใช้คำเดียวกับกฎ "ไฟล์ eThesis เป็นของคนอื่น" ไม่ใช่ชื่อไฟล์
-        # เพราะชื่อไฟล์อ่านแล้วไม่บอกอะไร ("1. 2.pdf" ในข้อความสรุป)
-        rep.add("RED", "-", "ไฟล์ที่อัปโหลด",
-                f"ไฟล์นี้ไม่ใช่เล่มวิทยานิพนธ์ — {_found}",
-                "ไฟล์ที่ตรวจต้องเป็นเล่มฉบับสมบูรณ์ "
-                "ซึ่งมีข้อความ template ของหน้าปก หน้าลงนาม และหน้าบทคัดย่อ",
-                "ตรวจว่าเลือกไฟล์ถูกช่องหรือไม่ (ช่องนี้ใช้ไฟล์รูปเล่ม "
-                "ไม่ใช่ไฟล์ eThesis) แล้วอัปโหลดใหม่",
-                "FILE.NOT_A_THESIS")
-        return check_result(
-            rep,
-            {"document_type": doc_type, "option": None,
-             "chapters_mode": chapters_mode, "n_pages": n,
-             "approved_data": bool(approved)},
-            (NOT_A_THESIS_STOPPED,) + tuple(NOT_CHECKED))
 
     # ---------- แผนที่ section ส่วนนำ (จากหัวเรื่องบนหน้าเท่านั้น) ----------
     _p("ระบุตำแหน่ง section ส่วนนำ")
