@@ -634,6 +634,9 @@ var TR = [
   [/หน้าบทคัดย่อภาษาอังกฤษต้องมีเฉพาะชื่อเรื่องภาษาอังกฤษ/g, 'The English abstract page must carry the English title only'],
   [/ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น "(.+?)" ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง/g, 'A font embedded in the file makes the digits extract as "$1", while the printed page itself is correct; the student ID was verified against the approved data on other pages. Please open this page and check the student ID by eye'],
   [/ระบบไม่ได้เทียบรหัสนักศึกษาที่ /g, 'Student ID not verified on '],
+  [/สารบัญมี (\d+) บท เนื้อหามี (\d+) บท เพราะสารบัญพิมพ์ซ้ำ: (.+)/g, 'The table of contents lists $1 chapters while the body has $2, because these are listed twice: $3'],
+  [/แต่ละบทต้องมีรายการเดียวในสารบัญ/g, 'Each chapter must appear only once in the table of contents'],
+  [/ลบรายการที่ซ้ำออกจากสารบัญ/g, 'Remove the duplicated entries from the table of contents'],
   [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
   [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ/g, 'Committee names on the approval pages must be in Capital Case, not the all-uppercase form used on the abstract page'],
   [/แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Capital Case; staff to confirm'],
@@ -1302,6 +1305,8 @@ var TR = [
   [/ แล้ว /g, ' then '],
   [/อาจารย์ที่ปรึกษา/g, 'advisory committee members'],
   [/อาจารย์/g, 'professors'],
+  // คำเชื่อมทั่วไป ต้องอยู่ท้ายสุดเสมอ กฎเฉพาะเจาะจงข้างบนได้ทำงานก่อนแล้ว
+  [/ และ /g, ' and '],
   [/บฑ\./g, 'GR.']
 ];
 

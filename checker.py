@@ -40,6 +40,9 @@ TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
+# keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
+# FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
+KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
 # เลขหน้าที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ทั้งส่วนนำและเนื้อหา
 # กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด / ไม่มีเลขหน้า / เลขหน้าอารบิกไม่เริ่มที่บทที่ 1)
 # ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
@@ -4140,6 +4143,34 @@ def _toc_chapter_title(text):
     ).strip()
 
 
+# บรรทัดสารบัญที่มีแต่ "CHAPTER 2" ไม่มีชื่อบท — _strip_toc_page_number อ่านเลขบท
+# เป็นเลขหน้าแล้วตัดทิ้ง เหลือคำว่า CHAPTER ลอย ๆ ซึ่งไม่ใช่ชื่อบท ห้ามเอาไปแสดง
+_TOC_CHAPTER_WORD_ONLY = re.compile(r'^(?:CHAPTER|บทท)\d*$', re.I)
+
+
+def _toc_chapter_label(number, entries):
+    """ป้ายบทที่ซ้ำ พร้อมชื่อบทตามที่เล่มพิมพ์ไว้ในสารบัญ
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าต้องบอกชื่อบทด้วย ไม่ใช่บอกแค่เลขบท เพราะสารบัญ
+    ที่พิมพ์ซ้ำต้องเปิดไล่หาว่าบรรทัดไหน — ชื่อบทอ่านจากบรรทัดในสารบัญของเล่มเอง
+    เล่มไทยจึงได้ชื่อไทย เล่มอังกฤษได้ชื่ออังกฤษ โดยไม่ต้องเดาภาษาของเล่ม
+    ครอบด้วยเครื่องหมายคำพูดเพราะเป็น "ค่าที่อ่านได้จากเล่ม" ห้ามแปลเป็นอังกฤษ
+    ถ้ารายการซ้ำใช้ชื่อคนละชื่อ ให้ยกมาทุกชื่อ เจ้าหน้าที่จะได้รู้ว่าซ้ำแบบไหน
+    """
+    titles = []
+    for entry in entries:
+        if entry[0] != number:
+            continue
+        title = soft(_toc_chapter_title(entry[3]))
+        if _TOC_CHAPTER_WORD_ONLY.match(norm(title)):
+            continue
+        if title and title not in titles:
+            titles.append(title)
+    if not titles:
+        return f"บทที่ {number}"
+    return f'บทที่ {number} "' + '" / "'.join(titles) + '"'
+
+
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
 # หัวข้อบทคัดย่อ "ภาษาอังกฤษ" ของเล่มสองภาษา — template เขียน ABSTRACT (THAI)
@@ -4862,10 +4893,31 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
 
     if toc_ch:
-        if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
-            rep.add("RED", "body", "สารบัญ vs เนื้อหา",
-                    f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท",
-                    "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา", "FRONT.TOC")
+        # สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน — ของเดิมบอกแค่ว่า
+        # "สารบัญมี 8 บท เนื้อหามี 6 บท" เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น
+        # เลยนึกว่าระบบนับผิด ทั้งที่สารบัญพิมพ์ CHAPTER 2 กับ CHAPTER 3 ซ้ำจริง
+        # (เล่มจริง ก.ย. 2569 — เรนเดอร์หน้า ix ออกมาดูแล้วยืนยัน)
+        _toc_numbers = [c[0] for c in toc_ch]
+        _dup = [n for n in sorted(set(_toc_numbers)) if _toc_numbers.count(n) > 1]
+        if BODY_RULES['check_toc_chapter_presence'] and (
+                _dup or len(toc_ch) != len(body_ch)):
+            # บอกทั้งจำนวนและชี้บทที่ซ้ำ "ในข้อเดียว" (เจ้าหน้าที่สั่ง ก.ย. 2569)
+            # ของเดิมบอกแค่จำนวน เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น เลยนึกว่า
+            # ระบบนับผิด ทั้งที่สารบัญพิมพ์ CHAPTER 2 กับ 3 ซ้ำจริง (เรนเดอร์หน้า ix
+            # ออกมาดูแล้วยืนยัน) — แยกเป็นสองการ์ดไม่ได้ จะกลายเป็นฟ้องซ้ำเรื่องเดียว
+            _counts = f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท"
+            if _dup:
+                _at = sorted({c[4] for c in toc_ch if _toc_numbers.count(c[0]) > 1})
+                _where = f"สารบัญ ({page_ref(_at[-1])})"
+                _found = (f"{_counts} เพราะสารบัญพิมพ์ซ้ำ: "
+                          + _join_and([_toc_chapter_label(n, toc_ch)
+                                       for n in _dup]))
+                _want = "แต่ละบทต้องมีรายการเดียวในสารบัญ"
+                _fix = "ลบรายการที่ซ้ำออกจากสารบัญ"
+            else:
+                _where, _found = "สารบัญ vs เนื้อหา", _counts
+                _want, _fix = "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา"
+            rep.add("RED", "body", _where, _found, _want, _fix, "FRONT.TOC")
         toc_map = {c[0]: (c[1], c[2], c[3], c[4]) for c in toc_ch}
         for cn, title, ppage, pno, _next_line in body_ch:
             if cn in toc_map:
@@ -5237,11 +5289,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         tail += " " + more
                     kws = [k for k in re.split(r'[,;/]', tail) if k.strip()]
                     if len(kws) > 5:
-                        rep.add("RED", "front_matter",
+                        rep.add(KEYWORD_COUNT_ZONE, "front_matter",
                                 f"{abstract_page_label(ai, abs_en_pages, abs_th_pages)}"
                                 f" ({page_ref(sp)})",
                                 f"Keywords {len(kws)} คำ", "ไม่เกิน 5 คำตามประกาศ",
-                                "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.ABSTRACT")
+                                "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.KEYWORD_COUNT")
                     done_kw = True
                     break
             if done_kw:

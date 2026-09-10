@@ -2709,6 +2709,113 @@ class AShortCommitteeListIsReportedInRed(unittest.TestCase):
         self.assertEqual(rep.zones["ORANGE"], [])
 
 
+class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
+    """สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน
+
+    เล่มจริง (ก.ย. 2569) สารบัญหน้า ix พิมพ์ CHAPTER 2 กับ CHAPTER 3 ซ้ำอีกรอบ
+    ระบบฟ้องว่า "สารบัญมี 8 บท เนื้อหามี 6 บท / จำนวนบทต้องเท่ากัน" เจ้าหน้าที่เปิด
+    เล่มเห็น 6 บทตามที่ควรเป็น เลยนึกว่าระบบนับผิด — เรนเดอร์หน้า ix ออกมาดูแล้ว
+    ยืนยันว่าสารบัญพิมพ์ซ้ำจริง ระบบไม่ได้นับผิด แต่ข้อความบอกไม่ตรงปัญหา
+    """
+
+    def test_the_finding_names_the_duplicated_chapters(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("_toc_numbers = [c[0] for c in toc_ch]", 1)[1][:1400]
+        # ต้องบอกทั้งจำนวนบทและชี้บทที่ซ้ำ ในข้อเดียว
+        self.assertIn("เพราะสารบัญพิมพ์ซ้ำ", block)
+        self.assertIn("สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท", block)
+        self.assertIn("_toc_chapter_label(n, toc_ch)", block)
+        # ต้องชี้หน้าที่ซ้ำ ไม่ใช่ตำแหน่งลอย ๆ ว่า "สารบัญ vs เนื้อหา"
+        self.assertIn("page_ref(_at[-1])", block)
+
+    def test_the_plain_count_message_is_the_fallback(self):
+        """ควบคุมเชิงลบ — จำนวนไม่เท่ากันโดยไม่มีบทซ้ำ ยังต้องฟ้องแบบเดิม"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("_toc_numbers = [c[0] for c in toc_ch]", 1)[1][:1400]
+        self.assertIn('_want, _fix = "จำนวนบทต้องเท่ากัน"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("สารบัญมี 8 บท เนื้อหามี 6 บท เพราะสารบัญพิมพ์ซ้ำ: "
+                   'บทที่ 2 "LITERATURE REVIEW" และ บทที่ 3 "RESEARCH METHODOLOGY"',
+                   "แต่ละบทต้องมีรายการเดียวในสารบัญ",
+                   "ลบรายการที่ซ้ำออกจากสารบัญ"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class TheDuplicatedChapterIsNamedInTheBooksOwnLanguage(unittest.TestCase):
+    """ข้อสารบัญซ้ำต้องบอกชื่อบทด้วย เล่มไทยได้ชื่อไทย เล่มอังกฤษได้ชื่ออังกฤษ
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) — บอกแค่ "บทที่ 2 และ บทที่ 3" ยังต้องเปิดสารบัญ
+    ไล่หาเองว่าบรรทัดไหน ชื่อบทอ่านจากบรรทัดในสารบัญของเล่มเอง จึงเป็นภาษาเดียว
+    กับเล่มโดยไม่ต้องเดา
+    """
+
+    # โครงเดียวกับ toc_ch ใน run_check: (เลขบท, ชื่อ norm, เลขหน้า, บรรทัดดิบ, หน้า, บรรทัดถัดไป)
+    EN = [(2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+          (2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+          (3, "", 30, "CHAPTER 3 RESEARCH METHODOLOGY 30", 8, "")]
+    TH = [(2, "", 12, "บทที่ 2 การทบทวนวรรณกรรม 12", 8, ""),
+          (2, "", 12, "บทที่ 2 การทบทวนวรรณกรรม 12", 8, "")]
+
+    def test_an_english_book_gets_the_english_title(self):
+        self.assertEqual(checker_module._toc_chapter_label(2, self.EN),
+                         'บทที่ 2 "LITERATURE REVIEW"')
+
+    def test_a_thai_book_gets_the_thai_title(self):
+        self.assertEqual(checker_module._toc_chapter_label(2, self.TH),
+                         'บทที่ 2 "การทบทวนวรรณกรรม"')
+
+    def test_the_title_is_quoted_so_the_english_report_keeps_it_verbatim(self):
+        """ค่าที่อ่านได้จากเล่มต้องไม่ถูกแปล — เครื่องหมายคำพูดคือสิ่งที่กันไว้"""
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        th = ("สารบัญมี 4 บท เนื้อหามี 3 บท เพราะสารบัญพิมพ์ซ้ำ: "
+              + checker_module._toc_chapter_label(2, self.TH))
+        en = i18n.tr_en(th, pairs)
+        self.assertIn('"การทบทวนวรรณกรรม"', en)
+        self.assertIn("Chapter 2", en)
+
+    def test_two_different_titles_under_one_number_are_both_shown(self):
+        entries = [(2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+                   (2, "", 40, "CHAPTER 2 RESULTS 40", 8, "")]
+        self.assertEqual(checker_module._toc_chapter_label(2, entries),
+                         'บทที่ 2 "LITERATURE REVIEW" / "RESULTS"')
+
+    def test_a_chapter_line_without_a_title_falls_back_to_the_number(self):
+        """ควบคุมเชิงลบ — อ่านชื่อไม่ได้ต้องไม่พังและไม่พิมพ์คำพูดเปล่า"""
+        entries = [(2, "", None, "CHAPTER 2", 8, "")]
+        self.assertEqual(checker_module._toc_chapter_label(2, entries), "บทที่ 2")
+
+    def test_other_chapters_are_not_pulled_in(self):
+        self.assertEqual(checker_module._toc_chapter_label(3, self.EN),
+                         'บทที่ 3 "RESEARCH METHODOLOGY"')
+
+
+class TooManyKeywordsIsOnlyANotice(unittest.TestCase):
+    """keyword เกิน 5 คำ = ข้อสังเกตสีเหลือง ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เดิมเป็นสีแดง ซึ่งทำให้เล่มที่เกินมาคำเดียวตกทั้งเล่ม
+    """
+
+    def test_the_zone_comes_from_the_rule_catalog(self):
+        self.assertEqual(RULE_CATALOG["FRONT.KEYWORD_COUNT"]["failure_zone"], "YELLOW")
+        self.assertEqual(checker_module.KEYWORD_COUNT_ZONE, "YELLOW")
+
+    def test_the_finding_uses_that_zone(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("if len(kws) > 5:", 1)[1][:400]
+        self.assertIn("rep.add(KEYWORD_COUNT_ZONE", block)
+        self.assertIn('"FRONT.KEYWORD_COUNT"', block)
+
+    def test_the_other_abstract_rules_stay_red(self):
+        """ควบคุมเชิงลบ — แยกรหัสกฎออกมาเพื่อไม่ให้ลากกฎอื่นของบทคัดย่อเป็นเหลืองด้วย"""
+        self.assertNotIn("failure_zone", RULE_CATALOG["FRONT.ABSTRACT"])
+
+
 class TheKeywordListIsCountedAcrossLines(unittest.TestCase):
     """รายการ keyword ที่ยาวเกินบรรทัดเดียว ต้องนับให้ครบ (เจ้าหน้าที่สั่ง ก.ย. 2569)
 
