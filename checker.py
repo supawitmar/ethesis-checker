@@ -3953,6 +3953,26 @@ _TOC_ENTRY_TAIL = re.compile(
     rf'\s+{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?\s*$', re.I)
 
 
+# "จุดไข่ปลา" (dot leader) ที่ลากเชื่อมชื่อหัวข้อกับเลขหน้า เป็นเส้นประของ template
+# ไม่ใช่ตัวอักษรของหัวข้อ บางเล่มลากชนเลขหน้าโดยไม่มีช่องว่างคั่น
+# ("CHAPTER 4 RESULTS.........45") ตัวอ่านบรรทัดสารบัญทุกตัวจึงต้องเห็นเป็นช่องว่าง
+# เหมือนกันหมดตั้งแต่ต้นทาง ไม่งั้นพลาดเป็นลูกโซ่: อ่านชื่อบท/ชื่อหัวข้อติดจุดและ
+# เลขหน้ามาด้วยแล้วฟ้องว่าสะกดผิด · หาเลขหน้าของรายการไม่เจอแล้วฟ้องว่าไม่ระบุเลขหน้า ·
+# นับบรรทัดที่มีเลขหน้าไม่ถึงเกณฑ์แล้วมองไม่ออกว่าหน้านี้คือหน้าสารบัญ
+#
+# แทนที่เฉพาะชุดจุดที่ตามด้วยเลขหน้า (หรือไม่มีอะไรต่อ) แล้วจบบรรทัด จุดที่อยู่กลาง
+# ชื่อหัวข้อและจุดในตัวย่อ ("U.S.") จึงไม่ถูกแตะ
+_TOC_DOT_LEADER = re.compile(
+    r'\s*(?:[.…]\s*){2,}'
+    rf'(?=\s*(?:{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?)?\s*$)',
+    re.I)
+
+
+def space_dot_leader(text):
+    """แทนจุดไข่ปลาด้วยช่องว่างเดียว เพื่อให้เลขหน้าแยกออกจากชื่อหัวข้อเสมอ"""
+    return _TOC_DOT_LEADER.sub(' ', soft(text)).strip()
+
+
 def looks_like_contents_page(text, min_entries=5):
     """หน้านี้เป็น "รายการสารบัญ" หรือไม่ — ดูจากสิ่งที่ควรอยู่บนหน้าสารบัญ
 
@@ -3964,11 +3984,12 @@ def looks_like_contents_page(text, min_entries=5):
     ส่วนหน้าปก หน้าลงนาม หน้ากิตติกรรมประกาศ และหน้าบทคัดย่อได้ 0-1 บรรทัด
     """
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    return sum(1 for line in lines if _TOC_ENTRY_TAIL.search(soft(line))) >= min_entries
+    return sum(1 for line in lines
+               if _TOC_ENTRY_TAIL.search(space_dot_leader(line))) >= min_entries
 
 
 def _strip_toc_page_number(text):
-    s = soft(text)
+    s = space_dot_leader(text)
     # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
     # รองรับ "ช่วงหน้า" ด้วย เช่น "LIST OF TABLES xi-xii" / "สารบัญตาราง ฎ-ฏ"
     # เล่มที่หัวข้อกินสองหน้าเขียนแบบนี้ ถ้าไม่ตัดจะจำแนกหัวข้อไม่ออก แล้วฟ้องผิดว่า
@@ -3990,9 +4011,10 @@ def _toc_page_label(text):
     ถ้าเขียนเป็นช่วง ("xi-xii") ให้ยึด "หน้าแรก" เพราะกฎที่ใช้ค่านี้ถามว่า
     หัวข้อเริ่มหน้าไหน
     """
+    spaced = space_dot_leader(text)
     match = re.search(rf'\s({_TOC_PAGE_TOKEN})\s*[-–—]\s*{_TOC_PAGE_TOKEN}\s*$',
-                      soft(text), re.I) or \
-        re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', soft(text), re.I)
+                      spaced, re.I) or \
+        re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', spaced, re.I)
     if not match:
         return ""
     label = match.group(1)
@@ -4135,16 +4157,12 @@ def _toc_chapter_title(text):
     PDF ภาษาไทยมักดึง "บทที่ 1" ออกมาเป็น "บทท ี่ 1" (สระ/วรรณยุกต์หลุดจากตำแหน่ง)
     จึงยอมรับ combining mark และช่องว่างแทรกระหว่างคำนำหน้ากับเลขบท
     """
-    head = re.sub(
+    return re.sub(
         r'^(?:CHAPTER|บทท)[ั-๎\s.]*(?:\d+\s*|[IVXL]+\s+)',
         '',
         _strip_toc_page_number(text),
         flags=re.I,
     ).strip()
-    # จุดไข่ปลาที่ลากติดเลขหน้าโดยไม่มีช่องว่างคั่น ("RESULTS.........45")
-    # _strip_toc_page_number ตัดไม่ได้ เพราะตัวตัดเลขหน้าต้องการช่องว่างนำหน้า
-    # แล้วตัวตัดจุดไข่ปลาก็ยึดท้ายบรรทัดซึ่งยังเป็นตัวเลขอยู่ ต้องเก็บกวาดอีกชั้น
-    return re.sub(r'\s*(?:[.…]\s*){2,}\s*[\divxlcdm]*\s*$', '', head, flags=re.I).strip()
 
 
 # บรรทัดสารบัญที่มีแต่ "CHAPTER 2" ไม่มีชื่อบท — _strip_toc_page_number อ่านเลขบท

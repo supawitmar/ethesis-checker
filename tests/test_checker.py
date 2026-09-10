@@ -2746,6 +2746,66 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class ADotLeaderGluedToThePageNumber(unittest.TestCase):
+    """จุดไข่ปลาที่ลากชนเลขหน้าโดยไม่มีช่องว่างคั่น ("RESULTS.........45")
+
+    เจ้าหน้าที่สั่งแก้ (ก.ย. 2569) เพราะทำให้อ่านชื่อบทพลาด — พอไล่ดูทั้งเส้นทาง
+    พบว่าไม่ได้พลาดแค่ชื่อบท ตัวอ่านบรรทัดสารบัญทุกตัวใช้ทางเดียวกันหมด จึงพลาด
+    เป็นลูกโซ่ ต้องแก้ที่ต้นทาง (space_dot_leader) ไม่ใช่แก้ทีละที่
+    """
+
+    GLUED = ["ACKNOWLEDGEMENTS.........iii",
+             "ABSTRACT (ENGLISH).........iv",
+             "LIST OF TABLES.........vii",
+             "CHAPTER 1 INTRODUCTION.........1",
+             "CHAPTER 4 RESULTS.........45",
+             "REFERENCES.........130"]
+
+    def test_the_page_is_still_recognised_as_a_table_of_contents(self):
+        """อาการหนักสุด — เดิมมองไม่ออกว่าเป็นหน้าสารบัญ แล้วฟ้องว่าไม่พบหน้าสารบัญ"""
+        page = "TABLE OF CONTENTS" + chr(10) + chr(10).join(self.GLUED)
+        self.assertTrue(checker_module.looks_like_contents_page(page))
+
+    def test_the_heading_no_longer_carries_the_dots_and_the_page_number(self):
+        for raw, want in zip(self.GLUED,
+                             ["ACKNOWLEDGEMENTS", "ABSTRACT (ENGLISH)",
+                              "LIST OF TABLES", "CHAPTER 1 INTRODUCTION",
+                              "CHAPTER 4 RESULTS", "REFERENCES"]):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), want, raw)
+
+    def test_the_page_number_is_readable_through_the_dots(self):
+        """เดิมอ่านไม่เจอ แล้วฟ้องว่ารายการนี้ไม่ระบุเลขหน้า"""
+        for raw, want in zip(self.GLUED, ["iii", "iv", "vii", "1", "45", "130"]):
+            self.assertEqual(checker_module._toc_page_label(raw), want, raw)
+
+    def test_thai_page_letters_and_ranges_work_too(self):
+        for raw, head, label in (
+                ("สารบัญตาราง.........ฎ", "สารบัญตาราง", "ฎ"),
+                ("LIST OF TABLES.........xi-xii", "LIST OF TABLES", "xi"),
+                ("บทที่ 6 สรุปผลการวิจัย…………120", "บทที่ 6 สรุปผลการวิจัย", "120")):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), head, raw)
+            self.assertEqual(checker_module._toc_page_label(raw), label, raw)
+
+    def test_dots_inside_a_heading_are_left_alone(self):
+        """ควบคุมเชิงลบ — ตัดเฉพาะชุดจุดที่ลากไปหาเลขหน้าท้ายบรรทัดเท่านั้น"""
+        for raw, want in (("CHAPTER 3 THE U.S. CONTEXT 30", "CHAPTER 3 THE U.S. CONTEXT"),
+                          ("CHAPTER 3 THE U.S. CONTEXT.........30",
+                           "CHAPTER 3 THE U.S. CONTEXT"),
+                          ("ACKNOWLEDGEMENTS iii", "ACKNOWLEDGEMENTS")):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), want, raw)
+
+    def test_a_line_with_no_dot_leader_is_untouched(self):
+        for raw in ("LIST OF TABLES xi", "บทที่ 2 การทบทวนวรรณกรรม 12",
+                    "TABLE OF CONTENTS"):
+            self.assertEqual(checker_module.space_dot_leader(raw), raw, raw)
+
+    def test_the_trailing_leader_without_a_page_number_still_goes(self):
+        """ของเดิมรองรับอยู่แล้ว ต้องไม่หายไปตอนย้ายมาที่ต้นทาง"""
+        self.assertEqual(
+            checker_module._strip_toc_page_number("LIST OF TABLES ................"),
+            "LIST OF TABLES")
+
+
 class TheDuplicatedChapterIsNamedInTheBooksOwnLanguage(unittest.TestCase):
     """ข้อสารบัญซ้ำต้องบอกชื่อบทด้วย เล่มไทยได้ชื่อไทย เล่มอังกฤษได้ชื่ออังกฤษ
 
