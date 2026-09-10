@@ -40,6 +40,13 @@ TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
+# keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
+# FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
+KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
+# เลขหน้าที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ทั้งส่วนนำและเนื้อหา
+# กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด / ไม่มีเลขหน้า / เลขหน้าอารบิกไม่เริ่มที่บทที่ 1)
+# ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
+PAGE_SEQUENCE_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE", "ORANGE")
 
 # ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
 # ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
@@ -83,15 +90,71 @@ def _page_text(page):
     chars = getattr(page, 'chars', None)
     if not chars:
         return page.extract_text() or ''
-    rows = {}
-    for c in _thai_chars(chars):
-        rows.setdefault(round(c['top'] / 3.0), []).append(c)
     out_lines = []
-    for key in sorted(rows):
-        line = _compose_thai_line(rows[key])
+    for row in _group_into_lines(_thai_chars(chars)):
+        line = _compose_thai_line(row)
         if line:
             out_lines.append(line)
     return '\n'.join(out_lines)
+
+
+# ความสูงสูงสุดที่ถือว่าอักขระยังอยู่ "บรรทัดเดียวกัน" — ระยะบรรทัดจริงของเล่มห่างกัน
+# 13-18 pt ส่วนสองคอลัมน์ในแถวเดียวกันเยื้องกันไม่ถึง 2 pt ค่านี้จึงแยกสองอย่างได้ชัด
+_LINE_TOLERANCE = 3.0
+
+
+def _group_into_lines(chars):
+    """จัดอักขระเป็นบรรทัดด้วย "ระยะห่างจริง" ไม่ใช่ช่องตายตัว
+
+    ของเดิมใช้ round(top / 3.0) เป็นกุญแจ ซึ่งมีขอบช่องตายตัว อักขระที่ห่างกันแค่
+    0.5 pt จึงตกคนละช่องได้ถ้าบังเอิญคร่อมขอบพอดี — หน้าลงนามเล่มจริง (ก.ย. 2569)
+    ชื่อสองคอลัมน์อยู่แถวเดียวกัน (top 283.4 กับ 283.9) แต่ถูกแยกเป็นสองบรรทัด
+
+        First Name Last name,          <- ช่องชื่อนักศึกษา (คอลัมน์ซ้าย)
+        Chayanan Sittibusaya,          <- ประธานกรรมการ (คอลัมน์ขวา)
+        Candidate MD.                  <- ป้ายสองคอลัมน์ รวมกันถูกต้อง
+
+    บรรทัดเหนือคำว่า Candidate จึงกลายเป็นชื่อของคอลัมน์ขวา ระบบเลยรายงานว่า
+    "ชื่อนักศึกษาในเล่มเขียนว่า Chayanan Sittibusaya" ทั้งที่ช่องนั้นเป็น placeholder
+    ที่ยังไม่ได้กรอก ("First Name Last name")
+
+    เทียบระยะกับ "ตัวแรกของบรรทัด" ไม่ใช่ตัวก่อนหน้า เพื่อไม่ให้บรรทัดยาวไหลไปเรื่อย ๆ
+    ทีละ 3 pt จนกลืนบรรทัดถัดไป
+    """
+    lines, start = [], None
+    for c in sorted(chars, key=lambda c: (float(c['top']), float(c['x0']))):
+        top = float(c['top'])
+        if start is None or top - start > _LINE_TOLERANCE:
+            lines.append([])
+            start = top
+        lines[-1].append(c)
+    return lines
+
+
+_CID_GLYPH = re.compile(r'\(cid:\d+\)')
+
+
+def font_damage_score(page, text=None):
+    """หน้านี้มีร่องรอยว่า "ฟอนต์ในไฟล์บอกอักขระผิด" กี่ตัว — 0 = ปกติ
+
+    สองสัญญาณที่ฟันธงได้ ไม่ใช่การเดา
+
+    1. อักขระกว้างศูนย์ที่ไม่ใช่สระ/วรรณยุกต์ — ฟอนต์ map วรรณยุกต์ไปเป็นตัวอักษรอื่น
+       (ดูเหตุผลเต็มใน _thai_chars ซึ่งทิ้งอักขระพวกนี้ก่อนประกอบข้อความอยู่แล้ว)
+    2. (cid:N) — pdfminer หาคำแปลของ glyph นั้นไม่ได้เลย
+
+    วัดกับเล่มจริง 6 เล่ม: เล่มที่ถูกต้อง 4 เล่มได้ 0 ทุกหน้า ไม่มี false positive เลย
+    ส่วนเล่มที่ฟอนต์เพี้ยนจับได้ทั้งสองเล่ม (เล่มหนึ่ง 38 หน้า อีกเล่ม 9 หน้า) ตรงกับ
+    หน้าที่ตรวจด้วยตาแล้วพบว่าเพี้ยนจริง
+    """
+    bad = 0
+    for c in (getattr(page, 'chars', None) or []):
+        t = c.get('text') or ''
+        if not t or t == ' ' or _TH_MARKS.match(t):
+            continue
+        if float(c.get('x1', 0)) - float(c.get('x0', 0)) < 0.5:
+            bad += 1
+    return bad + len(_CID_GLYPH.findall(text or ''))
 
 
 def _thai_chars(chars):
@@ -277,8 +340,9 @@ _SIG_SKIP_MARKERS = (
     norm('ผู้วิจัย'), 'CANDIDATE', norm('คณบดี'), 'DEAN',
     norm('ประธานหลักสูตร'), 'PROGRAMDIRECTOR', 'DIRECTOR',
 )
-# ข้อความตัวอย่างของ template ที่ต้องลบ/ถมขาวก่อนส่งเล่ม — ถ้ายังดึงข้อความได้แปลว่า
-# ยังอยู่ในไฟล์ (แต่ระบบอ่านข้อความที่ถมขาวไว้ได้ด้วย จึงยืนยันเองไม่ได้ว่ามองเห็นจริง)
+# ข้อความตัวอย่างของ template ที่ต้องถมขาวก่อนส่งเล่ม (ห้ามลบ กรอบตารางต้องคงตาม
+# template) — ถ้ายังดึงข้อความได้แปลว่ายังอยู่ในไฟล์ แต่ระบบอ่านข้อความที่ถมขาวไว้ได้ด้วย
+# จึงยืนยันเองไม่ได้ว่ามองเห็นจริง
 _SIG_LEFTOVER_PLACEHOLDERS = (
     (norm('ตำแหน่งทางวิชาการและชื่อ'), 'ตำแหน่งทางวิชาการและชื่อ นามสกุล'),
     (norm('ระบุสาขาวิชา'), 'คุณวุฒิ (ระบุสาขาวิชา)'),
@@ -830,6 +894,49 @@ def _page_count_issue(count_wrong, last_arabic):
     return zone, where, found
 
 
+def committee_name_for_case(text):
+    """ชื่อคนล้วน ๆ สำหรับตรวจตัวพิมพ์ — ตัดคุณวุฒิท้ายชื่อและตำแหน่งวิชาการออก
+
+    ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง คุณวุฒิที่พิมพ์ต่อท้ายจึงติดมาด้วย
+    กฎนี้เคยถูกถอดออกเพราะเหตุนี้ (ก.ย. 2569) — เล่มจริงได้ข้อส้มซ้ำทั้งสองหน้า
+
+        "Weerawat Limroonreungrat, PT"     ติด ", PT" แล้วถูกตัดสินว่าไม่ใช่ Capital Case
+        "Assist.Prof. Hoon Kim, ATC"       ติด ", ATC" เหมือนกัน
+
+    ทั้งสองชื่อถูกต้องอยู่แล้ว ตัดคุณวุฒิออกก่อนแล้วผ่านทั้งคู่ เจ้าหน้าที่จึงสั่งให้เอา
+    กฎกลับมาพร้อมการตัดคุณวุฒิ (ก.ย. 2569)
+    """
+    return _strip_committee_title((text or "").split(",")[0]).strip()
+
+
+def _report_committee_name_case(rep, members, loc):
+    """ชื่อกรรมการบนหน้าลงนามต้องไม่เป็นตัวพิมพ์ใหญ่ทั้งหมด
+
+    หน้าลงนามใช้ตัวพิมพ์แบบชื่อคน ("Mathuros Tipayamongkholgul") ต่างจากหน้าบทคัดย่อ
+    ที่ต้องเป็น UPPERCASE ทั้งหมด — นักศึกษาที่คัดรายชื่อจากหน้าบทคัดย่อมาวางจะได้
+    ตัวพิมพ์ใหญ่ทั้งบรรทัด ซึ่งเป็นอาการที่กฎนี้จับ
+
+    ตรวจเฉพาะชื่อภาษาอังกฤษ — ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก
+
+    **สีส้ม ไม่ใช่แดง** เพราะระบบอ่านชื่อจากตารางลายเซ็น ยังอ่านคร่อมช่องได้
+    (เหตุผลเดียวกับที่กฎนี้เคยถูกถอดออกทั้งกฎ) ให้เจ้าหน้าที่เปิดหน้านั้นยืนยัน
+    """
+    bad = []
+    for key in sorted(members):
+        core = committee_name_for_case(members.get(key))
+        if core and re.search(r'[A-Za-z]', core) and not _is_title_case(core):
+            bad.append(core)
+    if not bad:
+        return
+    shown = ", ".join(f'"{n}"' for n in bad)
+    rep.add("ORANGE", "front_matter", loc,
+            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
+            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case) "
+            "ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ",
+            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
+            "FRONT.COMMITTEE")
+
+
 def _committee_names(expected):
     """รายชื่อจากข้อมูลอนุมัติ — รับได้ทั้ง list ของ dict {'name': ...} และ list ของ str"""
     return [m.get("name", "") if isinstance(m, dict) else (m or "") for m in expected]
@@ -946,22 +1053,33 @@ def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
 
     "ควรมีชื่ออะไรบ้าง" อยู่ในบรรทัดที่ควรเป็น ดึงจากฟอร์มต้นทางโดยตรง
 
-    จำนวนไม่ตรง = **ส้ม ไม่ใช่แดง** เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านหน้าออกครบไหม
-    ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม
+    **จำนวนไม่ตรง = แดงทั้งสองทาง** (เจ้าหน้าที่สั่ง ก.ย. 2569 — เดิมขาดเป็นส้ม)
+
+    ทั้งขาดและเกินต้องแจ้งสีแดง และต้องอ้างถึง บฑ.1 / บฑ.2 ให้ชัดว่าเทียบกับอะไร
+    ข้อความจึงยกรายชื่อตามฟอร์มมาไว้ในบรรทัด "ควรเป็น" ทุกครั้ง
+
+    **ข้อควรระวังที่ยอมรับแล้ว:** จำนวนที่นับได้ขึ้นกับว่าระบบอ่านตารางลายเซ็นออกครบไหม
+    ถ้าอ่านไม่ครบจะได้ชื่อ *น้อยกว่า* ความจริง แล้วฟ้องแดงทั้งที่เล่มถูก — เจ้าหน้าที่
+    รับความเสี่ยงนี้แล้ว จึงต้องเปิดหน้านั้นดูก่อนส่งกลับให้นักศึกษา
+
+    เล่มจริงที่เจอ (ก.ย. 2569) หน้าลงนาม 2 พิมพ์กรรมการซ้ำสองคน คนละสองครั้ง
+    (Tran Kiem Hao กับ Karl Peltzer บรรทัดคุณวุฒิเขียน "Ph.D." กับ "PhD" ต่างกัน)
+    จึงได้ 7 ชื่อจากที่อนุมัติไว้ 5 — ของเดิมเป็นส้มพร้อมคำแนะนำว่า "ถ้าครบแล้วแปลว่า
+    ระบบอ่านบางช่องไม่ออก ให้ผ่านได้" ซึ่งชี้ผิดทางสำหรับกรณีเกิน
     """
     want = _committee_names(expected)
     if not want or len(found_names) == len(want):
         return
     listed = "  ".join(f'{k}. {_display_committee_name(n)}'
                        for k, n in enumerate(want, start=1))
-    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}"
-            if len(found_names) < len(want) else
+    short = len(found_names) < len(want)
+    lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}" if short else
             f"รายชื่อเกินจากที่ได้รับอนุมัติใน {form}")
-    rep.add("ORANGE", "front_matter", loc,
+    rep.add("RED", "front_matter", loc,
             f"{lead}: หน้านี้มี {len(found_names)} ชื่อ แต่อนุมัติไว้ {len(want)} ชื่อ",
             f"ต้องมีรายชื่อครบตาม {form} คือ {listed}",
-            "ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ "
-            "ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้",
+            (f"เพิ่มรายชื่อที่ขาดให้ครบตาม {form}" if short else
+             f"ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อตาม {form}"),
             rule_id)
 
 
@@ -1175,7 +1293,22 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
 
 
 def _report_sig_placeholders(rep, found, loc):
-    """ช่องกรรมการที่ไม่ได้ใช้ต้องลบ/ถมขาวข้อความตัวอย่างของ template
+    """ช่องกรรมการที่ไม่ได้ใช้ต้อง "เปลี่ยนสีตัวอักษรเป็นสีขาว" ไม่ใช่ลบทิ้ง
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้แจ้งแบบนี้ — ของเดิมบอกให้ "ลบข้อความตัวอย่างออกจาก
+    ไฟล์" ซึ่งสวนทางกับคู่มือของบัณฑิตวิทยาลัยเอง ที่กำหนดว่ากรอบของ template ต้องคงไว้
+    ตามที่ set มา (ใส่รายชื่อได้ฝั่งละ 6 รายชื่อ) แล้วช่องที่ไม่มีชื่อให้ถมด้วยสีขาว
+    ถ้อยคำชุดเดียวกันอยู่ใน STAFF_CHECKS หัวข้อ "โครงสร้างหน้าลงนาม" อยู่แล้ว
+    นักศึกษาที่ทำตามคำว่า "ลบ" จะได้กรอบตารางผิดจาก template แล้วโดนตีกลับอีกรอบ
+
+    ข้อความที่ตรวจทั้งสี่แบบเป็นแถวชื่อกับแถวคุณวุฒิของช่องกรรมการที่ไม่ได้ใช้ทั้งหมด
+    (ดู _SIG_LEFTOVER_PLACEHOLDERS) จึงใช้ถ้อยคำเดียวกันได้ทุกแบบ — เล่มไทยเจอ
+    "ตำแหน่งทางวิชาการและชื่อ นามสกุล" / "คุณวุฒิ (ระบุสาขาวิชา)" ส่วนเล่มอังกฤษเจอ
+    "Academic rank First Name Last name" / "Degree (Subject)" วิธีแก้อันเดียวกัน
+
+    ถ้อยคำจบแค่ "เปลี่ยนสีตัวอักษรเป็นสีขาว" ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) — เคยต่อท้าย
+    ว่า "ไม่ใช่ลบบรรทัดออก" แล้วถูกสั่งให้ตัดออก บรรทัดนี้อยู่ในข้อความที่คัดลอกส่งนักศึกษา
+    ยิ่งสั้นยิ่งอ่านจบ ส่วนเหตุผลเรื่องกรอบ template อยู่ในถ้อยคำของหัวข้อโครงสร้างหน้าลงนาม
 
     ยังเป็นส้มเพราะข้อความที่ไม่ใช่สีขาวอาจถูกกล่องทึบทับไว้อีกชั้น ระบบยืนยันเองไม่ได้
     """
@@ -1184,8 +1317,9 @@ def _report_sig_placeholders(rep, found, loc):
     rep.add("ORANGE", "front_matter", loc,
             "พบข้อความตัวอย่างของ template ค้างอยู่ในตารางลายเซ็น: "
             + ", ".join(f'"{label}"' for label in found),
-            "ช่องกรรมการที่ไม่ได้ใช้ต้องลบข้อความตัวอย่างออกจากไฟล์",
-            "ตรวจว่าข้อความนี้มองเห็นบนหน้ากระดาษหรือไม่ ถ้าเห็นให้ลบออกจากช่องที่ไม่ได้ใช้",
+            "ช่องกรรมการที่ไม่ได้ใช้ต้องเปลี่ยนสีตัวอักษรเป็นสีขาว",
+            "ตรวจว่าข้อความนี้มองเห็นบนหน้ากระดาษหรือไม่ "
+            "ถ้าเห็นให้เปลี่ยนสีตัวอักษรของช่องที่ไม่ได้ใช้เป็นสีขาว",
             "FRONT.COMMITTEE")
 
 
@@ -1284,10 +1418,9 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         # (ข้อฟ้องบอกว่าเทียบกับ บฑ.1 หรือ บฑ.2 ซึ่งบอกบทบาทในตัว)
         page_label = signature_page_position(sig_pages, idx)
         loc = f"{page_label} ({page_ref(idx)})"
-        # ไม่ตรวจตัวพิมพ์ของชื่อกรรมการบนหน้านี้ (เจ้าหน้าที่สั่งเลิก ก.ย. 2569)
-        # ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้ายมาด้วย
-        # ("Weerawat Limroonreungrat, PT" / "Assist.Prof. Hoon Kim, ATC") แล้วตัดสิน
-        # ว่าไม่ใช่ Capital Case ทั้งที่ชื่อถูกต้อง เล่มจริงจึงได้ข้อส้มซ้ำทั้งสองหน้า
+        # ตัวพิมพ์ของชื่อกรรมการ — เจ้าหน้าที่สั่งให้เอากลับมา (ก.ย. 2569) พร้อมกับ
+        # ตัดคุณวุฒิท้ายชื่อออกก่อน ซึ่งเป็นสาเหตุที่กฎนี้เคยถูกถอดออกทั้งกฎ
+        _report_committee_name_case(rep, members, loc)
         # บอกเจ้าหน้าที่ว่าระบบเอา "อะไร" ไปเทียบ — เวลาระบบอ่านหน้าเพี้ยนจะเห็นทันที
         # ว่าเพี้ยนตรงไหน แทนที่จะเห็นแต่ผลตัดสินแล้วเดาไม่ออกว่าทำไมถึงฟ้อง
         read_names = committee_name_list(members)
@@ -1401,6 +1534,21 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
             "", "FORM.APPROVED_MATCH")
 
 
+# อักษรไทย (ไม่รวมเลขไทยกับวรรณยุกต์) — ใช้แยก "ช่องรหัสที่ฟอนต์ทำเพี้ยน" ออกจาก
+# "นามสกุลไทยที่ค้างอยู่ตรงนั้นเพราะเล่มลืมพิมพ์รหัส"
+_THAI_LETTER = re.compile('[ก-ฮ]')
+
+
+def is_page_count_line(line):
+    """บรรทัด "97 pages" / "106 หน้า" ที่ปิดท้ายบทคัดย่อ
+
+    ใช้เป็นจุดหยุดของรายการ keyword — สำรวจเล่มจริง 5 เล่ม (ทั้งไทยและอังกฤษ)
+    พบว่ารายการ keyword จบด้วยบรรทัดนี้เสมอ ไม่มีเล่มไหนต่างออกไป
+    """
+    return bool(re.search(r'(\d{1,4})\s*PAGES?', line or "", re.I)
+                or re.search(r'(\d{1,4})(หนา)', norm(line)))
+
+
 def unreadable_id_digits(page_text, student_id, names=()):
     """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
 
@@ -1409,11 +1557,18 @@ def unreadable_id_digits(page_text, student_id, names=()):
     glyph ส่วนหน้าบทคัดย่ออังกฤษของเล่มเดียวกันใช้อีกฟอนต์ อ่านได้ "6437028 PHPH/M"
     ถูกต้อง เล่มไม่ได้พิมพ์ผิด ระบบอ่านไม่ออกเอง
 
+    อีกเล่มหนึ่ง (ก.ย. 2569) ฟอนต์เดียวกันแต่เพี้ยนคนละแบบ เลข "6636480" ออกมาเป็น
+    ",,-,./0" คือกลายเป็น **เครื่องหมายวรรคตอน** ไม่ใช่ตัวอักษร และรหัสหลักสูตร
+    "PHIE/M" ถูกแทรกช่องว่างเป็น "PHIE / M" จนกลายเป็นสามคำ ของเดิมจับได้เฉพาะแบบ
+    ตัวอักษรอังกฤษล้วนและรหัสหลักสูตรที่เป็นคำเดียว เล่มนี้จึงหลุด แล้วโดนฟ้องแดงว่า
+    "ไม่พบรหัสนักศึกษาบนหน้านี้" ทั้งที่พิมพ์อยู่ครบ
+
     ตัวชี้ขาดคือ "รหัสหลักสูตรอ่านได้ แต่ตัวเลขที่ต้องอยู่ข้างหน้ามันไม่ใช่ตัวเลข"
     ไม่ใช่การนับสถิติตัวอักษรทั้งหน้า เพราะกฎนี้ใช้ยกเลิกการฟ้อง จึงต้องแคบไว้ก่อน
 
-    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสองอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
-    และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (เล่มที่ลืมรหัสจะเหลือนามสกุลติดอยู่ตรงนั้น)
+    แยกจาก "เล่มลืมพิมพ์รหัส" ด้วยข้อมูลระบบสามอย่าง: ต้องยาวเท่าจำนวนหลักของรหัส
+    · ต้องไม่มีอักษรไทยปน (เล่มที่ลืมรหัสบนหน้าไทยจะเหลือนามสกุลไทยติดอยู่ตรงนั้น)
+    · และต้องไม่ใช่ท่อนหนึ่งของชื่อนักศึกษา (หน้าอังกฤษจะเหลือนามสกุลอังกฤษ)
     """
     student_id = soft(student_id)
     digits = re.sub(r'\D', '', student_id)
@@ -1427,12 +1582,15 @@ def unreadable_id_digits(page_text, student_id, names=()):
     for line in (page_text or "").splitlines():
         tokens = soft(line).split()
         for k in range(1, len(tokens)):
-            if norm(tokens[k]) != want_tail:
+            # รหัสหลักสูตรอาจถูกแทรกช่องว่างจนแตกเป็นหลายคำ ("PHIE / M") จึงต่อคำ
+            # ไปข้างหน้าทีละคำแล้วเทียบด้วย norm() ซึ่งตัดช่องว่างกับ "/" ทิ้งอยู่แล้ว
+            if not any(norm("".join(tokens[k:k + span])) == want_tail
+                       for span in range(1, min(4, len(tokens) - k + 1))):
                 continue
             slot = tokens[k - 1]
-            if not re.fullmatch(r'[A-Za-z]+', slot) or len(slot) != len(digits):
+            if len(slot) != len(digits) or _THAI_LETTER.search(slot):
                 continue
-            if any(norm(slot) in name for name in known):
+            if any(norm(slot) in name for name in known if name):
                 continue
             return slot
     return ""
@@ -1880,10 +2038,10 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         if problems:
             more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
             observed = ", ".join(lab for _i, lab, _s, _v in seq)
-            rep.add("RED", "front_matter", "ส่วนนำ",
+            rep.add(PAGE_SEQUENCE_ZONE, "front_matter", "ส่วนนำ",
                     "เลขหน้าไม่ต่อเนื่อง: " + " และ ".join(problems[:5]) + more,
                     f"เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
-                    "", "PAGE.NUMBERING")
+                    "", "PAGE.NUMBERING_SEQUENCE")
 
     if unread:
         # แยกสองแบบ เพราะวิธีแก้คนละอย่าง
@@ -2630,39 +2788,48 @@ STAFF_CHECKS = [
                 #
                 # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ (สี่ต่อสี่) เพราะหน้ารายงานแปล
                 # ด้วยการเทียบทีละบรรทัด บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                #
+                # ย่อหน้า 2 กับ 4 เคยอ่านแล้วขัดกันเอง — "ไม่ต้องเลื่อนหรือปรับกรอบ"
+                # กับ "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้" เจ้าหน้าที่สั่งให้
+                # ปรับให้สอดคล้องกัน (ก.ย. 2569) ทั้งสองย่อหน้าพูดคนละเรื่อง
+                #   ย่อหน้า 2  ห้ามขยับ "เพื่อให้พอดีกับจำนวนชื่อของตัวเอง"
+                #   ย่อหน้า 4  กรอบต้องเป็นค่ามาตรฐานของ template (ฝั่งละ 6 รายชื่อ)
                 "text": ("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"
                          "\n"
                          "ปรับโครงสร้างของหน้า "
                          "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
                          "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
                          "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
-                         "ไม่ต้องเลื่อนหรือปรับกรอบ"
+                         "ไม่ต้องเลื่อนชื่อหรือย่อขยายกรอบเพื่อให้พอดีกับจำนวนชื่อ"
                          "\n"
                          "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง"
                          "ให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
                          "และต้องใช้ font และ template ที่กำหนดด้วย "
                          "ซึ่งนักศึกษาจะต้องทำดำเนินจัดทำรูปเล่มตามโครงสร้างทื่กำหนด "
                          "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
-                         "(จัดตามลูกศรสีเหลืองในคู่มือ)"
+                         "(จัดตามลูกศรสีเหลืองในคู่มือ) "
+                         "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
                          "\n"
                          "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้"),
+                         "ให้ใส่สีขาวไว้ และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก"),
                 "text_en": ("Approval pages (Pages i - ii)"
                             "\n"
                             "please restructure the page and realign each committee "
                             "list to strictly follow the top-to-bottom sequence "
-                            "approved in the official document without shifting or "
-                            "modifying the frames."
+                            "approved in the official document without shifting the "
+                            "names or resizing the frames to fit them."
                             "\n"
                             "Students must format the file using the designated font "
                             "and template, following the exact ordering sequence "
-                            "indicated by the arrows in the formatting manual."
+                            "indicated by the arrows in the formatting manual: "
+                            "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
                             "\n"
                             "Additionally, the template frames must be adjusted to "
                             "match the default settings, which accommodate up to 6 "
                             "names per side; any remaining blank slots must be "
-                            "changed to white font color"),
+                            "changed to white font color and remove the position "
+                            "below the degree"),
             },
         ],
     },
@@ -2685,11 +2852,8 @@ STAFF_CHECKS = [
                 "label": "ไม่มีค่าปรับ",
                 "label_en": "No fine",
                 "tone": "pass",
-                "text": ("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า "
-                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
-                         "กรณีที่นักศึกษามีค่าปรับ "
-                         "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
-                         "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
+                "text": ("นักศึกษาไม่มีค่าปรับในการส่งเล่มล่าช้า "
+                         "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม"
                          "\n"
                          "\n"
                          "หากดำเนินการแก้ไขตามรายละเอียดที่เจ้าหน้าที่แจ้งใน Remarks "
@@ -2712,9 +2876,7 @@ STAFF_CHECKS = [
                          "\n"
                          "supawit.mar@mahidol.ac.th"),
                 "text_en": ("You have no fine for late submission, and no additional fees "
-                            "are charged during the checking process. If a fine is "
-                            "incurred, students will receive an invoice through the "
-                            "system after the checking process is completed."
+                            "are charged during the checking process."
                             "\n"
                             "\n"
                             "Please resubmit the document to the system once you have "
@@ -2741,9 +2903,11 @@ STAFF_CHECKS = [
                 "label": "มีค่าปรับ",
                 "label_en": "Has a fine",
                 "tone": "fail",
-                "text": ("นศ. มีค่าปรับในการส่งเล่มล่าช้า "
+                # ตัด "กรณีที่นักศึกษามีค่าปรับ" ออก (เจ้าหน้าที่สั่ง ก.ย. 2569 ว่าให้
+                # สองภาษาเท่ากัน) ประโยคแรกยืนยันไปแล้วว่ามีค่าปรับ จะพูดเป็นเงื่อนไข
+                # ซ้ำอีกไม่ได้ — ฝั่งอังกฤษเขียนตรงแบบนี้อยู่แล้วตั้งแต่แรก
+                "text": ("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า "
                          "และระหว่างการแก้ไขไฟล์จะไม่มีการคำนวณค่าปรับเพิ่มเติม "
-                         "กรณีที่นักศึกษามีค่าปรับ "
                          "จะได้รับเอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ "
                          "กระบวนการตรวจสอบเสร็จสิ้นแล้ว"
                          "\n"
@@ -2877,8 +3041,8 @@ def staff_choices(keys, placement, verdict=None):
             if choice["text"] and choice["id"] in picked:
                 # หนึ่งหัวข้อตอบได้คำตอบเดียว หน้าเว็บคุมให้อยู่แล้ว แต่ค่าที่ส่งมาเชื่อไม่ได้
                 # (หน้าเก่าค้างไว้ กดรัวจนคำขอสวนกัน หรือคำขอถูกส่งซ้ำ) ถ้าไม่คุมตรงนี้
-                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นศ. ไม่มีค่าปรับ" แล้วตามด้วย
-                # "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+                # นักศึกษาจะได้ข้อความที่ขัดกันเอง "นักศึกษาไม่มีค่าปรับ" แล้วตามด้วย
+                # "นักศึกษามีค่าปรับ" ในย่อหน้าถัดไป
                 out.append((check, choice))
                 break
     return out
@@ -3195,6 +3359,49 @@ _DEGREE_SEARCH_STOP = re.compile(
 
 # ตัวย่อคุณวุฒิที่มีจุดคั่นตั้งแต่สองท่อน เช่น Ph.D. / M.Sc. / ปร.ด. / วท.ม.
 _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2,}')
+
+
+# คำนำหน้าที่ template เขียนไว้เอง ไม่ใช่คำที่นักศึกษาเติมเกิน — หน้าปกเล่มไทยขึ้นบรรทัด
+# ว่า "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ส่วนข้อมูลอนุมัติเก็บไว้แค่
+# "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ถ้าไม่ตัดคำนี้ก่อน เล่มไทยที่ถูกต้อง
+# จะโดนฟ้องว่ามีข้อความเกินทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
+_DEGREE_LINE_TEMPLATE_PREFIXES = (norm("ปริญญา"),)
+
+
+def degree_line_extras(page_text, expected):
+    """ข้อความบนบรรทัดชื่อปริญญาที่ "เกิน" จากข้อมูลอนุมัติ — คืน "" ถ้าบรรทัดตรงพอดี
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าชื่อปริญญาต้องตรงเป๊ะและห้ามมีคำเกิน ส่วนการเว้นวรรค
+    จะเว้นหรือไม่เว้นยอมรับได้ จึงเทียบด้วย norm() ซึ่งตัดวรรคตอนกับช่องว่างทิ้งก่อน
+
+    เล่มจริงที่เจอ (ก.ย. 2569)
+        หน้าปก      "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)"
+                    ข้อมูลอนุมัติคือ "DOCTOR OF PUBLIC HEALTH"
+        บทคัดย่อ    "Dr.PH (PUBLIC HEALTH)"  ข้อมูลอนุมัติคือ "Dr. P.H."
+    ของเดิมปล่อยผ่านทั้งคู่ เพราะถามแค่ว่า "ข้อความที่อนุมัติอยู่บนหน้านี้ไหม"
+    ไม่ได้ถามว่า "บรรทัดนั้นเท่ากับที่อนุมัติไหม"
+
+    เลือก **บรรทัดที่สั้นที่สุด** ที่มีข้อความนั้นอยู่ — หน้าบทคัดย่อมีชื่อปริญญาโผล่ใน
+    บรรทัดรายชื่อกรรมการด้วย ("... SUPA PENGPID, Dr.PH, ...") ถ้าเลือกบรรทัดแรกที่เจอ
+    อาจไปยกบรรทัดกรรมการมาอ้างว่าเป็นบรรทัดชื่อปริญญา
+
+    ใช้เฉพาะช่องที่ template วางชื่อปริญญาไว้ "บรรทัดของมันเอง" (หน้าปก และบรรทัด
+    ชื่อย่อในบทคัดย่อ) — หน้าลงนามไม่ใช้ เพราะชื่อปริญญาอยู่กลางประโยค template
+    ("for the degree of ...") ซึ่งมีคำอื่นล้อมรอบโดยชอบอยู่แล้ว
+    """
+    want = norm(expected)
+    if not want:
+        return ""
+    hits = []
+    for line in (page_text or "").splitlines():
+        nl = norm(line)
+        for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
+            if prefix and nl.startswith(prefix):
+                nl = nl[len(prefix):]
+                break
+        if want in nl and nl != want:
+            hits.append(soft(line))
+    return min(hits, key=len) if hits else ""
 
 
 def _looks_like_degree_line(line):
@@ -3746,6 +3953,26 @@ _TOC_ENTRY_TAIL = re.compile(
     rf'\s+{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?\s*$', re.I)
 
 
+# "จุดไข่ปลา" (dot leader) ที่ลากเชื่อมชื่อหัวข้อกับเลขหน้า เป็นเส้นประของ template
+# ไม่ใช่ตัวอักษรของหัวข้อ บางเล่มลากชนเลขหน้าโดยไม่มีช่องว่างคั่น
+# ("CHAPTER 4 RESULTS.........45") ตัวอ่านบรรทัดสารบัญทุกตัวจึงต้องเห็นเป็นช่องว่าง
+# เหมือนกันหมดตั้งแต่ต้นทาง ไม่งั้นพลาดเป็นลูกโซ่: อ่านชื่อบท/ชื่อหัวข้อติดจุดและ
+# เลขหน้ามาด้วยแล้วฟ้องว่าสะกดผิด · หาเลขหน้าของรายการไม่เจอแล้วฟ้องว่าไม่ระบุเลขหน้า ·
+# นับบรรทัดที่มีเลขหน้าไม่ถึงเกณฑ์แล้วมองไม่ออกว่าหน้านี้คือหน้าสารบัญ
+#
+# แทนที่เฉพาะชุดจุดที่ตามด้วยเลขหน้า (หรือไม่มีอะไรต่อ) แล้วจบบรรทัด จุดที่อยู่กลาง
+# ชื่อหัวข้อและจุดในตัวย่อ ("U.S.") จึงไม่ถูกแตะ
+_TOC_DOT_LEADER = re.compile(
+    r'\s*(?:[.…]\s*){2,}'
+    rf'(?=\s*(?:{_TOC_PAGE_TOKEN}(?:\s*[-–—]\s*{_TOC_PAGE_TOKEN})?)?\s*$)',
+    re.I)
+
+
+def space_dot_leader(text):
+    """แทนจุดไข่ปลาด้วยช่องว่างเดียว เพื่อให้เลขหน้าแยกออกจากชื่อหัวข้อเสมอ"""
+    return _TOC_DOT_LEADER.sub(' ', soft(text)).strip()
+
+
 def looks_like_contents_page(text, min_entries=5):
     """หน้านี้เป็น "รายการสารบัญ" หรือไม่ — ดูจากสิ่งที่ควรอยู่บนหน้าสารบัญ
 
@@ -3757,11 +3984,12 @@ def looks_like_contents_page(text, min_entries=5):
     ส่วนหน้าปก หน้าลงนาม หน้ากิตติกรรมประกาศ และหน้าบทคัดย่อได้ 0-1 บรรทัด
     """
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    return sum(1 for line in lines if _TOC_ENTRY_TAIL.search(soft(line))) >= min_entries
+    return sum(1 for line in lines
+               if _TOC_ENTRY_TAIL.search(space_dot_leader(line))) >= min_entries
 
 
 def _strip_toc_page_number(text):
-    s = soft(text)
+    s = space_dot_leader(text)
     # ตัดเลขหน้าท้ายบรรทัดออกก่อน (อารบิก/โรมัน/อักษรไทย)
     # รองรับ "ช่วงหน้า" ด้วย เช่น "LIST OF TABLES xi-xii" / "สารบัญตาราง ฎ-ฏ"
     # เล่มที่หัวข้อกินสองหน้าเขียนแบบนี้ ถ้าไม่ตัดจะจำแนกหัวข้อไม่ออก แล้วฟ้องผิดว่า
@@ -3783,9 +4011,10 @@ def _toc_page_label(text):
     ถ้าเขียนเป็นช่วง ("xi-xii") ให้ยึด "หน้าแรก" เพราะกฎที่ใช้ค่านี้ถามว่า
     หัวข้อเริ่มหน้าไหน
     """
+    spaced = space_dot_leader(text)
     match = re.search(rf'\s({_TOC_PAGE_TOKEN})\s*[-–—]\s*{_TOC_PAGE_TOKEN}\s*$',
-                      soft(text), re.I) or \
-        re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', soft(text), re.I)
+                      spaced, re.I) or \
+        re.search(r'\s(\d{1,4}|[ivxlcdm]+|[ก-ฮ])\s*$', spaced, re.I)
     if not match:
         return ""
     label = match.group(1)
@@ -3936,6 +4165,34 @@ def _toc_chapter_title(text):
     ).strip()
 
 
+# บรรทัดสารบัญที่มีแต่ "CHAPTER 2" ไม่มีชื่อบท — _strip_toc_page_number อ่านเลขบท
+# เป็นเลขหน้าแล้วตัดทิ้ง เหลือคำว่า CHAPTER ลอย ๆ ซึ่งไม่ใช่ชื่อบท ห้ามเอาไปแสดง
+_TOC_CHAPTER_WORD_ONLY = re.compile(r'^(?:CHAPTER|บทท)\d*$', re.I)
+
+
+def _toc_chapter_label(number, entries):
+    """ป้ายบทที่ซ้ำ พร้อมชื่อบทตามที่เล่มพิมพ์ไว้ในสารบัญ
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าต้องบอกชื่อบทด้วย ไม่ใช่บอกแค่เลขบท เพราะสารบัญ
+    ที่พิมพ์ซ้ำต้องเปิดไล่หาว่าบรรทัดไหน — ชื่อบทอ่านจากบรรทัดในสารบัญของเล่มเอง
+    เล่มไทยจึงได้ชื่อไทย เล่มอังกฤษได้ชื่ออังกฤษ โดยไม่ต้องเดาภาษาของเล่ม
+    ครอบด้วยเครื่องหมายคำพูดเพราะเป็น "ค่าที่อ่านได้จากเล่ม" ห้ามแปลเป็นอังกฤษ
+    ถ้ารายการซ้ำใช้ชื่อคนละชื่อ ให้ยกมาทุกชื่อ เจ้าหน้าที่จะได้รู้ว่าซ้ำแบบไหน
+    """
+    titles = []
+    for entry in entries:
+        if entry[0] != number:
+            continue
+        title = soft(_toc_chapter_title(entry[3]))
+        if _TOC_CHAPTER_WORD_ONLY.match(norm(title)):
+            continue
+        if title and title not in titles:
+            titles.append(title)
+    if not titles:
+        return f"บทที่ {number}"
+    return f'บทที่ {number} "' + '" / "'.join(titles) + '"'
+
+
 # ---------- normalized heading keys ----------
 N_ABSTRACT_TH = norm('บทคัดย่อ')
 # หัวข้อบทคัดย่อ "ภาษาอังกฤษ" ของเล่มสองภาษา — template เขียน ABSTRACT (THAI)
@@ -4073,6 +4330,25 @@ def _roman_to_int(text):
         total += -v if v < prev else v
         prev = v
     return total if 1 <= total <= 49 else None
+
+
+# หัวบทที่เขียนเลขเป็นอารบิกล้วน — norm() ตัดช่องว่างกับจุดทิ้งไปแล้ว
+# เลขไทย (๑-๙) รอดจาก norm() เพราะอยู่ในช่วง ก-๙ จึงต้องระบุ 0-9 ให้ชัด
+_ARABIC_CHAPTER_HEAD = re.compile(r'(?:CHAPTER|บทท)[0-9]{1,2}')
+
+
+def chapter_number_is_arabic(line):
+    """หัวบทบรรทัดนี้ใช้เลขอารบิกไหม — "CHAPTER II" กับ "บทที่ ๒" คืน False
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าหัวบทต้องใช้เลขอารบิกเสมอ **ทั้งเล่มไทยและเล่มอังกฤษ**
+    เล่มไทยก็ใช้เลขอารบิก ไม่ใช่เลขไทย
+
+    ระบบรู้จักเลขโรมันกับเลขไทยไว้เพื่อ "หาบทให้เจอ" อยู่แล้ว (ดู _chapter_match)
+    แต่เดิมรู้จักแล้วเงียบ ไม่เคยฟ้อง — เล่มจริงเล่มหนึ่งพิมพ์
+    CHAPTER I, II, III, IV, 5, VI คือปนกันเองด้วยซ้ำ แล้วรายงานไม่มีข้อนี้เลย
+    (กติกาเดียวกับ N_TOC_WRONG: รู้จักไว้ให้การตรวจเดินต่อได้ แล้วค่อยฟ้องแยก)
+    """
+    return bool(_ARABIC_CHAPTER_HEAD.fullmatch(norm(line)))
 
 
 def _chapter_match(line):
@@ -4323,6 +4599,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("เปิดไฟล์ PDF")
     pages = []
     header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้า)
+    font_damaged = []          # ดัชนีหน้าที่ฟอนต์ในไฟล์ทำให้อ่านข้อความเพี้ยน
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -4333,6 +4610,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if _i % 5 == 0 or _i == n - 1:
                 _p(f"อ่านข้อความแบบละเอียด (หน้า {_i+1}/{n})")
             pages.append(_page_text(_pg))
+            try:
+                if font_damage_score(_pg, pages[-1]):
+                    font_damaged.append(_i)
+            except Exception:
+                pass
             try:
                 header_extras.append(header_extra_text(_pg))
             except Exception:
@@ -4491,9 +4773,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 # ตำแหน่งคือหน้าที่พิมพ์เลขผิด ส่วน "พบ" บอกว่าหน้าก่อนหน้าเป็นเลขอะไร
                 # (เดิมตำแหน่งเขียนว่า "ช่วงเลขหน้า 71 ถึง 70" ซึ่งพูดเรื่องเดียวกับ
                 #  ข้อความ "เลขหน้ากระโดดจาก 71 ไป 70" ซ้ำสองรอบ)
-                rep.add("RED", "body/end", page_ref(cur_idx),
+                rep.add(PAGE_SEQUENCE_ZONE, "body/end", page_ref(cur_idx),
                         f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}",
-                        f"หน้านี้ต้องเป็นหน้า {want}", "", "PAGE.NUMBERING")
+                        f"หน้านี้ต้องเป็นหน้า {want}", "",
+                        "PAGE.NUMBERING_SEQUENCE")
     last_arabic = max(printed.values()) if printed else None
 
     # หน้าว่าง: ถ้ายืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ เป็นเพียงข้อสังเกต
@@ -4595,6 +4878,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                        source_page_idx, next_toc_line))
 
     body_ch = []  # (chap_no, title_raw, pdf_idx, printed_no, next_line)
+    non_arabic_heads = []   # (เลขบท, บรรทัดหัวบทตามที่พิมพ์, ดัชนีหน้า)
     for i, t in enumerate(pages):
         tls = top_lines(t, BODY_RULES['heading_scan_lines'])
         for j, l in enumerate(tls):
@@ -4607,7 +4891,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if not re.match(r'\d', title):
                     body_ch.append((cn, title, i, printed.get(i),
                                     tls[j + 2] if j + 2 < len(tls) else ""))
+                    if not chapter_number_is_arabic(l):
+                        non_arabic_heads.append((cn, soft(l), i))
                 break
+    # ฟ้อง "รายบท" ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ไม่รวมเป็นข้อเดียว — แต่ละบท
+    # ต้องไปแก้คนละหน้า และเล่มจริงปนกันเองได้ (I, II, III, IV, 5, VI)
+    for _cn, _head, _idx in non_arabic_heads:
+        _want = f"CHAPTER {_cn}" if norm(_head).startswith("CHAPTER") else f"บทที่ {_cn}"
+        rep.add("RED", "body", f"บทที่ {_cn} ({page_ref(_idx)})",
+                f'หัวบทเขียนว่า "{_head}"',
+                f'หัวบทต้องใช้เลขอารบิก คือ "{_want}"',
+                "แก้เลขบทให้เป็นเลขอารบิก", "BODY.CHAPTER_NUMBER")
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
 
@@ -4621,10 +4915,31 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
 
     if toc_ch:
-        if BODY_RULES['check_toc_chapter_presence'] and len(toc_ch) != len(body_ch):
-            rep.add("RED", "body", "สารบัญ vs เนื้อหา",
-                    f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท",
-                    "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา", "FRONT.TOC")
+        # สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน — ของเดิมบอกแค่ว่า
+        # "สารบัญมี 8 บท เนื้อหามี 6 บท" เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น
+        # เลยนึกว่าระบบนับผิด ทั้งที่สารบัญพิมพ์ CHAPTER 2 กับ CHAPTER 3 ซ้ำจริง
+        # (เล่มจริง ก.ย. 2569 — เรนเดอร์หน้า ix ออกมาดูแล้วยืนยัน)
+        _toc_numbers = [c[0] for c in toc_ch]
+        _dup = [n for n in sorted(set(_toc_numbers)) if _toc_numbers.count(n) > 1]
+        if BODY_RULES['check_toc_chapter_presence'] and (
+                _dup or len(toc_ch) != len(body_ch)):
+            # บอกทั้งจำนวนและชี้บทที่ซ้ำ "ในข้อเดียว" (เจ้าหน้าที่สั่ง ก.ย. 2569)
+            # ของเดิมบอกแค่จำนวน เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น เลยนึกว่า
+            # ระบบนับผิด ทั้งที่สารบัญพิมพ์ CHAPTER 2 กับ 3 ซ้ำจริง (เรนเดอร์หน้า ix
+            # ออกมาดูแล้วยืนยัน) — แยกเป็นสองการ์ดไม่ได้ จะกลายเป็นฟ้องซ้ำเรื่องเดียว
+            _counts = f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท"
+            if _dup:
+                _at = sorted({c[4] for c in toc_ch if _toc_numbers.count(c[0]) > 1})
+                _where = f"สารบัญ ({page_ref(_at[-1])})"
+                _found = (f"{_counts} เพราะสารบัญพิมพ์ซ้ำ: "
+                          + _join_and([_toc_chapter_label(n, toc_ch)
+                                       for n in _dup]))
+                _want = "แต่ละบทต้องมีรายการเดียวในสารบัญ"
+                _fix = "ลบรายการที่ซ้ำออกจากสารบัญ"
+            else:
+                _where, _found = "สารบัญ vs เนื้อหา", _counts
+                _want, _fix = "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา"
+            rep.add("RED", "body", _where, _found, _want, _fix, "FRONT.TOC")
         toc_map = {c[0]: (c[1], c[2], c[3], c[4]) for c in toc_ch}
         for cn, title, ppage, pno, _next_line in body_ch:
             if cn in toc_map:
@@ -4728,6 +5043,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # ชื่อบทตามประกาศ (option/enforced_chapters คำนวณไว้ก่อนหน้าแล้ว)
     # ตรวจ typo เฉพาะหัวข้อหลักในสารบัญ ไม่อ่านหรือพิสูจน์อักษรเนื้อหาแต่ละย่อหน้า
+    # เก็บไว้ก่อน ยังไม่ฟ้อง — กฎ "หัวข้อบังคับหายจากสารบัญ" (FRONT.TOC_CONTENT)
+    # ข้างล่างจับหัวข้อเดียวกันได้ด้วย และบอกได้ว่าเกินคำไหน ("มี (If any) เกินมา")
+    # ถ้าฟ้องทั้งสองกฎ เจ้าหน้าที่เห็นการ์ดสองใบจากความผิดเดียว (เจ้าหน้าที่สั่งยุบ
+    # ก.ย. 2569 ให้เหลือของ FRONT.TOC_CONTENT) — แต่กฎนี้ยังต้องอยู่ เพราะครอบคลุม
+    # หัวข้อ LIST OF ... ที่ไม่มีส่วนนั้นอยู่ในเล่ม ซึ่งกฎข้างล่างไม่แตะ
+    toc_list_typos = []
     for toc_page_idx, raw in toc_lines:
         visible = _strip_toc_page_number(raw)
         if norm(visible).startswith('LISTOF'):
@@ -4737,9 +5058,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             )
             compared = compare_values(visible, expected, 'toc_heading')
             if compared['status'] != 'exact':
-                rep.add("RED", "front_matter", f"สารบัญ ({page_ref(toc_page_idx)})",
-                        mismatch_detail("หัวข้อสารบัญ", compared, expected),
-                        f"ควรเป็น \"{expected}\"", "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
+                toc_list_typos.append((toc_page_idx, visible, expected, compared))
 
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_chapter_count']:
         if option == 1 and len(body_ch) != 6:
@@ -4976,17 +5295,27 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
-            for raw in pages[sp].split('\n'):
+            raws = pages[sp].split('\n')
+            for kw_idx, raw in enumerate(raws):
                 nl = norm(raw)
                 if nl.startswith('KEYWORD') or nl.startswith(norm('คำสำคัญ')):
                     tail = raw.split(':', 1)[1] if ':' in raw else raw
+                    # รายการ keyword ยาวเกินบรรทัดเดียวได้ — เล่มจริง (ก.ย. 2569)
+                    # ฝั่งอังกฤษมี 6 คำ แต่คำที่ 5-6 ตกไปบรรทัดถัดไป ระบบอ่านแค่
+                    # บรรทัดแรกจึงนับได้ 4 แล้วปล่อยผ่าน ทั้งที่ฝั่งไทยของเล่มเดียวกัน
+                    # โดนฟ้อง 6 คำ — ต่อบรรทัดถัดไปจนถึงบรรทัด "N pages / N หน้า"
+                    # ซึ่งปิดท้ายบทคัดย่อเสมอ (สำรวจ 5 เล่ม ไม่มีเล่มไหนต่างออกไป)
+                    for more in raws[kw_idx + 1:kw_idx + 4]:
+                        if not soft(more) or is_page_count_line(more):
+                            break
+                        tail += " " + more
                     kws = [k for k in re.split(r'[,;/]', tail) if k.strip()]
                     if len(kws) > 5:
-                        rep.add("RED", "front_matter",
+                        rep.add(KEYWORD_COUNT_ZONE, "front_matter",
                                 f"{abstract_page_label(ai, abs_en_pages, abs_th_pages)}"
                                 f" ({page_ref(sp)})",
                                 f"Keywords {len(kws)} คำ", "ไม่เกิน 5 คำตามประกาศ",
-                                "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.ABSTRACT")
+                                "ตัดให้เหลือไม่เกิน 5 คำ", "FRONT.KEYWORD_COUNT")
                     done_kw = True
                     break
             if done_kw:
@@ -5308,8 +5637,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # 6437028 ชัดเจน คนอ่านไม่มีทางเห็นความผิดปกติ เสียแค่การดึงข้อความ
         # (PyMuPDF ซึ่งเป็นคนละเอนจินกับ pdfplumber ก็ได้ JKLMNOP เหมือนกัน
         #  แปลว่าตาราง ToUnicode ในไฟล์ผิดจริง ไม่ใช่ตัวอ่านของเราเพี้ยน)
-        # เจ้าหน้าที่จึงสั่ง (ก.ย. 2569) ว่าห้ามฟ้องเป็นจุดผิด — บันทึกเป็นข้อมูล
-        # ประกอบแทน ดู RULES_AND_SOURCES.md หัวข้อ "ฟอนต์ในไฟล์ทำให้อ่านตัวเลขไม่ออก"
+        # เจ้าหน้าที่จึงสั่ง (ก.ย. 2569) ว่า "ปล่อยผ่าน ทำเพียงแจ้งบอกว่าเกิดปัญหาอะไร
+        # ให้เจ้าหน้าที่ทราบและต้องไปดูเอง" — บันทึกเป็นข้อมูลประกอบ ไม่ใช่จุดผิด
+        # และต้องมีคำสั่งให้เปิดหน้านั้นดูด้วยตาอยู่ในบรรทัดเดียวกัน ไม่งั้นเจ้าหน้าที่
+        # อ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ ดู RULES_AND_SOURCES.md หัวข้อเดียวกัน
         unreadable_digit_pages = {}
         for _aidx in (abs_en_idx, abs_th_idx):
             if _aidx is None:
@@ -5318,6 +5649,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                             (student_name, student_name_th))
             if _misread:
                 unreadable_digit_pages[_aidx] = _misread
+        # เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "หน้าไหนเพี้ยนควรแจ้ง" — เดิมบอกเฉพาะหน้า
+        # บทคัดย่อที่อ่านรหัสนักศึกษาไม่ออก ส่วนหน้าอื่นเงียบสนิท เล่มจริงเล่มหนึ่ง
+        # เพี้ยน 38 หน้า แต่รายงานพูดถึงหน้าเดียว
+        if font_damaged:
+            _shown = ", ".join(page_ref(i) for i in font_damaged[:12])
+            if len(font_damaged) > 12:
+                _shown += f" และอีก {len(font_damaged) - 12} หน้า"
+            rep.add_info("-", f"ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน {len(font_damaged)} หน้า",
+                         f"หน้าที่พบคือ {_shown} "
+                         "หน้ากระดาษแสดงผลถูกต้องตามปกติ เสียเฉพาะการดึงข้อความออกจากไฟล์ "
+                         "กรุณาเปิดหน้าเหล่านี้ดูด้วยตาอีกครั้ง")
         for _aidx, _misread in sorted(unreadable_digit_pages.items()):
             _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
                     f" ({page_ref(_aidx)})")
@@ -5329,7 +5671,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             rep.add_info("front_matter", f"ระบบไม่ได้เทียบรหัสนักศึกษาที่ {_loc}",
                          "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น "
                          f'"{_misread}" ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ '
-                         "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว")
+                         "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
+                         "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
@@ -5493,12 +5836,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:
-                degree_spots.append(("หน้าปก", cover_text, cover_degree))
+                # หน้าปกวางชื่อปริญญาไว้บรรทัดของมันเอง จึงตรวจคำเกินได้
+                degree_spots.append(("หน้าปก", cover_text, cover_degree, True))
             if sig_degree:
-                degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx], sig_degree)
+                # หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template ("for the degree of ...")
+                # มีคำอื่นล้อมรอบโดยชอบ จึงตรวจคำเกินไม่ได้
+                degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx],
+                                     sig_degree, False)
                                     for k, idx in enumerate(sig_pages))
-            for spot_name, spot_text, expected_degree in degree_spots:
+            for spot_name, spot_text, expected_degree, own_line in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
+                extras = degree_line_extras(spot_text, expected_degree) if own_line else ""
+                if extras:
+                    # ตรงเป๊ะแต่มีคำเกิน = แดง (เจ้าหน้าที่สั่ง ก.ย. 2569) ต้องมาก่อน
+                    # กิ่ง exact เพราะ exact ตอบแค่ว่า "มีข้อความนี้อยู่บนหน้า"
+                    rep.add_verification("ชื่อปริญญา", spot_name, "fail",
+                                         f"มีข้อความเกิน: {extras}")
+                    rep.add("RED", "front_matter", spot_name,
+                            f'บรรทัดชื่อปริญญามีข้อความเกิน: "{extras}"',
+                            f'บรรทัดนี้ต้องเป็น "{expected_degree}" เท่านั้น '
+                            "ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
+                    continue
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
@@ -5528,19 +5887,19 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True)
             vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
             box = f"{lang} ({page_ref(abstract_idx)})"
-            if compared['status'] == 'exact':
-                # ชื่อย่อพบครบ แต่บรรทัดนั้นต้องไม่มีคำอื่นเกิน เช่น "DEGREE M.Sc. (...)"
-                abbr_lines = [soft(line) for line in abstract_text.splitlines()
-                              if abbr in soft(line)]
-                if abbr_lines and not any(norm(line) == norm(abbr) for line in abbr_lines):
-                    rep.add_verification("ชื่อปริญญา", vloc, "fail",
-                                         f"มีข้อความเกิน: {abbr_lines[0]}")
-                    rep.add("RED", "front_matter", box,
-                            f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{abbr_lines[0]}"',
-                            f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
-                            "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
-                else:
-                    rep.add_verification("ชื่อปริญญา", vloc, "pass")
+            # ต้องตรวจคำเกินก่อนทุกกิ่ง — ของเดิมตรวจเฉพาะตอนเทียบได้ exact และเทียบ
+            # ด้วย substring ดิบ ๆ เล่มที่เว้นวรรคต่างด้วย ("Dr.PH (PUBLIC HEALTH)"
+            # กับ "Dr. P.H.") จึงหลุดไปกิ่ง "ต่างเฉพาะวรรคตอน" แล้วได้เหลืองผ่าน
+            extras = degree_line_extras(abstract_text, abbr)
+            if extras:
+                rep.add_verification("ชื่อปริญญา", vloc, "fail",
+                                     f"มีข้อความเกิน: {extras}")
+                rep.add("RED", "front_matter", box,
+                        f'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: "{extras}"',
+                        f"บรรทัดนี้ต้องเป็น \"{abbr}\" เท่านั้น ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                        "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
+            elif compared['status'] == 'exact':
+                rep.add_verification("ชื่อปริญญา", vloc, "pass")
             elif norm(abbr) in norm(abstract_text):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
@@ -5648,6 +6007,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             appendix_labels = {page_labels.get(i, "") for i in appendix_pages}
             appendix_labels.discard("")
 
+            # หัวข้อที่กฎนี้ฟ้องว่า "สะกดผิด" ไปแล้ว กฎ FRONT.TOC ข้างบนต้องไม่ฟ้องซ้ำ
+            toc_typos_reported = set()
             for section_kind, (section_label, actual_page_idx) in actual_toc_sections.items():
                 candidates = toc_entries_by_kind.get(section_kind, [])
                 if not candidates:
@@ -5657,6 +6018,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if typo:
                         head, typo_idx = typo
                         found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
+                        toc_typos_reported.add(norm(head))
                         diff = describe_diff(head, section_label)
                         if diff:
                             found_msg += f" {diff}"
@@ -5742,6 +6104,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "FRONT.TOC_PAGE_REF",
                         )
 
+            # เหลือเฉพาะหัวข้อที่กฎข้างล่างไม่ได้ฟ้อง
+            toc_list_typos = [t for t in toc_list_typos
+                              if norm(t[1]) not in toc_typos_reported]
             for optional_kind in ("list_tables", "list_figures", "list_abbreviations"):
                 if optional_kind in toc_entries_by_kind and optional_kind not in actual_toc_sections:
                     entry = toc_entries_by_kind[optional_kind][0]
@@ -5752,6 +6117,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ลบหัวข้อออกจากสารบัญ หรือเพิ่มส่วนดังกล่าวในเล่ม",
                         "FRONT.TOC_CONTENT",
                     )
+
+    # ฟ้องหัวข้อ LIST OF ... ที่สะกดผิด เฉพาะที่กฎ FRONT.TOC_CONTENT ไม่ได้ฟ้องไปแล้ว
+    # ต้องอยู่ท้ายสุด เพราะกฎนั้นทำงานหลังบล็อกที่เก็บรายการนี้ไว้
+    for _idx, _visible, _expected, _compared in toc_list_typos:
+        rep.add("RED", "front_matter", f"สารบัญ ({page_ref(_idx)})",
+                mismatch_detail("หัวข้อสารบัญ", _compared, _expected),
+                f'ควรเป็น "{_expected}"', "แก้การสะกดหัวข้อสารบัญ", "FRONT.TOC")
 
     _p("สรุปผล")
     return check_result(

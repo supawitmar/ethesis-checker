@@ -972,12 +972,12 @@ class AbstractCommitteeTests(unittest.TestCase):
                                     {"name": "ธเนศ ข", "role": ""}]}
         pages = ["คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ ก, ปร.ด.\nบทคัดย่อ"]
         rep = self._run(committees, [], [0], pages)
-        self.assertEqual(self._reds(rep), [])          # จำนวนไม่ตรง = ส้ม ไม่ใช่แดง
-        found = [i["found"] for i in rep.zones["ORANGE"]]
+        # จำนวนไม่ตรง = แดง ตั้งแต่ ก.ย. 2569 (เดิมขาดเป็นส้ม)
+        found = [i["found"] for i in rep.zones["RED"]]
         self.assertTrue(any("หน้านี้มี 1 ชื่อ แต่อนุมัติไว้ 2 ชื่อ" in f for f in found),
                         found)
         # ต้องบอกด้วยว่าควรมีชื่ออะไรบ้าง (ดึงจากฟอร์มต้นทาง)
-        expected = [i["expected"] for i in rep.zones["ORANGE"]]
+        expected = [i["expected"] for i in rep.zones["RED"]]
         self.assertTrue(any("ธเนศ ข" in e for e in expected), expected)
 
     def test_committee_list_is_printed_for_staff_to_check_by_eye(self):
@@ -1139,12 +1139,272 @@ class SignaturePlaceholderTests(unittest.TestCase):
         self.assertEqual(rep.zones["RED"], [])
         self.assertTrue(any("template" in i["found"] for i in rep.zones["ORANGE"]))
 
+    def test_the_fix_says_paint_it_white_not_delete_it(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) — กรอบของ template ต้องคงไว้ตามที่ set มา
+        ช่องที่ไม่มีชื่อให้ถมขาว ของเดิมบอกให้ "ลบข้อความตัวอย่างออกจากไฟล์"
+        ซึ่งสวนทางกับถ้อยคำของเจ้าหน้าที่เองใน STAFF_CHECKS
+        """
+        rep = Report()
+        _report_sig_placeholders(rep, ["Academic rank First Name Last name"],
+                                 "หน้าลงนาม 1 (หน้า i)")
+        issue = rep.zones["ORANGE"][0]
+        for line in (issue["expected"], issue["fix"]):
+            self.assertIn("สีขาว", line)
+        self.assertNotIn("ลบข้อความตัวอย่างออกจากไฟล์", issue["expected"])
+        self.assertNotIn("ให้ลบออกจากช่อง", issue["fix"])
+
+    def test_the_line_in_the_summary_stops_at_white(self):
+        """เจ้าหน้าที่สั่งว่าแค่นี้พอ (ก.ย. 2569) — เคยต่อท้ายว่า "ไม่ใช่ลบบรรทัดออก"
+        แล้วถูกสั่งให้ตัดออก บรรทัดนี้อยู่ในข้อความที่คัดลอกส่งนักศึกษา
+        """
+        rep = Report()
+        _report_sig_placeholders(rep, ["Degree (Subject)"], "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(rep.zones["ORANGE"][0]["expected"],
+                         "ช่องกรรมการที่ไม่ได้ใช้ต้องเปลี่ยนสีตัวอักษรเป็นสีขาว")
+
+    def test_a_thai_book_gets_the_same_wording(self):
+        """เล่มไทยเจอข้อความตัวอย่างคนละชุดกับเล่มอังกฤษ แต่วิธีแก้อันเดียวกัน
+
+        เล่มไทย  "ตำแหน่งทางวิชาการและชื่อ นามสกุล" / "คุณวุฒิ (ระบุสาขาวิชา)"
+        เล่มอังกฤษ "Academic rank First Name Last name" / "Degree (Subject)"
+        """
+        pairs = (["ตำแหน่งทางวิชาการและชื่อ นามสกุล", "คุณวุฒิ (ระบุสาขาวิชา)"],
+                 ["Academic rank First Name Last name", "Degree (Subject)"])
+        seen = []
+        for found in pairs:
+            rep = Report()
+            _report_sig_placeholders(rep, found, "หน้าลงนาม 1")
+            issue = rep.zones["ORANGE"][0]
+            for label in found:                 # ต้องยกข้อความที่เจอมาให้ครบ
+                self.assertIn(label, issue["found"])
+            seen.append((issue["expected"], issue["fix"]))
+        self.assertEqual(seen[0], seen[1])
+        # ข้อความตัวอย่างทั้งสี่แบบต้องอยู่ในทะเบียนเดียวกัน ไม่ใช่รู้จักแค่ฝั่งอังกฤษ
+        labels = [label for _key, label in checker_module._SIG_LEFTOVER_PLACEHOLDERS]
+        for label in pairs[0] + pairs[1]:
+            self.assertIn(label, labels)
+
+    def test_the_fix_matches_the_wording_staff_already_use(self):
+        """ควบคุมเชิงลบของข้อบน — ต้องพูดเรื่องเดียวกับถ้อยคำที่เจ้าหน้าที่เขียนไว้เอง
+        ในหัวข้อ "โครงสร้างหน้าลงนาม" ไม่ใช่คิดคำใหม่ที่ขัดกันเอง
+        """
+        staff = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]["text"]
+        self.assertIn("เปลี่ยนสีตัวอักษรเป็นสีขาว", staff)
+        rep = Report()
+        _report_sig_placeholders(rep, ["Degree (Subject)"], "หน้าลงนาม 2 (หน้า ii)")
+        self.assertIn("เปลี่ยนสีตัวอักษรเป็นสีขาว", rep.zones["ORANGE"][0]["expected"])
+
     def test_white_detection_across_colour_spaces(self):
         self.assertTrue(_is_white_fill((1,)))          # grayscale
         self.assertTrue(_is_white_fill((1, 1, 1)))     # RGB
         self.assertTrue(_is_white_fill((0, 0, 0, 0)))  # CMYK
         self.assertFalse(_is_white_fill((0, 0, 0)))
         self.assertFalse(_is_white_fill(None))
+
+
+class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
+    """ชื่อปริญญาต้องตรงเป๊ะ ห้ามมีคำเกิน (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เล่มจริงที่ทำให้ออกกฎนี้
+        หน้าปก    "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)"
+        บทคัดย่อ  "Dr.PH (PUBLIC HEALTH)"   ข้อมูลอนุมัติคือ "Dr. P.H."
+    ของเดิมผ่านทั้งคู่ เพราะถามแค่ว่า "ข้อความที่อนุมัติอยู่บนหน้านี้ไหม"
+    """
+
+    COVER = NEWLINE.join([
+        "A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+        "OF THE REQUIREMENTS FOR THE DEGREE OF",
+        "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)",
+        "FACULTY OF GRADUATE STUDIES",
+    ])
+
+    def test_extra_words_on_the_cover_are_returned(self):
+        self.assertEqual(
+            checker_module.degree_line_extras(self.COVER, "DOCTOR OF PUBLIC HEALTH"),
+            "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)")
+
+    def test_a_clean_line_returns_nothing(self):
+        """ควบคุมเชิงบวก — บรรทัดที่ตรงพอดีต้องเงียบ"""
+        page = self.COVER.replace(" (INTERNATIONAL PROGRAM)", "")
+        self.assertEqual(
+            checker_module.degree_line_extras(page, "DOCTOR OF PUBLIC HEALTH"), "")
+
+    def test_spacing_alone_is_not_extra_text(self):
+        """เว้นวรรคต่างกันยอมรับได้ (เจ้าหน้าที่สั่ง) — ยังต้องคืน "" """
+        self.assertEqual(
+            checker_module.degree_line_extras("Dr.PH", "Dr. P.H."), "")
+
+    def test_spacing_plus_extra_words_is_still_extra(self):
+        """เคสของเล่มจริง — ต่างวรรคตอน *และ* มีคำเกิน ต้องจับได้"""
+        page = NEWLINE.join(["NGUYEN THI NGA 6637019 PHPH/D",
+                             "Dr.PH (PUBLIC HEALTH)",
+                             "THESIS ADVISORY COMMITTEE: SUPA PENGPID, Dr.PH,"])
+        self.assertEqual(checker_module.degree_line_extras(page, "Dr. P.H."),
+                         "Dr.PH (PUBLIC HEALTH)")
+
+    def test_the_shortest_matching_line_wins(self):
+        """ควบคุมเชิงลบของข้อบน — บรรทัดรายชื่อกรรมการก็มีชื่อปริญญาอยู่
+
+        ถ้าเลือกบรรทัดแรกที่เจอ จะไปยกบรรทัดกรรมการมาอ้างว่าเป็นบรรทัดชื่อปริญญา
+        """
+        page = NEWLINE.join(["THESIS ADVISORY COMMITTEE: SUPA PENGPID, Dr.PH, X, Y",
+                             "Dr.PH (PUBLIC HEALTH)"])
+        self.assertEqual(checker_module.degree_line_extras(page, "Dr. P.H."),
+                         "Dr.PH (PUBLIC HEALTH)")
+
+    def test_the_thai_template_prefix_is_not_extra(self):
+        """หน้าปกเล่มไทยขึ้นบรรทัดว่า "ปริญญา<ชื่อปริญญา>" ตาม template
+
+        ข้อมูลอนุมัติเก็บไว้แค่ชื่อปริญญา ถ้าไม่ยกเว้นคำนี้ เล่มไทยที่ถูกต้องจะโดนฟ้อง
+        ทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
+        """
+        page = NEWLINE.join(["วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+                             "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)",
+                             "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"])
+        self.assertEqual(
+            checker_module.degree_line_extras(
+                page, "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"), "")
+
+    def test_the_thai_prefix_does_not_hide_real_extras(self):
+        """ควบคุมเชิงลบ — ยกเว้นแค่คำว่า "ปริญญา" ไม่ใช่ยกเว้นทั้งบรรทัด"""
+        page = "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม) (ภาคพิเศษ)"
+        self.assertTrue(checker_module.degree_line_extras(
+            page, "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
+
+    def test_both_call_sites_actually_use_the_helper(self):
+        """ล็อกการต่อสาย ไม่ใช่ล็อกแค่ตัว helper
+
+        เทสต์ชุดนี้รอบแรกเรียก degree_line_extras ตรง ๆ อย่างเดียว พอลองปิดการต่อสาย
+        ใน run_check เทสต์ผ่านหมดโดยที่กฎไม่ทำงานเลย
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn(
+            "extras = degree_line_extras(spot_text, expected_degree) if own_line",
+            source)
+        self.assertIn("extras = degree_line_extras(abstract_text, abbr)", source)
+        for marker in ('บรรทัดชื่อปริญญามีข้อความเกิน',
+                       'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน'):
+            block = source.split(marker, 1)[0][-260:]
+            self.assertIn('rep.add("RED", "front_matter"', block, marker)
+
+    def test_the_signature_page_is_left_alone(self):
+        """หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template จึงห้ามตรวจคำเกิน"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("degree_spots = []", 1)[1][:900]
+        self.assertIn('("หน้าปก", cover_text, cover_degree, True)', block)
+        self.assertIn("sig_degree, False", block)
+
+
+class ChapterHeadingsMustUseArabicNumerals(unittest.TestCase):
+    """หัวบทต้องใช้เลขอารบิก (เจ้าหน้าที่สั่ง ก.ย. 2569) แดง ฟ้องรายบท
+
+    ระบบรู้จักเลขโรมันไว้เพื่อหาบทให้เจออยู่แล้ว แต่ไม่เคยฟ้อง เล่มจริงเล่มหนึ่งพิมพ์
+    CHAPTER I, II, III, IV, 5, VI คือปนกันเองด้วยซ้ำ แล้วรายงานเงียบสนิท
+    """
+
+    def test_arabic_headings_pass(self):
+        for line in ("CHAPTER 2", "บทที่ 2", "CHAPTER 12"):
+            self.assertTrue(checker_module.chapter_number_is_arabic(line), line)
+
+    def test_roman_and_thai_numerals_fail(self):
+        """เล่มไทยใช้เลขอารบิก ไม่ใช่เลขไทย (เจ้าหน้าที่ยืนยัน ก.ย. 2569)"""
+        for line in ("CHAPTER II", "CHAPTER IV", "บทที่ ๒", "บทที่ ๑๐"):
+            self.assertFalse(checker_module.chapter_number_is_arabic(line), line)
+
+    def test_the_rule_is_wired_in_per_chapter(self):
+        """ฟ้องรายบท ไม่รวมเป็นข้อเดียว — แต่ละบทไปแก้คนละหน้า"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if not chapter_number_is_arabic(l):", source)
+        block = source.split("for _cn, _head, _idx in non_arabic_heads:", 1)[1][:420]
+        self.assertIn('rep.add("RED", "body", f"บทที่ {_cn} ({page_ref(_idx)})"', block)
+        self.assertIn("BODY.CHAPTER_NUMBER", block)
+
+    def test_the_rule_is_in_the_catalog(self):
+        self.assertIn("BODY.CHAPTER_NUMBER", RULE_CATALOG)
+        self.assertNotIn("failure_zone", RULE_CATALOG["BODY.CHAPTER_NUMBER"])
+
+
+class TooManyCommitteeNamesIsRed(unittest.TestCase):
+    """ขาด = ส้ม · เกิน = แดง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ขาดเป็นส้มเพราะระบบอาจอ่านบางช่องไม่ออก แต่เกินฟันธงได้ — การอ่านไม่ครบทำให้ได้
+    ชื่อน้อยกว่า ไม่มีทางทำให้ได้มากกว่าที่พิมพ์ไว้จริง เล่มจริงพิมพ์กรรมการซ้ำสองคน
+    คนละสองครั้ง จึงได้ 7 ชื่อจากที่อนุมัติไว้ 5
+    """
+
+    APPROVED = [{"name": "BRIAN EDUARD VAN WYK"}, {"name": "SUPA PENGPID"},
+                {"name": "KARL PELTZER"}]
+
+    def _run(self, count):
+        rep = checker_module.Report()
+        checker_module._report_committee_count(
+            rep, self.APPROVED, [f"name {k}" for k in range(count)],
+            "หน้าลงนาม 2 (หน้า ii)", "บฑ.2", "FRONT.COMMITTEE")
+        return rep
+
+    def test_too_many_names_is_red(self):
+        rep = self._run(5)
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn("รายชื่อเกิน", rep.zones["RED"][0]["found"])
+        self.assertIn("ลบรายชื่อที่เกินออก", rep.zones["RED"][0]["fix"])
+
+    def test_too_few_names_is_red_too(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าไม่ครบก็ต้องแจ้งสีแดง — เดิมเป็นส้ม
+
+        ยอมรับความเสี่ยงแล้วว่าถ้าระบบอ่านตารางไม่ครบจะฟ้องแดงทั้งที่เล่มถูก
+        เจ้าหน้าที่จึงต้องเปิดหน้านั้นดูก่อนส่งกลับ
+        """
+        rep = self._run(2)
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertEqual(rep.zones["ORANGE"], [])
+        self.assertIn("เพิ่มรายชื่อที่ขาด", rep.zones["RED"][0]["fix"])
+
+    def test_the_right_count_says_nothing(self):
+        rep = self._run(3)
+        self.assertEqual(rep.zones["RED"] + rep.zones["ORANGE"], [])
+
+
+class ThePageSequenceFindingIsOrange(unittest.TestCase):
+    """เลขหน้าส่วนนำที่เรียงไม่ต่อเนื่อง = สีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เจ้าหน้าที่ส่งภาพข้อที่ฟ้องว่า กระโดดจาก "v" ไป "vii" มาแล้วสั่งว่าขอเป็นสีส้ม
+    ข้ออื่นของเลขหน้ายังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่เปลี่ยนทั้ง
+    PAGE.NUMBERING ซึ่งคุมชนิดเลขหน้าและเลขหน้าเนื้อหาอยู่ด้วย
+    """
+
+    def test_the_zone_comes_from_the_rule_catalog(self):
+        self.assertEqual(RULE_CATALOG["PAGE.NUMBERING_SEQUENCE"]["failure_zone"],
+                         "ORANGE")
+        self.assertEqual(checker_module.PAGE_SEQUENCE_ZONE, "ORANGE")
+
+    def test_the_finding_uses_that_zone(self):
+        source = inspect.getsource(checker_module)
+        block = source.split('"เลขหน้าไม่ต่อเนื่อง: " + " และ "', 1)[0][-260:]
+        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", block)
+        self.assertNotIn('rep.add("RED", "front_matter", "ส่วนนำ",' + NEWLINE
+                         + '                    "เลขหน้าไม่ต่อเนื่อง', source)
+
+    def test_the_body_page_sequence_is_orange_too(self):
+        """เจ้าหน้าที่สั่งเพิ่ม (ก.ย. 2569) ว่าเลขหน้าเนื้อหาที่กระโดดก็เป็นสีส้ม
+        เหมือนส่วนนำ — เป็นเรื่องเดียวกันคือความต่อเนื่องของเลขหน้า
+        """
+        source = inspect.getsource(checker_module)
+        before = source.split(
+            'f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}"', 1)[0][-200:]
+        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", before)
+
+    def test_the_other_page_number_rules_stay_red(self):
+        """ควบคุมเชิงลบ — ห้ามลากข้ออื่นของเลขหน้าเป็นสีส้มไปด้วย
+
+        ชนิดเลขหน้าผิด (ก ข ค ปนกับ i ii iii) และเลขหน้าอารบิกที่ไม่เริ่มที่บทที่ 1
+        ยังเป็นสีแดง เจ้าหน้าที่สั่งเฉพาะเรื่อง "ความต่อเนื่อง"
+        """
+        self.assertNotIn("failure_zone", RULE_CATALOG["PAGE.NUMBERING"])
+        source = inspect.getsource(checker_module)
+        for phrase in ('f"มีเลขหน้าเป็น{found_names} ',
+                       '"เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1"'):
+            before = source.split(phrase, 1)[0][-220:]
+            self.assertIn('rep.add("RED"', before, phrase)
 
 
 class FrontPageNumberTests(unittest.TestCase):
@@ -1200,15 +1460,16 @@ class FrontPageNumberTests(unittest.TestCase):
     def test_duplicate_labels_reported_once(self):
         # เล่มจริง (ไทย) ที่พบ: ค, ค, ค, ง, จ — ต้องรวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
         rep = self._run(["", "ค", "ค", "ค", "ง", "จ"], style="thai")
-        reds = [i["found"] for i in rep.zones["RED"]]
-        self.assertEqual(len(reds), 1)
-        self.assertIn('ถูกใช้ซ้ำ 3 หน้า', reds[0])
+        # ข้อความต่อเนื่องของเลขหน้าส่วนนำเป็นสีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
+        self.assertEqual(len(found), 1)
+        self.assertIn('ถูกใช้ซ้ำ 3 หน้า', found[0])
 
     def test_skipped_label_reported(self):
         rep = self._run(["", "i", "ii", "v", "vi"], style="roman")
-        reds = [i["found"] for i in rep.zones["RED"]]
-        self.assertEqual(len(reds), 1)
-        self.assertIn('กระโดดจาก "ii" ไป "v"', reds[0])
+        found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
+        self.assertEqual(len(found), 1)
+        self.assertIn('กระโดดจาก "ii" ไป "v"', found[0])
 
     def test_arabic_in_front_matter_flagged(self):
         rep = self._run(["", "i", "ii", "3", "4"], style="roman")
@@ -1257,12 +1518,14 @@ class FrontPageNumberTests(unittest.TestCase):
         # i, (อ่านไม่ออก), iii -> หน้าที่คั่นคือ ii พอดี ไม่ใช่การกระโดด
         ok = self._run(["", "i", "", "iii", "iv"], style="roman",
                        texts=["ปก", "หน้า i", "", "หน้า iii", "หน้า iv"])
-        self.assertEqual([i["found"] for i in ok.zones["RED"]], [])
+        # กรองเฉพาะข้อความต่อเนื่อง — โซนส้มมีข้อ "อ่านเลขหน้าไม่ได้" ของหน้าที่คั่นอยู่ด้วย
+        self.assertEqual([i["found"] for i in ok.zones[checker_module.PAGE_SEQUENCE_ZONE]
+                          if "เลขหน้าไม่ต่อเนื่อง" in i["found"]], [])
         # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
         bad = self._run(["", "i", "", "v", "vi"], style="roman",
                         texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
         self.assertTrue(any('กระโดดจาก "i" ไป "v"' in i["found"]
-                            for i in bad.zones["RED"]))
+                            for i in bad.zones[checker_module.PAGE_SEQUENCE_ZONE]))
 
     def test_skipped_when_body_start_unknown(self):
         # ไม่รู้ว่าเนื้อหาเริ่มหน้าไหน = ไม่เดาขอบเขตส่วนนำ
@@ -1873,7 +2136,7 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
     def _count_issue(self, loc, form="บฑ.2"):
         rep = Report()
         checker_module._report_committee_count(rep, self.FORM3, ["ก ก", "ข ข"], loc, form)
-        return rep.zones["ORANGE"][0]
+        return rep.zones["RED"][0]
 
     def test_the_count_finding_is_filed_as_a_data_mismatch(self):
         for loc in ("หน้ากรรมการสอบ (หน้า ข)", "หน้าอาจารย์ที่ปรึกษา (หน้า ก)",
@@ -1881,16 +2144,48 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
-    def test_the_case_rule_for_committee_names_is_gone(self):
-        """เจ้าหน้าที่สั่งเลิกตรวจตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม (ก.ย. 2569)
+    def test_the_case_rule_is_back_with_the_credential_stripped(self):
+        """เจ้าหน้าที่สั่งให้เอากฎกลับมา (ก.ย. 2569) พร้อมตัดคุณวุฒิท้ายชื่อออกก่อน
 
-        ระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง จึงติดคุณวุฒิที่พิมพ์ต่อท้าย
-        ("Weerawat Limroonreungrat, PT") แล้วตัดสินว่าไม่ใช่ Capital Case
-        ทั้งที่ชื่อถูกต้อง
+        กฎนี้เคยถูกถอดออกทั้งกฎ เพราะระบบอ่านชื่อจากตารางลายเซ็นมาทั้งช่อง คุณวุฒิ
+        ที่พิมพ์ต่อท้ายจึงติดมาด้วย แล้วชื่อที่ถูกต้องถูกตัดสินว่าผิด
         """
-        self.assertFalse(hasattr(checker_module, "_report_committee_name_case"))
-        source = inspect.getsource(checker_module)
-        self.assertNotIn("ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ", source)
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "Weerawat Limroonreungrat, PT",
+                  2: "Assist.Prof. Hoon Kim, ATC"}, "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(rep.zones["ORANGE"], [], "ชื่อที่ถูกต้องต้องไม่ถูกฟ้อง")
+
+    def test_an_all_uppercase_committee_name_is_reported(self):
+        """positive control — อาการที่กฎนี้มีไว้จับ
+
+        นักศึกษาที่คัดรายชื่อจากหน้าบทคัดย่อ (ซึ่งต้องเป็น UPPERCASE) มาวางบน
+        หน้าลงนาม จะได้ตัวพิมพ์ใหญ่ทั้งบรรทัด
+        """
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL, Ph.D.",
+                  2: "Hathaichon Inchai,"}, "หน้าลงนาม 2 (หน้า ii)")
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        found = rep.zones["ORANGE"][0]["found"]
+        self.assertIn("MATHUROS TIPAYAMONGKHOLGUL", found)
+        self.assertNotIn("Hathaichon", found)
+        self.assertNotIn("Ph.D.", found)
+
+    def test_thai_committee_names_are_left_alone(self):
+        """ภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก"""
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "ฉัตรภา หัตถโกศล, ส.ด."}, "หน้าลงนาม 1 (หน้า ก)")
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_the_credential_is_what_gets_stripped(self):
+        for raw, core in (("Weerawat Limroonreungrat, PT", "Weerawat Limroonreungrat"),
+                          ("Assoc. Prof. Mathuros Tipayamongkholgul,",
+                           "Mathuros Tipayamongkholgul"),
+                          ("Prof. Chartchalerm Isarankura-Na-Ayudhya,",
+                           "Chartchalerm Isarankura-Na-Ayudhya")):
+            self.assertEqual(checker_module.committee_name_for_case(raw), core, raw)
 
     def test_every_category_used_here_has_an_english_name(self):
         import tools.check_i18n as i18n
@@ -2319,6 +2614,456 @@ class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
             self.assertFalse(terms & {checker_module.norm(str(v)) for v in value}, name)
 
 
+class EveryDamagedPageIsReported(unittest.TestCase):
+    """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "หน้าไหนเพี้ยนควรแจ้ง"
+
+    ของเดิมบอกเฉพาะหน้าบทคัดย่อที่อ่านรหัสนักศึกษาไม่ออก หน้าอื่นเงียบสนิท
+    เล่มจริงเล่มหนึ่งฟอนต์เพี้ยน 38 หน้า แต่รายงานพูดถึงหน้าเดียว
+    """
+
+    class _Page:
+        def __init__(self, chars):
+            self.chars = chars
+
+    @staticmethod
+    def _char(text, width):
+        return {"text": text, "x0": 10.0, "x1": 10.0 + width, "top": 100.0}
+
+    def test_a_clean_page_scores_zero(self):
+        """ควบคุมเชิงลบ — เล่มที่ถูกต้อง 4 เล่มได้ 0 ทุกหน้า ห้ามมี false positive"""
+        page = self._Page([self._char("ก", 7.0), self._char(" ", 3.5),
+                           self._char("ั", 0.0), self._char("่", 0.0)])
+        self.assertEqual(checker_module.font_damage_score(page, "กัน ปกติ"), 0)
+
+    def test_a_zero_width_letter_is_a_damaged_font(self):
+        """ฟอนต์ map วรรณยุกต์ไปเป็นตัวอักษรอื่น ตัวนั้นจะกว้างศูนย์ทั้งที่ไม่ใช่วรรณยุกต์"""
+        page = self._Page([self._char("ก", 7.0), self._char("B", 0.0)])
+        self.assertEqual(checker_module.font_damage_score(page, "กB"), 1)
+
+    def test_an_unmapped_glyph_counts_too(self):
+        page = self._Page([self._char("ก", 7.0)])
+        self.assertEqual(
+            checker_module.font_damage_score(page, "ก(cid:127)(cid:128)"), 2)
+
+    def test_the_report_lists_the_pages(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if font_damaged:", source)
+        block = source.split("if font_damaged:", 1)[1][:700]
+        self.assertIn("page_ref(i) for i in font_damaged[:12]", block)
+        self.assertIn("rep.add_info", block)          # เป็นข้อมูลประกอบ ไม่ใช่จุดผิด
+        self.assertNotIn('rep.add("RED"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน 9 หน้า",
+                   "หน้าที่พบคือ หน้า vi, หน้า vii และอีก 26 หน้า "
+                   "หน้ากระดาษแสดงผลถูกต้องตามปกติ "
+                   "เสียเฉพาะการดึงข้อความออกจากไฟล์ "
+                   "กรุณาเปิดหน้าเหล่านี้ดูด้วยตาอีกครั้ง"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class AShortCommitteeListIsReportedInRed(unittest.TestCase):
+    """รายชื่อกรรมการที่ไม่ครบ = แดง และต้องอ้างถึง บฑ.1 / บฑ.2
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ถ้าไม่ครบก็ต้องแจ้งสีแดง และอ้างอิงถึง บฑ.1
+    หรือ บฑ.2" — ของเดิมขาดเป็นส้ม เพราะจำนวนที่นับได้ขึ้นกับว่าระบบอ่านตารางออกครบไหม
+    เจ้าหน้าที่รับความเสี่ยงนั้นแล้ว
+    """
+
+    EXPECTED = ["Chatrapa Hudthagosol", "Promluck Sanporkha", "Karl Peltzer"]
+
+    def _run(self, found):
+        rep = Report()
+        checker_module._report_committee_count(
+            rep, self.EXPECTED, found, "หน้าลงนาม 2 (หน้า ii)", "บฑ.2",
+            "FRONT.COMMITTEE")
+        return rep
+
+    def test_a_short_list_is_red(self):
+        rep = self._run(["Chatrapa Hudthagosol", "Promluck Sanporkha"])
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_an_over_long_list_is_red_too(self):
+        rep = self._run([f"Name {k}" for k in range(1, 6)])
+        self.assertEqual(len(rep.zones["RED"]), 1)
+
+    def test_both_directions_cite_the_form(self):
+        for found in (["a"], [f"n{k}" for k in range(1, 6)]):
+            issue = self._run(found).zones["RED"][0]
+            self.assertIn("บฑ.2", issue["found"])
+            self.assertIn("บฑ.2", issue["expected"])
+            self.assertIn("บฑ.2", issue["fix"])
+            # ต้องยกรายชื่อตามฟอร์มมาให้ครบ ไม่ใช่บอกแค่จำนวน
+            for name in self.EXPECTED:
+                self.assertIn(name, issue["expected"])
+
+    def test_a_matching_count_reports_nothing(self):
+        """ควบคุมเชิงลบ — ครบพอดีต้องเงียบ กฎนี้ไม่เทียบชื่อ"""
+        rep = self._run(["ใครก็ได้", "อีกคน", "คนที่สาม"])
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+
+class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
+    """สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน
+
+    เล่มจริง (ก.ย. 2569) สารบัญหน้า ix พิมพ์ CHAPTER 2 กับ CHAPTER 3 ซ้ำอีกรอบ
+    ระบบฟ้องว่า "สารบัญมี 8 บท เนื้อหามี 6 บท / จำนวนบทต้องเท่ากัน" เจ้าหน้าที่เปิด
+    เล่มเห็น 6 บทตามที่ควรเป็น เลยนึกว่าระบบนับผิด — เรนเดอร์หน้า ix ออกมาดูแล้ว
+    ยืนยันว่าสารบัญพิมพ์ซ้ำจริง ระบบไม่ได้นับผิด แต่ข้อความบอกไม่ตรงปัญหา
+    """
+
+    def test_the_finding_names_the_duplicated_chapters(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("_toc_numbers = [c[0] for c in toc_ch]", 1)[1][:1400]
+        # ต้องบอกทั้งจำนวนบทและชี้บทที่ซ้ำ ในข้อเดียว
+        self.assertIn("เพราะสารบัญพิมพ์ซ้ำ", block)
+        self.assertIn("สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท", block)
+        self.assertIn("_toc_chapter_label(n, toc_ch)", block)
+        # ต้องชี้หน้าที่ซ้ำ ไม่ใช่ตำแหน่งลอย ๆ ว่า "สารบัญ vs เนื้อหา"
+        self.assertIn("page_ref(_at[-1])", block)
+
+    def test_the_plain_count_message_is_the_fallback(self):
+        """ควบคุมเชิงลบ — จำนวนไม่เท่ากันโดยไม่มีบทซ้ำ ยังต้องฟ้องแบบเดิม"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("_toc_numbers = [c[0] for c in toc_ch]", 1)[1][:1400]
+        self.assertIn('_want, _fix = "จำนวนบทต้องเท่ากัน"', block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ("สารบัญมี 8 บท เนื้อหามี 6 บท เพราะสารบัญพิมพ์ซ้ำ: "
+                   'บทที่ 2 "LITERATURE REVIEW" และ บทที่ 3 "RESEARCH METHODOLOGY"',
+                   "แต่ละบทต้องมีรายการเดียวในสารบัญ",
+                   "ลบรายการที่ซ้ำออกจากสารบัญ"):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class ADotLeaderGluedToThePageNumber(unittest.TestCase):
+    """จุดไข่ปลาที่ลากชนเลขหน้าโดยไม่มีช่องว่างคั่น ("RESULTS.........45")
+
+    เจ้าหน้าที่สั่งแก้ (ก.ย. 2569) เพราะทำให้อ่านชื่อบทพลาด — พอไล่ดูทั้งเส้นทาง
+    พบว่าไม่ได้พลาดแค่ชื่อบท ตัวอ่านบรรทัดสารบัญทุกตัวใช้ทางเดียวกันหมด จึงพลาด
+    เป็นลูกโซ่ ต้องแก้ที่ต้นทาง (space_dot_leader) ไม่ใช่แก้ทีละที่
+    """
+
+    GLUED = ["ACKNOWLEDGEMENTS.........iii",
+             "ABSTRACT (ENGLISH).........iv",
+             "LIST OF TABLES.........vii",
+             "CHAPTER 1 INTRODUCTION.........1",
+             "CHAPTER 4 RESULTS.........45",
+             "REFERENCES.........130"]
+
+    def test_the_page_is_still_recognised_as_a_table_of_contents(self):
+        """อาการหนักสุด — เดิมมองไม่ออกว่าเป็นหน้าสารบัญ แล้วฟ้องว่าไม่พบหน้าสารบัญ"""
+        page = "TABLE OF CONTENTS" + chr(10) + chr(10).join(self.GLUED)
+        self.assertTrue(checker_module.looks_like_contents_page(page))
+
+    def test_the_heading_no_longer_carries_the_dots_and_the_page_number(self):
+        for raw, want in zip(self.GLUED,
+                             ["ACKNOWLEDGEMENTS", "ABSTRACT (ENGLISH)",
+                              "LIST OF TABLES", "CHAPTER 1 INTRODUCTION",
+                              "CHAPTER 4 RESULTS", "REFERENCES"]):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), want, raw)
+
+    def test_the_page_number_is_readable_through_the_dots(self):
+        """เดิมอ่านไม่เจอ แล้วฟ้องว่ารายการนี้ไม่ระบุเลขหน้า"""
+        for raw, want in zip(self.GLUED, ["iii", "iv", "vii", "1", "45", "130"]):
+            self.assertEqual(checker_module._toc_page_label(raw), want, raw)
+
+    def test_thai_page_letters_and_ranges_work_too(self):
+        for raw, head, label in (
+                ("สารบัญตาราง.........ฎ", "สารบัญตาราง", "ฎ"),
+                ("LIST OF TABLES.........xi-xii", "LIST OF TABLES", "xi"),
+                ("บทที่ 6 สรุปผลการวิจัย…………120", "บทที่ 6 สรุปผลการวิจัย", "120")):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), head, raw)
+            self.assertEqual(checker_module._toc_page_label(raw), label, raw)
+
+    def test_dots_inside_a_heading_are_left_alone(self):
+        """ควบคุมเชิงลบ — ตัดเฉพาะชุดจุดที่ลากไปหาเลขหน้าท้ายบรรทัดเท่านั้น"""
+        for raw, want in (("CHAPTER 3 THE U.S. CONTEXT 30", "CHAPTER 3 THE U.S. CONTEXT"),
+                          ("CHAPTER 3 THE U.S. CONTEXT.........30",
+                           "CHAPTER 3 THE U.S. CONTEXT"),
+                          ("ACKNOWLEDGEMENTS iii", "ACKNOWLEDGEMENTS")):
+            self.assertEqual(checker_module._strip_toc_page_number(raw), want, raw)
+
+    def test_a_line_with_no_dot_leader_is_untouched(self):
+        for raw in ("LIST OF TABLES xi", "บทที่ 2 การทบทวนวรรณกรรม 12",
+                    "TABLE OF CONTENTS"):
+            self.assertEqual(checker_module.space_dot_leader(raw), raw, raw)
+
+    def test_the_trailing_leader_without_a_page_number_still_goes(self):
+        """ของเดิมรองรับอยู่แล้ว ต้องไม่หายไปตอนย้ายมาที่ต้นทาง"""
+        self.assertEqual(
+            checker_module._strip_toc_page_number("LIST OF TABLES ................"),
+            "LIST OF TABLES")
+
+
+class TheDuplicatedChapterIsNamedInTheBooksOwnLanguage(unittest.TestCase):
+    """ข้อสารบัญซ้ำต้องบอกชื่อบทด้วย เล่มไทยได้ชื่อไทย เล่มอังกฤษได้ชื่ออังกฤษ
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) — บอกแค่ "บทที่ 2 และ บทที่ 3" ยังต้องเปิดสารบัญ
+    ไล่หาเองว่าบรรทัดไหน ชื่อบทอ่านจากบรรทัดในสารบัญของเล่มเอง จึงเป็นภาษาเดียว
+    กับเล่มโดยไม่ต้องเดา
+    """
+
+    # โครงเดียวกับ toc_ch ใน run_check: (เลขบท, ชื่อ norm, เลขหน้า, บรรทัดดิบ, หน้า, บรรทัดถัดไป)
+    EN = [(2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+          (2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+          (3, "", 30, "CHAPTER 3 RESEARCH METHODOLOGY 30", 8, "")]
+    TH = [(2, "", 12, "บทที่ 2 การทบทวนวรรณกรรม 12", 8, ""),
+          (2, "", 12, "บทที่ 2 การทบทวนวรรณกรรม 12", 8, "")]
+
+    def test_an_english_book_gets_the_english_title(self):
+        self.assertEqual(checker_module._toc_chapter_label(2, self.EN),
+                         'บทที่ 2 "LITERATURE REVIEW"')
+
+    def test_a_thai_book_gets_the_thai_title(self):
+        self.assertEqual(checker_module._toc_chapter_label(2, self.TH),
+                         'บทที่ 2 "การทบทวนวรรณกรรม"')
+
+    def test_the_title_is_quoted_so_the_english_report_keeps_it_verbatim(self):
+        """ค่าที่อ่านได้จากเล่มต้องไม่ถูกแปล — เครื่องหมายคำพูดคือสิ่งที่กันไว้"""
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        th = ("สารบัญมี 4 บท เนื้อหามี 3 บท เพราะสารบัญพิมพ์ซ้ำ: "
+              + checker_module._toc_chapter_label(2, self.TH))
+        en = i18n.tr_en(th, pairs)
+        self.assertIn('"การทบทวนวรรณกรรม"', en)
+        self.assertIn("Chapter 2", en)
+
+    def test_two_different_titles_under_one_number_are_both_shown(self):
+        entries = [(2, "", 12, "CHAPTER 2 LITERATURE REVIEW 12", 8, ""),
+                   (2, "", 40, "CHAPTER 2 RESULTS 40", 8, "")]
+        self.assertEqual(checker_module._toc_chapter_label(2, entries),
+                         'บทที่ 2 "LITERATURE REVIEW" / "RESULTS"')
+
+    def test_a_chapter_line_without_a_title_falls_back_to_the_number(self):
+        """ควบคุมเชิงลบ — อ่านชื่อไม่ได้ต้องไม่พังและไม่พิมพ์คำพูดเปล่า"""
+        entries = [(2, "", None, "CHAPTER 2", 8, "")]
+        self.assertEqual(checker_module._toc_chapter_label(2, entries), "บทที่ 2")
+
+    def test_other_chapters_are_not_pulled_in(self):
+        self.assertEqual(checker_module._toc_chapter_label(3, self.EN),
+                         'บทที่ 3 "RESEARCH METHODOLOGY"')
+
+    def _one(self, number, *raws):
+        return checker_module._toc_chapter_label(
+            number, [(number, "", None, r, 9, "") for r in raws])
+
+    def test_every_chapter_number_works_not_just_two_and_three(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าต้องรองรับบทอื่นด้วย
+
+        เล่มที่พบปัญหาบังเอิญซ้ำบทที่ 2 กับ 3 กฎนี้ไม่ได้ผูกกับเลขบทใด
+        """
+        for number, raw, want in (
+                (1, "CHAPTER 1 INTRODUCTION", "INTRODUCTION"),
+                (4, "CHAPTER 4 RESULTS 45", "RESULTS"),
+                (6, "CHAPTER 6 CONCLUSION AND RECOMMENDATIONS 120",
+                 "CONCLUSION AND RECOMMENDATIONS"),
+                (10, "CHAPTER 10 APPENDIX OVERVIEW 200", "APPENDIX OVERVIEW")):
+            self.assertEqual(self._one(number, raw), f'บทที่ {number} "{want}"', raw)
+
+    def test_a_roman_numeral_entry_reads_the_same(self):
+        """เล่มจริงปนเลขโรมันกับอารบิกในสารบัญเดียวกันได้"""
+        self.assertEqual(self._one(2, "CHAPTER II LITERATURE REVIEW 12",
+                                   "CHAPTER 2 LITERATURE REVIEW 12"),
+                         'บทที่ 2 "LITERATURE REVIEW"')
+
+    def test_a_dot_leader_glued_to_the_page_number_is_stripped(self):
+        """"RESULTS.........45" ไม่มีช่องว่างคั่น ตัวตัดเลขหน้าจึงตัดไม่ได้เอง"""
+        for raw in ("CHAPTER 4 RESULTS.................45",
+                    "CHAPTER 4 RESULTS ................. 45",
+                    "CHAPTER 4 RESULTS…………45"):
+            self.assertEqual(self._one(4, raw), 'บทที่ 4 "RESULTS"', raw)
+
+    def test_a_title_with_abbreviation_dots_survives(self):
+        """ควบคุมเชิงลบของตัวตัดจุดไข่ปลา — จุดในตัวย่อต้องไม่ถูกกิน"""
+        self.assertEqual(self._one(3, "CHAPTER 3 THE U.S. CONTEXT 30"),
+                         'บทที่ 3 "THE U.S. CONTEXT"')
+
+    def test_three_identical_entries_still_show_one_title(self):
+        self.assertEqual(self._one(5, "CHAPTER 5 DISCUSSION 90",
+                                   "CHAPTER 5 DISCUSSION 90",
+                                   "CHAPTER 5 DISCUSSION 90"),
+                         'บทที่ 5 "DISCUSSION"')
+
+    def test_the_thai_book_reads_the_same_across_chapters(self):
+        self.assertEqual(
+            self._one(6, "บทที่ 6 สรุปผลการวิจัยและข้อเสนอแนะ.........120"),
+            'บทที่ 6 "สรุปผลการวิจัยและข้อเสนอแนะ"')
+
+
+class TooManyKeywordsIsOnlyANotice(unittest.TestCase):
+    """keyword เกิน 5 คำ = ข้อสังเกตสีเหลือง ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เดิมเป็นสีแดง ซึ่งทำให้เล่มที่เกินมาคำเดียวตกทั้งเล่ม
+    """
+
+    def test_the_zone_comes_from_the_rule_catalog(self):
+        self.assertEqual(RULE_CATALOG["FRONT.KEYWORD_COUNT"]["failure_zone"], "YELLOW")
+        self.assertEqual(checker_module.KEYWORD_COUNT_ZONE, "YELLOW")
+
+    def test_the_finding_uses_that_zone(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("if len(kws) > 5:", 1)[1][:400]
+        self.assertIn("rep.add(KEYWORD_COUNT_ZONE", block)
+        self.assertIn('"FRONT.KEYWORD_COUNT"', block)
+
+    def test_the_other_abstract_rules_stay_red(self):
+        """ควบคุมเชิงลบ — แยกรหัสกฎออกมาเพื่อไม่ให้ลากกฎอื่นของบทคัดย่อเป็นเหลืองด้วย"""
+        self.assertNotIn("failure_zone", RULE_CATALOG["FRONT.ABSTRACT"])
+
+
+class TheKeywordListIsCountedAcrossLines(unittest.TestCase):
+    """รายการ keyword ที่ยาวเกินบรรทัดเดียว ต้องนับให้ครบ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    เล่มจริงฝั่งอังกฤษมี 6 คำ แต่คำที่ 5-6 ตกไปบรรทัดถัดไป ระบบอ่านแค่บรรทัดแรกจึง
+    นับได้ 4 แล้วปล่อยผ่าน ทั้งที่ฝั่งไทยของเล่มเดียวกันโดนฟ้อง 6 คำ
+
+        KEYWORDS: E-cigarette control policy / Electronic cigarettes / Prevalence / Forecasting /
+        Markov model / Population Attributable Fraction
+        64 pages
+
+    สำรวจเล่มจริง 5 เล่ม (ทั้งไทยและอังกฤษ) รายการ keyword จบด้วยบรรทัด
+    "N pages" / "N หน้า" เสมอ จึงใช้บรรทัดนั้นเป็นจุดหยุดได้
+    """
+
+    def test_the_page_count_line_is_the_stop_signal(self):
+        for line in ("64 pages", "157 pages", "106 หน้า", "79 หน้า"):
+            self.assertTrue(checker_module.is_page_count_line(line), line)
+
+    def test_ordinary_keyword_lines_are_not_mistaken_for_it(self):
+        """ควบคุมเชิงลบ — ถ้าจับผิด รายการ keyword จะถูกตัดกลางคัน"""
+        for line in ("Markov model / Population Attributable Fraction",
+                     "ควบคุมบุหรีไฟฟ้า",
+                     "Immunomodulation / Lactiplantibacillus plantarum"):
+            self.assertFalse(checker_module.is_page_count_line(line), line)
+
+    def test_the_reader_stops_at_the_page_count(self):
+        """โครงของตัวนับต้องหยุดที่บรรทัดจำนวนหน้า ไม่ใช่กวาดไปทั้งหน้า"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("nl.startswith('KEYWORD')", 1)[1][:900]
+        self.assertIn("is_page_count_line(more)", block)
+        self.assertIn("raws[kw_idx + 1:kw_idx + 4]", block)
+
+
+class OneMisspelledTocHeadingIsOneFinding(unittest.TestCase):
+    """หัวข้อสารบัญที่สะกดผิด ต้องฟ้องข้อเดียว ไม่ใช่สองข้อจากสองกฎ
+
+    เล่มจริง (ก.ย. 2569) เขียน "LIST OF TABLES (If any)" แล้วได้สองการ์ด
+
+        FRONT.TOC          หัวข้อสารบัญในเล่มเขียนว่า "LIST OF TABLES (If any)"
+        FRONT.TOC_CONTENT  สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "..." มี "(If any)" เกินมา
+
+    ข้อความสรุปที่ส่งนักศึกษารวมให้อยู่แล้ว แต่หน้ารายงานฝั่งเจ้าหน้าที่ยังเห็นซ้ำ
+    เจ้าหน้าที่สั่งให้ยุบเหลือของ FRONT.TOC_CONTENT เพราะบอกได้ว่าเกินคำไหน
+    """
+
+    def test_the_generic_rule_waits_for_the_specific_one(self):
+        source = inspect.getsource(checker_module.run_check)
+        # เก็บไว้ก่อน ไม่ฟ้องทันทีตอนเจอ
+        self.assertIn("toc_list_typos.append(", source)
+        # กรองด้วยหัวข้อที่กฎเจาะจงฟ้องไปแล้ว
+        self.assertIn("if norm(t[1]) not in toc_typos_reported]", source)
+
+    def test_the_generic_rule_is_not_deleted(self):
+        """ควบคุมเชิงลบ — ยังต้องฟ้องได้ ถ้ากฎเจาะจงไม่ได้แตะหัวข้อนั้น
+
+        กฎเจาะจงทำงานเฉพาะกับส่วนที่ "มีอยู่จริงในเล่มแต่หายจากสารบัญ" ส่วนหัวข้อ
+        LIST OF ... ที่สะกดผิดโดยไม่มีส่วนนั้นในเล่ม ยังต้องพึ่งกฎนี้อยู่
+        """
+        source = inspect.getsource(checker_module.run_check)
+        tail = source.split("for _idx, _visible, _expected, _compared in toc_list_typos:",
+                            1)[1][:400]
+        self.assertIn('"FRONT.TOC"', tail)
+        self.assertIn("แก้การสะกดหัวข้อสารบัญ", tail)
+
+
+class DecisionsThatDeliberatelyChangeNothing(unittest.TestCase):
+    """คำตัดสินของเจ้าหน้าที่ที่ "ให้คงไว้อย่างเดิม" (ก.ย. 2569)
+
+    เขียนเป็นเทสต์ไว้เพราะการคงไว้ก็เป็นคำตัดสิน ไม่ใช่เรื่องที่ยังไม่ได้พิจารณา
+    ถ้าไม่ล็อกไว้ คนที่มาอ่านทีหลังจะเห็นว่า "น่าจะปรับได้" แล้วเปลี่ยนโดยไม่รู้
+    """
+
+    def test_a_toc_entry_without_a_page_number_stays_yellow_per_chapter(self):
+        """เล่มจริงได้ข้อสังเกต 6 ข้อจากรูปแบบสารบัญเดียวกัน เจ้าหน้าที่สั่งว่า
+        "ตรวจเหมือนเดิม แต่ฟ้องเหลือง" คือไม่ยุบเป็นข้อเดียว และไม่ยกระดับสี
+        """
+        self.assertEqual(checker_module.TOC_PAGE_ZONE, "YELLOW")
+        self.assertEqual(RULE_CATALOG["FRONT.TOC_PAGE_REF"]["failure_zone"], "YELLOW")
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split('if not entry["page_label"]:', 1)[1][:320]
+        self.assertIn("TOC_PAGE_ZONE", block)
+
+    def test_stray_text_in_the_running_head_stays_orange(self):
+        """ชื่อรูปที่วางล้ำเข้าเขตหัวกระดาษ — เจ้าหน้าที่ยืนยันว่าสีส้มถูกแล้ว
+        (เล่มจริงหน้า 38 วางชื่อรูปที่ top 48.6 ซึ่งอยู่ในขอบบน 72 pt)
+        """
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ", 1)[0][-400:]
+        self.assertIn('rep.add("ORANGE"', block)
+
+
+class TwoColumnsOnTheSameRowStayOnOneLine(unittest.TestCase):
+    """หน้าลงนามเป็นสองคอลัมน์ อักขระที่อยู่แถวเดียวกันต้องอยู่บรรทัดเดียวกัน
+
+    ของเดิมจัดบรรทัดด้วย round(top / 3.0) ซึ่งมีขอบช่องตายตัว เล่มจริง (ก.ย. 2569)
+    ชื่อสองคอลัมน์อยู่ที่ top 283.4 กับ 283.9 ห่างกันแค่ 0.5 pt แต่คร่อมขอบช่องพอดี
+    จึงถูกแยกเป็นสองบรรทัด แล้วบรรทัดเหนือคำว่า Candidate กลายเป็นชื่อของคอลัมน์ขวา
+
+        First Name Last name,      <- ช่องชื่อนักศึกษา (ยังไม่ได้กรอก)
+        Chayanan Sittibusaya,      <- ประธานกรรมการ คอลัมน์ขวา
+        Candidate MD.
+
+    ระบบจึงรายงานว่า "ชื่อนักศึกษาในเล่มเขียนว่า Chayanan Sittibusaya"
+    ทั้งที่เจ้าหน้าที่เห็นว่าเป็น "First Name Last name"
+    """
+
+    @staticmethod
+    def _chars(rows):
+        out = []
+        for top, x0, text in rows:
+            out.append({"text": text, "top": top, "x0": x0, "x1": x0 + 6,
+                        "size": 16.0, "upright": True})
+        return out
+
+    def test_half_a_point_apart_is_the_same_line(self):
+        rows = [(283.4, 48.0, "A"), (283.9, 310.8, "B")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertEqual(len(lines), 1)
+
+    def test_a_real_next_line_still_splits(self):
+        """ควบคุมเชิงลบ — ระยะบรรทัดจริงของเล่มห่าง 13-18 pt ต้องไม่ถูกยุบรวม"""
+        rows = [(283.4, 48.0, "A"), (297.1, 48.0, "B")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertEqual(len(lines), 2)
+
+    def test_a_long_line_does_not_creep_into_the_next_one(self):
+        """เทียบระยะกับตัวแรกของบรรทัด ไม่ใช่ตัวก่อนหน้า ไม่งั้นไหลไปทีละ 3 pt เรื่อย ๆ"""
+        rows = [(100.0, 10.0, "A"), (102.0, 20.0, "B"), (104.0, 30.0, "C"),
+                (106.0, 40.0, "D")]
+        lines = checker_module._group_into_lines(self._chars(rows))
+        self.assertGreater(len(lines), 1)
+
+    def test_the_student_slot_is_the_left_column(self):
+        page = NEWLINE.join([
+            "……………………………………… ………………………………………",
+            "First Name Last name, Chayanan Sittibusaya,",
+            "Candidate MD.",
+        ])
+        self.assertEqual(checker_module.signature_printed_name(page),
+                         "First Name Last name")
+
+
 class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
     """หน้าที่ฟอนต์ทำให้ตัวเลขกลายเป็นตัวอักษร ต้องไม่ถูกฟ้องว่าเล่มพิมพ์ผิด
 
@@ -2370,6 +3115,30 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
             checker_module.unreadable_id_digits("กีรติ JKLMNOP PHPH/M", "",
                                                 self.NAMES), "")
 
+    def test_digits_turned_into_punctuation_are_caught_too(self):
+        """อีกเล่มหนึ่ง (ก.ย. 2569) ฟอนต์เดียวกันเพี้ยนคนละแบบ
+
+        เลข "6636480" ออกมาเป็น ",,-,./0" คือกลายเป็นเครื่องหมายวรรคตอน และรหัส
+        หลักสูตรถูกแทรกช่องว่างเป็น "PHIE / M" จนแตกเป็นสามคำ ของเดิมจับได้เฉพาะ
+        ตัวอักษรอังกฤษล้วนกับรหัสหลักสูตรคำเดียว เล่มนี้จึงโดนฟ้องแดงว่าไม่พบรหัส
+        ทั้งที่พิมพ์อยู่ครบ
+        """
+        line = "อรณิชา หนูนาค ,,-,./0 PHIE / M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(
+                line, "6636480 PHIE/M", ("ONNICHA NOONAK", "อรณิชา หนูนาค")),
+            ",,-,./0")
+
+    def test_a_thai_surname_in_the_slot_is_not_mistaken_for_broken_digits(self):
+        """ควบคุมเชิงลบ — เล่มไทยที่ลืมพิมพ์รหัสจะเหลือนามสกุลไทยอยู่ตรงนั้น
+
+        ยาวเท่าจำนวนหลักพอดีได้ จึงต้องกันด้วย "ห้ามมีอักษรไทย" ไม่ใช่ความยาวอย่างเดียว
+        """
+        self.assertEqual(
+            checker_module.unreadable_id_digits(
+                "อรณิชา หนูนาคสกุล PHIE / M", "6636480 PHIE/M",
+                ("ONNICHA NOONAK",)), "")
+
     def test_the_page_is_not_reported_as_a_problem(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด
 
@@ -2382,6 +3151,15 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         head = source.split("unreadable_digit_pages = {}", 1)[1][:1400]
         self.assertIn("rep.add_info", head)
         self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
+
+    def test_staff_are_told_to_open_the_page_themselves(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ปล่อยผ่าน ทำเพียงแจ้งบอกว่าเกิดปัญหาอะไร
+        ให้เจ้าหน้าที่ทราบและต้องไปดูเอง" — คำสั่งให้ไปดูต้องอยู่ในบรรทัดนั้นด้วย
+        ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
+        """
+        source = inspect.getsource(checker_module.run_check)
+        head = source.split("unreadable_digit_pages = {}", 1)[1][:3200]
+        self.assertIn("กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง", head)
 
     def test_the_name_on_that_page_is_still_compared(self):
         """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
@@ -2411,7 +3189,8 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
         for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
                    "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
                    "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
-                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว",
+                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
+                   "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง",
                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
                    "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
             en = i18n.tr_en(th, pairs)
@@ -2605,14 +3384,14 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         report = self._signature_report()
         text = checker_module.plain_summary(report, staff=[self.FEE_YES])
         self.assertIn("ทั้งหมด 1 จุด", text)
-        self.assertIn("นศ. มีค่าปรับในการส่งเล่มล่าช้า", text)
+        self.assertIn("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า", text)
 
     def test_the_fee_wording_comes_last(self):
         report = self._signature_report()
         text = checker_module.plain_summary(report,
                                             staff=[self.WRONG, self.FEE_NONE])
         self.assertLess(text.index("ปรับโครงสร้างของหน้า"),
-                        text.index("นศ. ไม่มีค่าปรับ"))
+                        text.index("นักศึกษาไม่มีค่าปรับ"))
         self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"),
                         text[-80:])
 
@@ -2832,12 +3611,18 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 # "ฝั่ง ละ 6 รายชื่อ" ถูกแล้ว เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าฝั่งซ้าย
                 # ต้องนับชื่อนักศึกษารวมไปด้วย จึงไม่ใช่จำนวนกรรมการล้วน ๆ
                 "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ",
-                "ให้ใส่สีขาวไว้",
+                # เจ้าหน้าที่อนุมัติถ้อยคำไทยท่อนนี้แล้ว (ก.ย. 2569) คู่กับฝั่งอังกฤษ
+                # "and remove the position below the degree" ที่เจ้าหน้าที่เขียนมาเอง
+                "ให้ใส่สีขาวไว้ และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก",
             ],
             "LATE_FEE_NONE": [
-                "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
                 "Line Offical Account ID @322wjrbo",
                 "หรือผ่านลิ้งค์",
+            ],
+            # ประโยคใบแจ้งหนี้เหลืออยู่เฉพาะชุด "มีค่าปรับ" แล้ว (เจ้าหน้าที่สั่งตัด
+            # ออกจากชุด "ไม่มีค่าปรับ" ก.ย. 2569 เพราะขัดกับประโยคแรกของชุดนั้นเอง)
+            "LATE_FEE_YES": [
+                "เอกสารแจ้งค่าปรับ(Invoice)ผ่านระบบเมื่อ กระบวนการตรวจสอบเสร็จสิ้นแล้ว",
             ],
         }
         for choice_id, phrases in verbatim.items():
@@ -2865,7 +3650,10 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             # บรรทัดตำแหน่งต้องสั้น ไม่มีคำสั่งปนมา
             self.assertLess(len(lines[0]), 60, lines[0])
             for line in lines[1:]:
-                self.assertLess(len(line), 260, line[:60])
+                # วัดเฉพาะเนื้อความ ไม่นับลิงก์ — ที่ห้ามคือประโยคยาวจนอ่านไม่จบ
+                # ส่วนลิงก์คู่มือยาวตามที่มันเป็น จะตัดให้สั้นเองไม่ได้
+                prose = re.sub(r"https?://\S+", "", line).strip()
+                self.assertLess(len(prose), 260, prose[:60])
         self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
                         choice["text"][:60])
         self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i - ii)"),
@@ -2897,16 +3685,85 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         # ฝั่งที่ยืนยันว่ามีค่าปรับ ต้องไม่พูดเป็นเงื่อนไขอีก
         self.assertNotIn("If a fine is incurred", yes_en)
         self.assertIn("The invoice will be issued through the system", yes_en)
-        # ฝั่งที่ไม่มีค่าปรับ ยังคงประโยคเงื่อนไขไว้ตามต้นฉบับไทย
-        self.assertIn("If a fine is incurred", none_en)
+        # ฝั่งที่ไม่มีค่าปรับ ตัดประโยคเงื่อนไขออกแล้ว (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        # เพราะขัดกับประโยคแรกที่เพิ่งบอกว่าไม่มีค่าปรับ ทั้งสองภาษาตัดพร้อมกัน
+        self.assertNotIn("If a fine is incurred", none_en)
+        # ทั้งสองชุดไม่มีคำนี้แล้ว — ชุด "มีค่าปรับ" ตัดออกทีหลัง (เจ้าหน้าที่สั่งให้
+        # สองภาษาเท่ากัน) เพราะประโยคแรกยืนยันไปแล้วว่ามี จะพูดเป็นเงื่อนไขซ้ำอีกไม่ได้
+        for cid in ("LATE_FEE_NONE", "LATE_FEE_YES"):
+            self.assertNotIn("กรณีที่นักศึกษามีค่าปรับ",
+                             checker_module.STAFF_CHOICE_BY_ID[cid][1]["text"], cid)
+        # ฝั่งที่มีค่าปรับต้องยังบอกเรื่องใบแจ้งหนี้อยู่ ทั้งสองภาษา
+        yes = checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_YES"][1]
+        self.assertIn("เอกสารแจ้งค่าปรับ(Invoice)", yes["text"])
+        self.assertIn("The invoice will be issued", yes["text_en"])
+
+    def test_the_two_frame_sentences_do_not_contradict(self):
+        """ย่อหน้า 2 กับ 4 เคยอ่านแล้วขัดกันเอง เจ้าหน้าที่สั่งให้ปรับ (ก.ย. 2569)
+
+            ย่อหน้า 2  "...ไม่ต้องเลื่อนหรือปรับกรอบ"
+            ย่อหน้า 4  "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้..."
+
+        ทั้งสองย่อหน้าพูดคนละเรื่อง — ย่อหน้า 2 ห้ามขยับเพื่อให้พอดีกับจำนวนชื่อของ
+        ตัวเอง ส่วนย่อหน้า 4 บอกว่ากรอบต้องเป็นค่ามาตรฐานของ template
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        th = [ln for ln in choice["text"].split(NEWLINE) if ln.strip()]
+        en = [ln for ln in choice["text_en"].split(NEWLINE) if ln.strip()]
+        # ห้ามกลับไปเป็นคำสั่งลอย ๆ ที่อ่านแล้วขัดกับย่อหน้าที่ 4
+        self.assertNotIn("ไม่ต้องเลื่อนหรือปรับกรอบ", th[1])
+        self.assertNotIn("without shifting or modifying the frames", en[1])
+        # ต้องบอกด้วยว่าห้ามขยับ "เพื่ออะไร"
+        self.assertIn("เพื่อให้พอดีกับจำนวนชื่อ", th[1])
+        self.assertIn("to fit them", en[1])
+        # ย่อหน้า 4 ยังต้องสั่งให้กรอบตรงกับ template เหมือนเดิม
+        self.assertIn("ให้ตรงกันกับที่ set ไว้", th[3])
+        self.assertIn("match the default settings", en[3])
+
+    def test_the_wording_uses_the_full_word_for_student(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ใช้คำว่า "นักศึกษา" ทั้งหมด ไม่ใช้ตัวย่อ
+
+        ข้อความชุดนี้ส่งถึงนักศึกษาโดยตรง ตัวย่อในจดหมายราชการอ่านแล้วห้วน
+        """
+        for check in checker_module.STAFF_CHECKS:
+            for choice in check["choices"]:
+                for field in ("text", "text_en"):
+                    self.assertNotIn("นศ.", choice.get(field) or "", choice["id"])
+
+    def test_the_layout_wording_tells_them_to_remove_the_position(self):
+        """เจ้าหน้าที่สั่งเพิ่มท่อนนี้ (ก.ย. 2569) ต้องมีทั้งสองภาษา
+
+        จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ จึงต้องต่อท้ายย่อหน้าเดิม ไม่ขึ้นบรรทัดใหม่
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        self.assertIn("and remove the position below the degree", choice["text_en"])
+        self.assertIn("และลบตำแหน่งที่อยู่ใต้คุณวุฒิออก", choice["text"])
+        for field in ("text", "text_en"):
+            lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
+            self.assertEqual(len(lines), 4, field)
+
+    def test_the_formatting_manual_comes_with_a_link(self):
+        """เจ้าหน้าที่ส่งลิงก์คู่มือมาให้ (ก.ย. 2569) — เดิมเขียนว่า "คู่มือการจัดฯ"
+        ลอย ๆ นักศึกษาเปิดไม่ได้ว่าอยู่ที่ไหน ต้องมีทั้งสองภาษา
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        for field in ("text", "text_en"):
+            self.assertIn("https://www.canva.com/design/DAHA0Rwyb84/",
+                          choice[field], field)
+        # ลิงก์ต้องอยู่ย่อหน้าเดียวกับที่พูดถึงคู่มือ ไม่ใช่ขึ้นบรรทัดใหม่ —
+        # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ หน้ารายงานแปลทีละบรรทัด
+        for field, marker in (("text", "คู่มือการจัดฯ"),
+                              ("text_en", "formatting manual")):
+            para = next(ln for ln in choice[field].split(NEWLINE) if marker in ln)
+            self.assertIn("https://www.canva.com/", para, field)
 
     def test_the_two_fee_answers_differ_only_in_the_first_sentence(self):
         """ผิดคำเดียวคือบอกนักศึกษาผิดเรื่องเงิน — ล็อกไว้ว่าต่างกันแค่ มี/ไม่มี"""
         none_lines = self._wording(self.FEE_NONE).split(NEWLINE)
         yes_lines = self._wording(self.FEE_YES).split(NEWLINE)
         self.assertEqual(none_lines[1:], yes_lines[1:])
-        self.assertIn("นศ. ไม่มีค่าปรับในการส่งเล่มล่าช้า", none_lines[0])
-        self.assertIn("นศ. มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
+        self.assertIn("นักศึกษาไม่มีค่าปรับในการส่งเล่มล่าช้า", none_lines[0])
+        self.assertIn("นักศึกษามีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
         self.assertNotIn("ไม่มีค่าปรับในการส่งเล่มล่าช้า", yes_lines[0])
 
     def test_two_topics_on_the_same_page_do_not_collapse_into_one(self):
@@ -2947,7 +3804,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
 
         หน้าเว็บกดได้ทีละอันอยู่แล้ว แต่หน้าเก่าที่ค้างไว้ คำขอที่สวนกัน หรือคำขอที่ถูก
         ส่งซ้ำ ทำให้ส่งมาสองคำตอบพร้อมกันได้ ถ้าไม่คุม นักศึกษาจะได้ข้อความว่า
-        "นศ. ไม่มีค่าปรับ" แล้วตามด้วย "นศ. มีค่าปรับ" ในย่อหน้าถัดไป
+        "นักศึกษาไม่มีค่าปรับ" แล้วตามด้วย "นักศึกษามีค่าปรับ" ในย่อหน้าถัดไป
         """
         text = checker_module.plain_summary(self._signature_report(),
                                             staff=[self.FEE_NONE, self.FEE_YES])
@@ -4496,7 +5353,8 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
             th = [] if lang == "อังกฤษ" else [0]
             _check_abstract_committees(rep, committees, en, th, [page],
                                        lambda i: "หน้า iv")
-            found = " ".join(i["found"] for i in rep.zones["ORANGE"])
+            found = " ".join(i["found"] for i in
+                             rep.zones["RED"] + rep.zones["ORANGE"])
             self.assertIn("บฑ.1", found, lang)
             self.assertNotIn("บฑ.2", found, lang)
 
@@ -4511,24 +5369,26 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
             self.assertFalse(hasattr(checker_module, gone), gone)
 
     def test_too_few_names_says_the_list_is_incomplete(self):
-        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        issue = self._count(["ก ก", "ข ข"]).zones["RED"][0]
         self.assertIn("รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 2 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
     def test_too_many_names_says_the_list_is_over(self):
-        issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["ORANGE"][0]
+        # ทั้งขาดและเกิน = สีแดง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        issue = self._count(["ก ก", "ข ข", "ค ค", "ง ง"]).zones["RED"][0]
         self.assertIn("รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 4 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
     def test_the_finding_lists_who_should_be_there(self):
         """เจ้าหน้าที่สั่งให้บอกด้วยว่าควรมีชื่ออะไรบ้าง ดึงจากฟอร์มต้นทาง"""
-        issue = self._count(["ก ก", "ข ข"]).zones["ORANGE"][0]
+        issue = self._count(["ก ก", "ข ข"]).zones["RED"][0]
         for name in ("คนางค์ คันธมธุรพจน์", "ธเนศ เกษศิลป์", "สุภาภรณ์ สงค์ประชา"):
             self.assertIn(name, issue["expected"], name)
         self.assertIn("ตาม บฑ.2", issue["expected"])
 
     def test_the_right_count_says_nothing(self):
-        self.assertEqual(self._count(["ก ก", "ข ข", "ค ค"]).zones["ORANGE"], [])
+        rep = self._count(["ก ก", "ข ข", "ค ค"])
+        self.assertEqual(rep.zones["RED"] + rep.zones["ORANGE"], [])
 
     def test_only_cells_holding_a_name_are_counted(self):
         # ช่องคงที่ของ template ถูกคัดออกตั้งแต่ _sig_clean_name (คืน None)

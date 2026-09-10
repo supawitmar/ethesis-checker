@@ -7,14 +7,14 @@
   },
   "2": {
     "verdict": "ไม่ผ่าน",
-    "red": 4,
-    "orange": 0,
+    "red": 3,
+    "orange": 1,
     "yellow": 2
   },
   "3": {
     "verdict": "ไม่ผ่าน",
-    "red": 4,
-    "orange": 3,
+    "red": 2,
+    "orange": 5,
     "yellow": 4
   }
 }
