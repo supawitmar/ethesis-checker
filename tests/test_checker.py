@@ -2794,6 +2794,52 @@ class TheDuplicatedChapterIsNamedInTheBooksOwnLanguage(unittest.TestCase):
         self.assertEqual(checker_module._toc_chapter_label(3, self.EN),
                          'บทที่ 3 "RESEARCH METHODOLOGY"')
 
+    def _one(self, number, *raws):
+        return checker_module._toc_chapter_label(
+            number, [(number, "", None, r, 9, "") for r in raws])
+
+    def test_every_chapter_number_works_not_just_two_and_three(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าต้องรองรับบทอื่นด้วย
+
+        เล่มที่พบปัญหาบังเอิญซ้ำบทที่ 2 กับ 3 กฎนี้ไม่ได้ผูกกับเลขบทใด
+        """
+        for number, raw, want in (
+                (1, "CHAPTER 1 INTRODUCTION", "INTRODUCTION"),
+                (4, "CHAPTER 4 RESULTS 45", "RESULTS"),
+                (6, "CHAPTER 6 CONCLUSION AND RECOMMENDATIONS 120",
+                 "CONCLUSION AND RECOMMENDATIONS"),
+                (10, "CHAPTER 10 APPENDIX OVERVIEW 200", "APPENDIX OVERVIEW")):
+            self.assertEqual(self._one(number, raw), f'บทที่ {number} "{want}"', raw)
+
+    def test_a_roman_numeral_entry_reads_the_same(self):
+        """เล่มจริงปนเลขโรมันกับอารบิกในสารบัญเดียวกันได้"""
+        self.assertEqual(self._one(2, "CHAPTER II LITERATURE REVIEW 12",
+                                   "CHAPTER 2 LITERATURE REVIEW 12"),
+                         'บทที่ 2 "LITERATURE REVIEW"')
+
+    def test_a_dot_leader_glued_to_the_page_number_is_stripped(self):
+        """"RESULTS.........45" ไม่มีช่องว่างคั่น ตัวตัดเลขหน้าจึงตัดไม่ได้เอง"""
+        for raw in ("CHAPTER 4 RESULTS.................45",
+                    "CHAPTER 4 RESULTS ................. 45",
+                    "CHAPTER 4 RESULTS…………45"):
+            self.assertEqual(self._one(4, raw), 'บทที่ 4 "RESULTS"', raw)
+
+    def test_a_title_with_abbreviation_dots_survives(self):
+        """ควบคุมเชิงลบของตัวตัดจุดไข่ปลา — จุดในตัวย่อต้องไม่ถูกกิน"""
+        self.assertEqual(self._one(3, "CHAPTER 3 THE U.S. CONTEXT 30"),
+                         'บทที่ 3 "THE U.S. CONTEXT"')
+
+    def test_three_identical_entries_still_show_one_title(self):
+        self.assertEqual(self._one(5, "CHAPTER 5 DISCUSSION 90",
+                                   "CHAPTER 5 DISCUSSION 90",
+                                   "CHAPTER 5 DISCUSSION 90"),
+                         'บทที่ 5 "DISCUSSION"')
+
+    def test_the_thai_book_reads_the_same_across_chapters(self):
+        self.assertEqual(
+            self._one(6, "บทที่ 6 สรุปผลการวิจัยและข้อเสนอแนะ.........120"),
+            'บทที่ 6 "สรุปผลการวิจัยและข้อเสนอแนะ"')
+
 
 class TooManyKeywordsIsOnlyANotice(unittest.TestCase):
     """keyword เกิน 5 คำ = ข้อสังเกตสีเหลือง ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569)
