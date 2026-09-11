@@ -489,6 +489,16 @@ function renderCommitteeSummary(committees) {
 
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  // ช่องที่มองไม่เห็นบนฟอร์มต้องล้างทุกครั้งที่นำเข้าใหม่ — ของเดิมเขียนทับเฉพาะช่องที่
+  // ข้อมูลใหม่มีค่า นำเข้านักศึกษาคนที่สองด้วยวิธีวางข้อความ (ซึ่งไม่อ่านรายชื่อกรรมการ)
+  // หรือไฟล์ที่อ่านรายชื่อกรรมการไม่ออก รายชื่อของคนแรกจึงค้างอยู่ แล้วเล่มของคนที่สอง
+  // ถูกนับกรรมการเทียบกับรายชื่อของคนแรก ได้ข้อแดง "รายชื่อไม่ครบ/เกิน" ที่โชว์ชื่อคนอื่น
+  ['committees-json', 'faculty-field', 'program-field'].forEach(function(id){
+    const field = document.getElementById(id);
+    if (field) field.value = '';
+  });
+  const oldCommittees = document.getElementById('committee-box');
+  if (oldCommittees) oldCommittees.style.display = 'none';
   const filled = [];
   // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {

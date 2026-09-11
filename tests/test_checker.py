@@ -2799,6 +2799,95 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class ADegreeInTheWrongCaseIsRed(unittest.TestCase):
+    """/code-review (ก.ย. 2569): ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์ ถูกลดเป็นเหลืองผ่านได้
+
+    กิ่ง "ต่างเฉพาะวรรคตอน/ช่องว่าง" เทียบด้วย norm() ซึ่งแปลงเป็นตัวใหญ่หมด
+    ตัวพิมพ์ผิดจึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบายที่ผิด แล้วเล่มผ่าน
+    """
+
+    def test_a_case_only_difference_is_not_spacing(self):
+        for page, want in (("MASTER OF SCIENCE (EPIDEMIOLOGY)",
+                            "Master of Science (Epidemiology)"),
+                           ("Master of Science (Epidemiology)",
+                            "MASTER OF SCIENCE (EPIDEMIOLOGY)"),
+                           ("M.SC. (EPIDEMIOLOGY)", "M.Sc. (Epidemiology)")):
+            self.assertFalse(
+                checker_module.degree_differs_only_in_spacing(want, page), page)
+
+    def test_a_spacing_only_difference_still_is(self):
+        """ควบคุมเชิงลบ — ข้อสังเกตสีเหลืองที่เจ้าหน้าที่กำหนดไว้ต้องยังทำงาน"""
+        for page, want in (("M.Sc.(Epidemiology)", "M.Sc. (Epidemiology)"),
+                           ("Master of Science  (Epidemiology)",
+                            "Master of Science (Epidemiology)"),
+                           ("วท.ม.(ระบาดวิทยา)", "วท.ม. (ระบาดวิทยา)")):
+            self.assertTrue(
+                checker_module.degree_differs_only_in_spacing(want, page), page)
+
+    def test_both_degree_checks_use_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertEqual(source.count("degree_differs_only_in_spacing("), 2)
+        self.assertNotIn("norm(expected_degree) in norm(spot_text)", source)
+        self.assertNotIn("norm(abbr) in norm(abstract_text)", source)
+
+
+class TheExamDateMustNotMatchALongerDay(unittest.TestCase):
+    """/code-review (ก.ย. 2569): วันที่อนุมัติ "7" ผ่านบนหน้าที่พิมพ์ "17" หรือ "27"
+
+    ไฟล์ eThesis เขียนวันที่ 1-9 เป็นเลขหลักเดียวเสมอ วันต้นเดือนจึงโดนทุกเล่ม
+    """
+
+    def test_a_longer_day_is_not_a_match(self):
+        for want, page in (("7 July 2026", "Date 17 July 2026"),
+                           ("7 July 2026", "Date 27 July 2026"),
+                           ("1 พฤษภาคม 2569", "วันที่ 11 พฤษภาคม พ.ศ. 2569"),
+                           ("1 พฤษภาคม 2569", "วันที่ 21 พฤษภาคม 2569")):
+            self.assertFalse(checker_module.exam_date_on_page(want, page), page)
+
+    def test_the_right_day_still_matches(self):
+        """ควบคุมเชิงลบ — รูปแบบที่เคยผ่านต้องยังผ่าน"""
+        for want, page in (("7 July 2026", "Date 7 July 2026"),
+                           ("7 July 2026", "Date 07 July 2026"),
+                           ("17 July 2026", "on 17 July 2026."),
+                           ("11 พฤษภาคม 2569", "วันที่ 11 พฤษภาคม พ.ศ. 2569"),
+                           ("7 July 2026", "Page 2" + chr(10) + "7 July 2026")):
+            self.assertTrue(checker_module.exam_date_on_page(want, page), page)
+
+    def test_the_signature_page_check_reports_it(self):
+        rep = Report()
+        checker_module._check_exam_date(rep, "7 July 2026", [0],
+                                        ["Date of examination 17 July 2026"],
+                                        lambda i: f"หน้า {i + 1}")
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn("17 July 2026", rep.zones["RED"][0]["found"])
+
+
+class AGarbledIdIsNotMistakenForASurname(unittest.TestCase):
+    """/code-review (ก.ย. 2569): _THAI_LETTER ประกาศสองที่ ตัวหลังทับตัวแรกเงียบ ๆ
+
+    unreadable_id_digits ตั้งใจใช้ "พยัญชนะไทย" แยกนามสกุลไทยที่ค้างในช่องรหัส แต่ได้
+    ตัวที่ครอบสระ วรรณยุกต์ และเลขไทยไปแทน ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นเลขไทยหรือสระ
+    จึงถูกตัดสินว่าเป็นนามสกุล แล้วฟ้องแดง "ไม่พบรหัสนักศึกษา"
+    """
+
+    def test_thai_digits_in_the_id_slot_are_unreadable_digits(self):
+        page = "นางสาวทดสอบ ระบบ ๖๔๓๗๐๒๘ PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "๖๔๓๗๐๒๘")
+
+    def test_a_thai_surname_in_the_slot_is_still_rejected(self):
+        """ควบคุมเชิงลบ — เล่มที่ลืมพิมพ์รหัสบนหน้าไทยต้องยังฟ้องได้"""
+        page = "นางสาวทดสอบ สมบูรณ์ PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "")
+
+    def test_the_two_regexes_no_longer_share_a_name(self):
+        source = inspect.getsource(checker_module)
+        self.assertEqual(source.count("_THAI_LETTER = re.compile"), 1)
+        self.assertIn("_THAI_CONSONANT.search(slot)",
+                      inspect.getsource(checker_module.unreadable_id_digits))
+
+
 class ADotLeaderGluedToThePageNumber(unittest.TestCase):
     """จุดไข่ปลาที่ลากชนเลขหน้าโดยไม่มีช่องว่างคั่น ("RESULTS.........45")
 

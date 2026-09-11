@@ -1541,7 +1541,11 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
 
 # อักษรไทย (ไม่รวมเลขไทยกับวรรณยุกต์) — ใช้แยก "ช่องรหัสที่ฟอนต์ทำเพี้ยน" ออกจาก
 # "นามสกุลไทยที่ค้างอยู่ตรงนั้นเพราะเล่มลืมพิมพ์รหัส"
-_THAI_LETTER = re.compile('[ก-ฮ]')
+# พยัญชนะไทยเท่านั้น — ใช้แยก "นามสกุลไทยที่ค้างอยู่ตรงช่องรหัส" ออกจาก "ตัวเลขที่ฟอนต์
+# ทำเพี้ยน" ห้ามตั้งชื่อ _THAI_LETTER เพราะชื่อนั้นประกาศซ้ำอีกที่ข้างล่าง (สำหรับตัดสิน
+# ภาษาชื่อเรื่อง ครอบสระ วรรณยุกต์ และเลขไทยด้วย) ตัวหลังจะทับตัวนี้เงียบ ๆ — เคยพลาดมาแล้ว
+# ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นเลขไทยหรือสระ จึงถูกตัดสินผิดว่าเป็นนามสกุล แล้วฟ้องแดง
+_THAI_CONSONANT = re.compile('[ก-ฮ]')
 
 
 def is_page_count_line(line):
@@ -1593,7 +1597,7 @@ def unreadable_id_digits(page_text, student_id, names=()):
                        for span in range(1, min(4, len(tokens) - k + 1))):
                 continue
             slot = tokens[k - 1]
-            if len(slot) != len(digits) or _THAI_LETTER.search(slot):
+            if len(slot) != len(digits) or _THAI_CONSONANT.search(slot):
                 continue
             if any(norm(slot) in name for name in known if name):
                 continue
@@ -1912,7 +1916,24 @@ def _exam_date_key(text):
     หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุศักราชคั่นระหว่าง
     เดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569" ถ้าไม่ตัดออกจะฟ้องผิด
     """
-    return norm(re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or "")))
+    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or ""))
+    # norm() ตัดช่องว่างทิ้งหมด ตัวเลขสองชุดที่คั่นด้วยช่องว่างหรือขึ้นบรรทัดใหม่จึงต่อกัน
+    # เป็นเลขเดียว ("หน้า 2" บรรทัดบน + "7 July" บรรทัดล่าง = "27JULY") ต้องคั่นไว้ก่อน
+    return " ".join(norm(part) for part in re.split(r'(?<=\d)\s+(?=\d)', text))
+
+
+def exam_date_on_page(exam_date, page_text):
+    """วันที่สอบตามข้อมูลอนุมัติพิมพ์อยู่บนหน้านี้หรือไม่
+
+    ห้ามค้นแบบ "มีข้อความนี้อยู่ข้างใน" เฉย ๆ — วันที่อนุมัติ "7 July 2026" จะไปเจอ
+    อยู่ในหน้าที่พิมพ์ "17 July 2026" หรือ "27 July 2026" แล้วผ่านทั้งที่วันผิด
+    ไฟล์ eThesis เขียนวันที่ 1-9 เป็นเลขหลักเดียวเสมอ วันต้นเดือนจึงโดนทุกเล่ม
+    ต้องไม่มีตัวเลขติดอยู่หน้าหรือหลังวันที่ที่ค้นเจอ
+    """
+    want = _exam_date_key(exam_date)
+    if not want:
+        return False
+    return bool(re.search(rf'(?<!\d){re.escape(want)}(?!\d)', _exam_date_key(page_text)))
 
 
 def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
@@ -1927,7 +1948,7 @@ def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
         return
     for k, idx in enumerate(sig_pages):
         loc = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
-        if _exam_date_key(exam_date) in _exam_date_key(pages[idx]):
+        if exam_date_on_page(exam_date, pages[idx]):
             rep.add_verification("วันที่สอบผ่าน", loc, "pass")
             continue
         found_date = find_signature_date(pages[idx])
@@ -3577,6 +3598,24 @@ def describe_diff(found, expected):
         if by_word:
             return by_word
     return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
+
+
+def _letters_keep_case(text):
+    """ตัวอักษรและตัวเลขล้วน โดย "คงตัวพิมพ์เล็ก-ใหญ่ไว้" — norm() แปลงเป็นตัวใหญ่หมด"""
+    text = _TH_MARKS.sub('', (text or '').replace('ำ', 'า'))
+    return re.sub(r'[^A-Za-zก-๙0-9]', '', text)
+
+
+def degree_differs_only_in_spacing(expected, page_text):
+    """ชื่อปริญญาบนหน้านี้ต่างจากข้อมูลอนุมัติ "เฉพาะวรรคตอน/ช่องว่าง" หรือไม่
+
+    เป็นเงื่อนไขของข้อสังเกตสีเหลือง "ต่างเฉพาะวรรคตอน/ช่องว่าง" ซึ่งผ่านได้ ของเดิมเทียบ
+    ด้วย norm() ที่แปลงเป็นตัวใหญ่ทั้งหมด ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่
+    ("MASTER OF SCIENCE" กับ "Master of Science") จึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบาย
+    ที่ผิด แล้วเล่มผ่านได้ — ตัวพิมพ์ผิดต้องเป็นแดงเหมือนเดิม (ดู mismatch_detail)
+    """
+    want = _letters_keep_case(expected)
+    return bool(want) and want in _letters_keep_case(page_text)
 
 
 def mismatch_detail(label, compared, expected=''):
@@ -5868,7 +5907,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
-                if norm(expected_degree) in norm(spot_text):
+                if degree_differs_only_in_spacing(expected_degree, spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
                     # (เช่น "M.Sc. ()" กับ "M.Sc.()") = ข้อสังเกตสีเหลือง ผ่านได้
                     # ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
@@ -5907,7 +5946,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
             elif compared['status'] == 'exact':
                 rep.add_verification("ชื่อปริญญา", vloc, "pass")
-            elif norm(abbr) in norm(abstract_text):
+            elif degree_differs_only_in_spacing(abbr, abstract_text):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                 rep.add(DEGREE_SPACING_ZONE, "front_matter", box,

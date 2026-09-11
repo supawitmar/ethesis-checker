@@ -1,8 +1,12 @@
 import hashlib
 import hmac
+import json
 import os
+import shutil
+import subprocess
 import time
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("MAX_UPLOAD_MB", "1")
 os.environ.setdefault("APP_PASSWORD", "test-password")
@@ -348,15 +352,52 @@ class WebSmokeTests(unittest.TestCase):
     def test_session_survives_process_restart(self):
         """คุกกี้ต้องยังใช้ได้หลัง Render cold start ไม่งั้นฟอร์มที่กรอกค้างไว้จะสูญ
 
-        token ผูกกับ APP_PASSWORD จึงคำนวณได้เท่าเดิมทุกครั้งที่ process เริ่มใหม่
+        กุญแจเซ็นคำนวณจาก APP_PASSWORD (+ SESSION_SECRET) จึงได้เท่าเดิมทุกครั้งที่
+        process เริ่มใหม่ ไม่ได้เก็บเซสชันไว้ในหน่วยความจำ
         """
-        token = main.SESSION_TOKEN
-        restarted = hmac.new(main.APP_PASSWORD.encode("utf-8"),
-                             b"ethesis-session-v1", hashlib.sha256).hexdigest()
-        self.assertEqual(token, restarted)
+        restarted = main.derive_session_key(main.APP_PASSWORD,
+                                            os.environ.get("SESSION_SECRET", ""))
+        self.assertEqual(main.SESSION_KEY, restarted)
         # เปลี่ยนรหัสผ่าน = เตะทุกเซสชันออก
-        other = hmac.new(b"another-password", b"ethesis-session-v1", hashlib.sha256).hexdigest()
-        self.assertNotEqual(token, other)
+        self.assertNotEqual(main.SESSION_KEY,
+                            main.derive_session_key("another-password"))
+
+    def test_every_login_gets_its_own_cookie(self):
+        """/code-review (ก.ย. 2569): ของเดิมทุกคนได้คุกกี้ค่าเดียวกันตลอดไป"""
+        self.assertNotEqual(main.new_session_token(), main.new_session_token())
+
+    def test_the_server_expires_the_cookie_itself(self):
+        """ของเดิม 8 ชั่วโมงมีผลแค่ในเบราว์เซอร์ คุกกี้ที่หลุดไปใช้ได้ไม่มีวันหมด"""
+        issued = 1_800_000_000
+        token = main.new_session_token(now=issued)
+        self.assertTrue(main.session_token_valid(token, now=issued + 60))
+        self.assertTrue(main.session_token_valid(token, now=issued + main.SESSION_MAX_AGE - 1))
+        self.assertFalse(main.session_token_valid(token, now=issued + main.SESSION_MAX_AGE))
+
+    def test_a_tampered_cookie_is_rejected(self):
+        """ควบคุมเชิงลบ — ยืดอายุด้วยการแก้เวลาในคุกกี้เองต้องไม่ได้"""
+        issued, nonce, signature = main.new_session_token(now=1_800_000_000).split(".")
+        self.assertFalse(main.session_token_valid(
+            f"{int(issued) + 86_400}.{nonce}.{signature}", now=1_800_086_400))
+        for junk in ("", "abc", "1.2", "x.y.z", "1.2.3.4"):
+            self.assertFalse(main.session_token_valid(junk), junk)
+
+    def test_the_old_fixed_cookie_no_longer_works(self):
+        """คุกกี้แบบเดิมคำนวณจากรหัสผ่านตรง ๆ เอาไปเดารหัสผ่านออฟไลน์ได้"""
+        old = hmac.new(main.APP_PASSWORD.encode("utf-8"),
+                       b"ethesis-session-v1", hashlib.sha256).hexdigest()
+        self.assertFalse(main.session_token_valid(old))
+        client = TestClient(main.app)
+        client.cookies.set(main.SESSION_COOKIE, old)
+        self.assertEqual(client.get("/", follow_redirects=False).status_code, 303)
+
+    def test_the_cookie_from_login_opens_the_app(self):
+        client = TestClient(main.app)
+        login = client.post("/login", data={"password": main.APP_PASSWORD, "next": "/"},
+                            follow_redirects=False)
+        self.assertEqual(login.status_code, 303)
+        self.assertTrue(main.session_token_valid(client.cookies.get(main.SESSION_COOKIE)))
+        self.assertEqual(client.get("/", follow_redirects=False).status_code, 200)
 
     def test_wrong_password_is_rejected(self):
         anonymous = TestClient(main.app)
@@ -476,3 +517,59 @@ class WebSmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportingASecondStudentClearsTheFirst(unittest.TestCase):
+    """/code-review (ก.ย. 2569): นำเข้าข้อมูลนักศึกษาคนที่สองแล้วรายชื่อกรรมการคนแรกค้าง
+
+    applyParsed เขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า วิธีวางข้อความไม่อ่านรายชื่อกรรมการเลย
+    ช่องซ่อน committees_json จึงค้างรายชื่อของคนแรก แล้วเล่มของคนที่สองถูกนับกรรมการ
+    เทียบกับรายชื่อคนอื่น ได้ข้อแดง "รายชื่อไม่ครบ/เกิน" ที่โชว์ชื่อของอีกคน
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def _block(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        start = html.index("const IMPORT_LABELS")
+        end = html.index("// ---- แท็บเลือกวิธีนำเข้า ----")
+        return html[start:end]
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_hidden_fields_are_cleared_by_the_next_import(self):
+        script = r"""
+const vm = require('vm');
+const fields = {'committees-json': {value: ''}, 'faculty-field': {value: ''},
+                'program-field': {value: ''}, 'committee-box': {style: {display: 'none'}},
+                'committee-summary': {innerHTML: ''}};
+const byName = {faculty: 'faculty-field', program: 'program-field',
+                committees_json: 'committees-json'};
+global.Event = class { constructor(type) { this.type = type; } };
+global.document = {
+  getElementById: id => fields[id] || null,
+  querySelectorAll: () => [],
+  querySelector: sel => {
+    const f = fields[byName[(sel.match(/name="([^"]+)"/) || [])[1]]];
+    if (!f) return null;
+    f.classList = {add() {}, remove() {}};
+    f.dispatchEvent = () => {};
+    return f;
+  }
+};
+vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
+const read = () => [fields['committees-json'].value, fields['faculty-field'].value,
+                    fields['program-field'].value, fields['committee-box'].style.display];
+applyParsed({committees: {exam: [{name: 'A One'}]}, faculty: 'Faculty A', program: 'Program A'});
+const first = read();
+applyParsed({title_en: 'Student B'});
+console.log(JSON.stringify({first, second: read()}));
+"""
+        run = subprocess.run(["node", "-e", script], input=self._block(),
+                             capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout)
+        # ควบคุมเชิงบวก — คนแรกต้องเติมได้จริง ไม่งั้นเทสต์ข้างล่างผ่านลอย ๆ
+        self.assertIn("A One", out["first"][0])
+        self.assertEqual(out["first"][1:], ["Faculty A", "Program A", ""])
+        # คนที่สองไม่มีรายชื่อกรรมการ ต้องไม่เหลือของคนแรก
+        self.assertEqual(out["second"], ["", "", "", "none"])
