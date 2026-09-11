@@ -2839,6 +2839,27 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class AnEmptyNameFieldIsStoppedAtTheForm(unittest.TestCase):
+    """การ์ดแดง "ไม่ได้กรอกชื่อ...ของนักศึกษาในฟอร์ม" ไม่มีแล้ว (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    "ระบบควรไม่ให้ตรวจเพราะยังกรอกข้อมูลยังไม่ครบ อยู่แล้ว" — ช่องชื่อบังคับกรอกทั้งหน้าเว็บ
+    และ /check การ์ดนี้จึงขึ้นผ่านหน้าเว็บไม่ได้
+    """
+
+    def test_the_card_is_gone(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn('f"ไม่ได้กรอก{nlbl}ของนักศึกษาในฟอร์ม"', source)
+        self.assertNotIn('"กรอกฟอร์มให้ครบแล้วตรวจใหม่"', source)
+
+    def test_the_form_still_requires_both_names_for_thai_programmes(self):
+        """ควบคุมเชิงลบ — การ์ดหายไปได้เพราะด่านนี้ยังอยู่"""
+        from ethesis_rules import FRONT_MATTER_RULES
+        for program in ("thai", "thai_english"):
+            want = FRONT_MATTER_RULES["required_form_fields"][program]
+            self.assertIn("student_name_th", want, program)
+            self.assertIn("student_name", want, program)
+
+
 class TheSummaryGroupsMatchTheHeaderBoxes(unittest.TestCase):
     """ข้อความสรุปสองกลุ่มต้องนับเท่ากับสองกล่องบนหัวรายงานเสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569)
 

@@ -5766,17 +5766,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
             name_checks = [
-                (student_name_th, abs_th_idx, "บทคัดย่อภาษาไทย", "ชื่อภาษาไทย", True),
-                (student_name, abs_en_idx, "บทคัดย่อภาษาอังกฤษ", "ชื่อภาษาอังกฤษ", True),
+                (student_name_th, abs_th_idx, "บทคัดย่อภาษาไทย", "ชื่อภาษาไทย"),
+                (student_name, abs_en_idx, "บทคัดย่อภาษาอังกฤษ", "ชื่อภาษาอังกฤษ"),
             ]
         else:
-            name_checks = [(student_name, abs_en_idx, "บทคัดย่อ", "ชื่อนักศึกษา", False)]
-        for nm3, aidx, albl, nlbl, required in name_checks:
+            name_checks = [(student_name, abs_en_idx, "บทคัดย่อ", "ชื่อนักศึกษา")]
+        for nm3, aidx, albl, nlbl in name_checks:
+            # ไม่มีชื่อให้เทียบ = ข้าม ไม่ขึ้นการ์ด — ช่องชื่อบังคับกรอกทั้งหน้าเว็บและ /check
+            # (FRONT_MATTER_RULES["required_form_fields"]) เล่มจึงถูกปฏิเสธก่อนถึงตรงนี้
+            # เดิมมีการ์ดแดง "ไม่ได้กรอก...ของนักศึกษาในฟอร์ม" ซึ่งขึ้นผ่านหน้าเว็บไม่ได้
+            # เจ้าหน้าที่ยืนยันให้เอาออก (ก.ย. 2569) เหมือนการ์ด "ไม่ได้กรอกข้อมูลอนุมัติ"
             if not nm3:
-                if required:
-                    rep.add(FRONT_FAILURE_ZONE, "front_matter", albl, f"ไม่ได้กรอก{nlbl}ของนักศึกษาในฟอร์ม",
-                            f"หลักสูตรไทยต้องตรวจ{nlbl}ในหน้า{albl}",
-                            "กรอกฟอร์มให้ครบแล้วตรวจใหม่", "FORM.REQUIRED")
                 continue
             if aidx is None:
                 # เล่มไม่มีหน้าบทคัดย่อภาษานี้ — กฎ "ภาษาครบตามหลักสูตร" ฟ้องแดงไปแล้ว
