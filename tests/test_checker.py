@@ -2799,6 +2799,53 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
+    """ข้อสีเหลืองที่กดไม่ผ่าน ต้องไม่พาท่อนที่เขียนถึงเจ้าหน้าที่ไปในข้อความสรุป
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569): กดไม่ผ่านข้อเลขหน้าในสารบัญ แล้วนักศึกษาได้บรรทัด
+    "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย — "เฉพาะส่วนสรุป
+    ไม่ต้องมีท่อนนี้" การ์ดในรายงานยังต้องมีเหมือนเดิม
+    """
+
+    NOTE = "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว"
+    FIX = "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้"
+
+    def _report(self):
+        rep = Report()
+        rep.add("YELLOW", "front_matter", "สารบัญ (หน้า v) กับบทที่ 2 (หน้า 12)",
+                "สารบัญระบุหน้า 12 แต่หัวข้อเริ่มจริงหน้า 14", self.NOTE, self.FIX,
+                "FRONT.TOC_PAGE_REF")
+        return checker_module.check_result(rep)
+
+    def test_the_rejected_note_keeps_what_was_found_but_not_the_staff_line(self):
+        summary = checker_module.plain_summary(self._report(), failed=["YELLOW:0"])
+        self.assertIn("สารบัญระบุหน้า 12 แต่หัวข้อเริ่มจริงหน้า 14", summary)
+        self.assertNotIn("ไม่ได้ตรวจ", summary)
+        self.assertNotIn("เป็นข้อสังเกต", summary)
+        self.assertNotIn("ไม่ต้องแก้", summary)
+
+    def test_the_report_card_still_says_it(self):
+        """ควบคุมเชิงลบ — ตัดเฉพาะในข้อความสรุป ไม่ใช่ลบออกจากข้อ"""
+        issue = self._report()["issues_by_zone"]["YELLOW"][0]
+        self.assertEqual(issue["expected"], self.NOTE)
+        self.assertEqual(issue["fix"], self.FIX)
+
+    def test_an_ordinary_directive_still_reaches_the_summary(self):
+        """ควบคุมเชิงลบ — ข้อที่ไม่มีค่าเดี่ยวให้ดึง ยังต้องได้บรรทัด "ต้องเป็น ..." เหมือนเดิม"""
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า i)", "ไม่พบวันที่สอบ",
+                "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", summary)
+
+    def test_every_staff_only_line_in_the_engine_is_covered(self):
+        """ทุกบรรทัด expected/fix ในเครื่องตรวจที่ขึ้นต้นแบบนี้ ต้องถูกกันไว้"""
+        source = inspect.getsource(checker_module)
+        for phrase in (self.NOTE, self.FIX):
+            self.assertIn(phrase, source)
+            self.assertTrue(phrase.startswith(checker_module._STAFF_ONLY_DIRECTIVES), phrase)
+
+
 class ADegreeInTheWrongCaseIsRed(unittest.TestCase):
     """/code-review (ก.ย. 2569): ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์ ถูกลดเป็นเหลืองผ่านได้
 

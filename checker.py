@@ -3188,6 +3188,14 @@ def _prose_location(location):
 SUMMARY_INDENT = "   "
 
 
+# ท่อนที่เขียนถึง "เจ้าหน้าที่" บนการ์ดสีเหลือง — อยู่ในรายงานได้ แต่ห้ามติดไปกับข้อความ
+# สรุปที่ส่งนักศึกษา เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากดไม่ผ่านข้อเลขหน้าในสารบัญแล้ว
+# นักศึกษาได้บรรทัด "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย
+# ซึ่งอ่านแล้วขัดกับการที่ถูกสั่งให้แก้ ส่วนบรรทัด fix "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่า
+# ควรแก้" เป็นตัวสำรองเมื่อ expected ว่าง จึงต้องกันด้วย ไม่งั้นหลุดมาแทนที่กัน
+_STAFF_ONLY_DIRECTIVES = ("เป็นข้อสังเกต ไม่ได้ตรวจ", "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่")
+
+
 def _summary_sentence(issue, skip_location=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
@@ -3216,7 +3224,10 @@ def _summary_sentence(issue, skip_location=False):
     else:
         # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ใช้ประโยค expected/fix เต็ม ๆ
         # ซึ่งเขียนไว้ในรูป "ต้องเป็น ..." อยู่แล้ว จึงไม่ต้องเติมคำนำอะไรอีก
-        directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+        directive = next(
+            (text for text in (summary_tidy(issue.get("expected")),
+                               summary_tidy(issue.get("fix")))
+             if text and not text.startswith(_STAFF_ONLY_DIRECTIVES)), "")
         if directive:
             lines.append(directive)
     kept = [line for line in lines if line]
