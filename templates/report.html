@@ -723,15 +723,15 @@ var TR = [
   [/ \/ ชื่อเรื่อง\)/g, ' / Thesis title)'],
   [/^ชื่อเรื่อง$/g, 'Thesis title'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
-  // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Capital Case ----
+  // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Sentence Case ----
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้พิมพ์ว่า/g, 'The name printed on this page is'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE) with no title prefix:'],
-  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in Capital Case with no title prefix:'],
+  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in Sentence Case (only the first letter of the given name and of the surname capitalised) with no title prefix:'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE):'],
-  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) คือ/g, 'On this page the name must be in Capital Case:'],
+  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\) คือ/g, 'On this page the name must be in Sentence Case (only the first letter of the given name and of the surname capitalised):'],
   [/แก้(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้เป็น/g, 'Change the name on this page to'],
   [/ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\)/g, 'must be in ALL CAPS (UPPERCASE)'],
-  [/ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'must be in Capital Case'],
+  [/ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\)/g, 'must be in Sentence Case (only the first letter of the given name and of the surname capitalised)'],
   [/มีคำนำหน้านาม "(.+?)" ซึ่งหน้านี้ต้องไม่มี/g, 'has the title "$1", which this page must not have'],
   [/^โครงสร้างเล่ม$/g, 'Document structure'],
   [/^เลขหน้า$/g, 'Page numbers'],

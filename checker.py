@@ -681,8 +681,11 @@ _STUDENT_NAME_STYLE = {
     "signature": ("title", True),
 }
 
+# หน้าลงนามใช้คำว่า Sentence Case เหมือนข้อชื่อกรรมการ (เจ้าหน้าที่สั่ง ก.ย. 2569
+# "จัดไปให้เหมือนกัน") ถ้อยคำเดิมของเจ้าหน้าที่ข้างบนเขียน Capital case ตัวตรวจไม่เปลี่ยน
+# เพราะชื่อคนเป็นคำนามเฉพาะ Sentence Case ของชื่อจึงขึ้นต้นตัวใหญ่ทั้งชื่อและนามสกุล
 _STYLE_LABEL = {"upper": "ตัวพิมพ์ใหญ่ทั้งหมด (UPPERCASE)",
-                "title": "ตัวพิมพ์ใหญ่ต้นคำ (Capital Case)"}
+                "title": "ตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล (Sentence Case)"}
 
 
 def _printed_student_name(page_text, core_name):

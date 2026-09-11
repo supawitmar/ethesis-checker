@@ -658,7 +658,7 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
         self.assertEqual(out[0][0], "RED")
         self.assertIn("UPPERCASE", out[0][1])
 
-    def test_signature_accepts_capital_case_with_or_without_prefix(self):
+    def test_signature_accepts_sentence_case_with_or_without_prefix(self):
         """เล่มที่ 15 พิมพ์ "Mr. Nammont Prompianpong" บนหน้าลงนาม — ต้องผ่าน"""
         self.assertEqual(
             self._issues("Mr. Nammont Prompianpong, Asst. Prof. X,\n", "signature"), [])
@@ -669,7 +669,7 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
             out = self._issues(text, "signature")
             self.assertEqual(len(out), 1, text)
             self.assertEqual(out[0][0], "ORANGE", text)
-            self.assertIn("Capital Case", out[0][1])
+            self.assertIn("Sentence Case", out[0][1])
 
     def test_cover_reports_case_and_prefix_in_one_issue(self):
         """แก้ที่บรรทัดเดียวกัน จึงต้องเป็นข้อเดียว ไม่ใช่สองข้อ"""
@@ -678,11 +678,42 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
         self.assertIn("UPPERCASE", out[0][1])
         self.assertIn('"Mr."', out[0][1])
 
-    def test_hyphenated_surname_is_valid_capital_case(self):
+    def test_hyphenated_surname_is_valid_sentence_case(self):
         """เล่มจริงเขียนทั้ง "Pan-Ngum" และ "Pan-ngum" — เจ้าตัวเลือกเอง ต้องผ่านทั้งคู่"""
         for printed in ("Wirichada Pan-Ngum\n", "Wirichada Pan-ngum\n"):
             self.assertEqual(self._issues(printed, "signature",
                                           core="WIRICHADA PAN-NGUM"), [], printed)
+
+    def test_student_and_committee_use_the_same_words(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): "จัดไปให้เหมือนกัน"
+
+        ข้อชื่อกรรมการเปลี่ยนเป็น Sentence Case ไปก่อน ส่วนข้อชื่อนักศึกษาบนหน้าเดียวกัน
+        ยังเขียน Capital Case ถ้อยคำสองแบบบนหน้าเดียวกันทำให้นักศึกษานึกว่าเป็นคนละกฎ
+        """
+        student = self._run("NAMMONT PROMPIANPONG\n", "signature").zones["ORANGE"][0]
+        committee = Report()
+        import checker
+        checker._report_committee_name_case(committee, {1: "MATHUROS TIPAYAMONGKHOLGUL"},
+                                            "หน้าลงนาม 1 (หน้า i)")
+        committee = committee.zones["ORANGE"][0]
+        for issue in (student, committee):
+            text = issue["found"] + issue["expected"]
+            self.assertIn("Sentence Case", text)
+            self.assertIn("ตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล", issue["expected"])
+            self.assertNotIn("Capital Case", text)
+            self.assertNotIn("ต้นคำ", text)
+        # ค่าที่ต้องแก้เป็นยังบอกตัวสะกดเป้าหมายตรง ๆ เหมือนเดิม
+        self.assertIn('"Nammont Prompianpong"', student["expected"])
+
+    def test_the_student_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        issue = self._run("NAMMONT PROMPIANPONG\n", "signature").zones["ORANGE"][0]
+        for th in (issue["found"], issue["expected"], issue["fix"]):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+        self.assertIn("Sentence Case", i18n.tr_en(issue["expected"], pairs))
 
     def test_thai_name_has_no_letter_case_to_check(self):
         self.assertEqual(self._issues("นํ้ามนต์ พรหมเพียรพงศ์\n", "cover",
