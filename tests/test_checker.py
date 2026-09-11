@@ -1790,19 +1790,24 @@ class PlainSummaryProseTests(unittest.TestCase):
         text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
-    def test_orange_is_included_by_default(self):
-        # สีส้ม (รอยืนยัน) ต้องเข้าสรุปโดยปริยาย นับรวมเป็นจุดที่ต้องแก้
+    def test_an_unpressed_orange_is_listed_as_pending_not_as_a_fix(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): "สีส้มที่ยังไม่ได้กด จะเข้าว่ารอยืนยัน"
+
+        ของเดิมปนอยู่กลุ่ม "กรุณาแก้ไข" หัวรายงานจึงเขียน "ต้องแก้ 0" คู่กับข้อความสรุปที่
+        เขียนว่า "กรุณาแก้ไข 1 จุด" ทั้งที่เจ้าหน้าที่ยังไม่ได้ยืนยัน
+        """
         report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
             "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
             "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
             "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
         }], "YELLOW": []}}
         text = plain_summary(report)
-        self.assertIn("ทั้งหมด 1 จุด", text)
+        self.assertNotIn("กรุณาแก้ไข", text)
+        self.assertIn("รอยืนยัน 1 จุด ดังต่อไปนี้", text)
         self.assertIn("สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45", text)
-        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) ไม่มีหัวข้อแยกระดับความรุนแรง
+        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) เหมือนกลุ่มกรุณาแก้ไข
         self.assertIn("\nสารบัญ\n1.", text)
-        self.assertEqual(text.count("รอยืนยัน"), 1)   # โผล่แค่ในบรรทัดผลการตรวจ
+        self.assertNotIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
     def test_orange_dropped_when_staff_passes_it(self):
         report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
@@ -2832,6 +2837,65 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             en = i18n.tr_en(th, pairs)
             left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class TheSummaryGroupsMatchTheHeaderBoxes(unittest.TestCase):
+    """ข้อความสรุปสองกลุ่มต้องนับเท่ากับสองกล่องบนหัวรายงานเสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+        กล่อง "ต้องแก้"   = "กรุณาแก้ไขทั้งหมด N จุด"  ข้อแดง + ข้อที่กดไม่ผ่าน
+        กล่อง "รอยืนยัน"  = "รอยืนยัน M จุด"           ข้อส้มที่ยังไม่ได้กด
+
+    กดสลับไปมาได้ ✗ ย้ายข้อไปกลุ่มแก้ไข ✓ เอาออก กดปุ่มเดิมซ้ำเพื่อยกเลิกแล้วข้อกลับมารอยืนยัน
+    """
+
+    def _report(self, red=1, orange=2, yellow=1):
+        rep = Report()
+        for i in range(red):
+            rep.add("RED", "front_matter", f"หน้าปก {i}", f"แดง {i}", f'ต้องเป็น "R{i}"')
+        for i in range(orange):
+            rep.add("ORANGE", "front_matter", f"หน้าลงนาม {i} (หน้า i)", f"ส้ม {i}",
+                    f'ต้องเป็น "O{i}"')
+        for i in range(yellow):
+            rep.add("YELLOW", "body", f"หน้า {10 + i}", f"เหลือง {i}", f'ต้องเป็น "Y{i}"')
+        return checker_module.check_result(rep)
+
+    def _numbers(self, report, failed=(), passed=()):
+        import re
+        text = checker_module.plain_summary(report, failed, passed)
+        fix = re.search(r"กรุณาแก้ไขทั้งหมด (\d+) จุด", text)
+        wait = re.search(r"รอยืนยัน (\d+) จุด", text)
+        return (int(fix.group(1)) if fix else 0, int(wait.group(1)) if wait else 0), text
+
+    def test_every_toggle_keeps_the_summary_equal_to_the_header(self):
+        report = self._report()
+        cases = [((), ()), (["ORANGE:0"], ()), ((), ["ORANGE:0"]),
+                 (["ORANGE:0", "ORANGE:1"], ()), (["YELLOW:0"], ["ORANGE:1"]),
+                 (["ORANGE:1", "YELLOW:0"], ["ORANGE:0"])]
+        for failed, passed in cases:
+            counts = checker_module.zone_counts(report, failed, passed)
+            (fix, wait), _text = self._numbers(report, failed, passed)
+            self.assertEqual((fix, wait), (counts["RED"], counts["ORANGE"]), (failed, passed))
+
+    def test_rejecting_moves_the_item_between_groups(self):
+        report = self._report(red=0, orange=1, yellow=0)
+        (_n, before) = self._numbers(report)
+        (_n, after) = self._numbers(report, failed=["ORANGE:0"])
+        self.assertIn("รอยืนยัน 1 จุด", before)
+        self.assertNotIn("กรุณาแก้ไข", before)
+        self.assertIn("กรุณาแก้ไขทั้งหมด 1 จุด", after)
+        self.assertNotIn("รอยืนยัน 1 จุด", after)
+
+    def test_numbers_run_on_across_the_two_groups(self):
+        """นักศึกษาอ้าง "ข้อ 2" ได้โดยไม่ซ้ำกันระหว่างสองกลุ่ม"""
+        (_n, text) = self._numbers(self._report(red=1, orange=1, yellow=0))
+        self.assertIn("1. ", text.split("รอยืนยัน 1 จุด", 1)[0])
+        self.assertIn("2. ", text.split("รอยืนยัน 1 จุด", 1)[1])
+
+    def test_the_pending_heading_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("รอยืนยัน 2 จุด ดังต่อไปนี้", pairs)
+        self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
 
 
 class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):

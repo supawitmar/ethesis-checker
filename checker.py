@@ -3098,12 +3098,13 @@ def staff_issue(check, choice):
 
 
 def issues_to_fix(report, failed=None, passed=None, staff=None):
-    """รายการที่ต้องแก้ในสรุป
+    """รายการในกลุ่ม "กรุณาแก้ไข" ของข้อความสรุป — นับเท่ากับกล่อง "ต้องแก้" บนหัวรายงานเสมอ
 
-    - สีแดง: เข้าสรุปเสมอ
-    - สีส้ม (รอยืนยัน): เข้าสรุป**โดยปริยาย** เพราะเป็นจุดที่ต่างจากข้อมูลอนุมัติ
-      นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
-    - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
+    - สีแดง: เข้าเสมอ
+    - สีส้ม / สีเหลือง: เข้าเมื่อเจ้าหน้าที่กด "ไม่ผ่าน" เท่านั้น (กลายเป็นสีแดงทันที)
+    - สีส้มที่ยังไม่กด อยู่กลุ่ม "รอยืนยัน" แยกต่างหาก (ดู issues_pending) — เจ้าหน้าที่สั่ง
+      (ก.ย. 2569) ของเดิมสีส้มที่ยังไม่กดปนอยู่กลุ่มนี้ หัวรายงานจึงเขียน "ต้องแก้ 0" คู่กับ
+      ข้อความสรุปที่เขียนว่า "กรุณาแก้ไข 2 จุด" ทั้งที่เจ้าหน้าที่ยังไม่ได้ยืนยันสักข้อ
 
     ข้อที่ตั้ง system_note=True ไม่เข้าสรุป "โดยปริยาย" เพราะเป็นปัญหาฝั่งเจ้าหน้าที่
     (เช่น ยังไม่ได้กรอกข้อมูลอนุมัติ หรือเลือกไฟล์ eThesis คนละคนกับเล่ม) นักศึกษาแก้
@@ -3125,13 +3126,24 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     for check, choice in staff_choices(staff, "section"):
         items.append(staff_issue(check, choice))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
-        key = f"ORANGE:{index}"
-        if key in failed or (key not in passed and not issue.get("system_note")):
+        if f"ORANGE:{index}" in failed:
             items.append(issue)
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
             items.append(issue)
     return items
+
+
+def issues_pending(report, failed=None, passed=None):
+    """สีส้มที่เจ้าหน้าที่ยังไม่ได้กด — กลุ่ม "รอยืนยัน" ของข้อความสรุป
+
+    นับเท่ากับกล่อง "รอยืนยัน" บนหัวรายงาน กด ✗ แล้วย้ายไปกลุ่ม "กรุณาแก้ไข" กด ✓ แล้วหายไป
+    กดซ้ำปุ่มเดิมเพื่อยกเลิกได้ ข้อจะกลับมาอยู่กลุ่มนี้ (สลับไปมาได้ตามที่เจ้าหน้าที่สั่ง)
+    """
+    failed, passed = set(failed or ()), set(passed or ())
+    return [issue for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or [])
+            if f"ORANGE:{index}" not in failed and f"ORANGE:{index}" not in passed
+            and not issue.get("system_note")]
 
 
 def _corrected_value(issue):
@@ -3330,13 +3342,36 @@ def summary_verdict(report, failed=None, passed=None, staff=None):
     return verdict
 
 
+def _summary_block(lines, items, number):
+    """เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
+    grouped = {}
+    for issue in items:
+        grouped.setdefault(summary_section(issue), []).append(issue)
+    for section in SUMMARY_SECTION_ORDER:
+        section_items = grouped.get(section)
+        if not section_items:
+            continue
+        lines.append(f"\n{section}")
+        for issue in section_items:
+            number += 1
+            # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
+            # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
+            skip_loc = _prose_location(issue.get("location")) == section
+            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+    return number
+
+
 def plain_summary(report, failed=None, passed=None, staff=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
-    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
+    แยกสองกลุ่มตามหัวรายงาน (เจ้าหน้าที่สั่ง ก.ย. 2569):
+      "กรุณาแก้ไขทั้งหมด N จุด"  = ข้อแดง + ข้อที่กดไม่ผ่าน   (เท่ากับกล่อง "ต้องแก้")
+      "รอยืนยัน M จุด"           = ข้อส้มที่ยังไม่ได้กด         (เท่ากับกล่อง "รอยืนยัน")
+    เลขข้อไล่ต่อกันข้ามสองกลุ่ม นักศึกษาอ้าง "ข้อ 3" ได้โดยไม่ซ้ำกัน
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    pending = _dedupe_issues(issues_pending(report, failed, passed))
     verdict = summary_verdict(report, failed, passed, staff)
     # ข้อความปิดท้าย (เช่น เรื่องค่าปรับและช่องทางติดต่อ) ไม่ใช่จุดที่ต้องแก้ จึงไม่ถูกนับ
     # และต้องตามไปด้วยเสมอ แม้เล่มจะไม่มีจุดต้องแก้เลย
@@ -3347,31 +3382,20 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     # ถ้อยคำชุด "ผ่าน" ขึ้นต้นด้วย "การส่ง E-thesis ... เสร็จสิ้นแล้ว" อยู่แล้ว
     finished = any(check.get("applies_to") == "pass" for check, _choice in picked)
     lines = [f"ผลการตรวจ: {verdict}"]
-    if not items:
+    if not items and not pending:
         # "ผลการตรวจ: ผ่าน" ตามด้วย "ไม่พบจุดที่ต้องแก้ไข" อ่านรวมกันว่า "จบแล้ว
         # ไม่ต้องทำอะไร" นักศึกษาหยุดอ่านตรงนั้น แล้วพลาดกำหนดส่งหน้าลงนามภายใน
         # 30 วันที่อยู่ข้างล่าง (เจ้าหน้าที่รายงานพฤติกรรมนี้ ก.ย. 2569) เล่มที่มี
         # ถ้อยคำชุด "ผ่าน" ต่อท้ายอยู่แล้วจึงไม่ต้องพิมพ์บรรทัดนี้ซ้ำ
         if not finished:
             lines.append("\nไม่พบจุดที่ต้องแก้ไข")
-    else:
+    number = 0
+    if items:
         lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
-        grouped = {}
-        for issue in items:
-            grouped.setdefault(summary_section(issue), []).append(issue)
-        number = 0
-        for section in SUMMARY_SECTION_ORDER:
-            section_items = grouped.get(section)
-            if not section_items:
-                continue
-            lines.append(f"\n{section}")
-            for issue in section_items:
-                number += 1
-                # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
-                # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
-                skip_loc = _prose_location(issue.get("location")) == section
-                lines.append(
-                    f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+        number = _summary_block(lines, items, number)
+    if pending:
+        lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
+        number = _summary_block(lines, pending, number)
     for text in closing:
         lines.append("\n" + text.strip())
     return "\n".join(lines).strip()
