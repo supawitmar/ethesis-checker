@@ -1527,6 +1527,10 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
 # ภาษาชื่อเรื่อง ครอบสระ วรรณยุกต์ และเลขไทยด้วย) ตัวหลังจะทับตัวนี้เงียบ ๆ — เคยพลาดมาแล้ว
 # ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นเลขไทยหรือสระ จึงถูกตัดสินผิดว่าเป็นนามสกุล แล้วฟ้องแดง
 _THAI_CONSONANT = re.compile('[ก-ฮ]')
+# เลขไทยทั้งช่อง = อ่านออกชัดเจน แค่ใช้เลขผิดระบบ ไม่ใช่ฟอนต์ทำเพี้ยน — ต้องไปทางข้อแดง
+# "พิมพ์เป็นเลขไทย" (เจ้าหน้าที่ยืนยัน ก.ย. 2569 ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น)
+_THAI_DIGITS_ONLY = re.compile('[๐-๙]+')
+_THAI_DIGIT = re.compile('[๐-๙]')
 
 
 def is_page_count_line(line):
@@ -1580,10 +1584,25 @@ def unreadable_id_digits(page_text, student_id, names=()):
             slot = tokens[k - 1]
             if len(slot) != len(digits) or _THAI_CONSONANT.search(slot):
                 continue
+            if _THAI_DIGITS_ONLY.fullmatch(slot):
+                continue
             if any(norm(slot) in name for name in known if name):
                 continue
             return slot
     return ""
+
+
+def thai_numeral_student_id(printed, student_id, abs_label):
+    """(พบ, ควรเป็น, ต้องแก้) เมื่อรหัสนักศึกษาพิมพ์เป็นเลขไทย — คืน None ถ้าไม่ใช่
+
+    เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น ของเดิมรหัส
+    ที่พิมพ์เป็นเลขไทยถูกนับเป็น "ฟอนต์ทำเพี้ยน อ่านไม่ออก" แล้วผ่านไปเป็นแค่ข้อมูลประกอบ
+    """
+    if not printed or not _THAI_DIGIT.search(printed):
+        return None
+    return (f'บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย "{printed}"',
+            f'รหัสนักศึกษาใน{abs_label}ต้องเป็นเลขอารบิกเท่านั้น คือ "{student_id}"',
+            "แก้รหัสนักศึกษาเป็นเลขอารบิก")
 
 
 def _closest_student_id(page_text, expected):
@@ -5797,6 +5816,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # ถ้าเจอรหัสบนหน้า ต้องบอกว่าเล่มพิมพ์ว่าอะไรและต่างตรงไหน ไม่ใช่
                     # บอกลอย ๆ ว่า "ไม่พบรหัสนักศึกษา" ซึ่งอ่านแล้วนึกว่าระบบหาไม่เจอ
                     printed = _closest_student_id(pages[abs_idx], student_id)
+                    thai_digits = thai_numeral_student_id(printed, student_id, abs_label)
+                    if thai_digits:
+                        rep.add_verification("รหัสนักศึกษา", loc, "fail", printed)
+                        rep.add("RED", "front_matter", loc, *thai_digits,
+                                "FORM.APPROVED_MATCH")
+                        continue
                     if printed:
                         # ชี้จุดต่างเฉพาะตอนที่ต่างกันจุดเดียว (พิมพ์ผิดหลักเดียว)
                         # ถ้าเป็นคนละรหัสกันคนละเรื่อง การไล่ทีละตัวอักษรจะได้

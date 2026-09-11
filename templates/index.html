@@ -487,18 +487,36 @@ function renderCommitteeSummary(committees) {
   box.style.display = '';
 }
 
-function applyParsed(parsed) {
-  document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
-  // ช่องที่มองไม่เห็นบนฟอร์มต้องล้างทุกครั้งที่นำเข้าใหม่ — ของเดิมเขียนทับเฉพาะช่องที่
-  // ข้อมูลใหม่มีค่า นำเข้านักศึกษาคนที่สองด้วยวิธีวางข้อความ (ซึ่งไม่อ่านรายชื่อกรรมการ)
-  // หรือไฟล์ที่อ่านรายชื่อกรรมการไม่ออก รายชื่อของคนแรกจึงค้างอยู่ แล้วเล่มของคนที่สอง
-  // ถูกนับกรรมการเทียบกับรายชื่อของคนแรก ได้ข้อแดง "รายชื่อไม่ครบ/เกิน" ที่โชว์ชื่อคนอื่น
-  ['committees-json', 'faculty-field', 'program-field'].forEach(function(id){
+// ล้าง "ทุกช่องที่ระบบเติมให้" ก่อนเติมข้อมูลของคนใหม่ (เจ้าหน้าที่สั่ง ก.ย. 2569 — ถ้าจะแก้
+// ค่าเอง ให้แก้หลังนำเข้า) ของเดิมเขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า ช่องที่คนใหม่ไม่มี
+// จึงค้างค่าของคนก่อน วัดกับเล่มจริง: เล่มหลักสูตรไทย-อังกฤษที่ชื่อเรื่องไทย/ชื่อไทย/ตัวย่อ
+// ปริญญาไทยของคนก่อนค้างอยู่ ได้ข้อแดงเพิ่มจาก 3 เป็น 6 ทั้งที่เล่มไม่ผิด ส่วนช่องซ่อน
+// (รายชื่อกรรมการ คณะ หลักสูตร) ค้างแล้วเล่มถูกนับกรรมการเทียบกับรายชื่อของคนอื่น
+const HIDDEN_IMPORT_FIELDS = ['committees-json', 'faculty-field', 'program-field'];
+function clearField(field) {
+  if (field.tagName === 'SELECT') {
+    const idx = Array.from(field.options).findIndex(o => o.defaultSelected);
+    field.selectedIndex = idx < 0 ? 0 : idx;
+  } else {
+    field.value = '';
+  }
+}
+function clearImportedFields() {
+  Object.keys(IMPORT_LABELS).forEach(function(name){
+    const field = document.querySelector(`[name="${name}"]`);
+    if (field) clearField(field);
+  });
+  HIDDEN_IMPORT_FIELDS.forEach(function(id){
     const field = document.getElementById(id);
     if (field) field.value = '';
   });
   const oldCommittees = document.getElementById('committee-box');
   if (oldCommittees) oldCommittees.style.display = 'none';
+}
+
+function applyParsed(parsed) {
+  document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  clearImportedFields();
   const filled = [];
   // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
@@ -651,6 +669,27 @@ function updateConditionalRequirements() {
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
 updateConditionalRequirements();
+
+// ทุกครั้งที่เข้าหน้านี้ = เริ่มตรวจเล่มใหม่ ฟอร์มต้องว่างทั้งหมด (เจ้าหน้าที่สั่ง ก.ย. 2569
+// "ทุกครั้งที่จะตรวจ ต้องกดตรวจเล่มใหม่อยู่แล้ว ก็ล้างค่าตรงนั้นเลย")
+// ใช้ pageshow ไม่ใช่แค่ตอนโหลด เพราะกดปุ่มย้อนกลับจากหน้ารายงาน เบราว์เซอร์คืนหน้านี้
+// จากแคชพร้อมค่าเดิมทุกช่อง (และหน้าจอ "กำลังตรวจ" ค้างทับอยู่) ส่วน Firefox เติมค่าเดิม
+// กลับให้เองตอนรีเฟรช pageshow เกิดหลังทั้งสองกรณี จึงล้างได้ทุกทาง
+const IMPORT_STATUS_DEFAULT = document.getElementById('import-status').textContent;
+function resetCheckForm() {
+  document.getElementById('f').reset();
+  clearImportedFields();
+  document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  ethSourceHtml = '';
+  ethSourcePlainText = '';
+  ['ethesis-pdf', 'book-pdf'].forEach(function(id){
+    document.getElementById(id).dispatchEvent(new Event('change'));
+  });
+  setStatus('', IMPORT_STATUS_DEFAULT);
+  document.getElementById('overlay').style.display = 'none';
+  updateConditionalRequirements();
+}
+window.addEventListener('pageshow', resetCheckForm);
 
 // เซสชันหมดอายุระหว่างกรอกฟอร์ม (ทิ้งหน้าไว้นาน / server restart) เซิร์ฟเวอร์จะตอบ
 // 401 JSON แทนหน้า login กันไม่ให้ resp.json() พังเป็น "Unexpected token '<'"

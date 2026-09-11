@@ -587,7 +587,6 @@ var TR = [
   [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
   [/(\d+)\/ส่วนเนื้อหา/g, '$1 (start of the body)'],
   // ---- ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง (ประโยคเต็ม ต้องอยู่บนสุด) ----
-  [/กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ\./g, 'Fill in the missing form fields and run the check again, or verify this item by eye against Form GR.'],
   // ---- อ่านรายชื่อกรรมการไม่ได้ / ชื่อเกือบตรง (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/ระบบอ่านรายชื่อกรรมการบนหน้านี้ไม่ได้ \(อาจเป็นหน้าภาพสแกน หรือใช้ฟอนต์ที่ระบบอ่านไม่ออก\)/g, 'The system could not read the committee names on this page (it may be a scanned image, or use a font the system cannot read)'],
   [/รายชื่อบนหน้านี้ไม่ตรงกับข้อมูลอนุมัติสักคนเดียว ระบบอ่านได้ว่า/g, 'None of the names on this page match the approved data; the system read:'],
@@ -812,6 +811,9 @@ var TR = [
   // ชื่อกับรหัสต้องอยู่บรรทัดเดียวกันตาม template
   [/บรรทัดที่พิมพ์รหัสนักศึกษาไม่มี(.+?)อยู่ด้วย คือ ("[^"]*")/g, '$1 is missing from the line that carries the student ID: $2'],
   [/(.+?)กับรหัสนักศึกษาต้องอยู่บรรทัดเดียวกัน คือ ("[^"]*")/g, '$1 and the student ID must be on the same line: $2'],
+  [/บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย ("[^"]*")/g, 'The student-name line prints the ID in Thai numerals: $1'],
+  [/รหัสนักศึกษาใน(บทคัดย่ออังกฤษ|บทคัดย่อไทย)ต้องเป็นเลขอารบิกเท่านั้น คือ ("[^"]*")/g, 'The student ID must use Arabic numerals only: $2'],
+  [/แก้รหัสนักศึกษาเป็นเลขอารบิก/g, 'Change the student ID to Arabic numerals'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า ("[^"]*") (.+)/g, 'The student-name line prints the ID $1, $2'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า ("[^"]*")$/g, 'The student-name line prints the ID $1'],
   [/ไม่พบรหัสนักศึกษาบนหน้านี้ \(ต้องมีทั้งตัวเลขและรหัสหลักสูตร\)/g, 'No student ID was found on this page (it must contain both the number and the program code)'],

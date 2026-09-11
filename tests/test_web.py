@@ -529,21 +529,18 @@ class ImportingASecondStudentClearsTheFirst(unittest.TestCase):
 
     SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
 
-    def _block(self):
-        html = self.SOURCE.read_text(encoding="utf-8")
-        start = html.index("const IMPORT_LABELS")
-        end = html.index("// ---- แท็บเลือกวิธีนำเข้า ----")
-        return html[start:end]
-
-    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
-    def test_the_hidden_fields_are_cleared_by_the_next_import(self):
-        script = r"""
+    SCRIPT = r"""
 const vm = require('vm');
 const fields = {'committees-json': {value: ''}, 'faculty-field': {value: ''},
                 'program-field': {value: ''}, 'committee-box': {style: {display: 'none'}},
-                'committee-summary': {innerHTML: ''}};
+                'committee-summary': {innerHTML: ''}, 'title-th': {value: ''},
+                'name-th': {value: ''}, 'abbr-th': {value: ''}, 'title-en': {value: ''},
+                'doc-type': {tagName: 'SELECT', selectedIndex: 0, value: '',
+                             options: [{defaultSelected: true}, {}, {}]}};
 const byName = {faculty: 'faculty-field', program: 'program-field',
-                committees_json: 'committees-json'};
+                committees_json: 'committees-json', title_th: 'title-th',
+                student_name_th: 'name-th', degree_abbr_th: 'abbr-th', title_en: 'title-en',
+                doc_type: 'doc-type'};
 global.Event = class { constructor(type) { this.type = type; } };
 global.document = {
   getElementById: id => fields[id] || null,
@@ -559,17 +556,63 @@ global.document = {
 vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
 const read = () => [fields['committees-json'].value, fields['faculty-field'].value,
                     fields['program-field'].value, fields['committee-box'].style.display];
-applyParsed({committees: {exam: [{name: 'A One'}]}, faculty: 'Faculty A', program: 'Program A'});
-const first = read();
+const visible = () => [fields['title-th'].value, fields['name-th'].value,
+                       fields['abbr-th'].value, fields['title-en'].value,
+                       fields['doc-type'].selectedIndex];
+applyParsed({committees: {exam: [{name: 'A One'}]}, faculty: 'Faculty A', program: 'Program A',
+             title_th: 'ชื่อเรื่องของ A', student_name_th: 'นาย เอ',
+             degree_abbr_th: 'วท.ม. (A)', title_en: 'A TITLE'});
+fields['doc-type'].selectedIndex = 2;
+const first = read(), firstVisible = visible();
 applyParsed({title_en: 'Student B'});
-console.log(JSON.stringify({first, second: read()}));
+console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: visible()}));
 """
-        run = subprocess.run(["node", "-e", script], input=self._block(),
+
+    def _block(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        start = html.index("const IMPORT_LABELS")
+        end = html.index("// ---- แท็บเลือกวิธีนำเข้า ----")
+        return html[start:end]
+
+    def _node_output(self):
+        run = subprocess.run(["node", "-e", self.SCRIPT], input=self._block(),
                              capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(run.returncode, 0, run.stderr)
-        out = json.loads(run.stdout)
+        return json.loads(run.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_hidden_fields_are_cleared_by_the_next_import(self):
+        out = self._node_output()
         # ควบคุมเชิงบวก — คนแรกต้องเติมได้จริง ไม่งั้นเทสต์ข้างล่างผ่านลอย ๆ
         self.assertIn("A One", out["first"][0])
         self.assertEqual(out["first"][1:], ["Faculty A", "Program A", ""])
         # คนที่สองไม่มีรายชื่อกรรมการ ต้องไม่เหลือของคนแรก
         self.assertEqual(out["second"], ["", "", "", "none"])
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_every_imported_field_is_cleared_not_only_the_hidden_ones(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): ล้างทุกช่องที่ระบบเติมให้ ทุกครั้งที่นำเข้าข้อมูลใหม่
+
+        วัดกับเล่มจริง: เล่มไทย-อังกฤษที่ชื่อเรื่องไทย/ชื่อไทย/ตัวย่อปริญญาไทยของคนก่อน
+        ค้างอยู่ ได้ข้อแดงเพิ่มจาก 3 เป็น 6 ทั้งที่เล่มไม่ผิด
+        """
+        out = self._node_output()
+        # ควบคุมเชิงบวก — คนแรกเติมได้จริง
+        self.assertEqual(out["firstVisible"],
+                         ["ชื่อเรื่องของ A", "นาย เอ", "วท.ม. (A)", "A TITLE", 2])
+        # คนที่สองมีแค่ชื่อเรื่องอังกฤษ ช่องอื่นต้องว่าง และช่องเลือกกลับไปค่าตั้งต้น
+        self.assertEqual(out["secondVisible"], ["", "", "", "Student B", 0])
+
+    def test_coming_back_to_the_form_always_clears_it(self):
+        """ "ทุกครั้งที่จะตรวจ ต้องกดตรวจเล่มใหม่อยู่แล้ว ก็ล้างค่าตรงนั้นเลย"
+
+        ต้องผูกกับ pageshow ไม่ใช่แค่ตอนโหลด — กดย้อนกลับจากหน้ารายงาน เบราว์เซอร์คืนหน้า
+        จากแคชพร้อมค่าเดิมทุกช่อง และหน้าจอ "กำลังตรวจ" ค้างทับอยู่
+        """
+        html = self.SOURCE.read_text(encoding="utf-8")
+        self.assertIn("window.addEventListener('pageshow', resetCheckForm);", html)
+        body = html.split("function resetCheckForm() {", 1)[1].split("\n}", 1)[0]
+        for step in ("document.getElementById('f').reset();", "clearImportedFields();",
+                     "ethSourceHtml = '';", "document.getElementById('overlay').style.display = 'none';",
+                     "updateConditionalRequirements();"):
+            self.assertIn(step, body)

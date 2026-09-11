@@ -2879,6 +2879,46 @@ class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
             self.assertTrue(phrase.startswith(checker_module._STAFF_ONLY_DIRECTIVES), phrase)
 
 
+class AStudentIdInThaiNumeralsIsRed(unittest.TestCase):
+    """เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น
+
+    ของเดิมรหัสที่พิมพ์เป็นเลขไทยถูกนับเป็น "ฟอนต์ทำเพี้ยน อ่านไม่ออก" แล้วผ่านไปเป็นแค่
+    ข้อมูลประกอบ ให้เจ้าหน้าที่ไปเปิดดูเอง
+    """
+
+    def test_thai_numerals_give_a_red_finding_with_the_arabic_value(self):
+        found, expected, fix = checker_module.thai_numeral_student_id(
+            "๖๔๓๗๐๒๘ PHPH/M", "6437028 PHPH/M", "บทคัดย่อไทย")
+        self.assertIn("เลขไทย", found)
+        self.assertIn('"๖๔๓๗๐๒๘ PHPH/M"', found)
+        self.assertIn("เลขอารบิก", expected)
+        self.assertTrue(expected.endswith('"6437028 PHPH/M"'), expected)
+        self.assertIn("เลขอารบิก", fix)
+
+    def test_arabic_numerals_are_left_to_the_usual_checks(self):
+        """ควบคุมเชิงลบ — รหัสเลขอารบิกที่พิมพ์ผิดตัวเลข ยังใช้ข้อความเดิม"""
+        self.assertIsNone(checker_module.thai_numeral_student_id(
+            "6437029 PHPH/M", "6437028 PHPH/M", "บทคัดย่อไทย"))
+        self.assertIsNone(checker_module.thai_numeral_student_id(
+            "", "6437028 PHPH/M", "บทคัดย่อไทย"))
+
+    def test_the_abstract_check_uses_it_as_red(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("thai_digits = thai_numeral_student_id(", 1)[1][:500]
+        self.assertIn('rep.add("RED"', block)
+        self.assertIn("continue", block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for label in ("บทคัดย่ออังกฤษ", "บทคัดย่อไทย"):
+            for th in checker_module.thai_numeral_student_id(
+                    "๖๔๓๗๐๒๘ PHPH/M", "6437028 PHPH/M", label):
+                en = i18n.tr_en(th, pairs)
+                left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+                self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
 class ADegreeInTheWrongCaseIsRed(unittest.TestCase):
     """/code-review (ก.ย. 2569): ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์ ถูกลดเป็นเหลืองผ่านได้
 
@@ -2950,10 +2990,17 @@ class AGarbledIdIsNotMistakenForASurname(unittest.TestCase):
     จึงถูกตัดสินว่าเป็นนามสกุล แล้วฟ้องแดง "ไม่พบรหัสนักศึกษา"
     """
 
-    def test_thai_digits_in_the_id_slot_are_unreadable_digits(self):
+    def test_thai_marks_in_the_id_slot_are_unreadable_digits(self):
+        """ฟอนต์ที่ทำตัวเลขเพี้ยนเป็นสระ/วรรณยุกต์ไทย ต้องไม่ถูกนับเป็นนามสกุล"""
+        page = "นางสาวทดสอบ ระบบ ิีึืุูั PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "ิีึืุูั")
+
+    def test_thai_numerals_are_not_font_damage(self):
+        """เลขไทยทั้งช่องอ่านออกชัดเจน แค่ใช้เลขผิดระบบ — ต้องไปทางข้อแดง ไม่ใช่ข้อมูลประกอบ"""
         page = "นางสาวทดสอบ ระบบ ๖๔๓๗๐๒๘ PHPH/M"
         self.assertEqual(
-            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "๖๔๓๗๐๒๘")
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "")
 
     def test_a_thai_surname_in_the_slot_is_still_rejected(self):
         """ควบคุมเชิงลบ — เล่มที่ลืมพิมพ์รหัสบนหน้าไทยต้องยังฟ้องได้"""
