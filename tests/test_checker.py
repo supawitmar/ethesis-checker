@@ -2144,6 +2144,37 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
+    def test_the_wording_says_sentence_case_and_explains_it(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): ชื่อกรรมการต้องเป็น Sentence Case และเป็นสีส้ม
+
+        ต้องอธิบายด้วยว่าหมายถึงตัวใหญ่ต้นชื่อและต้นนามสกุล — นักศึกษาที่อ่าน
+        Sentence Case ตามตัวอักษรจะพิมพ์นามสกุลเป็นตัวเล็ก แล้วโดนฟ้องซ้ำ
+        """
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL, Ph.D."}, "หน้าลงนาม 2 (หน้า ii)")
+        self.assertEqual(rep.zones["RED"], [])
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("Sentence Case", issue["found"])
+        self.assertIn("Sentence Case", issue["expected"])
+        self.assertIn("อักษรแรกของชื่อและนามสกุล", issue["expected"])
+        self.assertIn("Sentence Case", issue["fix"])
+        for text in (issue["found"], issue["expected"], issue["fix"]):
+            self.assertNotIn("Capital Case", text)
+
+    def test_the_committee_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL"}, "หน้าลงนาม 2 (หน้า ii)")
+        issue = rep.zones["ORANGE"][0]
+        for th in (issue["found"], issue["expected"], issue["fix"]):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+            self.assertIn("Sentence Case", en)
+
     def test_the_case_rule_is_back_with_the_credential_stripped(self):
         """เจ้าหน้าที่สั่งให้เอากฎกลับมา (ก.ย. 2569) พร้อมตัดคุณวุฒิท้ายชื่อออกก่อน
 
@@ -2484,16 +2515,38 @@ class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
             self.assertEqual(self._counts(report, failed, passed)["RED"], len(items),
                              (failed, passed))
 
-    def test_a_system_note_never_becomes_a_must_fix(self):
-        """ข้อจำกัดของระบบไม่เคยเข้าข้อความสรุป จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน
+    def test_rejecting_a_system_note_makes_it_a_must_fix(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): "สีส้มกับสีเหลืองถ้ากด ต้องให้เป็นสีแดง = แก้ไข"
 
-        ไม่งั้นหัวรายงานเขียนว่าต้องแก้ 1 จุด แต่ข้อความสรุปไม่มีจุดนั้นอยู่เลย
-        นักศึกษาได้ใบสั่งแก้ที่นับไม่ตรงกับรายการ
+        การ์ดสีส้มสองใบที่เป็นปัญหาฝั่งเจ้าหน้าที่ (ไม่ได้กรอกข้อมูลอนุมัติ / ไฟล์
+        eThesis คนละคนกับเล่ม) เคยกด ✗ แล้วตัวเลขไม่ขยับ เพราะถูกกันออกจาก "ต้องแก้"
         """
         report = self._report(notes=1)
         self.assertEqual(self._counts(report, failed=["ORANGE:0"]),
+                         {"RED": 1, "ORANGE": 0, "YELLOW": 0})
+        self.assertEqual(checker_module.summary_verdict(report, failed=["ORANGE:0"]),
+                         "ไม่ผ่าน")
+
+    def test_a_rejected_system_note_reaches_the_summary(self):
+        """นับเป็นต้องแก้แล้วต้องมีในข้อความสรุปด้วย ไม่งั้นตัวเลขกับรายการขัดกัน"""
+        report = self._report(notes=1)
+        items = checker_module.issues_to_fix(report, failed=["ORANGE:0"])
+        self.assertEqual([i["found"] for i in items], ["ระบบอ่านหน้านี้ไม่ออก"])
+        self.assertIn("ระบบอ่านหน้านี้ไม่ออก",
+                      checker_module.plain_summary(report, failed=["ORANGE:0"]))
+
+    def test_an_untouched_system_note_stays_out_of_the_summary(self):
+        """ควบคุมเชิงลบ — ยังไม่กด ต้องไม่ไปถึงนักศึกษา เพราะเป็นปัญหาฝั่งเจ้าหน้าที่"""
+        report = self._report(notes=1)
+        self.assertEqual(checker_module.issues_to_fix(report), [])
+        self.assertEqual(self._counts(report),
                          {"RED": 0, "ORANGE": 1, "YELLOW": 0})
-        self.assertEqual(self._counts(report, passed=["ORANGE:0"])["ORANGE"], 0)
+
+    def test_accepting_a_system_note_clears_it(self):
+        report = self._report(notes=1)
+        self.assertEqual(self._counts(report, passed=["ORANGE:0"]),
+                         {"RED": 0, "ORANGE": 0, "YELLOW": 0})
+        self.assertEqual(checker_module.issues_to_fix(report, passed=["ORANGE:0"]), [])
 
     def test_the_book_passes_once_every_pending_item_is_accepted(self):
         """เล่มที่ระบบว่า "รอยืนยัน" เคยค้างเป็นรอยืนยันตลอดไป

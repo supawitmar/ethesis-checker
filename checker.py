@@ -910,7 +910,12 @@ def committee_name_for_case(text):
 
 
 def _report_committee_name_case(rep, members, loc):
-    """ชื่อกรรมการบนหน้าลงนามต้องไม่เป็นตัวพิมพ์ใหญ่ทั้งหมด
+    """ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ชื่อคนเป็นคำนามเฉพาะ Sentence Case ของชื่อจึงขึ้นต้นตัวใหญ่ทั้งชื่อและนามสกุล
+    ("Mathuros Tipayamongkholgul") ตัวตรวจจึงใช้ _is_title_case ได้ตรงตัว ข้อความ
+    ต้องอธิบายไว้ด้วยว่าหมายถึงอะไร ไม่งั้นนักศึกษาที่อ่าน Sentence Case ตามตัวอักษร
+    จะพิมพ์นามสกุลเป็นตัวเล็ก แล้วโดนฟ้องซ้ำ
 
     หน้าลงนามใช้ตัวพิมพ์แบบชื่อคน ("Mathuros Tipayamongkholgul") ต่างจากหน้าบทคัดย่อ
     ที่ต้องเป็น UPPERCASE ทั้งหมด — นักศึกษาที่คัดรายชื่อจากหน้าบทคัดย่อมาวางจะได้
@@ -930,10 +935,10 @@ def _report_committee_name_case(rep, members, loc):
         return
     shown = ", ".join(f'"{n}"' for n in bad)
     rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
-            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case) "
-            "ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ",
-            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
+            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ Sentence Case: {shown}",
+            "ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case คือตัวพิมพ์ใหญ่เฉพาะอักษรแรก"
+            "ของชื่อและนามสกุล ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ",
+            "แก้ชื่อกรรมการบนหน้านี้เป็น Sentence Case แล้วให้เจ้าหน้าที่ยืนยัน",
             "FRONT.COMMITTEE")
 
 
@@ -3076,9 +3081,11 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
       นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
     - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
 
-    ข้อที่ตั้ง system_note=True ไม่เข้าสรุปทุกกรณี เพราะเป็นข้อจำกัดของระบบเอง
-    (เช่น เจ้าหน้าที่ยังไม่ได้กรอกข้อมูลอนุมัติ ระบบจึงข้ามการเทียบข้อมูลนั้น)
-    นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย การใส่ไว้ในใบสั่งแก้ทำให้นักศึกษาสับสน
+    ข้อที่ตั้ง system_note=True ไม่เข้าสรุป "โดยปริยาย" เพราะเป็นปัญหาฝั่งเจ้าหน้าที่
+    (เช่น ยังไม่ได้กรอกข้อมูลอนุมัติ หรือเลือกไฟล์ eThesis คนละคนกับเล่ม) นักศึกษาแก้
+    เล่มยังไงข้อนี้ก็ไม่หาย แต่ถ้าเจ้าหน้าที่กด "ไม่ผ่าน" ต้องเข้าสรุปเหมือนข้อสีส้มอื่น
+    — เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "สีส้มกับสีเหลืองถ้ากด ต้องให้เป็นสีแดง = แก้ไข"
+    ของเดิมกันข้อนี้ออกทุกกรณี ปุ่ม ✗ บนการ์ดสองใบนี้จึงกดแล้วไม่มีอะไรเกิดขึ้น
 
     failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
     staff เป็นชุด id ของ "ตัวเลือก" ใน STAFF_CHECKS ที่เจ้าหน้าที่กด (เช่น
@@ -3087,18 +3094,20 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     """
     failed = set(failed or ())
     passed = set(passed or ())
-    items = list(report["issues_by_zone"].get("RED") or [])
+    items = [it for it in (report["issues_by_zone"].get("RED") or [])
+             if not it.get("system_note")]
     # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
     # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
     for check, choice in staff_choices(staff, "section"):
         items.append(staff_issue(check, choice))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
-        if f"ORANGE:{index}" not in passed:
+        key = f"ORANGE:{index}"
+        if key in failed or (key not in passed and not issue.get("system_note")):
             items.append(issue)
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
             items.append(issue)
-    return [it for it in items if not it.get("system_note")]
+    return items
 
 
 def _corrected_value(issue):
@@ -3227,9 +3236,9 @@ def zone_counts(report, failed=None, passed=None, staff=None):
         กด "ผ่าน"      หายไปจากทุกกล่อง (เจ้าหน้าที่รับได้แล้ว)
         ยังไม่กด       อยู่กล่องเดิม
 
-    ข้อ system_note (ข้อจำกัดของระบบ เช่น อ่านหน้านั้นไม่ออก) ไม่เคยเข้าข้อความสรุป
-    เพราะนักศึกษาแก้เล่มยังไงก็ไม่หาย จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน —
-    ค้างไว้ที่ "รอยืนยัน" ตามความจริงว่ายังไม่มีข้อสรุป ส่วนกด "ผ่าน" ถือว่าดูแล้ว
+    ข้อ system_note ใช้กติกาเดียวกับข้อสีส้มอื่นทุกประการ — กด "ไม่ผ่าน" แล้วเป็น
+    "ต้องแก้" และเข้าข้อความสรุปด้วย (เจ้าหน้าที่สั่ง ก.ย. 2569) ต่างกันแค่ตอนยังไม่กด
+    ข้อนี้ไม่อยู่ในข้อความสรุป (ดู issues_to_fix)
     """
     failed, passed = set(failed or ()), set(passed or ())
     zones = report.get("issues_by_zone") or {}
@@ -3239,9 +3248,7 @@ def zone_counts(report, failed=None, passed=None, staff=None):
     pending = notice = 0
     for index, issue in enumerate(zones.get("ORANGE") or []):
         key = f"ORANGE:{index}"
-        if issue.get("system_note"):
-            pending += key not in passed
-        elif key in failed:
+        if key in failed:
             red += 1
         elif key not in passed:
             pending += 1

@@ -150,6 +150,26 @@ def main():
                             fail["counts"]["RED"] > body["counts"]["RED"],
                             f'{body["counts"]["RED"]} -> {fail["counts"]["RED"]}'))
 
+    # การ์ดสีส้มที่เป็นปัญหาฝั่งเจ้าหน้าที่ (system_note) เคยกด ✗ แล้วตัวเลขไม่ขยับ
+    # เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าสีส้มกดไม่ผ่าน = สีแดง = แก้ไข ไม่เว้นข้อไหน
+    # เล่มทดสอบไม่มีการ์ดชนิดนี้ จึงเติมเข้าไปในงานที่ตรวจเสร็จแล้ว ให้ผ่านปลายทางจริง
+    oranges = zones.setdefault("ORANGE", [])
+    note_key = f"ORANGE:{len(oranges)}"
+    oranges.append({"part": "front_matter", "location": "ไฟล์ที่อัปโหลด",
+                    "found": "ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง น่าจะเป็นคนละคนกัน",
+                    "expected": "ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน",
+                    "fix": "", "system_note": True, "rule_id": "FORM.REQUIRED"})
+    before = client.post(f"/summary/{job}",
+                         json={"failed": [], "passed": [], "staff": []}).json()
+    note = client.post(f"/summary/{job}",
+                       json={"failed": [note_key], "passed": [], "staff": []}).json()
+    passed.append(check("กดไม่ผ่านการ์ดปัญหาฝั่งเจ้าหน้าที่แล้วนับเป็นต้องแก้",
+                        note["counts"]["RED"] == before["counts"]["RED"] + 1,
+                        f'{before["counts"]["RED"]} -> {note["counts"]["RED"]}'))
+    passed.append(check("การ์ดที่กดไม่ผ่านเข้าข้อความสรุป",
+                        "น่าจะเป็นคนละคนกัน" in note["plain"]
+                        and "น่าจะเป็นคนละคนกัน" not in before["plain"]))
+
     gone = client.post("/summary/ไม่มีงานนี้", json={})
     passed.append(check("งานที่ไม่มีอยู่ต้องได้ 404 ไม่ใช่ 500",
                         gone.status_code == 404, str(gone.status_code)))
