@@ -30,7 +30,6 @@ from checker import (
     summary_section,
     _report_abstract_title_format,
     _report_missing_abstract_language,
-    _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
     _is_abstract_heading,
@@ -370,31 +369,65 @@ class ThaiBookRegressionTests(unittest.TestCase):
         self.assertEqual(kind, "wrong")
 
 
-class EmptyFormFieldIsNotTheDocumentsFault(unittest.TestCase):
-    """ช่องข้อมูลอ้างอิงว่าง = ฟอร์มไม่ครบ ไม่ใช่เล่มผิด
+class TheTwoStaffSideCardsAreGone(unittest.TestCase):
+    """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าสองเรื่องนี้ "ไม่จำเป็นต้องมีการ์ดขึ้นมา"
 
-    เจอจริงกับเล่มที่ 6: eThesis ไม่มีบรรทัดตัวย่อปริญญาอังกฤษ ระบบเว้นช่องว่างไว้
-    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
+    - ไม่ได้กรอกข้อมูลอนุมัติบางช่อง — "ระบบไม่ควรให้กดตรวจ" หน้าเว็บบังคับกรอก และ
+      /check ปฏิเสธก่อนสร้างงานอยู่แล้ว (รายการเดียวกัน) การ์ดนี้จึงมาไม่ถึงรายงานจริง
+    - เลือกไฟล์ eThesis ผิดคน — "ก็จะตรวจสอบผิด ให้ตรวจใหม่เอง"
     """
 
-    def _run(self, approved):
-        rep = Report()
-        _report_missing_form_fields(rep, approved, ("degree_abbr_en", "degree_abbr_th"))
-        return rep
+    def test_the_missing_field_card_is_gone(self):
+        self.assertFalse(hasattr(checker_module, "_report_missing_form_fields"))
+        self.assertNotIn("ระบบจึงข้ามการเทียบข้อมูลนี้", inspect.getsource(checker_module))
 
-    def test_missing_field_is_orange_not_red(self):
-        rep = self._run({"degree_abbr_th": "พย.ด."})
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+    def test_the_wrong_student_card_is_gone(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn("น่าจะเป็นคนละคนกัน", source)
+        self.assertNotIn("ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน", source)
 
-    def test_missing_field_is_not_on_the_students_fix_list(self):
-        """นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย คนกรอกฟอร์มคือเจ้าหน้าที่"""
-        rep = self._run({"degree_abbr_th": "พย.ด."})
-        self.assertTrue(rep.zones["ORANGE"][0]["system_note"])
+    def test_a_wrong_file_is_still_compared_not_skipped(self):
+        """ห้ามข้ามการเทียบข้อมูลอนุมัติเงียบ ๆ เมื่อไม่มีการ์ดบอกแล้ว
 
-    def test_complete_form_reports_nothing(self):
-        rep = self._run({"degree_abbr_en": "D.N.S.", "degree_abbr_th": "พย.ด."})
-        self.assertEqual(rep.zones["ORANGE"], [])
+        วัดกับเล่มจริง: เล่ม 1 คู่กับไฟล์ eThesis ของเล่ม 3 ถ้าข้ามโดยไม่มีการ์ด จะได้
+        "ผ่าน" ทั้งที่ไม่ได้เทียบอะไรเลย ต้องเทียบตามปกติ ชื่อ/รหัสที่ไม่ตรงจึงขึ้นแดงให้เห็น
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn("if approved and not same_student", source)
+        self.assertIn("    if approved:\n        A = approved", source)
+
+    def test_the_language_gate_still_ignores_someone_elses_file(self):
+        """ควบคุมเชิงลบ — ด่านภาษาของเล่มหยุดตรวจทั้งเล่ม ห้ามตัดสินจากไฟล์ของคนอื่น
+
+        ไม่งั้นเลือกไฟล์ผิดคนที่เป็นเล่มคนละภาษา จะได้ข้อเดียวว่า "เล่มผิดภาษา" แล้วหยุด
+        ซึ่งทั้งปิดบังว่าเลือกไฟล์ผิด และเสี่ยงที่จะส่งเล่มที่ถูกกลับให้นักศึกษาทำใหม่
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertRegex(source, r"approved and same_student and not skip_identity_check")
+
+    def test_the_web_form_and_the_server_require_the_same_fields(self):
+        """การ์ดหายไปได้เพราะมีสองด่านกันไว้ ต้องไม่หลุดจากกันเอง"""
+        import re
+        from pathlib import Path
+        html = (Path(checker_module.__file__).parent / "templates" / "index.html"
+                ).read_text(encoding="utf-8")
+        always = set(re.findall(r'name="(\w+)"[^>]*\brequired\b', html))
+        toggled = dict(re.findall(
+            r"querySelector\('\[name=\"(\w+)\"\]'\)\.required = (\w+|!\w+|true)", html))
+        from ethesis_rules import FRONT_MATTER_RULES
+        rules = FRONT_MATTER_RULES["required_form_fields"]
+        for program, want in rules.items():
+            flags = {"requiresThai": program in ("thai", "thai_english"),
+                     "thaiOnly": program == "thai", "!thaiOnly": program != "thai",
+                     "true": True}
+            page = {n for n in always if n not in toggled} | \
+                   {n for n, flag in toggled.items() if flags[flag]}
+            self.assertEqual(page & set(_FIELDS), set(want), program)
+
+
+_FIELDS = ("title_en", "title_th", "student_name", "student_name_th", "student_id",
+           "degree_cover_en", "degree_cover_th", "degree_sig_en", "degree_sig_th",
+           "degree_abbr_en", "degree_abbr_th", "exam_date", "year")
 
 
 class DegreeFieldsByLocationTests(unittest.TestCase):
@@ -2144,6 +2177,37 @@ class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
             issue = self._count_issue(loc)
             self.assertEqual(checker_module.classify(issue), "ไม่ตรงข้อมูลอนุมัติ", loc)
 
+    def test_the_wording_says_sentence_case_and_explains_it(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): ชื่อกรรมการต้องเป็น Sentence Case และเป็นสีส้ม
+
+        ต้องอธิบายด้วยว่าหมายถึงตัวใหญ่ต้นชื่อและต้นนามสกุล — นักศึกษาที่อ่าน
+        Sentence Case ตามตัวอักษรจะพิมพ์นามสกุลเป็นตัวเล็ก แล้วโดนฟ้องซ้ำ
+        """
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL, Ph.D."}, "หน้าลงนาม 2 (หน้า ii)")
+        self.assertEqual(rep.zones["RED"], [])
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn("Sentence Case", issue["found"])
+        self.assertIn("Sentence Case", issue["expected"])
+        self.assertIn("อักษรแรกของชื่อและนามสกุล", issue["expected"])
+        self.assertIn("Sentence Case", issue["fix"])
+        for text in (issue["found"], issue["expected"], issue["fix"]):
+            self.assertNotIn("Capital Case", text)
+
+    def test_the_committee_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        rep = Report()
+        checker_module._report_committee_name_case(
+            rep, {1: "MATHUROS TIPAYAMONGKHOLGUL"}, "หน้าลงนาม 2 (หน้า ii)")
+        issue = rep.zones["ORANGE"][0]
+        for th in (issue["found"], issue["expected"], issue["fix"]):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+            self.assertIn("Sentence Case", en)
+
     def test_the_case_rule_is_back_with_the_credential_stripped(self):
         """เจ้าหน้าที่สั่งให้เอากฎกลับมา (ก.ย. 2569) พร้อมตัดคุณวุฒิท้ายชื่อออกก่อน
 
@@ -2484,16 +2548,38 @@ class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
             self.assertEqual(self._counts(report, failed, passed)["RED"], len(items),
                              (failed, passed))
 
-    def test_a_system_note_never_becomes_a_must_fix(self):
-        """ข้อจำกัดของระบบไม่เคยเข้าข้อความสรุป จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน
+    def test_rejecting_a_system_note_makes_it_a_must_fix(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): "สีส้มกับสีเหลืองถ้ากด ต้องให้เป็นสีแดง = แก้ไข"
 
-        ไม่งั้นหัวรายงานเขียนว่าต้องแก้ 1 จุด แต่ข้อความสรุปไม่มีจุดนั้นอยู่เลย
-        นักศึกษาได้ใบสั่งแก้ที่นับไม่ตรงกับรายการ
+        การ์ดสีส้มสองใบที่เป็นปัญหาฝั่งเจ้าหน้าที่ (ไม่ได้กรอกข้อมูลอนุมัติ / ไฟล์
+        eThesis คนละคนกับเล่ม) เคยกด ✗ แล้วตัวเลขไม่ขยับ เพราะถูกกันออกจาก "ต้องแก้"
         """
         report = self._report(notes=1)
         self.assertEqual(self._counts(report, failed=["ORANGE:0"]),
+                         {"RED": 1, "ORANGE": 0, "YELLOW": 0})
+        self.assertEqual(checker_module.summary_verdict(report, failed=["ORANGE:0"]),
+                         "ไม่ผ่าน")
+
+    def test_a_rejected_system_note_reaches_the_summary(self):
+        """นับเป็นต้องแก้แล้วต้องมีในข้อความสรุปด้วย ไม่งั้นตัวเลขกับรายการขัดกัน"""
+        report = self._report(notes=1)
+        items = checker_module.issues_to_fix(report, failed=["ORANGE:0"])
+        self.assertEqual([i["found"] for i in items], ["ระบบอ่านหน้านี้ไม่ออก"])
+        self.assertIn("ระบบอ่านหน้านี้ไม่ออก",
+                      checker_module.plain_summary(report, failed=["ORANGE:0"]))
+
+    def test_an_untouched_system_note_stays_out_of_the_summary(self):
+        """ควบคุมเชิงลบ — ยังไม่กด ต้องไม่ไปถึงนักศึกษา เพราะเป็นปัญหาฝั่งเจ้าหน้าที่"""
+        report = self._report(notes=1)
+        self.assertEqual(checker_module.issues_to_fix(report), [])
+        self.assertEqual(self._counts(report),
                          {"RED": 0, "ORANGE": 1, "YELLOW": 0})
-        self.assertEqual(self._counts(report, passed=["ORANGE:0"])["ORANGE"], 0)
+
+    def test_accepting_a_system_note_clears_it(self):
+        report = self._report(notes=1)
+        self.assertEqual(self._counts(report, passed=["ORANGE:0"]),
+                         {"RED": 0, "ORANGE": 0, "YELLOW": 0})
+        self.assertEqual(checker_module.issues_to_fix(report, passed=["ORANGE:0"]), [])
 
     def test_the_book_passes_once_every_pending_item_is_accepted(self):
         """เล่มที่ระบบว่า "รอยืนยัน" เคยค้างเป็นรอยืนยันตลอดไป
@@ -2744,6 +2830,189 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             en = i18n.tr_en(th, pairs)
             left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
+    """ข้อสีเหลืองที่กดไม่ผ่าน ต้องไม่พาท่อนที่เขียนถึงเจ้าหน้าที่ไปในข้อความสรุป
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569): กดไม่ผ่านข้อเลขหน้าในสารบัญ แล้วนักศึกษาได้บรรทัด
+    "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย — "เฉพาะส่วนสรุป
+    ไม่ต้องมีท่อนนี้" การ์ดในรายงานยังต้องมีเหมือนเดิม
+    """
+
+    NOTE = "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว"
+    FIX = "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้"
+
+    def _report(self):
+        rep = Report()
+        rep.add("YELLOW", "front_matter", "สารบัญ (หน้า v) กับบทที่ 2 (หน้า 12)",
+                "สารบัญระบุหน้า 12 แต่หัวข้อเริ่มจริงหน้า 14", self.NOTE, self.FIX,
+                "FRONT.TOC_PAGE_REF")
+        return checker_module.check_result(rep)
+
+    def test_the_rejected_note_keeps_what_was_found_but_not_the_staff_line(self):
+        summary = checker_module.plain_summary(self._report(), failed=["YELLOW:0"])
+        self.assertIn("สารบัญระบุหน้า 12 แต่หัวข้อเริ่มจริงหน้า 14", summary)
+        self.assertNotIn("ไม่ได้ตรวจ", summary)
+        self.assertNotIn("เป็นข้อสังเกต", summary)
+        self.assertNotIn("ไม่ต้องแก้", summary)
+
+    def test_the_report_card_still_says_it(self):
+        """ควบคุมเชิงลบ — ตัดเฉพาะในข้อความสรุป ไม่ใช่ลบออกจากข้อ"""
+        issue = self._report()["issues_by_zone"]["YELLOW"][0]
+        self.assertEqual(issue["expected"], self.NOTE)
+        self.assertEqual(issue["fix"], self.FIX)
+
+    def test_an_ordinary_directive_still_reaches_the_summary(self):
+        """ควบคุมเชิงลบ — ข้อที่ไม่มีค่าเดี่ยวให้ดึง ยังต้องได้บรรทัด "ต้องเป็น ..." เหมือนเดิม"""
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าลงนาม 1 (หน้า i)", "ไม่พบวันที่สอบ",
+                "วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", "", "FORM.APPROVED_MATCH")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน", summary)
+
+    def test_every_staff_only_line_in_the_engine_is_covered(self):
+        """ทุกบรรทัด expected/fix ในเครื่องตรวจที่ขึ้นต้นแบบนี้ ต้องถูกกันไว้"""
+        source = inspect.getsource(checker_module)
+        for phrase in (self.NOTE, self.FIX):
+            self.assertIn(phrase, source)
+            self.assertTrue(phrase.startswith(checker_module._STAFF_ONLY_DIRECTIVES), phrase)
+
+
+class AStudentIdInThaiNumeralsIsRed(unittest.TestCase):
+    """เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น
+
+    ของเดิมรหัสที่พิมพ์เป็นเลขไทยถูกนับเป็น "ฟอนต์ทำเพี้ยน อ่านไม่ออก" แล้วผ่านไปเป็นแค่
+    ข้อมูลประกอบ ให้เจ้าหน้าที่ไปเปิดดูเอง
+    """
+
+    def test_thai_numerals_give_a_red_finding_with_the_arabic_value(self):
+        found, expected, fix = checker_module.thai_numeral_student_id(
+            "๖๔๓๗๐๒๘ PHPH/M", "6437028 PHPH/M", "บทคัดย่อไทย")
+        self.assertIn("เลขไทย", found)
+        self.assertIn('"๖๔๓๗๐๒๘ PHPH/M"', found)
+        self.assertIn("เลขอารบิก", expected)
+        self.assertTrue(expected.endswith('"6437028 PHPH/M"'), expected)
+        self.assertIn("เลขอารบิก", fix)
+
+    def test_arabic_numerals_are_left_to_the_usual_checks(self):
+        """ควบคุมเชิงลบ — รหัสเลขอารบิกที่พิมพ์ผิดตัวเลข ยังใช้ข้อความเดิม"""
+        self.assertIsNone(checker_module.thai_numeral_student_id(
+            "6437029 PHPH/M", "6437028 PHPH/M", "บทคัดย่อไทย"))
+        self.assertIsNone(checker_module.thai_numeral_student_id(
+            "", "6437028 PHPH/M", "บทคัดย่อไทย"))
+
+    def test_the_abstract_check_uses_it_as_red(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("thai_digits = thai_numeral_student_id(", 1)[1][:500]
+        self.assertIn('rep.add("RED"', block)
+        self.assertIn("continue", block)
+
+    def test_the_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for label in ("บทคัดย่ออังกฤษ", "บทคัดย่อไทย"):
+            for th in checker_module.thai_numeral_student_id(
+                    "๖๔๓๗๐๒๘ PHPH/M", "6437028 PHPH/M", label):
+                en = i18n.tr_en(th, pairs)
+                left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+                self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class ADegreeInTheWrongCaseIsRed(unittest.TestCase):
+    """/code-review (ก.ย. 2569): ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์ ถูกลดเป็นเหลืองผ่านได้
+
+    กิ่ง "ต่างเฉพาะวรรคตอน/ช่องว่าง" เทียบด้วย norm() ซึ่งแปลงเป็นตัวใหญ่หมด
+    ตัวพิมพ์ผิดจึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบายที่ผิด แล้วเล่มผ่าน
+    """
+
+    def test_a_case_only_difference_is_not_spacing(self):
+        for page, want in (("MASTER OF SCIENCE (EPIDEMIOLOGY)",
+                            "Master of Science (Epidemiology)"),
+                           ("Master of Science (Epidemiology)",
+                            "MASTER OF SCIENCE (EPIDEMIOLOGY)"),
+                           ("M.SC. (EPIDEMIOLOGY)", "M.Sc. (Epidemiology)")):
+            self.assertFalse(
+                checker_module.degree_differs_only_in_spacing(want, page), page)
+
+    def test_a_spacing_only_difference_still_is(self):
+        """ควบคุมเชิงลบ — ข้อสังเกตสีเหลืองที่เจ้าหน้าที่กำหนดไว้ต้องยังทำงาน"""
+        for page, want in (("M.Sc.(Epidemiology)", "M.Sc. (Epidemiology)"),
+                           ("Master of Science  (Epidemiology)",
+                            "Master of Science (Epidemiology)"),
+                           ("วท.ม.(ระบาดวิทยา)", "วท.ม. (ระบาดวิทยา)")):
+            self.assertTrue(
+                checker_module.degree_differs_only_in_spacing(want, page), page)
+
+    def test_both_degree_checks_use_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertEqual(source.count("degree_differs_only_in_spacing("), 2)
+        self.assertNotIn("norm(expected_degree) in norm(spot_text)", source)
+        self.assertNotIn("norm(abbr) in norm(abstract_text)", source)
+
+
+class TheExamDateMustNotMatchALongerDay(unittest.TestCase):
+    """/code-review (ก.ย. 2569): วันที่อนุมัติ "7" ผ่านบนหน้าที่พิมพ์ "17" หรือ "27"
+
+    ไฟล์ eThesis เขียนวันที่ 1-9 เป็นเลขหลักเดียวเสมอ วันต้นเดือนจึงโดนทุกเล่ม
+    """
+
+    def test_a_longer_day_is_not_a_match(self):
+        for want, page in (("7 July 2026", "Date 17 July 2026"),
+                           ("7 July 2026", "Date 27 July 2026"),
+                           ("1 พฤษภาคม 2569", "วันที่ 11 พฤษภาคม พ.ศ. 2569"),
+                           ("1 พฤษภาคม 2569", "วันที่ 21 พฤษภาคม 2569")):
+            self.assertFalse(checker_module.exam_date_on_page(want, page), page)
+
+    def test_the_right_day_still_matches(self):
+        """ควบคุมเชิงลบ — รูปแบบที่เคยผ่านต้องยังผ่าน"""
+        for want, page in (("7 July 2026", "Date 7 July 2026"),
+                           ("7 July 2026", "Date 07 July 2026"),
+                           ("17 July 2026", "on 17 July 2026."),
+                           ("11 พฤษภาคม 2569", "วันที่ 11 พฤษภาคม พ.ศ. 2569"),
+                           ("7 July 2026", "Page 2" + chr(10) + "7 July 2026")):
+            self.assertTrue(checker_module.exam_date_on_page(want, page), page)
+
+    def test_the_signature_page_check_reports_it(self):
+        rep = Report()
+        checker_module._check_exam_date(rep, "7 July 2026", [0],
+                                        ["Date of examination 17 July 2026"],
+                                        lambda i: f"หน้า {i + 1}")
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn("17 July 2026", rep.zones["RED"][0]["found"])
+
+
+class AGarbledIdIsNotMistakenForASurname(unittest.TestCase):
+    """/code-review (ก.ย. 2569): _THAI_LETTER ประกาศสองที่ ตัวหลังทับตัวแรกเงียบ ๆ
+
+    unreadable_id_digits ตั้งใจใช้ "พยัญชนะไทย" แยกนามสกุลไทยที่ค้างในช่องรหัส แต่ได้
+    ตัวที่ครอบสระ วรรณยุกต์ และเลขไทยไปแทน ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นเลขไทยหรือสระ
+    จึงถูกตัดสินว่าเป็นนามสกุล แล้วฟ้องแดง "ไม่พบรหัสนักศึกษา"
+    """
+
+    def test_thai_marks_in_the_id_slot_are_unreadable_digits(self):
+        """ฟอนต์ที่ทำตัวเลขเพี้ยนเป็นสระ/วรรณยุกต์ไทย ต้องไม่ถูกนับเป็นนามสกุล"""
+        page = "นางสาวทดสอบ ระบบ ิีึืุูั PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "ิีึืุูั")
+
+    def test_thai_numerals_are_not_font_damage(self):
+        """เลขไทยทั้งช่องอ่านออกชัดเจน แค่ใช้เลขผิดระบบ — ต้องไปทางข้อแดง ไม่ใช่ข้อมูลประกอบ"""
+        page = "นางสาวทดสอบ ระบบ ๖๔๓๗๐๒๘ PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "")
+
+    def test_a_thai_surname_in_the_slot_is_still_rejected(self):
+        """ควบคุมเชิงลบ — เล่มที่ลืมพิมพ์รหัสบนหน้าไทยต้องยังฟ้องได้"""
+        page = "นางสาวทดสอบ สมบูรณ์ PHPH/M"
+        self.assertEqual(
+            checker_module.unreadable_id_digits(page, "6437028 PHPH/M"), "")
+
+    def test_the_two_regexes_no_longer_share_a_name(self):
+        source = inspect.getsource(checker_module)
+        self.assertEqual(source.count("_THAI_LETTER = re.compile"), 1)
+        self.assertIn("_THAI_CONSONANT.search(slot)",
+                      inspect.getsource(checker_module.unreadable_id_digits))
 
 
 class ADotLeaderGluedToThePageNumber(unittest.TestCase):

@@ -37,16 +37,53 @@ templates = Jinja2Templates(directory=BASE / "templates")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 SESSION_COOKIE = "ethesis_session"
-# ผูก token กับ APP_PASSWORD แทนการสุ่มใหม่ทุกครั้งที่ process เริ่ม เพราะบน Render
-# บริการจะ sleep แล้ว cold start ใหม่เมื่อไม่มีคนใช้สักพัก ถ้า token สุ่มใหม่ คุกกี้เดิม
-# ใช้ไม่ได้ทันที เจ้าหน้าที่ที่กรอกฟอร์มค้างไว้จะกด "ตรวจเล่ม" ไม่ได้โดยไม่รู้สาเหตุ
-# (การเดา token ยังต้องรู้ APP_PASSWORD อยู่ดี ซึ่งถ้ารู้ก็ล็อกอินตรงได้อยู่แล้ว
-#  และการเปลี่ยน APP_PASSWORD จะเตะทุกเซสชันออกทันทีตามที่ควรเป็น)
-SESSION_TOKEN = (
-    hmac.new(APP_PASSWORD.encode("utf-8"), b"ethesis-session-v1", hashlib.sha256).hexdigest()
-    if APP_PASSWORD else secrets.token_urlsafe(32)
-)
 SESSION_MAX_AGE = 8 * 60 * 60
+# คุกกี้เข้าสู่ระบบ = "เวลาที่ออก.ค่าสุ่ม.ลายเซ็น" เซิร์ฟเวอร์ตรวจลายเซ็นและอายุเองทุกครั้ง
+#
+# ของเดิมเป็นค่าตายตัวค่าเดียวที่คำนวณจาก APP_PASSWORD ตรง ๆ จึงมีปัญหาสามอย่าง
+#   - ทุกคนได้คุกกี้ค่าเดียวกัน และเซิร์ฟเวอร์ไม่เคยดูอายุ — 8 ชั่วโมงกับการออกจากระบบ
+#     มีผลแค่ในเบราว์เซอร์ คุกกี้ที่หลุดไปใช้ได้ตลอดจนกว่าจะเปลี่ยนรหัสผ่าน
+#   - เอาคุกกี้ที่หลุดไปเดารหัสผ่านแบบออฟไลน์ได้ (ลอง HMAC ทีละรหัสจนตรง)
+#
+# ที่ยังต้องคงไว้: ต้องไม่เก็บเซสชันไว้ในหน่วยความจำ บน Render บริการจะ sleep แล้ว cold
+# start ใหม่ ถ้าเซสชันหายตามไปด้วย เจ้าหน้าที่ที่กรอกฟอร์มค้างไว้จะกด "ตรวจเล่ม" ไม่ได้
+# กุญแจเซ็นจึงคำนวณได้เท่าเดิมทุกครั้งที่ process เริ่ม และเปลี่ยนรหัสผ่าน = เตะทุกคนออก
+#
+# กุญแจผ่าน PBKDF2 200,000 รอบ การเดารหัสผ่านจากคุกกี้ที่หลุดจึงช้าลงราวสองแสนเท่า
+# ถ้าตั้ง SESSION_SECRET ไว้ด้วย (ค่าสุ่มยาว ๆ เก็บเป็น secret บน Render) จะเดาไม่ได้เลย
+_SESSION_KDF_ROUNDS = 200_000
+
+
+def derive_session_key(password, secret=""):
+    salt = ("ethesis-session-v2:" + (secret or "")).encode("utf-8")
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _SESSION_KDF_ROUNDS)
+
+
+SESSION_KEY = (derive_session_key(APP_PASSWORD, os.getenv("SESSION_SECRET", ""))
+               if APP_PASSWORD else secrets.token_bytes(32))
+
+
+def _session_signature(payload):
+    return hmac.new(SESSION_KEY, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def new_session_token(now=None):
+    issued = int(time.time() if now is None else now)
+    payload = f"{issued}.{secrets.token_urlsafe(12)}"
+    return f"{payload}.{_session_signature(payload)}"
+
+
+def session_token_valid(token, now=None):
+    try:
+        issued_text, nonce, signature = (token or "").split(".")
+        issued = int(issued_text)
+    except ValueError:
+        return False
+    if not hmac.compare_digest(signature, _session_signature(f"{issued_text}.{nonce}")):
+        return False
+    age = (time.time() if now is None else now) - issued
+    # เผื่อนาฬิกาเครื่องเหลื่อมกันเล็กน้อยหลัง cold start
+    return -60 <= age < SESSION_MAX_AGE
 # คุกกี้ต้องเป็น Secure เมื่อเสิร์ฟผ่าน HTTPS — Render ตั้งให้อัตโนมัติ ส่วน host อื่น
 # ให้ตั้ง COOKIE_SECURE=1 เอง (ถ้ารันในเครื่องด้วย http ต้องเป็น 0 ไม่งั้นล็อกอินไม่ติด)
 COOKIE_SECURE = (os.getenv("COOKIE_SECURE", "").lower() in ("1", "true", "yes")
@@ -81,8 +118,7 @@ JOB_SLOTS = threading.BoundedSemaphore(MAX_ACTIVE_JOBS)
 
 
 def _is_authenticated(request):
-    token = request.cookies.get(SESSION_COOKIE, "")
-    return bool(token) and hmac.compare_digest(token, SESSION_TOKEN)
+    return session_token_valid(request.cookies.get(SESSION_COOKIE, ""))
 
 
 def _safe_next(path):
@@ -218,7 +254,7 @@ async def login(request: Request, password: str = Form(...), next: str = Form("/
     response = RedirectResponse(url=_safe_next(next), status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
-        SESSION_TOKEN,
+        new_session_token(),
         max_age=SESSION_MAX_AGE,
         httponly=True,
         secure=COOKIE_SECURE,

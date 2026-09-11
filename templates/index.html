@@ -2,99 +2,210 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <title>E-Thesis Staff Checker</title>
 <style>
-  :root { --navy:#1a3a5c; --gold:#c9a227; --bg:#f5f6f8; }
-  * { box-sizing:border-box; font-family:'Segoe UI','Sarabun',Tahoma,sans-serif; }
-  body { background:var(--bg); margin:0; padding:24px; color:#222; }
-  .card { max-width:860px; margin:0 auto; background:#fff; border-radius:12px; position:relative;
-          box-shadow:0 2px 12px rgba(0,0,0,.08); padding:28px 32px; }
-  h1 { color:var(--navy); font-size:1.3rem; margin:0 0 4px; }
-  .sub { color:#777; font-size:.85rem; margin-bottom:20px; }
-  h2 { color:var(--navy); font-size:1rem; border-left:4px solid var(--gold);
-       padding-left:10px; margin:26px 0 12px; }
-  label { display:block; font-size:.85rem; font-weight:600; margin:10px 0 4px; }
-  input, select, textarea { width:100%; padding:8px 10px; border:1px solid #ccd;
-       border-radius:6px; font-size:.9rem; }
-  textarea { resize:vertical; }
-  .row { display:flex; gap:12px; } .row > div { flex:1; }
+  :root { --navy:#16365a; --navy-2:#23548a; --navy-soft:#edf3fa;
+          --gold:#c9a227; --gold-soft:#fcf7e6; --gold-line:#efe1b0;
+          --bg:#f2f5f9; --surface:#ffffff; --line:#e3e8ef; --line-2:#d2dae5;
+          --ink:#1c2733; --ink-2:#4a5868; --ink-3:#7b8898;
+          --ok:#1e8449; --ok-bg:#eaf7ef;
+          --ring:0 0 0 3px rgba(35,84,138,.2);
+          --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+          --shadow:0 1px 3px rgba(16,24,40,.05), 0 12px 32px -14px rgba(16,24,40,.18);
+          --font:'IBM Plex Sans Thai','Noto Sans Thai','Sarabun','Segoe UI',Tahoma,sans-serif; }
+  * { box-sizing:border-box; font-family:var(--font); }
+  body { background:var(--bg); margin:0; padding:32px 16px 56px; color:var(--ink);
+         font-size:15px; line-height:1.55; }
+  .card { max-width:880px; margin:0 auto; background:var(--surface); border:1px solid var(--line);
+          border-radius:20px; position:relative; box-shadow:var(--shadow); padding:34px 38px 38px;
+          overflow:hidden; }
+  .card::before { content:""; position:absolute; left:0; right:0; top:0; height:4px; background:linear-gradient(90deg,var(--navy) 0%,var(--navy-2) 62%,var(--gold) 100%); }
+  h1 { color:var(--navy); font-size:1.45rem; font-weight:700; margin:0 0 4px; letter-spacing:-.01em;
+       padding-right:130px; }
+  .sub { color:var(--ink-3); font-size:.88rem; margin-bottom:18px; padding-right:130px; }
+  h2 { color:var(--navy); font-size:1.02rem; font-weight:700; display:flex; align-items:center; gap:10px;
+       margin:30px 0 14px; padding-top:24px; border-top:1px solid var(--line); }
+  h2::before { content:""; flex:none; width:4px; height:18px; border-radius:4px; background:var(--gold); }
+  #f > h2:first-child { border-top:0; padding-top:0; margin-top:26px; }
+  label { display:block; font-size:.84rem; font-weight:600; color:var(--ink-2); margin:12px 0 6px; }
+  label b { color:var(--navy); }
+  input, select, textarea { width:100%; padding:10px 12px; border:1px solid var(--line-2);
+       border-radius:10px; font-size:.92rem; color:var(--ink); background-color:#fbfcfe;
+       transition:border-color .15s, box-shadow .15s, background-color .15s; }
+  input::placeholder, textarea::placeholder { color:#a6b1bd; }
+  input:hover, select:hover, textarea:hover { border-color:#b8c4d3; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--navy-2);
+       box-shadow:var(--ring); background-color:#fff; }
+  select { appearance:none; -webkit-appearance:none; cursor:pointer; padding-right:36px;
+       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%237b8898' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+  textarea { resize:vertical; line-height:1.5; }
+  .row { display:flex; gap:14px; } .row > div { flex:1; min-width:0; }
   .committee-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
   .committee-row input.cname { flex:3; } .committee-row select { flex:2; }
-  .committee-row button { background:#e66; color:#fff; border:none; border-radius:6px;
-       padding:8px 12px; cursor:pointer; }
-  .addbtn { background:#eef; color:var(--navy); border:1px dashed var(--navy);
-       border-radius:6px; padding:8px 14px; cursor:pointer; font-size:.85rem; }
-  .actions { margin-top:28px; }
-  .primary { background:var(--navy); color:#fff; border:none; border-radius:8px;
-       padding:12px 22px; font-size:.95rem; cursor:pointer; }
-  .note { background:#fff8e6; border-left:4px solid var(--gold); padding:10px 14px;
-       font-size:.82rem; border-radius:6px; margin-top:6px; }
-  .committee-box { background:#f3f7fd; border:1px solid #d6e3f5; border-radius:9px;
-       padding:11px 14px; margin-top:10px; }
-  .committee-head { font-size:.82rem; color:#2c3e50; margin-bottom:7px; }
+  .committee-row button { background:#e05d5d; color:#fff; border:none; border-radius:8px;
+       padding:9px 12px; cursor:pointer; }
+  .addbtn { background:var(--navy-soft); color:var(--navy); border:1px dashed var(--navy-2);
+       border-radius:10px; padding:9px 14px; cursor:pointer; font-size:.85rem; font-weight:600; }
+  .actions { margin-top:30px; padding-top:24px; border-top:1px solid var(--line); }
+  .primary { background:var(--navy); color:#fff; border:none; border-radius:12px;
+       padding:13px 30px; font-size:1rem; font-weight:700; cursor:pointer;
+       box-shadow:0 10px 22px -10px rgba(22,54,90,.65);
+       transition:background .15s, transform .05s, box-shadow .15s; }
+  .primary:hover { background:var(--navy-2); }
+  .primary:active { transform:translateY(1px); }
+  .primary:focus-visible { outline:none; box-shadow:var(--ring); }
+  .note { background:var(--gold-soft); border:1px solid var(--gold-line); border-left:4px solid var(--gold);
+       padding:10px 14px; font-size:.84rem; color:#5b4814; border-radius:10px; margin-top:10px; }
+  .note b { color:#463608; }
+  .committee-box { background:var(--navy-soft); border:1px solid #d3e1f1; border-radius:12px;
+       padding:12px 16px; margin-top:12px; }
+  .committee-head { font-size:.84rem; color:#2c3e50; margin-bottom:8px; }
   .committee-summary { display:flex; flex-wrap:wrap; gap:18px; }
-  .committee-list { font-size:.82rem; color:#3d5060; line-height:1.6; min-width:230px; flex:1 1 300px; }
+  .committee-list { font-size:.84rem; color:#3d5060; line-height:1.6; min-width:230px; flex:1 1 300px; }
   .committee-list b { color:var(--navy); }
-  .cm-row { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:6px; }
-  .cm-no { width:15px; color:#8894a0; flex:none; }
+  .cm-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+  .cm-no { width:16px; color:var(--ink-3); flex:none; }
   .cm-th { flex:0 1 auto; min-width:0; color:var(--navy); font-weight:600; }
-  .cm-role { flex:1 1 auto; font-size:.72rem; color:#8894a0; }
-  .import-box { background:#f4f8fc; border:1px solid #cbd9e6; border-radius:10px; padding:0;
+  .cm-role { flex:1 1 auto; font-size:.74rem; color:var(--ink-3); }
+  .import-box { background:#f7f9fc; border:1px solid var(--line); border-radius:14px; padding:0;
        overflow:hidden; }
-  .import-box textarea { min-height:110px; }
-  .secondary { background:#fff; color:var(--navy); border:1px solid var(--navy); border-radius:7px;
-       padding:9px 14px; cursor:pointer; margin-top:10px; font-weight:600; font-size:.86rem; }
-  .secondary:hover:not(:disabled) { background:var(--navy); color:#fff; }
+  .import-box textarea { min-height:110px; background-color:#fff; }
+  .secondary { background:#fff; color:var(--navy); border:1px solid var(--line-2); border-radius:10px;
+       padding:9px 16px; cursor:pointer; margin-top:12px; font-weight:600; font-size:.86rem;
+       box-shadow:var(--shadow-sm); transition:background .15s, color .15s, border-color .15s; }
+  .secondary:hover:not(:disabled) { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .secondary:focus-visible { outline:none; box-shadow:var(--ring); }
   .secondary:disabled { opacity:.55; cursor:progress; }
-  .autofilled { background:#eef9f1; border-color:#79a987; }
+  .autofilled { background-color:var(--ok-bg); border-color:#86c09b; }
 
   /* แท็บเลือกวิธีนำเข้า — แสดงทีละวิธี ไม่ให้หน้ายาวเกินจำเป็น */
-  .tabs { display:flex; gap:0; background:#e7eef6; border-bottom:1px solid #cbd9e6; }
-  .tab { flex:1; border:none; background:transparent; padding:11px 12px; cursor:pointer;
-       font-size:.86rem; font-weight:700; color:#5b6b7d; border-bottom:3px solid transparent; }
-  .tab:hover { background:#dee8f2; }
-  .tab.on { background:#f4f8fc; color:var(--navy); border-bottom-color:var(--gold); }
-  .tab-panel { display:none; padding:14px; } .tab-panel.on { display:block; }
+  .tabs { display:flex; gap:6px; padding:6px; background:#e9eef5; border-bottom:1px solid var(--line); }
+  .tab { flex:1; border:none; background:transparent; padding:10px 12px; cursor:pointer; border-radius:9px;
+       font-size:.88rem; font-weight:600; color:var(--ink-2);
+       transition:background .15s, color .15s, box-shadow .15s; }
+  .tab:hover { background:rgba(255,255,255,.65); color:var(--navy); }
+  .tab.on { background:#fff; color:var(--navy); box-shadow:var(--shadow-sm); }
+  .tab:focus-visible { outline:none; box-shadow:var(--ring); }
+  .tab-panel { display:none; padding:16px; } .tab-panel.on { display:block; }
 
   /* กล่องลากวางไฟล์ — คลิกหรือลากไฟล์มาวางก็ได้ */
-  .drop { position:relative; display:flex; align-items:center; gap:12px; width:100%; text-align:left;
-       border:2px dashed #b9cade; background:#fbfdff; border-radius:10px; padding:14px 16px;
-       cursor:pointer; transition:border-color .15s, background .15s; }
-  .drop:hover, .drop.over { border-color:var(--navy); background:#eef4fb; }
-  .drop.has-file { border-style:solid; border-color:#79a987; background:#f2fbf5; }
-  .drop:focus-within { outline:2px solid var(--navy); outline-offset:2px; }
-  .drop-ico { font-size:1.5rem; line-height:1; }
-  .drop-main { font-weight:700; font-size:.88rem; color:var(--navy); }
-  .drop-sub { font-size:.78rem; color:#6b7a8b; margin-top:2px; word-break:break-all; }
+  .drop { position:relative; display:flex; align-items:center; gap:14px; width:100%; text-align:left;
+       border:1.5px dashed #b6c4d6; background:#fff; border-radius:12px; padding:16px 18px; margin:0;
+       cursor:pointer; transition:border-color .15s, background .15s, box-shadow .15s; }
+  .drop:hover, .drop.over { border-color:var(--navy-2); background:var(--navy-soft); }
+  .drop.has-file { border-style:solid; border-color:#86c09b; background:var(--ok-bg); }
+  .drop:focus-within { outline:none; border-color:var(--navy-2); box-shadow:var(--ring); }
+  .drop-ico { flex:none; display:grid; place-items:center; width:46px; height:46px; border-radius:12px;
+       background:var(--navy-soft); font-size:1.45rem; line-height:1; }
+  .drop.has-file .drop-ico { background:#d6efdf; }
+  .drop-main { font-weight:700; font-size:.9rem; color:var(--navy); }
+  .drop-sub { font-size:.8rem; color:var(--ink-3); margin-top:2px; overflow-wrap:anywhere; }
+  .drop .drop-main, .drop .drop-sub { display:block; }
   /* ซ่อนช่องไฟล์แต่ต้องยัง "โฟกัสได้" — ถ้าใช้ display:none เบราว์เซอร์จะเตือน
      required ไม่ได้ (not focusable) กดตรวจเล่มแล้วจะเงียบโดยไม่มีข้อความอะไรเลย */
   .drop input[type=file] { position:absolute; left:16px; bottom:6px;
        opacity:0; width:1px; height:1px; pointer-events:none; }
 
-  .import-status { font-size:.82rem; margin:10px 0 0; color:#43566a; padding:9px 12px;
-       border-radius:7px; background:#eef2f7; border-left:4px solid #b9cade; }
-  .import-status.ok { background:#eef9f1; border-left-color:#4c9a63; color:#245c37; }
-  .import-status.warn { background:#fff8e6; border-left-color:var(--gold); color:#7a5c00; }
-  .import-status.err { background:#fdeeee; border-left-color:#d16a6a; color:#8c2f2f; }
+  .import-status { font-size:.84rem; margin:12px 0 0; color:var(--ink-2); padding:10px 14px;
+       border-radius:10px; background:#eef2f7; border:1px solid var(--line); border-left:4px solid #b6c4d6; }
+  .import-status.ok { background:var(--ok-bg); border-color:#cde8d6; border-left-color:#3f9a5c; color:#1f5a34; }
+  .import-status.warn { background:var(--gold-soft); border-color:var(--gold-line); border-left-color:var(--gold); color:#6e5300; }
+  .import-status.err { background:#fdf0ef; border-color:#f3d3cf; border-left-color:#d0605a; color:#8c2f2f; }
   .filled-list { margin:6px 0 0; font-size:.78rem; opacity:.85; }
-  .logout { position:absolute; top:18px; right:24px; margin:0; }
-  .logout button { background:#fff; color:#596575; border:1px solid #ccd3dc;
-    border-radius:7px; padding:6px 10px; cursor:pointer; }
+  .logout { position:absolute; top:26px; right:30px; margin:0; }
+  .logout button { background:#fff; color:var(--ink-2); border:1px solid var(--line-2); border-radius:9px;
+    padding:7px 12px; font-size:.82rem; cursor:pointer; transition:all .15s; }
+  .logout button:hover { color:#a12626; border-color:#e8bcb7; background:#fdf6f5; }
+
+  /* หน้าจอระหว่างตรวจ — id overlay/stage ใช้ในสคริปต์ ห้ามเปลี่ยน */
+  #overlay { position:fixed; inset:0; z-index:99; background:rgba(14,24,40,.55);
+       -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); }
+  .overlay-card { max-width:420px; margin:22vh auto 0; background:#fff; border-radius:18px;
+       padding:30px 34px; text-align:center; box-shadow:0 24px 60px -20px rgba(0,0,0,.45); }
+  .spin { width:46px; height:46px; margin:0 auto 16px; border-radius:50%;
+       border:4px solid #e3e9f1; border-top-color:var(--navy); animation:sp .9s linear infinite; }
+  .overlay-title { font-weight:700; color:var(--navy); margin-bottom:6px; }
+  #stage { font-size:.9rem; color:var(--ink-3); }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  /* ---------- รอบสอง: โครงภาพ ---------- */
+  body { background:radial-gradient(1100px 520px at 0% -10%, #dbe6f4 0%, transparent 60%),
+                    radial-gradient(900px 480px at 100% 0%, #f3ead0 0%, transparent 55%), var(--bg);
+         background-attachment:fixed; }
+  .card { max-width:900px; background:transparent; border:0; box-shadow:none; padding:0; overflow:visible; }
+  .card::before { display:none; }
+  .page-head { position:relative; display:flex; align-items:center; gap:18px; color:#fff;
+       padding:28px 32px 26px; border-radius:22px; overflow:hidden;
+       background:radial-gradient(620px 220px at 100% 0%, rgba(201,162,39,.32) 0%, transparent 62%),
+                  linear-gradient(135deg,#122c4b 0%,#1f4a7c 100%);
+       box-shadow:0 18px 40px -22px rgba(18,44,75,.8); }
+  .page-head::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
+       background:linear-gradient(90deg,transparent,var(--gold),transparent); opacity:.8; }
+  .brand-mark { flex:none; display:grid; place-items:center; width:58px; height:58px; border-radius:16px;
+       font-size:1.8rem; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); }
+  .page-head h1 { color:#fff; font-size:1.6rem; margin:0; padding-right:130px; }
+  .page-head .sub { color:rgba(255,255,255,.78); margin:4px 0 0; padding-right:130px; }
+  .logout { top:30px; right:30px; z-index:2; }
+  .logout button { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.32);
+       border-radius:99px; padding:7px 14px; }
+  .logout button:hover { background:rgba(255,255,255,.24); color:#fff; border-color:rgba(255,255,255,.5); }
+  .note-lead { margin:16px 0 0; }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:20px;
+       box-shadow:var(--shadow); padding:24px 28px 26px; margin-top:16px; }
+  .panel > h2:first-child, #f > .panel:first-child > h2 { border-top:0; padding-top:0; margin-top:0; }
+  .panel > h2 { margin-bottom:16px; font-size:1.08rem; }
+  .panel > h2::before { display:none; }
+  .step { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:50%;
+       background:var(--navy); color:#fff; font-size:.9rem; font-weight:700;
+       box-shadow:0 0 0 4px var(--navy-soft); }
+  .step-opt { background:var(--gold); box-shadow:0 0 0 4px var(--gold-soft); }
+  .panel .note { margin-top:12px; }
+  .panel-final .note:first-child { margin-top:0; }
+  .panel-final .actions { margin-top:22px; padding-top:22px; }
+  .panel-final .primary { width:100%; padding:16px 30px; font-size:1.08rem; border-radius:14px;
+       background:linear-gradient(135deg,#16365a 0%,#23548a 100%); }
+  .panel-final .primary:hover { background:linear-gradient(135deg,#1d4470 0%,#2a64a3 100%); }
+
+  @media (max-width:680px) {
+    .page-head { padding:22px 20px; border-radius:18px; align-items:flex-start; }
+    .page-head h1, .page-head .sub { padding-right:0; }
+    .brand-mark { width:46px; height:46px; font-size:1.4rem; }
+    .logout { position:absolute; top:14px; right:14px; }
+    .page-head { padding-top:52px; }
+    .panel { padding:20px 16px 22px; border-radius:16px; }
+  }
+
+  @media (max-width:680px) {
+    body { padding:16px 10px 40px; }
+    h1, .sub { padding-right:0; }
+    .row { flex-direction:column; gap:0; }
+  }
 </style>
 </head>
 <body>
 <div class="card">
   <form class="logout" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
-  <h1>📋 E-Thesis Staff Checker</h1>
-  <div class="sub">อัปโหลด PDF + กรอกข้อมูลอนุมัติจากบัณฑิตวิทยาลัย ระบบตรวจให้อัตโนมัติ (ไม่ต้องผ่าน Claude)</div>
-  <div class="note">⚠️ ข้อมูลในฟอร์มนี้คือ "ความจริงอ้างอิง" — กรอกให้ตรงเอกสารอนุมัติทุกตัวอักษร</div>
+  <header class="page-head">
+    <div class="brand-mark" aria-hidden="true">📋</div>
+    <div>
+      <h1>E-Thesis Staff Checker</h1>
+      <div class="sub">อัปโหลด PDF + กรอกข้อมูลอนุมัติจากบัณฑิตวิทยาลัย ระบบตรวจให้อัตโนมัติ (ไม่ต้องผ่าน Claude)</div>
+    </div>
+  </header>
+  <div class="note note-lead">⚠️ ข้อมูลในฟอร์มนี้คือ "ความจริงอ้างอิง" — กรอกให้ตรงเอกสารอนุมัติทุกตัวอักษร</div>
 
   <form id="f" action="/check" method="post" enctype="multipart/form-data">
-    <h2>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
+    <section class="panel">
+    <h2><span class="step step-opt" aria-hidden="true">⇩</span>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
     <div class="import-box">
       <div class="tabs" role="tablist">
         <button type="button" class="tab on" id="tab-file" role="tab" aria-selected="true"
-                aria-controls="panel-file">📄 แนบไฟล์ PDF <span style="font-weight:400">(แนะนำ)</span></button>
+                aria-controls="panel-file">📄 แนบไฟล์ PDF <span style="font-weight:400;opacity:.8">(แนะนำ)</span></button>
         <button type="button" class="tab" id="tab-text" role="tab" aria-selected="false"
                 aria-controls="panel-text">📋 วางข้อความ</button>
       </div>
@@ -124,7 +235,10 @@
       </div>
     </div>
 
-    <h2>0. ไฟล์เล่ม</h2>
+    </section>
+
+    <section class="panel">
+    <h2><span class="step" aria-hidden="true">0</span>ไฟล์เล่ม</h2>
     <label class="drop" id="drop-book">
       <span class="drop-ico">📕</span>
       <span>
@@ -135,7 +249,10 @@
     </label>
     <div class="note">รองรับไฟล์ PDF ขนาดไม่เกิน 25 MB และต้องเป็นไฟล์ที่ระบบดึงข้อความได้ ไม่รองรับไฟล์ที่มีรหัสผ่านหรือเป็นภาพสแกนทั้งเล่ม</div>
 
-    <h2>1. ประเภทและรูปแบบเล่ม</h2>
+    </section>
+
+    <section class="panel">
+    <h2><span class="step" aria-hidden="true">1</span>ประเภทและรูปแบบเล่ม</h2>
     <div class="row">
       <div><label>ประเภทเล่ม</label>
         <select name="doc_type" required>
@@ -165,13 +282,19 @@
         </select></div>
     </div>
 
-    <h2>2. ชื่อเรื่อง (ตาม บฑ.1)</h2>
+    </section>
+
+    <section class="panel">
+    <h2><span class="step" aria-hidden="true">2</span>ชื่อเรื่อง (ตาม บฑ.1)</h2>
     <label>ชื่อเรื่องภาษาอังกฤษ</label>
     <textarea name="title_en" rows="2" placeholder="THESIS TITLE ..." required></textarea>
     <label>ชื่อเรื่องภาษาไทย (จำเป็นสำหรับหลักสูตรไทย)</label>
     <textarea name="title_th" rows="2" placeholder="หัวข้อภาษาไทย ..."></textarea>
 
-    <h2>3. นักศึกษา</h2>
+    </section>
+
+    <section class="panel">
+    <h2><span class="step" aria-hidden="true">3</span>นักศึกษา</h2>
     <div class="row">
       <div><label>ชื่อ-นามสกุล (ภาษาอังกฤษ)</label><input name="student_name" placeholder="FIRSTNAME LASTNAME" required></div>
       <div><label>ชื่อ-นามสกุล (ภาษาไทย — จำเป็นสำหรับหลักสูตรไทย)</label><input name="student_name_th" placeholder="ชื่อ นามสกุล"></div>
@@ -204,30 +327,33 @@
     <input type="hidden" name="committees_json" id="committees-json">
     <div id="committee-box" class="committee-box" style="display:none;">
       <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
-        <span style="color:#8894a0;">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
+        <span style="color:var(--ink-3);">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
         เล่มภาษาอังกฤษระบบจะถอดชื่อเป็นอังกฤษให้เองตอนตรวจ</span></div>
       <div id="committee-summary" class="committee-summary"></div>
     </div>
 
+    </section>
+
+    <section class="panel panel-final">
     <div class="note">🔴 ตรวจอย่างเข้ม: ข้อมูลจากแบบฟอร์มต้องตรงทุกตำแหน่งที่กำหนดตั้งแต่หน้าปกถึงบทคัดย่อ หากผิด ขาด หรือสะกดต่างแม้เล็กน้อย ระบบจะแสดงเป็นสีแดง</div>
     <div class="note">ℹ️ หน้าลงนาม: ระบบตรวจ<b>ชื่อเรื่อง</b>, <b>เลขหน้า (i/ii หรือ ก/ข)</b> และ<b>จำนวนอาจารย์</b>เทียบกับ บฑ.1 (หน้าแรก) / บฑ.2 (หน้าที่สอง) เมื่อดึงข้อมูลจาก eThesis ได้ — <b>ไม่เทียบชื่อ</b>ทั้งเล่มไทยและเล่มอังกฤษ ระบบพิมพ์รายชื่อตามฟอร์มไว้ให้ทานเอง พร้อมคุณวุฒิใต้ชื่อ</div>
 
     <div class="actions">
       <button type="submit" class="primary">🔍 ตรวจเล่ม</button>
     </div>
+    </section>
   </form>
 </div>
 
 
 
-<div id="overlay" style="display:none; position:fixed; inset:0; background:rgba(20,30,45,.75); z-index:99;">
-  <div style="max-width:420px; margin:22vh auto 0; background:#fff; border-radius:12px; padding:28px 32px; text-align:center;">
-    <div class="spin" style="width:44px;height:44px;border:5px solid #dde;border-top-color:#1a3a5c;border-radius:50%;margin:0 auto 16px;animation:sp 1s linear infinite;"></div>
-    <div style="font-weight:600; color:#1a3a5c; margin-bottom:6px;">กำลังตรวจเล่ม...</div>
-    <div id="stage" style="font-size:.9rem; color:#666;">กำลังอัปโหลดไฟล์...</div>
+<div id="overlay" style="display:none;">
+  <div class="overlay-card">
+    <div class="spin"></div>
+    <div class="overlay-title">กำลังตรวจเล่ม...</div>
+    <div id="stage">กำลังอัปโหลดไฟล์...</div>
   </div>
 </div>
-<style>@keyframes sp{to{transform:rotate(360deg)}}</style>
 
 <script>
 function detectLatestFormat(source, sourceHtml='') {
@@ -487,8 +613,36 @@ function renderCommitteeSummary(committees) {
   box.style.display = '';
 }
 
+// ล้าง "ทุกช่องที่ระบบเติมให้" ก่อนเติมข้อมูลของคนใหม่ (เจ้าหน้าที่สั่ง ก.ย. 2569 — ถ้าจะแก้
+// ค่าเอง ให้แก้หลังนำเข้า) ของเดิมเขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า ช่องที่คนใหม่ไม่มี
+// จึงค้างค่าของคนก่อน วัดกับเล่มจริง: เล่มหลักสูตรไทย-อังกฤษที่ชื่อเรื่องไทย/ชื่อไทย/ตัวย่อ
+// ปริญญาไทยของคนก่อนค้างอยู่ ได้ข้อแดงเพิ่มจาก 3 เป็น 6 ทั้งที่เล่มไม่ผิด ส่วนช่องซ่อน
+// (รายชื่อกรรมการ คณะ หลักสูตร) ค้างแล้วเล่มถูกนับกรรมการเทียบกับรายชื่อของคนอื่น
+const HIDDEN_IMPORT_FIELDS = ['committees-json', 'faculty-field', 'program-field'];
+function clearField(field) {
+  if (field.tagName === 'SELECT') {
+    const idx = Array.from(field.options).findIndex(o => o.defaultSelected);
+    field.selectedIndex = idx < 0 ? 0 : idx;
+  } else {
+    field.value = '';
+  }
+}
+function clearImportedFields() {
+  Object.keys(IMPORT_LABELS).forEach(function(name){
+    const field = document.querySelector(`[name="${name}"]`);
+    if (field) clearField(field);
+  });
+  HIDDEN_IMPORT_FIELDS.forEach(function(id){
+    const field = document.getElementById(id);
+    if (field) field.value = '';
+  });
+  const oldCommittees = document.getElementById('committee-box');
+  if (oldCommittees) oldCommittees.style.display = 'none';
+}
+
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  clearImportedFields();
   const filled = [];
   // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
@@ -641,6 +795,27 @@ function updateConditionalRequirements() {
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
 updateConditionalRequirements();
+
+// ทุกครั้งที่เข้าหน้านี้ = เริ่มตรวจเล่มใหม่ ฟอร์มต้องว่างทั้งหมด (เจ้าหน้าที่สั่ง ก.ย. 2569
+// "ทุกครั้งที่จะตรวจ ต้องกดตรวจเล่มใหม่อยู่แล้ว ก็ล้างค่าตรงนั้นเลย")
+// ใช้ pageshow ไม่ใช่แค่ตอนโหลด เพราะกดปุ่มย้อนกลับจากหน้ารายงาน เบราว์เซอร์คืนหน้านี้
+// จากแคชพร้อมค่าเดิมทุกช่อง (และหน้าจอ "กำลังตรวจ" ค้างทับอยู่) ส่วน Firefox เติมค่าเดิม
+// กลับให้เองตอนรีเฟรช pageshow เกิดหลังทั้งสองกรณี จึงล้างได้ทุกทาง
+const IMPORT_STATUS_DEFAULT = document.getElementById('import-status').textContent;
+function resetCheckForm() {
+  document.getElementById('f').reset();
+  clearImportedFields();
+  document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
+  ethSourceHtml = '';
+  ethSourcePlainText = '';
+  ['ethesis-pdf', 'book-pdf'].forEach(function(id){
+    document.getElementById(id).dispatchEvent(new Event('change'));
+  });
+  setStatus('', IMPORT_STATUS_DEFAULT);
+  document.getElementById('overlay').style.display = 'none';
+  updateConditionalRequirements();
+}
+window.addEventListener('pageshow', resetCheckForm);
 
 // เซสชันหมดอายุระหว่างกรอกฟอร์ม (ทิ้งหน้าไว้นาน / server restart) เซิร์ฟเวอร์จะตอบ
 // 401 JSON แทนหน้า login กันไม่ให้ resp.json() พังเป็น "Unexpected token '<'"

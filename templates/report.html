@@ -3,84 +3,108 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <title>Electronic file checking report</title>
 <style>
-  :root { --navy:#1a3a5c; --gold:#c9a227; --bg:#eef1f5;
-          --red:#c0392b; --red-bg:#fdf1f0; --orange:#d68910; --orange-bg:#fdf6ec;
-          --yellow:#b7950b; --yellow-bg:#fdfaea; --green:#1e8449; --green-bg:#eafaf1;
-          --purple:#7d3c98; --purple-bg:#f9f2fc; }
-  * { box-sizing:border-box; font-family:'Segoe UI','Sarabun',Tahoma,sans-serif; }
-  body { background:var(--bg); margin:0; padding:24px 16px; color:#26303b; }
-  .wrap { max-width:920px; margin:0 auto; }
+  :root { --navy:#16365a; --navy-2:#23548a; --navy-soft:#edf3fa;
+          --gold:#c9a227; --gold-soft:#fcf7e6; --gold-line:#efe1b0;
+          --bg:#f2f5f9; --surface:#ffffff; --line:#e3e8ef; --line-2:#d2dae5;
+          --ink:#1c2733; --ink-2:#4a5868; --ink-3:#7b8898;
+          --ok:#1e8449; --ok-bg:#eaf7ef;
+          --red:#c0392b; --red-bg:#fdf1f0; --orange:#c77c0e; --orange-bg:#fdf5ea;
+          --yellow:#a8870a; --yellow-bg:#fdf9e7; --green:#1e8449; --green-bg:#eaf7ef;
+          --purple:#7d3c98; --purple-bg:#f8f2fb;
+          --ring:0 0 0 3px rgba(35,84,138,.2);
+          --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+          --shadow:0 1px 3px rgba(16,24,40,.05), 0 12px 32px -14px rgba(16,24,40,.18);
+          --font:'IBM Plex Sans Thai','Noto Sans Thai','Sarabun','Segoe UI',Tahoma,sans-serif; }
+  * { box-sizing:border-box; font-family:var(--font); }
+  body { background:var(--bg); margin:0; padding:32px 16px 56px; color:var(--ink);
+         font-size:15px; line-height:1.55; }
+  .wrap { max-width:960px; margin:0 auto; border-radius:20px; box-shadow:var(--shadow); }
 
-  .head { background:linear-gradient(135deg,#1a3a5c 0%,#27568a 100%); color:#fff;
-          border-radius:16px 16px 0 0; padding:24px 32px 20px; position:relative; }
-  .head h1 { font-size:1.3rem; margin:0; font-weight:600; }
-  .head .sub { font-size:.82rem; opacity:.75; margin-top:2px; }
-  .langbtn { position:absolute; top:20px; right:24px; background:rgba(255,255,255,.12);
-          color:#fff; border:1px solid rgba(255,255,255,.4); border-radius:99px;
-          padding:7px 18px; font-size:.82rem; cursor:pointer; font-weight:600; }
-  .langbtn:hover { background:rgba(255,255,255,.22); }
-  .logout-form { position:absolute; top:20px; right:80px; margin:0; }
-  .logout-form button { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35);
-                        border-radius:6px; padding:6px 10px; cursor:pointer; }
-  .stu { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px 24px;
-          margin-top:16px; font-size:.88rem; }
-  .stu .lb { opacity:.65; font-size:.75rem; }
+  .head { position:relative; color:#fff; border-radius:20px 20px 0 0; padding:26px 34px 22px;
+          background:radial-gradient(700px 240px at 100% 0%, rgba(201,162,39,.28) 0%, transparent 60%),
+                     linear-gradient(135deg,#132f50 0%,#1f4a7c 100%); }
+  .head::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
+          background:linear-gradient(90deg,transparent 0%,var(--gold) 50%,transparent 100%); opacity:.7; }
+  .head h1 { font-size:1.35rem; margin:0; font-weight:700; letter-spacing:-.01em; padding-right:190px; }
+  .head .sub { font-size:.84rem; opacity:.78; margin-top:2px; padding-right:190px; }
+  .langbtn { position:absolute; top:22px; right:26px; background:rgba(255,255,255,.14);
+          color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:99px;
+          padding:7px 18px; font-size:.82rem; cursor:pointer; font-weight:700; transition:background .15s; }
+  .langbtn:hover { background:rgba(255,255,255,.26); }
+  .logout-form { position:absolute; top:22px; right:88px; margin:0; }
+  .logout-form button { background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.3);
+                        border-radius:99px; padding:7px 14px; font-size:.82rem; cursor:pointer; transition:background .15s; }
+  .logout-form button:hover { background:rgba(255,255,255,.22); }
+  .stu { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px 26px;
+          margin-top:18px; padding:14px 18px; font-size:.9rem; border-radius:14px;
+          background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); }
+  .stu .lb { opacity:.68; font-size:.74rem; letter-spacing:.01em; }
   .stu .vl { font-weight:600; }
   .stu .pages { font-weight:400; opacity:.75; margin-left:6px; }
 
   .verdict-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
-          background:#fff; padding:18px 32px; border-bottom:1px solid #e4e8ee; }
-  .verdict-label { font-size:.85rem; color:#5a6875; font-weight:600; }
-  .verdict-pill { font-size:1rem; font-weight:700; padding:10px 24px; border-radius:99px; }
-  .verdict-pill.pass { background:var(--green-bg); color:var(--green); }
-  .verdict-pill.fail { background:var(--red-bg); color:var(--red); }
-  .verdict-pill.pending { background:var(--orange-bg); color:var(--orange); }
+          background:var(--surface); padding:18px 34px; border-bottom:1px solid var(--line); }
+  .verdict-label { font-size:.85rem; color:var(--ink-2); font-weight:600; }
+  .verdict-pill { font-size:1rem; font-weight:700; padding:9px 22px; border-radius:99px;
+          border:1px solid transparent; }
+  .verdict-pill.pass { background:var(--green-bg); color:var(--green); border-color:#bfe3cd; }
+  .verdict-pill.fail { background:var(--red-bg); color:var(--red); border-color:#f3cfca; }
+  .verdict-pill.pending { background:var(--orange-bg); color:var(--orange); border-color:#f2dcb8; }
   .stats { display:flex; gap:10px; margin-left:auto; flex-wrap:wrap; }
-  .stat { text-align:center; min-width:84px; padding:8px 14px; border-radius:10px; }
-  .stat b { display:block; font-size:1.3rem; line-height:1.2; }
-  .stat span { font-size:.72rem; }
-  .stat.r { background:var(--red-bg); color:var(--red); }
-  .stat.o { background:var(--orange-bg); color:var(--orange); }
-  .stat.y { background:var(--yellow-bg); color:var(--yellow); }
+  .stat { text-align:center; min-width:92px; padding:9px 14px; border-radius:12px; border:1px solid transparent; }
+  .stat b { display:block; font-size:1.45rem; line-height:1.15; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stat span { font-size:.74rem; font-weight:600; }
+  .stat.r { background:var(--red-bg); color:var(--red); border-color:#f6dcd8; }
+  .stat.o { background:var(--orange-bg); color:var(--orange); border-color:#f4e2c6; }
+  .stat.y { background:var(--yellow-bg); color:var(--yellow); border-color:#efe5bd; }
 
-  .body { background:#fff; border-radius:0 0 16px 16px; padding:26px 32px 30px;
-          box-shadow:0 2px 14px rgba(20,40,70,.07); }
-  h2.sec { font-size:1rem; color:var(--navy); display:flex; align-items:center; gap:8px;
-           margin:26px 0 12px; padding-bottom:8px; border-bottom:2px solid #eef1f5; }
-  h2.sec .count { font-size:.75rem; font-weight:600; padding:2px 10px; border-radius:99px; background:#eef1f5; color:#667; }
+  .body { background:var(--surface); border-radius:0 0 20px 20px; padding:26px 34px 32px; }
+  h2.sec { font-size:1.02rem; color:var(--navy); display:flex; align-items:center; gap:10px;
+           margin:28px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  h2.sec::before { content:""; flex:none; width:4px; height:18px; border-radius:4px; background:var(--gold); }
+  h2.sec .count { font-size:.74rem; font-weight:600; padding:2px 10px; border-radius:99px;
+           background:#eef2f7; color:var(--ink-2); }
 
-  .issue { display:grid; grid-template-columns:6px 1fr; border-radius:10px;
-           overflow:hidden; margin-bottom:10px; background:#fafbfc; border:1px solid #edf0f4; }
-  .issue .bar { background:#ccc; }
-  .issue.RED .bar { background:var(--red); } .issue.RED { background:var(--red-bg); border-color:#f6dedb; }
-  .issue.ORANGE .bar { background:var(--orange); } .issue.ORANGE { background:var(--orange-bg); border-color:#f4e5cd; }
-  .issue.YELLOW .bar { background:var(--yellow); } .issue.YELLOW { background:var(--yellow-bg); border-color:#f1e9c8; }
-  .issue .in { padding:12px 16px; }
-  .issue .loc { font-size:.78rem; font-weight:700; color:#5a6875; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .issue .loc .part { background:rgba(0,0,0,.06); border-radius:6px; padding:1px 8px; font-weight:600; }
-  .issue .loc .cat { background:#fff; border:1px solid rgba(0,0,0,.15); border-radius:99px;
+  .issue { display:grid; grid-template-columns:5px 1fr; border-radius:12px;
+           overflow:hidden; margin-bottom:10px; background:#fafbfd; border:1px solid var(--line);
+           transition:box-shadow .15s; }
+  .issue:hover { box-shadow:var(--shadow-sm); }
+  .issue .bar { background:#cfd6df; }
+  .issue.RED .bar { background:var(--red); } .issue.RED { background:var(--red-bg); border-color:#f6dcd8; }
+  .issue.ORANGE .bar { background:var(--orange); } .issue.ORANGE { background:var(--orange-bg); border-color:#f4e2c6; }
+  .issue.YELLOW .bar { background:var(--yellow); } .issue.YELLOW { background:var(--yellow-bg); border-color:#efe5bd; }
+  .issue .in { padding:13px 18px; }
+  .issue .loc { font-size:.78rem; font-weight:700; color:var(--ink-2); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .issue .loc .part { background:rgba(22,54,90,.07); border-radius:6px; padding:1px 8px; font-weight:600; }
+  .issue .loc .cat { background:#fff; border:1px solid rgba(22,54,90,.14); border-radius:99px;
         padding:1px 10px; font-weight:600; font-size:.72rem; color:#5a4a70; }
-  .issue .found { font-size:.95rem; margin:6px 0 2px; font-weight:600; }
-  .issue .expected { font-size:.85rem; color:#4a5560; }
+  .issue .found { font-size:.96rem; margin:7px 0 3px; font-weight:600; color:var(--ink); }
+  .issue .expected { font-size:.86rem; color:var(--ink-2); }
   .issue .expected b { color:var(--navy); }
-  .issue .fix { font-size:.8rem; color:#8894a0; margin-top:6px; }
-  .rule-source { font-size:.76rem; color:#617184; margin-top:7px; padding-top:7px;
+  .issue .fix { font-size:.8rem; color:var(--ink-3); margin-top:6px; }
+  .rule-source { font-size:.76rem; color:#617184; margin-top:8px; padding-top:8px;
         border-top:1px dashed rgba(60,80,100,.18); }
   .rule-source b { color:var(--navy); }
   .rule-source ul { margin:3px 0 0; padding-left:19px; }
-  .empty { color:#9aa5b0; font-size:.85rem; background:#f7f9fb; border:1px dashed #dde3ea;
-           border-radius:10px; padding:14px 18px; }
+  .empty { color:var(--ink-3); font-size:.86rem; background:#f7f9fb; border:1px dashed var(--line-2);
+           border-radius:12px; padding:14px 18px; }
 
-  .hc { background:var(--purple-bg); border:1px solid #ecdcf4; border-radius:10px;
-        padding:12px 16px; margin-bottom:10px; }
+  .hc { background:var(--purple-bg); border:1px solid #eadcf3; border-radius:12px;
+        padding:13px 18px; margin-bottom:10px; }
   .hc .row1 { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
   .hc .t { font-weight:600; font-size:.92rem; color:#4a2a5c; }
   .hc .w { font-size:.82rem; color:#7a668a; margin-top:2px; }
   .hc .btns { margin-left:auto; display:flex; gap:8px; }
   .pf { border:1.5px solid #cbb3da; background:#fff; color:#6a4a80; font-size:.82rem;
-        padding:7px 16px; border-radius:8px; cursor:pointer; font-weight:600; }
+        padding:7px 16px; border-radius:99px; cursor:pointer; font-weight:600;
+        transition:background .15s, border-color .15s, color .15s, box-shadow .15s; }
+  .pf:hover { box-shadow:var(--shadow-sm); }
+  .pf:focus-visible { outline:none; box-shadow:var(--ring); }
   .pf.pass.on { background:var(--green-bg); border-color:var(--green); color:var(--green); }
   .pf.fail.on { background:var(--red-bg); border-color:var(--red); color:var(--red); }
   /* จุดที่เจ้าหน้าที่กดแล้วมีผลกับข้อความที่ส่งให้นักศึกษา — ขีดข้างซ้ายให้ต่างจาก
@@ -98,34 +122,36 @@
   .hc.state-fail .sf-state { color:#8a2f24; }
   .hc.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
   .hc.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
-  .issue-decide { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
-  .issue-decide .lbl { font-size:.78rem; font-weight:600; color:#5a6875; }
+  .issue-decide { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .issue-decide .lbl { font-size:.78rem; font-weight:600; color:var(--ink-2); }
   .issue-decide .pf { border-color:#c3cede; color:#4a5a70; }
   .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
   .issue.state-pass .bar { background:var(--green); }
   .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
   .issue.state-fail .bar { background:var(--red); }
 
-  .cmt-btn { border:none; background:transparent; color:#8894a0; font-size:.78rem;
-        cursor:pointer; padding:4px 8px; border-radius:6px; margin-top:6px; }
-  .cmt-btn:hover { background:rgba(0,0,0,.06); }
+  .cmt-btn { border:none; background:transparent; color:var(--ink-3); font-size:.78rem;
+        cursor:pointer; padding:4px 8px; border-radius:8px; margin-top:6px; }
+  .cmt-btn:hover { background:rgba(22,54,90,.06); color:var(--navy); }
   .note-editor { display:none; margin-top:8px; }
   .note-editor.open { display:block; }
-  .note-editor textarea { width:100%; border:1px solid #c9d4e0; border-radius:8px;
-        padding:8px 12px; font-size:.85rem; min-height:60px; resize:vertical; }
+  .note-editor textarea { width:100%; border:1px solid var(--line-2); border-radius:10px;
+        padding:9px 12px; font-size:.86rem; min-height:60px; resize:vertical; }
+  .note-editor textarea:focus { outline:none; border-color:var(--navy-2); box-shadow:var(--ring); }
   .note-editor .save { margin-top:6px; background:var(--navy); color:#fff; border:none;
-        border-radius:7px; padding:7px 18px; font-size:.8rem; cursor:pointer; }
+        border-radius:9px; padding:7px 18px; font-size:.8rem; cursor:pointer; font-weight:600; }
+  .note-editor .save:hover { background:var(--navy-2); }
   .note-view { display:none; margin-top:8px; background:#fff; border-left:3px solid var(--gold);
-        padding:8px 12px; font-size:.85rem; color:#4a5560; white-space:pre-wrap; border-radius:0; }
+        padding:8px 12px; font-size:.86rem; color:var(--ink-2); white-space:pre-wrap; border-radius:0 8px 8px 0; }
   .note-view.show { display:block; }
   .note-view b { color:var(--navy); }
 
-  .vf-group { border:1px solid #e2e8f0; border-radius:10px; margin-bottom:10px; overflow:hidden; }
+  .vf-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
   .vf-topic { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
-              background:#f0f4fa; font-weight:700; font-size:.88rem; color:var(--navy);
-              padding:11px 16px; list-style:none; user-select:none; }
+              background:#f3f6fa; font-weight:700; font-size:.88rem; color:var(--navy);
+              padding:12px 18px; list-style:none; user-select:none; transition:background .15s; }
   .vf-topic::-webkit-details-marker { display:none; }
-  .vf-topic:hover { background:#e8eef7; }
+  .vf-topic:hover { background:#e9eff7; }
   .vf-topic.fail { background:var(--red-bg); }
   .vf-topic.pending { background:var(--orange-bg); }
   .vf-topic-name { flex:1; min-width:150px; }
@@ -133,18 +159,18 @@
   details[open] > .vf-topic .vf-arrow { transform:rotate(90deg); }
   .vf-count { font-size:.72rem; font-weight:600; color:#8091a6; }
   .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
-            padding:7px 16px 7px 34px; border-top:1px solid #eef1f5; font-size:.85rem; }
+            padding:8px 18px 8px 36px; border-top:1px solid #eef1f5; font-size:.86rem; }
   .vf-loc { min-width:220px; color:#3d4c5e; }
-  .vf-badge { font-size:.75rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
+  .vf-badge { font-size:.74rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
   .vf-badge.pass { background:var(--green-bg); color:var(--green); }
   .vf-badge.fail { background:var(--red-bg); color:var(--red); }
   .vf-badge.pending { background:var(--orange-bg); color:var(--orange); }
-  .vf-detail { color:#8894a0; font-size:.78rem; }
+  .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
   /* จัดกลุ่มรายงานตามหมวด (กด expand ดูรายละเอียด) */
-  .cat-group { border:1px solid #e2e8f0; border-radius:10px; margin-bottom:10px; overflow:hidden; }
+  .cat-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
   .cat-sum { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
-             font-weight:700; font-size:.88rem; padding:10px 16px; list-style:none; user-select:none; }
+             font-weight:700; font-size:.88rem; padding:11px 18px; list-style:none; user-select:none; }
   .cat-sum::-webkit-details-marker { display:none; }
   .cat-group.RED .cat-sum { background:var(--red-bg); color:var(--red); }
   .cat-group.ORANGE .cat-sum { background:var(--orange-bg); color:var(--orange); }
@@ -153,45 +179,117 @@
   .cat-arrow { font-size:.8rem; transition:transform .15s; opacity:.7; }
   details[open] > .cat-sum .cat-arrow { transform:rotate(90deg); }
   .cat-n { font-size:.72rem; font-weight:600; opacity:.8; }
-  .cat-group .issue { margin:0; border-top:1px solid #eef1f5; border-radius:0; }
-  .copybox { border:1px solid #cfd8e3; border-radius:10px; margin:0 0 16px; overflow:hidden; }
+  .cat-group .issue { margin:0; border-width:1px 0 0; border-top-color:#eef1f5; border-radius:0; }
+  .cat-group .issue:hover { box-shadow:none; }
+  .copybox { border:1px solid #cdd8e6; border-radius:12px; margin:0 0 16px; overflow:hidden;
+             box-shadow:var(--shadow-sm); }
   .copy-sum { display:flex; align-items:center; gap:12px; flex-wrap:wrap; cursor:pointer;
-              background:#eef4ff; font-weight:700; font-size:.9rem; color:var(--navy);
-              padding:11px 16px; list-style:none; user-select:none; }
+              background:var(--navy-soft); font-weight:700; font-size:.9rem; color:var(--navy);
+              padding:12px 18px; list-style:none; user-select:none; }
   .copy-sum::-webkit-details-marker { display:none; }
   .copy-btn { margin-left:auto; border:1px solid var(--navy); background:#fff; color:var(--navy);
-              border-radius:8px; padding:4px 14px; font-size:.8rem; font-weight:700; cursor:pointer; }
+              border-radius:99px; padding:5px 16px; font-size:.8rem; font-weight:700; cursor:pointer;
+              transition:background .15s, color .15s; }
   .copy-btn:hover { background:var(--navy); color:#fff; }
   .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee;
-               padding:12px 16px; font:0.82rem/1.5 ui-monospace,Consolas,monospace; resize:vertical;
-               min-height:120px; background:#fbfdff; color:#22303f; white-space:pre; }
+               padding:14px 18px; font:0.84rem/1.6 var(--font); resize:vertical;
+               min-height:140px; background:#fbfdff; color:#22303f; white-space:pre; }
+  .copy-text:focus { outline:none; background:#fff; }
   .copy-print { display:none; }
-  .copy-error { margin:8px 14px 12px; padding:8px 12px; border-radius:8px;
+  .copy-error { margin:8px 14px 12px; padding:9px 12px; border-radius:10px;
                 background:var(--red-bg); border:1px solid #f0ccc7; color:#8a2f24;
                 font-size:.85rem; line-height:1.6; }
 
-  .infobox { background:#f0f4fa; border-radius:10px; padding:10px 16px; font-size:.82rem;
-             margin-bottom:8px; color:#3d4c5e; }
+  .infobox { background:#f2f6fb; border:1px solid #e1e9f3; border-radius:12px; padding:10px 16px;
+             font-size:.84rem; margin-bottom:8px; color:#3d4c5e; }
   .infobox b { color:var(--navy); }
-  .actions { display:flex; gap:12px; margin-top:28px; flex-wrap:wrap; }
-  .btn { text-decoration:none; font-size:.9rem; padding:11px 22px; border-radius:9px; cursor:pointer; border:none; }
-  .btn.primary { background:var(--navy); color:#fff; }
+  .actions { display:flex; gap:12px; margin-top:30px; padding-top:22px; border-top:1px solid var(--line); flex-wrap:wrap; }
+  .btn { text-decoration:none; font-size:.92rem; font-weight:600; padding:11px 22px; border-radius:11px;
+         cursor:pointer; border:none; transition:background .15s, color .15s, box-shadow .15s; }
+  .btn.primary { background:var(--navy); color:#fff; box-shadow:0 10px 22px -10px rgba(22,54,90,.65); }
+  .btn.primary:hover { background:var(--navy-2); }
   .btn.ghost { background:#fff; color:var(--navy); border:1.5px solid var(--navy); }
+  .btn.ghost:hover { background:var(--navy-soft); }
+  .btn:focus-visible { outline:none; box-shadow:var(--ring); }
 
   @media print {
     body { background:#fff; padding:0; }
+    .wrap { box-shadow:none; }
     .body { box-shadow:none; }
+    .head { background:#16365a; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     .actions, .cmt-btn, .note-editor, .langbtn, .logout-form { display:none !important; }
     .vf-arrow { display:none; }
     .vf-topic { cursor:default; }
     .copy-text { display:none; }
     .copy-print { display:block; padding:12px 16px; border-top:1px solid #dbe4ee;
-                  font:0.82rem/1.6 'Segoe UI','Sarabun',Tahoma,sans-serif;
+                  font:0.82rem/1.6 var(--font);
                   white-space:pre-wrap; color:#22303f; }
   }
   @media (max-width:640px) {
+    body { padding:14px 8px 36px; }
     .head, .verdict-bar, .body { padding-left:18px; padding-right:18px; }
+    .head h1, .head .sub { padding-right:0; }
+    .langbtn, .logout-form { position:static; display:inline-block; margin:0 6px 12px 0; }
     .stats { margin-left:0; }
+  }
+
+  /* ---------- รอบสอง: แยกสามการ์ด การ์ดข้อพื้นขาว ---------- */
+  body { background:radial-gradient(1100px 520px at 0% -10%, #dbe6f4 0%, transparent 60%),
+                    radial-gradient(900px 480px at 100% 0%, #f3ead0 0%, transparent 55%), var(--bg);
+         background-attachment:fixed; }
+  .wrap { box-shadow:none; border-radius:0; }
+  .head { border-radius:22px; box-shadow:0 18px 40px -22px rgba(18,44,75,.8); overflow:hidden; }
+  .verdict-bar { margin-top:16px; border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow);
+          padding:20px 28px; gap:18px; }
+  .verdict-label { font-size:.9rem; }
+  .verdict-pill { font-size:1.12rem; padding:11px 24px 11px 20px; display:inline-flex; align-items:center; gap:10px; }
+  .verdict-pill::before { display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
+          color:#fff; font-size:.9rem; font-weight:700; }
+  .verdict-pill.pass::before { content:"✓"; background:var(--green); }
+  .verdict-pill.fail::before { content:"✕"; background:var(--red); }
+  .verdict-pill.pending::before { content:"…"; background:var(--orange); }
+  .stat { min-width:104px; padding:12px 16px 10px; background:#fff !important; border:1px solid var(--line);
+          border-top:4px solid currentColor; border-radius:14px; box-shadow:var(--shadow-sm); }
+  .stat b { font-size:1.9rem; }
+  .body { margin-top:16px; border:1px solid var(--line); border-radius:22px; box-shadow:var(--shadow);
+          padding:24px 30px 30px; }
+  h2.sec { font-size:1.1rem; }
+
+  .issue { background:#fff; border-color:var(--line); box-shadow:var(--shadow-sm); }
+  .issue.RED, .issue.ORANGE, .issue.YELLOW { background:#fff; border-color:var(--line); }
+  .issue .bar { width:5px; }
+  .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
+  .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
+  .cat-group { background:#fff; border-left-width:4px; }
+  .cat-group.RED { border-left-color:var(--red); }
+  .cat-group.ORANGE { border-left-color:var(--orange); }
+  .cat-group.YELLOW { border-left-color:var(--yellow); }
+  .cat-group.RED .cat-sum, .cat-group.ORANGE .cat-sum, .cat-group.YELLOW .cat-sum { background:#fff; }
+  .cat-group[open] > .cat-sum { border-bottom:1px solid var(--line); }
+  .cat-group .issue { box-shadow:none; }
+  /* ในกลุ่มมีแถบสีโซนที่ขอบกลุ่มอยู่แล้ว แถบของแต่ละข้อจึงเหลือไว้บอก "ผลที่เจ้าหน้าที่กด" เท่านั้น */
+  .cat-group .issue .bar { background:transparent; }
+  .cat-group .issue.state-pass .bar { background:var(--green); }
+  .cat-group .issue.state-fail .bar { background:var(--red); }
+  .cat-n { background:#f1f4f8; color:var(--ink-2); padding:2px 10px; border-radius:99px; opacity:1; }
+  .vf-group { background:#fff; }
+  .vf-topic { background:#fff; }
+  .vf-topic:hover { background:#f6f8fb; }
+  .vf-topic.fail { background:#fff; box-shadow:inset 4px 0 0 var(--red); }
+  .vf-topic.pending { background:#fff; box-shadow:inset 4px 0 0 var(--orange); }
+  .vf-count { background:#f1f4f8; padding:2px 10px; border-radius:99px; }
+  .hc { background:#fff; border-color:#e8def0; border-left:4px solid #b28bc8; box-shadow:var(--shadow-sm); }
+  .hc.state-pass { background:var(--green-bg); }
+  .hc.state-fail { background:var(--red-bg); }
+  .infobox { background:#fff; border-color:var(--line); border-left:4px solid var(--navy-2); }
+
+  @media print {
+    body { background:#fff; }
+    .head, .verdict-bar, .body, .stat, .issue, .hc { box-shadow:none !important; }
+  }
+  @media (max-width:640px) {
+    .verdict-bar, .body { border-radius:16px; }
+    .head { border-radius:18px; }
   }
 </style>
 </head>
@@ -587,20 +685,6 @@ var TR = [
   [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
   [/(\d+)\/ส่วนเนื้อหา/g, '$1 (start of the body)'],
   // ---- ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง (ประโยคเต็ม ต้องอยู่บนสุด) ----
-  [/ไม่ได้กรอกชื่อเรื่องภาษาอังกฤษ ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English thesis title filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อเรื่องภาษาไทย ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai thesis title filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อนักศึกษาภาษาอังกฤษ ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English student name filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อนักศึกษาภาษาไทย ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai student name filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกรหัสนักศึกษา ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the student ID filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาต้นฉบับจาก eThesis \(อังกฤษ\) — ใช้ตรวจหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the original English degree name from eThesis (used to check the cover) filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาต้นฉบับจาก eThesis \(ไทย\) — ใช้ตรวจหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the original Thai degree name from eThesis (used to check the cover) filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาที่ใช้ตรวจหน้าลงนาม \(อังกฤษ\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the English degree name used to check the approval page filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาที่ใช้ตรวจหน้าลงนาม \(ไทย\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the Thai degree name used to check the approval page filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาแบบย่อในบทคัดย่อ \(อังกฤษ\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the abbreviated English degree name on the abstract page filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกชื่อปริญญาแบบย่อในบทคัดย่อ \(ไทย\) ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the abbreviated Thai degree name on the abstract page filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกวันที่สอบผ่าน ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the examination pass date filled in, so this comparison was skipped'],
-  [/ไม่ได้กรอกปีบนหน้าปก ระบบจึงข้ามการเทียบข้อมูลนี้/g, 'The form does not have the year on the cover filled in, so this comparison was skipped'],
-  [/กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ\./g, 'Fill in the missing form fields and run the check again, or verify this item by eye against Form GR.'],
   // ---- อ่านรายชื่อกรรมการไม่ได้ / ชื่อเกือบตรง (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/ระบบอ่านรายชื่อกรรมการบนหน้านี้ไม่ได้ \(อาจเป็นหน้าภาพสแกน หรือใช้ฟอนต์ที่ระบบอ่านไม่ออก\)/g, 'The system could not read the committee names on this page (it may be a scanned image, or use a font the system cannot read)'],
   [/รายชื่อบนหน้านี้ไม่ตรงกับข้อมูลอนุมัติสักคนเดียว ระบบอ่านได้ว่า/g, 'None of the names on this page match the approved data; the system read:'],
@@ -637,9 +721,9 @@ var TR = [
   [/สารบัญมี (\d+) บท เนื้อหามี (\d+) บท เพราะสารบัญพิมพ์ซ้ำ: (.+)/g, 'The table of contents lists $1 chapters while the body has $2, because these are listed twice: $3'],
   [/แต่ละบทต้องมีรายการเดียวในสารบัญ/g, 'Each chapter must appear only once in the table of contents'],
   [/ลบรายการที่ซ้ำออกจากสารบัญ/g, 'Remove the duplicated entries from the table of contents'],
-  [/ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\):/g, 'These committee names on this page are not in Capital Case:'],
-  [/ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ/g, 'Committee names on the approval pages must be in Capital Case, not the all-uppercase form used on the abstract page'],
-  [/แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Capital Case; staff to confirm'],
+  [/ชื่อกรรมการบนหน้านี้ไม่ใช่ Sentence Case:/g, 'These committee names on this page are not in Sentence Case:'],
+  [/ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case คือตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ/g, 'Committee names on the approval pages must be in Sentence Case, with only the first letter of the given name and of the surname capitalised, not the all-uppercase form used on the abstract page'],
+  [/แก้ชื่อกรรมการบนหน้านี้เป็น Sentence Case แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Sentence Case; staff to confirm'],
   [/เพิ่มรายชื่อที่ขาดให้ครบตาม (บฑ\.\d)/g, 'Add the missing names so the list matches Form GR.$1'],
   [/ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อตาม (บฑ\.\d)/g, 'Remove the extra names so only the ones on Form GR.$1 remain'],
   [/ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน (\d+) หน้า/g, 'A font in the file makes the text extract incorrectly on $1 page(s)'],
@@ -714,24 +798,19 @@ var TR = [
   [/^ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่$/g, 'only the upper/lower case differs'],
   [/ พิมพ์ผิดเล็กน้อย/g, ', a small typo'],
   [/ ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่/g, ', only the upper/lower case differs'],
-  // ---- ด่านกันอัปโหลดไฟล์สลับคน ----
-  [/^ไฟล์ที่อัปโหลด$/g, 'Uploaded files'],
-  [/ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง \((.+?)\) น่าจะเป็นคนละคนกัน/g, 'The approved data matches the document on none of these ($1) — they look like two different students'],
-  [/ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน/g, 'The eThesis file and the document file must belong to the same student'],
-  [/ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ \(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน\)/g, 'Check whether the eThesis file matches the document, then run the check again (all approved-data comparisons were skipped for now)'],
   [/ชื่อเรื่อง \/ /g, 'Thesis title / '],
   [/ \/ ชื่อเรื่อง\)/g, ' / Thesis title)'],
   [/^ชื่อเรื่อง$/g, 'Thesis title'],
   // ---- ตัวพิมพ์ของชื่อกรรมการบนหน้าลงนาม ----
-  // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Capital Case ----
+  // ---- ตัวพิมพ์ของชื่อนักศึกษา: หน้าปก/บทคัดย่อ = UPPERCASE, หน้าลงนาม = Sentence Case ----
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้พิมพ์ว่า/g, 'The name printed on this page is'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE) with no title prefix:'],
-  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in Capital Case with no title prefix:'],
+  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\) และไม่มีคำนำหน้านาม คือ/g, 'On this page the name must be in Sentence Case (only the first letter of the given name and of the surname capitalised) with no title prefix:'],
   [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\) คือ/g, 'On this page the name must be in ALL CAPS (UPPERCASE):'],
-  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\) คือ/g, 'On this page the name must be in Capital Case:'],
+  [/(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)ในหน้านี้ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\) คือ/g, 'On this page the name must be in Sentence Case (only the first letter of the given name and of the surname capitalised):'],
   [/แก้(ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้เป็น/g, 'Change the name on this page to'],
   [/ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\)/g, 'must be in ALL CAPS (UPPERCASE)'],
-  [/ต้องเป็นตัวพิมพ์ใหญ่ต้นคำ \(Capital Case\)/g, 'must be in Capital Case'],
+  [/ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\)/g, 'must be in Sentence Case (only the first letter of the given name and of the surname capitalised)'],
   [/มีคำนำหน้านาม "(.+?)" ซึ่งหน้านี้ต้องไม่มี/g, 'has the title "$1", which this page must not have'],
   [/^โครงสร้างเล่ม$/g, 'Document structure'],
   [/^เลขหน้า$/g, 'Page numbers'],
@@ -830,6 +909,9 @@ var TR = [
   // ชื่อกับรหัสต้องอยู่บรรทัดเดียวกันตาม template
   [/บรรทัดที่พิมพ์รหัสนักศึกษาไม่มี(.+?)อยู่ด้วย คือ ("[^"]*")/g, '$1 is missing from the line that carries the student ID: $2'],
   [/(.+?)กับรหัสนักศึกษาต้องอยู่บรรทัดเดียวกัน คือ ("[^"]*")/g, '$1 and the student ID must be on the same line: $2'],
+  [/บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย ("[^"]*")/g, 'The student-name line prints the ID in Thai numerals: $1'],
+  [/รหัสนักศึกษาใน(บทคัดย่ออังกฤษ|บทคัดย่อไทย)ต้องเป็นเลขอารบิกเท่านั้น คือ ("[^"]*")/g, 'The student ID must use Arabic numerals only: $2'],
+  [/แก้รหัสนักศึกษาเป็นเลขอารบิก/g, 'Change the student ID to Arabic numerals'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า ("[^"]*") (.+)/g, 'The student-name line prints the ID $1, $2'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า ("[^"]*")$/g, 'The student-name line prints the ID $1'],
   [/ไม่พบรหัสนักศึกษาบนหน้านี้ \(ต้องมีทั้งตัวเลขและรหัสหลักสูตร\)/g, 'No student ID was found on this page (it must contain both the number and the program code)'],

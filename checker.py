@@ -19,7 +19,6 @@ from ethesis_rules import (
     CANONICAL_OPTION_1,
     CANONICAL_OPTION_2,
     DEFAULT_RULE_BY_PART,
-    FORM_FIELD_LABELS,
     MATCH_RULES,
     FRONT_MATTER_RULES,
     NOT_CHECKED,
@@ -681,8 +680,11 @@ _STUDENT_NAME_STYLE = {
     "signature": ("title", True),
 }
 
+# หน้าลงนามใช้คำว่า Sentence Case เหมือนข้อชื่อกรรมการ (เจ้าหน้าที่สั่ง ก.ย. 2569
+# "จัดไปให้เหมือนกัน") ถ้อยคำเดิมของเจ้าหน้าที่ข้างบนเขียน Capital case ตัวตรวจไม่เปลี่ยน
+# เพราะชื่อคนเป็นคำนามเฉพาะ Sentence Case ของชื่อจึงขึ้นต้นตัวใหญ่ทั้งชื่อและนามสกุล
 _STYLE_LABEL = {"upper": "ตัวพิมพ์ใหญ่ทั้งหมด (UPPERCASE)",
-                "title": "ตัวพิมพ์ใหญ่ต้นคำ (Capital Case)"}
+                "title": "ตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล (Sentence Case)"}
 
 
 def _printed_student_name(page_text, core_name):
@@ -910,7 +912,12 @@ def committee_name_for_case(text):
 
 
 def _report_committee_name_case(rep, members, loc):
-    """ชื่อกรรมการบนหน้าลงนามต้องไม่เป็นตัวพิมพ์ใหญ่ทั้งหมด
+    """ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ชื่อคนเป็นคำนามเฉพาะ Sentence Case ของชื่อจึงขึ้นต้นตัวใหญ่ทั้งชื่อและนามสกุล
+    ("Mathuros Tipayamongkholgul") ตัวตรวจจึงใช้ _is_title_case ได้ตรงตัว ข้อความ
+    ต้องอธิบายไว้ด้วยว่าหมายถึงอะไร ไม่งั้นนักศึกษาที่อ่าน Sentence Case ตามตัวอักษร
+    จะพิมพ์นามสกุลเป็นตัวเล็ก แล้วโดนฟ้องซ้ำ
 
     หน้าลงนามใช้ตัวพิมพ์แบบชื่อคน ("Mathuros Tipayamongkholgul") ต่างจากหน้าบทคัดย่อ
     ที่ต้องเป็น UPPERCASE ทั้งหมด — นักศึกษาที่คัดรายชื่อจากหน้าบทคัดย่อมาวางจะได้
@@ -930,10 +937,10 @@ def _report_committee_name_case(rep, members, loc):
         return
     shown = ", ".join(f'"{n}"' for n in bad)
     rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ตัวพิมพ์ใหญ่ต้นคำ (Capital Case): {shown}",
-            "ชื่อกรรมการบนหน้าลงนามต้องเป็นตัวพิมพ์ใหญ่ต้นคำ (Capital Case) "
-            "ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ",
-            "แก้ชื่อกรรมการบนหน้านี้เป็นตัวพิมพ์ใหญ่ต้นคำ แล้วให้เจ้าหน้าที่ยืนยัน",
+            f"ชื่อกรรมการบนหน้านี้ไม่ใช่ Sentence Case: {shown}",
+            "ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case คือตัวพิมพ์ใหญ่เฉพาะอักษรแรก"
+            "ของชื่อและนามสกุล ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ",
+            "แก้ชื่อกรรมการบนหน้านี้เป็น Sentence Case แล้วให้เจ้าหน้าที่ยืนยัน",
             "FRONT.COMMITTEE")
 
 
@@ -1349,27 +1356,6 @@ def _report_missing_abstract_language(rep, has_en, has_th, en_loc="", th_loc="")
             "เพิ่มบทคัดย่อ" + "และ".join(missing), "FRONT.ABSTRACT")
 
 
-def _report_missing_form_fields(rep, approved, required_fields):
-    """ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง — สีส้ม ไม่ใช่สีแดง
-
-    ช่องฟอร์มว่าง = ข้อมูลอ้างอิงไม่ครบ **ไม่ใช่ข้อบกพร่องของเล่ม** จึงต้องไม่ตัดสิน
-    ว่าเล่ม "ไม่ผ่าน" และต้องไม่เข้ารายการที่นักศึกษาต้องแก้ (system_note) เพราะ
-    นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย — คนที่ทำให้หายได้คือเจ้าหน้าที่ที่กรอกฟอร์ม
-
-    เจอจริงกับเล่มที่ 6: หน้า eThesis ไม่มีบรรทัดตัวย่อปริญญาภาษาอังกฤษให้อ่าน และ
-    "DOCTOR OF NURSING SCIENCE" ยังไม่มีในตารางตัวย่อ ระบบจึงเว้นช่องว่างไว้
-    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
-    """
-    for field_name in required_fields:
-        if soft(approved.get(field_name, "")):
-            continue
-        rep.add("ORANGE", "front_matter", "ข้อมูลอ้างอิงในแบบฟอร์ม",
-                f"ไม่ได้กรอก{FORM_FIELD_LABELS[field_name]} ระบบจึงข้ามการเทียบข้อมูลนี้",
-                "การตรวจอย่างเข้มต้องมีข้อมูลอ้างอิงครบทุกช่องที่กำหนด",
-                "กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ.",
-                "FORM.REQUIRED", system_note=True)
-
-
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                       program_language, A, page_labels=None):
     """ตรวจกรรมการบนหน้าลงนามทั้งสองหน้า (ตามกริดตายตัวของ template)
@@ -1536,7 +1522,15 @@ def _check_student_line_pairs_name_with_id(rep, page_text, core_name, student_id
 
 # อักษรไทย (ไม่รวมเลขไทยกับวรรณยุกต์) — ใช้แยก "ช่องรหัสที่ฟอนต์ทำเพี้ยน" ออกจาก
 # "นามสกุลไทยที่ค้างอยู่ตรงนั้นเพราะเล่มลืมพิมพ์รหัส"
-_THAI_LETTER = re.compile('[ก-ฮ]')
+# พยัญชนะไทยเท่านั้น — ใช้แยก "นามสกุลไทยที่ค้างอยู่ตรงช่องรหัส" ออกจาก "ตัวเลขที่ฟอนต์
+# ทำเพี้ยน" ห้ามตั้งชื่อ _THAI_LETTER เพราะชื่อนั้นประกาศซ้ำอีกที่ข้างล่าง (สำหรับตัดสิน
+# ภาษาชื่อเรื่อง ครอบสระ วรรณยุกต์ และเลขไทยด้วย) ตัวหลังจะทับตัวนี้เงียบ ๆ — เคยพลาดมาแล้ว
+# ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นเลขไทยหรือสระ จึงถูกตัดสินผิดว่าเป็นนามสกุล แล้วฟ้องแดง
+_THAI_CONSONANT = re.compile('[ก-ฮ]')
+# เลขไทยทั้งช่อง = อ่านออกชัดเจน แค่ใช้เลขผิดระบบ ไม่ใช่ฟอนต์ทำเพี้ยน — ต้องไปทางข้อแดง
+# "พิมพ์เป็นเลขไทย" (เจ้าหน้าที่ยืนยัน ก.ย. 2569 ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น)
+_THAI_DIGITS_ONLY = re.compile('[๐-๙]+')
+_THAI_DIGIT = re.compile('[๐-๙]')
 
 
 def is_page_count_line(line):
@@ -1588,12 +1582,27 @@ def unreadable_id_digits(page_text, student_id, names=()):
                        for span in range(1, min(4, len(tokens) - k + 1))):
                 continue
             slot = tokens[k - 1]
-            if len(slot) != len(digits) or _THAI_LETTER.search(slot):
+            if len(slot) != len(digits) or _THAI_CONSONANT.search(slot):
+                continue
+            if _THAI_DIGITS_ONLY.fullmatch(slot):
                 continue
             if any(norm(slot) in name for name in known if name):
                 continue
             return slot
     return ""
+
+
+def thai_numeral_student_id(printed, student_id, abs_label):
+    """(พบ, ควรเป็น, ต้องแก้) เมื่อรหัสนักศึกษาพิมพ์เป็นเลขไทย — คืน None ถ้าไม่ใช่
+
+    เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่ารหัสนักศึกษาต้องเป็นเลขอารบิกเท่านั้น ของเดิมรหัส
+    ที่พิมพ์เป็นเลขไทยถูกนับเป็น "ฟอนต์ทำเพี้ยน อ่านไม่ออก" แล้วผ่านไปเป็นแค่ข้อมูลประกอบ
+    """
+    if not printed or not _THAI_DIGIT.search(printed):
+        return None
+    return (f'บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย "{printed}"',
+            f'รหัสนักศึกษาใน{abs_label}ต้องเป็นเลขอารบิกเท่านั้น คือ "{student_id}"',
+            "แก้รหัสนักศึกษาเป็นเลขอารบิก")
 
 
 def _closest_student_id(page_text, expected):
@@ -1907,7 +1916,24 @@ def _exam_date_key(text):
     หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุศักราชคั่นระหว่าง
     เดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569" ถ้าไม่ตัดออกจะฟ้องผิด
     """
-    return norm(re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or "")))
+    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or ""))
+    # norm() ตัดช่องว่างทิ้งหมด ตัวเลขสองชุดที่คั่นด้วยช่องว่างหรือขึ้นบรรทัดใหม่จึงต่อกัน
+    # เป็นเลขเดียว ("หน้า 2" บรรทัดบน + "7 July" บรรทัดล่าง = "27JULY") ต้องคั่นไว้ก่อน
+    return " ".join(norm(part) for part in re.split(r'(?<=\d)\s+(?=\d)', text))
+
+
+def exam_date_on_page(exam_date, page_text):
+    """วันที่สอบตามข้อมูลอนุมัติพิมพ์อยู่บนหน้านี้หรือไม่
+
+    ห้ามค้นแบบ "มีข้อความนี้อยู่ข้างใน" เฉย ๆ — วันที่อนุมัติ "7 July 2026" จะไปเจอ
+    อยู่ในหน้าที่พิมพ์ "17 July 2026" หรือ "27 July 2026" แล้วผ่านทั้งที่วันผิด
+    ไฟล์ eThesis เขียนวันที่ 1-9 เป็นเลขหลักเดียวเสมอ วันต้นเดือนจึงโดนทุกเล่ม
+    ต้องไม่มีตัวเลขติดอยู่หน้าหรือหลังวันที่ที่ค้นเจอ
+    """
+    want = _exam_date_key(exam_date)
+    if not want:
+        return False
+    return bool(re.search(rf'(?<!\d){re.escape(want)}(?!\d)', _exam_date_key(page_text)))
 
 
 def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
@@ -1922,7 +1948,7 @@ def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
         return
     for k, idx in enumerate(sig_pages):
         loc = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
-        if _exam_date_key(exam_date) in _exam_date_key(pages[idx]):
+        if exam_date_on_page(exam_date, pages[idx]):
             rep.add_verification("วันที่สอบผ่าน", loc, "pass")
             continue
         found_date = find_signature_date(pages[idx])
@@ -3076,9 +3102,11 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
       นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
     - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
 
-    ข้อที่ตั้ง system_note=True ไม่เข้าสรุปทุกกรณี เพราะเป็นข้อจำกัดของระบบเอง
-    (เช่น เจ้าหน้าที่ยังไม่ได้กรอกข้อมูลอนุมัติ ระบบจึงข้ามการเทียบข้อมูลนั้น)
-    นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย การใส่ไว้ในใบสั่งแก้ทำให้นักศึกษาสับสน
+    ข้อที่ตั้ง system_note=True ไม่เข้าสรุป "โดยปริยาย" เพราะเป็นปัญหาฝั่งเจ้าหน้าที่
+    (เช่น ยังไม่ได้กรอกข้อมูลอนุมัติ หรือเลือกไฟล์ eThesis คนละคนกับเล่ม) นักศึกษาแก้
+    เล่มยังไงข้อนี้ก็ไม่หาย แต่ถ้าเจ้าหน้าที่กด "ไม่ผ่าน" ต้องเข้าสรุปเหมือนข้อสีส้มอื่น
+    — เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "สีส้มกับสีเหลืองถ้ากด ต้องให้เป็นสีแดง = แก้ไข"
+    ของเดิมกันข้อนี้ออกทุกกรณี ปุ่ม ✗ บนการ์ดสองใบนี้จึงกดแล้วไม่มีอะไรเกิดขึ้น
 
     failed/passed เป็นชุดคีย์รูปแบบ "ZONE:index" เช่น {"ORANGE:0", "YELLOW:2"}
     staff เป็นชุด id ของ "ตัวเลือก" ใน STAFF_CHECKS ที่เจ้าหน้าที่กด (เช่น
@@ -3087,18 +3115,20 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     """
     failed = set(failed or ())
     passed = set(passed or ())
-    items = list(report["issues_by_zone"].get("RED") or [])
+    items = [it for it in (report["issues_by_zone"].get("RED") or [])
+             if not it.get("system_note")]
     # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
     # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
     for check, choice in staff_choices(staff, "section"):
         items.append(staff_issue(check, choice))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
-        if f"ORANGE:{index}" not in passed:
+        key = f"ORANGE:{index}"
+        if key in failed or (key not in passed and not issue.get("system_note")):
             items.append(issue)
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
             items.append(issue)
-    return [it for it in items if not it.get("system_note")]
+    return items
 
 
 def _corrected_value(issue):
@@ -3155,6 +3185,14 @@ def _prose_location(location):
 SUMMARY_INDENT = "   "
 
 
+# ท่อนที่เขียนถึง "เจ้าหน้าที่" บนการ์ดสีเหลือง — อยู่ในรายงานได้ แต่ห้ามติดไปกับข้อความ
+# สรุปที่ส่งนักศึกษา เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากดไม่ผ่านข้อเลขหน้าในสารบัญแล้ว
+# นักศึกษาได้บรรทัด "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย
+# ซึ่งอ่านแล้วขัดกับการที่ถูกสั่งให้แก้ ส่วนบรรทัด fix "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่า
+# ควรแก้" เป็นตัวสำรองเมื่อ expected ว่าง จึงต้องกันด้วย ไม่งั้นหลุดมาแทนที่กัน
+_STAFF_ONLY_DIRECTIVES = ("เป็นข้อสังเกต ไม่ได้ตรวจ", "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่")
+
+
 def _summary_sentence(issue, skip_location=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
@@ -3183,7 +3221,10 @@ def _summary_sentence(issue, skip_location=False):
     else:
         # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ใช้ประโยค expected/fix เต็ม ๆ
         # ซึ่งเขียนไว้ในรูป "ต้องเป็น ..." อยู่แล้ว จึงไม่ต้องเติมคำนำอะไรอีก
-        directive = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+        directive = next(
+            (text for text in (summary_tidy(issue.get("expected")),
+                               summary_tidy(issue.get("fix")))
+             if text and not text.startswith(_STAFF_ONLY_DIRECTIVES)), "")
         if directive:
             lines.append(directive)
     kept = [line for line in lines if line]
@@ -3227,9 +3268,9 @@ def zone_counts(report, failed=None, passed=None, staff=None):
         กด "ผ่าน"      หายไปจากทุกกล่อง (เจ้าหน้าที่รับได้แล้ว)
         ยังไม่กด       อยู่กล่องเดิม
 
-    ข้อ system_note (ข้อจำกัดของระบบ เช่น อ่านหน้านั้นไม่ออก) ไม่เคยเข้าข้อความสรุป
-    เพราะนักศึกษาแก้เล่มยังไงก็ไม่หาย จึงห้ามนับเป็น "ต้องแก้" แม้กดไม่ผ่าน —
-    ค้างไว้ที่ "รอยืนยัน" ตามความจริงว่ายังไม่มีข้อสรุป ส่วนกด "ผ่าน" ถือว่าดูแล้ว
+    ข้อ system_note ใช้กติกาเดียวกับข้อสีส้มอื่นทุกประการ — กด "ไม่ผ่าน" แล้วเป็น
+    "ต้องแก้" และเข้าข้อความสรุปด้วย (เจ้าหน้าที่สั่ง ก.ย. 2569) ต่างกันแค่ตอนยังไม่กด
+    ข้อนี้ไม่อยู่ในข้อความสรุป (ดู issues_to_fix)
     """
     failed, passed = set(failed or ()), set(passed or ())
     zones = report.get("issues_by_zone") or {}
@@ -3239,9 +3280,7 @@ def zone_counts(report, failed=None, passed=None, staff=None):
     pending = notice = 0
     for index, issue in enumerate(zones.get("ORANGE") or []):
         key = f"ORANGE:{index}"
-        if issue.get("system_note"):
-            pending += key not in passed
-        elif key in failed:
+        if key in failed:
             red += 1
         elif key not in passed:
             pending += 1
@@ -3570,6 +3609,24 @@ def describe_diff(found, expected):
         if by_word:
             return by_word
     return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
+
+
+def _letters_keep_case(text):
+    """ตัวอักษรและตัวเลขล้วน โดย "คงตัวพิมพ์เล็ก-ใหญ่ไว้" — norm() แปลงเป็นตัวใหญ่หมด"""
+    text = _TH_MARKS.sub('', (text or '').replace('ำ', 'า'))
+    return re.sub(r'[^A-Za-zก-๙0-9]', '', text)
+
+
+def degree_differs_only_in_spacing(expected, page_text):
+    """ชื่อปริญญาบนหน้านี้ต่างจากข้อมูลอนุมัติ "เฉพาะวรรคตอน/ช่องว่าง" หรือไม่
+
+    เป็นเงื่อนไขของข้อสังเกตสีเหลือง "ต่างเฉพาะวรรคตอน/ช่องว่าง" ซึ่งผ่านได้ ของเดิมเทียบ
+    ด้วย norm() ที่แปลงเป็นตัวใหญ่ทั้งหมด ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่
+    ("MASTER OF SCIENCE" กับ "Master of Science") จึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบาย
+    ที่ผิด แล้วเล่มผ่านได้ — ตัวพิมพ์ผิดต้องเป็นแดงเหมือนเดิม (ดู mismatch_detail)
+    """
+    want = _letters_keep_case(expected)
+    return bool(want) and want in _letters_keep_case(page_text)
 
 
 def mismatch_detail(label, compared, expected=''):
@@ -4656,9 +4713,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     abs_en_idx = abs_en_pages[0] if abs_en_pages else None
     has_th_abs, has_en_abs = abs_th_idx is not None, abs_en_idx is not None
 
-    # ไฟล์ eThesis เป็นของนักศึกษาคนเดียวกับเล่มไหม — ต้องรู้ก่อนกฎอื่นที่ใช้ข้อมูลอนุมัติ
-    # (รวมถึงกฎชนิดเลขหน้าส่วนนำ ที่อ่าน program_language จากข้อมูลอนุมัติ)
-    same_student, sig_checked, _sig_found = (
+    # ไฟล์ eThesis เป็นของนักศึกษาคนเดียวกับเล่มไหม — ใช้ภายในเท่านั้น ไม่มีการ์ดแล้ว
+    # (เจ้าหน้าที่สั่ง ก.ย. 2569: เลือกไฟล์ผิดคนก็ตรวจผิด ให้เจ้าหน้าที่ตรวจใหม่เอง)
+    # ยังต้องรู้ไว้กันข้อสรุปที่ "หยุดตรวจทั้งเล่ม" หรือ "เดาโครงเล่ม" จากข้อมูลของคนอื่น
+    # คือด่านภาษาของเล่ม ผังบท และชนิดเลขหน้าส่วนนำ ส่วนการเทียบข้อมูลอนุมัติทำตามปกติ
+    same_student, _checked, _found = (
         ethesis_matches_book(approved, pages)
         if approved and not skip_identity_check else (True, [], []))
     # ---------- ภาษาของเล่มต้องตรงกับที่ได้รับอนุมัติ ----------
@@ -5365,21 +5424,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # ---------- เทียบข้อมูลอนุมัติ ----------
     _p("เทียบข้อมูลอนุมัติ (ชื่อเรื่อง/ชื่อนักศึกษา)")
-    if approved and not same_student:
-        # ข้ามการเทียบข้อมูลอนุมัติทั้งชุด — ถ้าปล่อยให้เทียบต่อ รายงานจะแดงยาวเป็นสิบข้อ
-        # โดยไม่มีข้อไหนช่วยอะไร และเสี่ยงที่เจ้าหน้าที่จะส่งกลับให้นักศึกษาแก้ทั้งที่เล่มไม่ผิด
-        rep.add("ORANGE", "front_matter", "ไฟล์ที่อัปโหลด",
-                "ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง ("
-                + " / ".join(sig_checked) + ") น่าจะเป็นคนละคนกัน",
-                "ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน",
-                "ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ "
-                "(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน)",
-                "FORM.REQUIRED", system_note=True)
-    elif approved:
+    # ไม่มีการ์ด "ไฟล์ eThesis คนละคนกับเล่ม" และ "ไม่ได้กรอกข้อมูลอนุมัติ" แล้ว
+    # (เจ้าหน้าที่สั่ง ก.ย. 2569) สองเรื่องนี้เป็นงานของเจ้าหน้าที่ ไม่ใช่ความผิดของเล่ม
+    #   - ช่องข้อมูลอนุมัติว่าง: หน้าเว็บบังคับกรอก และ /check ปฏิเสธก่อนสร้างงาน
+    #     (ใช้รายการเดียวกัน FRONT_MATTER_RULES["required_form_fields"]) จึงมาไม่ถึงตรงนี้
+    #   - ไฟล์ eThesis ผิดคน: เทียบตามข้อมูลที่ให้มาตามปกติ ชื่อ/รหัส/ชื่อเรื่องที่ไม่ตรง
+    #     จะขึ้นแดงให้เห็นเองว่าเลือกไฟล์ผิด **ห้ามข้ามการเทียบเงียบ ๆ** — วัดกับเล่มจริง
+    #     เล่ม 1 คู่กับไฟล์ของเล่ม 3 ถ้าข้ามโดยไม่มีการ์ด จะได้ "ผ่าน" ทั้งที่ไม่ได้เทียบอะไรเลย
+    if approved:
         A = approved
         program_language = A.get("program_language", "")
-        required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())
-        _report_missing_form_fields(rep, A, required_fields)
 
         missing_cover_items = [
             (label, expected_text)
@@ -5762,6 +5816,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # ถ้าเจอรหัสบนหน้า ต้องบอกว่าเล่มพิมพ์ว่าอะไรและต่างตรงไหน ไม่ใช่
                     # บอกลอย ๆ ว่า "ไม่พบรหัสนักศึกษา" ซึ่งอ่านแล้วนึกว่าระบบหาไม่เจอ
                     printed = _closest_student_id(pages[abs_idx], student_id)
+                    thai_digits = thai_numeral_student_id(printed, student_id, abs_label)
+                    if thai_digits:
+                        rep.add_verification("รหัสนักศึกษา", loc, "fail", printed)
+                        rep.add("RED", "front_matter", loc, *thai_digits,
+                                "FORM.APPROVED_MATCH")
+                        continue
                     if printed:
                         # ชี้จุดต่างเฉพาะตอนที่ต่างกันจุดเดียว (พิมพ์ผิดหลักเดียว)
                         # ถ้าเป็นคนละรหัสกันคนละเรื่อง การไล่ทีละตัวอักษรจะได้
@@ -5861,7 +5921,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if compared['status'] == 'exact':
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
-                if norm(expected_degree) in norm(spot_text):
+                if degree_differs_only_in_spacing(expected_degree, spot_text):
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
                     # (เช่น "M.Sc. ()" กับ "M.Sc.()") = ข้อสังเกตสีเหลือง ผ่านได้
                     # ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
@@ -5900,7 +5960,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
             elif compared['status'] == 'exact':
                 rep.add_verification("ชื่อปริญญา", vloc, "pass")
-            elif norm(abbr) in norm(abstract_text):
+            elif degree_differs_only_in_spacing(abbr, abstract_text):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                 rep.add(DEGREE_SPACING_ZONE, "front_matter", box,

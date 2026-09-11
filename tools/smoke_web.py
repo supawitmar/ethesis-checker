@@ -150,6 +150,18 @@ def main():
                             fail["counts"]["RED"] > body["counts"]["RED"],
                             f'{body["counts"]["RED"]} -> {fail["counts"]["RED"]}'))
 
+    # ช่องข้อมูลอนุมัติว่าง = ระบบไม่ให้กดตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569) ต้องปฏิเสธก่อน
+    # สร้างงาน และบอกชื่อช่องที่ขาด ไม่ใช่ตรวจไปแล้วค่อยขึ้นการ์ดในรายงาน
+    short = dict(form, title_en="")
+    with open(BOOKS / f"{book}.pdf", "rb") as fh:
+        refused = client.post("/check", data=short,
+                              files={"pdf": (f"{book}.pdf", fh, "application/pdf")})
+    passed.append(check("ช่องข้อมูลอนุมัติว่าง ระบบไม่ให้ตรวจ",
+                        refused.status_code == 400, str(refused.status_code)))
+    passed.append(check("บอกชื่อช่องที่ยังไม่ได้กรอก",
+                        "ชื่อเรื่องภาษาอังกฤษ" in (refused.json().get("detail") or ""),
+                        refused.json().get("detail")))
+
     gone = client.post("/summary/ไม่มีงานนี้", json={})
     passed.append(check("งานที่ไม่มีอยู่ต้องได้ 404 ไม่ใช่ 500",
                         gone.status_code == 404, str(gone.status_code)))
