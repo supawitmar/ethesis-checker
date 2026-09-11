@@ -1598,7 +1598,9 @@ class ExamDatePerSignaturePageTests(unittest.TestCase):
     def test_no_signature_page_is_pending_not_red(self):
         rep = self._run(["ปก"], sig_pages=())
         self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(rep.verification[0]["checks"][0]["status"], "pending")
+        # ไม่มีหน้าลงนาม = ไม่ได้ตรวจ (หน้าที่ขาดถูกฟ้องในกฎของมันเอง) ไม่ใช่ "รอยืนยัน"
+        # ซึ่งหมายถึงมีการ์ดส้มให้กด (ก.ย. 2569 ป้ายในตารางต้องตรงกับสีการ์ด)
+        self.assertEqual(rep.verification[0]["checks"][0]["status"], "skipped")
 
 
 class CoverYearLineTests(unittest.TestCase):
@@ -3408,27 +3410,28 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
                 "อรณิชา หนูนาคสกุล PHIE / M", "6636480 PHIE/M",
                 ("ONNICHA NOONAK",)), "")
 
-    def test_the_page_is_not_reported_as_a_problem(self):
-        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด
-
-        เรนเดอร์หน้าจริงออกมาดูแล้ว หน้ากระดาษถูกต้องทุกตัวอักษร เห็นรหัส 6437028
-        ชัดเจน เสียแค่การดึงข้อความ (PyMuPDF ซึ่งเป็นคนละเอนจินก็ได้ JKLMNOP
-        เหมือนกัน) ข้อสีส้มใบเดิมพูดซ้ำกับตารางผลเทียบที่บันทึกไว้อยู่แล้ว และยัง
-        ลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
-        """
+    def _id_block(self):
         source = inspect.getsource(checker_module.run_check)
-        head = source.split("unreadable_digit_pages = {}", 1)[1][:1400]
-        self.assertIn("rep.add_info", head)
-        self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
+        start = source.index("for _aidx, _misread in sorted(unreadable_digit_pages.items()):")
+        return source[start:start + 1600]
+
+    def test_the_page_is_an_orange_card(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้ามันเพี้ยนแบบนี้ งั้นควรใส่สีส้ม"
+
+        ประวัติ: เคยเป็นการ์ดส้ม แล้วถูกย้ายไปเป็นข้อมูลประกอบตามกติกา "ฟอนต์เพี้ยนปล่อยผ่าน"
+        ซึ่งไม่มีปุ่ม เจ้าหน้าที่ที่เปิดหน้าจริงแล้วเจอว่ารหัสพิมพ์ผิดจึงส่งเข้าข้อความสรุปไม่ได้
+        และตารางผลเทียบขึ้นสีส้มโดยไม่มีการ์ดคู่กัน
+        """
+        block = self._id_block()
+        self.assertIn("rep.add(FONT_UNREADABLE_ZONE", block)
+        self.assertIn('"FORM.FONT_UNREADABLE"', block)
+        self.assertNotIn("rep.add_info", block)
+        self.assertEqual(checker_module.FONT_UNREADABLE_ZONE, "ORANGE")
+        self.assertEqual(RULE_CATALOG["FORM.FONT_UNREADABLE"]["failure_zone"], "ORANGE")
 
     def test_staff_are_told_to_open_the_page_themselves(self):
-        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ปล่อยผ่าน ทำเพียงแจ้งบอกว่าเกิดปัญหาอะไร
-        ให้เจ้าหน้าที่ทราบและต้องไปดูเอง" — คำสั่งให้ไปดูต้องอยู่ในบรรทัดนั้นด้วย
-        ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
-        """
-        source = inspect.getsource(checker_module.run_check)
-        head = source.split("unreadable_digit_pages = {}", 1)[1][:3200]
-        self.assertIn("กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง", head)
+        """คำสั่งให้เปิดหน้าจริงดูต้องอยู่บนการ์ด ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ"""
+        self.assertIn("เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน", self._id_block())
 
     def test_the_name_on_that_page_is_still_compared(self):
         """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
@@ -3441,25 +3444,30 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
             "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
             source)
 
-    def test_a_mismatched_name_on_that_page_is_never_accused(self):
-        """ควบคุมเชิงลบของข้อบน — ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่า
-        เล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ ต้องลงเป็น pending ไม่ใช่ฟ้องแดง
+    def test_a_mismatched_name_on_that_page_is_orange_not_red(self):
+        """ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ
+
+        เดิมข้ามเงียบ ๆ ไม่มีการ์ด — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ฟอนต์เพี้ยนเป็นสีส้ม
+        และกฎทั้งหน้าต้องไปทางเดียวกัน จึงเป็นการ์ดส้มให้ดูหน้าจริง ไม่ใช่ฟ้องแดง
         """
         source = inspect.getsource(checker_module.run_check)
         block = source.split(
             "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
-            1)[1][:700]
+            1)[1].split("continue", 1)[0]
         self.assertIn('"pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"', block)
+        self.assertIn("rep.add(FONT_UNREADABLE_ZONE", block)
         self.assertNotIn('rep.add("RED"', block)
 
     def test_the_wording_translates(self):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
-        for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
-                   "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
-                   "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
-                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
-                   "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง",
+        for th in ("ระบบอ่านรหัสนักศึกษาบนหน้านี้ไม่ออก เพราะฟอนต์ในไฟล์ทำให้ตัวเลข"
+                   "ถูกดึงออกมาเป็น \"JKLMNOP\"",
+                   'รหัสนักศึกษาต้องเป็น "6437028 PHPH/M"',
+                   "เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
+                   'ชื่อภาษาไทยที่ระบบอ่านได้คือ "กีรติ ยูประสทธ" ซึ่งอาจเพี้ยนเพราะฟอนต์ในไฟล์',
+                   'ชื่อภาษาไทยต้องเป็น "กีรติ ยู้ประสิทธิ์"',
+                   "เปิดหน้านี้ดูชื่อด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
                    "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
             en = i18n.tr_en(th, pairs)
@@ -4838,7 +4846,7 @@ class TheLanguageOfTheDocumentShowsInTheVerificationTable(unittest.TestCase):
     def test_a_file_the_system_cannot_read_is_pending_not_a_pass(self):
         """อ่านไม่ออกไม่ใช่ผ่าน ถ้านับเป็นผ่านเจ้าหน้าที่จะเชื่อว่าตรวจครบแล้ว"""
         rows = self._rows({"cover": "", "signature": "", "chapter": ""})
-        self.assertEqual([r["status"] for r in rows], ["pending", "pending"])
+        self.assertEqual([r["status"] for r in rows], ["skipped", "skipped"])
         self.assertEqual(rows[1]["detail"], "ระบบอ่านภาษาจากไฟล์ไม่ได้")
 
     def test_no_approved_programme_means_no_rows(self):

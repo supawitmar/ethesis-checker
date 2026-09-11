@@ -618,42 +618,55 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
             self.assertIn(step, body)
 
 
-class AnUndecidedTableRowIsNotCalledPending(unittest.TestCase):
-    """ตารางผลเทียบ: แถวที่ระบบตัดสินไม่ได้ต้องไม่ใช้คำว่า "รอยืนยัน" (ก.ย. 2569)
+class TheTableBadgeMatchesTheCardColour(unittest.TestCase):
+    """ป้ายในตารางผลเทียบต้องตรงกับสีของการ์ดที่คู่กัน (เจ้าหน้าที่สั่ง ก.ย. 2569)
 
-    เจ้าหน้าที่เห็นแถวรหัสนักศึกษาบนบทคัดย่อไทยขึ้น "❓ รอยืนยัน" สีส้ม (ฟอนต์ทำตัวเลขเพี้ยนเป็น
-    "JKLMNOP") แล้วไม่เจอการ์ดในหมวด "รอยืนยัน" จึงถามว่าทำไมไม่เหมือนสีส้มอื่น — ในตาราง
-    คำนี้แปลว่าระบบตัดสินไม่ได้ ส่วนหมวดการ์ดแปลว่ารอกด ✓/✗ เจ้าหน้าที่เลือกให้เปลี่ยนคำในตาราง
+    ที่มา: แถวรหัสนักศึกษาบนบทคัดย่อไทยที่ฟอนต์ทำตัวเลขเพี้ยนขึ้น "❓ รอยืนยัน" สีส้ม แต่ไม่มี
+    การ์ดส้มให้กด เจ้าหน้าที่ถามว่าทำไมไม่เหมือนสีส้มอื่น แล้วสั่งว่า "ถ้ามันเพี้ยนแบบนี้ งั้นควร
+    ใส่สีส้ม แก้กฎการตรวจให้สัมพันธ์กันด้วย" — ข้อฟอนต์เพี้ยนจึงเป็นการ์ดส้ม และป้ายในตาราง
+    บอกสีของการ์ดที่คู่กัน
     """
 
-    def _render(self):
+    ROWS = (("รหัสนักศึกษา", "บทคัดย่อไทย (หน้า vi)", "pending", "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก"),
+            ("ชื่อปริญญา", "หน้าลงนาม 1 (หน้า i)", "notice", "ต่างเฉพาะวรรคตอน/ช่องว่าง"),
+            ("ชื่อเรื่อง (ตาม บฑ.1)", "บทคัดย่อภาษาไทย", "skipped", "เล่มไม่มีหน้าบทคัดย่อภาษานี้"))
+
+    def _render(self, rows):
         import jinja2
         import checker
         rep = checker.Report()
-        rep.add_verification("รหัสนักศึกษา", "บทคัดย่ออังกฤษ (หน้า iv)", "pass")
-        rep.add_verification("รหัสนักศึกษา", "บทคัดย่อไทย (หน้า vi)", "pending",
-                             "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก")
+        for topic, loc, status, detail in rows:
+            rep.add_verification(topic, loc, status, detail)
         env = jinja2.Environment(loader=jinja2.FileSystemLoader(
             str(Path(__file__).resolve().parents[1] / "templates")), autoescape=True)
         return env.get_template("report.html").render(
             report=checker.check_result(rep, {"n_pages": 10}), zone_label=main.ZONE_LABEL,
             job_id="t", pdf_name="book.pdf", student={})
 
-    def _table(self, html):
-        start = html.index('class="vf-group"')
+    @staticmethod
+    def _group(html, topic):
+        start = html.index(topic, html.index('class="vf-group"'))
         return html[start:html.index("</details>", start)]
 
-    def test_the_row_says_check_by_eye(self):
-        table = self._table(self._render())
-        self.assertIn("○ ต้องดูเอง", table)
-        self.assertIn("ระบบอ่านตัวเลขบนหน้านี้ไม่ออก", table)
-        self.assertIn("○ ต้องดูเอง 1 ตำแหน่ง", table)
+    def test_each_status_shows_the_colour_of_its_card(self):
+        html = self._render(self.ROWS)
+        self.assertIn("❓ รอยืนยัน", self._group(html, "รหัสนักศึกษา"))
+        self.assertIn("ข้อสังเกต", self._group(html, "ชื่อปริญญา"))
+        self.assertIn("— ไม่ได้ตรวจ", self._group(html, "ชื่อเรื่อง (ตาม บฑ.1)"))
 
-    def test_the_table_never_says_pending(self):
-        """คำว่า "รอยืนยัน" เหลือไว้เฉพาะหมวดการ์ดสีส้มที่มีปุ่ม ✓/✗"""
-        self.assertNotIn("รอยืนยัน", self._table(self._render()))
+    def test_a_missing_page_is_not_called_pending(self):
+        """ควบคุมเชิงลบ — แถวที่ไม่มีการ์ดคู่กันต้องไม่ใช้คำว่า "รอยืนยัน" อีก"""
+        group = self._group(self._render(self.ROWS[2:]), "ชื่อเรื่อง (ตาม บฑ.1)")
+        self.assertNotIn("รอยืนยัน", group)
+        self.assertNotIn("ข้อสังเกต", group)
 
-    def test_the_badge_is_grey_not_orange(self):
-        html = self._render()
-        rule = html.split(".vf-badge.pending {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("orange", rule)
+    def test_a_group_with_passes_and_a_missing_page_says_checked_pages_match(self):
+        rows = (("ชื่อเรื่อง (ตาม บฑ.1)", "หน้าปก", "pass", ""),) + self.ROWS[2:]
+        self.assertIn("✓ ตรงทุกหน้าที่ตรวจ", self._group(self._render(rows), "ชื่อเรื่อง (ตาม บฑ.1)"))
+
+    def test_the_badge_colours_follow_the_zones(self):
+        html = self._render(self.ROWS)
+        rule = lambda sel: html.split(sel + " {", 1)[1].split("}", 1)[0]
+        self.assertIn("--orange", rule(".vf-badge.pending"))
+        self.assertIn("--yellow", rule(".vf-badge.notice"))
+        self.assertNotIn("--orange", rule(".vf-badge.skipped"))
