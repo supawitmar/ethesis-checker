@@ -616,3 +616,44 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
                      "ethSourceHtml = '';", "document.getElementById('overlay').style.display = 'none';",
                      "updateConditionalRequirements();"):
             self.assertIn(step, body)
+
+
+class AnUndecidedTableRowIsNotCalledPending(unittest.TestCase):
+    """ตารางผลเทียบ: แถวที่ระบบตัดสินไม่ได้ต้องไม่ใช้คำว่า "รอยืนยัน" (ก.ย. 2569)
+
+    เจ้าหน้าที่เห็นแถวรหัสนักศึกษาบนบทคัดย่อไทยขึ้น "❓ รอยืนยัน" สีส้ม (ฟอนต์ทำตัวเลขเพี้ยนเป็น
+    "JKLMNOP") แล้วไม่เจอการ์ดในหมวด "รอยืนยัน" จึงถามว่าทำไมไม่เหมือนสีส้มอื่น — ในตาราง
+    คำนี้แปลว่าระบบตัดสินไม่ได้ ส่วนหมวดการ์ดแปลว่ารอกด ✓/✗ เจ้าหน้าที่เลือกให้เปลี่ยนคำในตาราง
+    """
+
+    def _render(self):
+        import jinja2
+        import checker
+        rep = checker.Report()
+        rep.add_verification("รหัสนักศึกษา", "บทคัดย่ออังกฤษ (หน้า iv)", "pass")
+        rep.add_verification("รหัสนักศึกษา", "บทคัดย่อไทย (หน้า vi)", "pending",
+                             "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก")
+        env = jinja2.Environment(loader=jinja2.FileSystemLoader(
+            str(Path(__file__).resolve().parents[1] / "templates")), autoescape=True)
+        return env.get_template("report.html").render(
+            report=checker.check_result(rep, {"n_pages": 10}), zone_label=main.ZONE_LABEL,
+            job_id="t", pdf_name="book.pdf", student={})
+
+    def _table(self, html):
+        start = html.index('class="vf-group"')
+        return html[start:html.index("</details>", start)]
+
+    def test_the_row_says_check_by_eye(self):
+        table = self._table(self._render())
+        self.assertIn("○ ต้องดูเอง", table)
+        self.assertIn("ระบบอ่านตัวเลขบนหน้านี้ไม่ออก", table)
+        self.assertIn("○ ต้องดูเอง 1 ตำแหน่ง", table)
+
+    def test_the_table_never_says_pending(self):
+        """คำว่า "รอยืนยัน" เหลือไว้เฉพาะหมวดการ์ดสีส้มที่มีปุ่ม ✓/✗"""
+        self.assertNotIn("รอยืนยัน", self._table(self._render()))
+
+    def test_the_badge_is_grey_not_orange(self):
+        html = self._render()
+        rule = html.split(".vf-badge.pending {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("orange", rule)
