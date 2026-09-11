@@ -297,7 +297,7 @@
     <h2><span class="step" aria-hidden="true">3</span>นักศึกษา</h2>
     <div class="row">
       <div><label>ชื่อ-นามสกุล (ภาษาอังกฤษ)</label><input name="student_name" placeholder="FIRSTNAME LASTNAME" required></div>
-      <div><label>ชื่อ-นามสกุล (ภาษาไทย — จำเป็นสำหรับหลักสูตรไทย)</label><input name="student_name_th" placeholder="ชื่อ นามสกุล"></div>
+      <div><label>ชื่อ-นามสกุล (ภาษาไทย — จำเป็นสำหรับหลักสูตรไทย)</label><input name="student_name_th" placeholder="ชื่อ นามสกุล (นักศึกษาต่างชาติใช้ชื่อภาษาอังกฤษ)"></div>
     </div>
     <div class="row">
       <div><label>รหัสนักศึกษา</label><input name="student_id" placeholder="6xxxxxx" required></div>
@@ -492,18 +492,23 @@ function parseEthesisText(source, sourceHtml='') {
 
   // คำนำหน้านามภาษาไทยที่ต้องตัดออก รวมแบบย่อ เช่น น.ส. = นางสาว
   const THAI_PREFIX = /^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|ว่าที่\s*(?:ร|พ)\.?[ตทอ]\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*/;
+  // นักศึกษาต่างชาติไม่มีชื่อไทย ช่องชื่อไทยของ eThesis จึงเป็นชื่ออังกฤษ — ดึงมาใส่ช่องชื่อไทยด้วย
+  // ไม่ปล่อยว่าง เพราะหลักสูตรไทย/ไทย-อังกฤษบังคับกรอก (เจ้าหน้าที่สั่ง ก.ย. 2569 กติกาเดียวกับ
+  // ethesis_import.student_names ฝั่งเซิร์ฟเวอร์)
+  const EN_PREFIX = /^(?:MR|MRS|MISS|MS|DR)\.?\s+/i;
   const names = findLine('ชื่อ-สกุล');
   if (names.value) {
     if (/[ก-๙]/.test(names.value)) {
       data.student_name_th = names.value.replace(THAI_PREFIX, '');
     } else {
-      data.student_name = names.value.replace(/^(?:MR|MRS|MISS|MS|DR)\.?\s+/i, '');
+      data.student_name_th = data.student_name = names.value.replace(EN_PREFIX, '');
     }
     const followingName = nextLine(names.index, names.value === lines[names.index + 1] ? 2 : 1);
     if (followingName && /[A-Za-z]/.test(followingName) && !/[ก-๙]/.test(followingName)) {
-      data.student_name = followingName.replace(/^(?:MR|MRS|MISS|MS|DR)\.?\s+/i, '');
+      data.student_name = followingName.replace(EN_PREFIX, '');
     }
   }
+  if (!data.student_name_th && data.student_name) data.student_name_th = data.student_name;
 
   data.title_th = findLine('ชื่อหัวข้อภาษาไทย').value;
   data.title_en = findLine('ชื่อหัวข้อภาษาอังกฤษ').value;

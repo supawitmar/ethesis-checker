@@ -410,6 +410,30 @@ def _student_id(text):
     return digits.group(0) if digits else ''
 
 
+def student_names(lines):
+    """(ชื่อไทย, ชื่ออังกฤษ) จากช่อง "ชื่อ-สกุล" ของหน้า eThesis — ค่าว่างถ้าไม่พบ
+
+    eThesis พิมพ์ชื่อไทยต่อป้าย "ชื่อ-สกุล" แล้วชื่ออังกฤษบรรทัดถัดไป นักศึกษาต่างชาติไม่มีชื่อไทย
+    ช่องนั้นจึงเป็นชื่ออังกฤษ — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ดึงค่านั้นมาเป็นชื่อไทยด้วย ไม่ปล่อยว่าง
+    เพราะหลักสูตรไทย/ไทย-อังกฤษบังคับกรอกช่องชื่อไทย ถ้าว่างระบบจะไม่ให้ตรวจ ถ้าไม่มีค่าในช่อง
+    ชื่อไทยเลยแต่มีชื่ออังกฤษ ใช้ชื่ออังกฤษแทนด้วยเหตุผลเดียวกัน
+    """
+    name_th = name_en = ''
+    name_value, name_index = _find(lines, 'ชื่อ-สกุล')
+    if name_value:
+        if re.search(r'[ก-๙]', name_value):
+            name_th = THAI_PREFIX.sub('', name_value)
+        else:
+            name_th = name_en = EN_PREFIX.sub('', name_value)
+        offset = 2 if name_value == _next(lines, name_index) else 1
+        following = _next(lines, name_index, offset)
+        if following and re.search(r'[A-Za-z]', following) and not re.search(r'[ก-๙]', following):
+            name_en = EN_PREFIX.sub('', following)
+    if not name_th and name_en:
+        name_th = name_en
+    return name_th, name_en
+
+
 def parse_ethesis_pdf(pdf_path):
     """คืน dict ของค่าที่ดึงได้ (เฉพาะช่องที่พบ) สำหรับเติมแบบฟอร์ม"""
     with pdfplumber.open(pdf_path) as pdf:
@@ -432,16 +456,11 @@ def parse_ethesis_pdf(pdf_path):
     if student_id:
         data['student_id'] = student_id
 
-    name_value, name_index = _find(lines, 'ชื่อ-สกุล')
-    if name_value:
-        if re.search(r'[ก-๙]', name_value):
-            data['student_name_th'] = THAI_PREFIX.sub('', name_value)
-        else:
-            data['student_name'] = EN_PREFIX.sub('', name_value)
-        offset = 2 if name_value == _next(lines, name_index) else 1
-        following = _next(lines, name_index, offset)
-        if following and re.search(r'[A-Za-z]', following) and not re.search(r'[ก-๙]', following):
-            data['student_name'] = EN_PREFIX.sub('', following)
+    name_th, name_en = student_names(lines)
+    if name_th:
+        data['student_name_th'] = name_th
+    if name_en:
+        data['student_name'] = name_en
 
     data['title_th'] = title_th or _find(lines, 'ชื่อหัวข้อภาษาไทย')[0]
     data['title_en'] = title_en or _find(lines, 'ชื่อหัวข้อภาษาอังกฤษ')[0]

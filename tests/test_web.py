@@ -670,3 +670,60 @@ class TheTableBadgeMatchesTheCardColour(unittest.TestCase):
         self.assertIn("--orange", rule(".vf-badge.pending"))
         self.assertIn("--yellow", rule(".vf-badge.notice"))
         self.assertNotIn("--orange", rule(".vf-badge.skipped"))
+
+
+class AForeignStudentsNameFillsTheThaiNameField(unittest.TestCase):
+    """นักศึกษาต่างชาติ: ช่องชื่อไทยของ eThesis เป็นชื่ออังกฤษ ต้องดึงมาใส่ช่องชื่อไทย (ก.ย. 2569)
+
+    เจ้าหน้าที่: "ก็ให้ดึงชื่อไทย ซึ่งก็จะเป็นชื่อภาษาอังกฤษ มา เพื่อไม่ให้ช่องว่าง" — หลักสูตรไทย/
+    ไทย-อังกฤษบังคับกรอกช่องนี้ ถ้าว่างระบบไม่ให้ตรวจ ("แบบฟอร์มก่อนตรวจถ้ากรอกไม่ครบ ระบบไม่ตรวจ")
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def test_the_pdf_importer_fills_both_names(self):
+        import ethesis_import
+        for lines, want in (
+                (["ชื่อ-สกุล", "MR. JOHN SMITH", "JOHN SMITH"], ("JOHN SMITH", "JOHN SMITH")),
+                (["ชื่อ-สกุล MS. ANNA LEE"], ("ANNA LEE", "ANNA LEE")),
+                (["ชื่อ-สกุล", "นาย โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"],
+                 ("โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"))):
+            self.assertEqual(ethesis_import.student_names(lines), want, lines)
+
+    def test_a_thai_student_keeps_the_thai_name(self):
+        """ควบคุมเชิงลบ — นักศึกษาไทยต้องไม่ถูกเขียนทับด้วยชื่ออังกฤษ"""
+        import ethesis_import
+        th, en = ethesis_import.student_names(["ชื่อ-สกุล", "น.ส. ธัญชนก โสภาคดิษฐ",
+                                               "THANCHANOK SOPARDIT"])
+        self.assertEqual((th, en), ("ธัญชนก โสภาคดิษฐ", "THANCHANOK SOPARDIT"))
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_pasted_text_importer_does_the_same(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        start = html.index("<script>") + len("<script>")
+        block = html[start:html.index("let ethSourceHtml")]
+        script = r"""
+const vm = require('vm');
+vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
+const out = {};
+for (const [key, text] of Object.entries({
+    foreign: "ชื่อ-สกุล\nMR. JOHN SMITH\nJOHN SMITH",
+    thai: "ชื่อ-สกุล\nนาย โฆษิต เที่ยงตรง\nKOSITH THEINGTRONG"})) {
+  const d = parseEthesisText(text, '');
+  out[key] = [d.student_name_th || '', d.student_name || ''];
+}
+console.log(JSON.stringify(out));
+"""
+        run = subprocess.run(["node", "-e", script], input=block, capture_output=True,
+                             text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout)
+        self.assertEqual(out["foreign"], ["JOHN SMITH", "JOHN SMITH"])
+        self.assertEqual(out["thai"], ["โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"])
+
+    def test_an_empty_thai_name_is_still_refused(self):
+        """ควบคุมเชิงลบ — กติกา "กรอกไม่ครบ ระบบไม่ตรวจ" ต้องยังอยู่"""
+        from ethesis_rules import FRONT_MATTER_RULES
+        for program in ("thai", "thai_english"):
+            self.assertIn("student_name_th",
+                          FRONT_MATTER_RULES["required_form_fields"][program], program)
