@@ -30,7 +30,6 @@ from checker import (
     summary_section,
     _report_abstract_title_format,
     _report_missing_abstract_language,
-    _report_missing_form_fields,
     toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
     _is_abstract_heading,
@@ -370,31 +369,65 @@ class ThaiBookRegressionTests(unittest.TestCase):
         self.assertEqual(kind, "wrong")
 
 
-class EmptyFormFieldIsNotTheDocumentsFault(unittest.TestCase):
-    """ช่องข้อมูลอ้างอิงว่าง = ฟอร์มไม่ครบ ไม่ใช่เล่มผิด
+class TheTwoStaffSideCardsAreGone(unittest.TestCase):
+    """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าสองเรื่องนี้ "ไม่จำเป็นต้องมีการ์ดขึ้นมา"
 
-    เจอจริงกับเล่มที่ 6: eThesis ไม่มีบรรทัดตัวย่อปริญญาอังกฤษ ระบบเว้นช่องว่างไว้
-    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
+    - ไม่ได้กรอกข้อมูลอนุมัติบางช่อง — "ระบบไม่ควรให้กดตรวจ" หน้าเว็บบังคับกรอก และ
+      /check ปฏิเสธก่อนสร้างงานอยู่แล้ว (รายการเดียวกัน) การ์ดนี้จึงมาไม่ถึงรายงานจริง
+    - เลือกไฟล์ eThesis ผิดคน — "ก็จะตรวจสอบผิด ให้ตรวจใหม่เอง"
     """
 
-    def _run(self, approved):
-        rep = Report()
-        _report_missing_form_fields(rep, approved, ("degree_abbr_en", "degree_abbr_th"))
-        return rep
+    def test_the_missing_field_card_is_gone(self):
+        self.assertFalse(hasattr(checker_module, "_report_missing_form_fields"))
+        self.assertNotIn("ระบบจึงข้ามการเทียบข้อมูลนี้", inspect.getsource(checker_module))
 
-    def test_missing_field_is_orange_not_red(self):
-        rep = self._run({"degree_abbr_th": "พย.ด."})
-        self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+    def test_the_wrong_student_card_is_gone(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn("น่าจะเป็นคนละคนกัน", source)
+        self.assertNotIn("ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน", source)
 
-    def test_missing_field_is_not_on_the_students_fix_list(self):
-        """นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย คนกรอกฟอร์มคือเจ้าหน้าที่"""
-        rep = self._run({"degree_abbr_th": "พย.ด."})
-        self.assertTrue(rep.zones["ORANGE"][0]["system_note"])
+    def test_a_wrong_file_is_still_compared_not_skipped(self):
+        """ห้ามข้ามการเทียบข้อมูลอนุมัติเงียบ ๆ เมื่อไม่มีการ์ดบอกแล้ว
 
-    def test_complete_form_reports_nothing(self):
-        rep = self._run({"degree_abbr_en": "D.N.S.", "degree_abbr_th": "พย.ด."})
-        self.assertEqual(rep.zones["ORANGE"], [])
+        วัดกับเล่มจริง: เล่ม 1 คู่กับไฟล์ eThesis ของเล่ม 3 ถ้าข้ามโดยไม่มีการ์ด จะได้
+        "ผ่าน" ทั้งที่ไม่ได้เทียบอะไรเลย ต้องเทียบตามปกติ ชื่อ/รหัสที่ไม่ตรงจึงขึ้นแดงให้เห็น
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn("if approved and not same_student", source)
+        self.assertIn("    if approved:\n        A = approved", source)
+
+    def test_the_language_gate_still_ignores_someone_elses_file(self):
+        """ควบคุมเชิงลบ — ด่านภาษาของเล่มหยุดตรวจทั้งเล่ม ห้ามตัดสินจากไฟล์ของคนอื่น
+
+        ไม่งั้นเลือกไฟล์ผิดคนที่เป็นเล่มคนละภาษา จะได้ข้อเดียวว่า "เล่มผิดภาษา" แล้วหยุด
+        ซึ่งทั้งปิดบังว่าเลือกไฟล์ผิด และเสี่ยงที่จะส่งเล่มที่ถูกกลับให้นักศึกษาทำใหม่
+        """
+        source = inspect.getsource(checker_module.run_check)
+        self.assertRegex(source, r"approved and same_student and not skip_identity_check")
+
+    def test_the_web_form_and_the_server_require_the_same_fields(self):
+        """การ์ดหายไปได้เพราะมีสองด่านกันไว้ ต้องไม่หลุดจากกันเอง"""
+        import re
+        from pathlib import Path
+        html = (Path(checker_module.__file__).parent / "templates" / "index.html"
+                ).read_text(encoding="utf-8")
+        always = set(re.findall(r'name="(\w+)"[^>]*\brequired\b', html))
+        toggled = dict(re.findall(
+            r"querySelector\('\[name=\"(\w+)\"\]'\)\.required = (\w+|!\w+|true)", html))
+        from ethesis_rules import FRONT_MATTER_RULES
+        rules = FRONT_MATTER_RULES["required_form_fields"]
+        for program, want in rules.items():
+            flags = {"requiresThai": program in ("thai", "thai_english"),
+                     "thaiOnly": program == "thai", "!thaiOnly": program != "thai",
+                     "true": True}
+            page = {n for n in always if n not in toggled} | \
+                   {n for n, flag in toggled.items() if flags[flag]}
+            self.assertEqual(page & set(_FIELDS), set(want), program)
+
+
+_FIELDS = ("title_en", "title_th", "student_name", "student_name_th", "student_id",
+           "degree_cover_en", "degree_cover_th", "degree_sig_en", "degree_sig_th",
+           "degree_abbr_en", "degree_abbr_th", "exam_date", "year")
 
 
 class DegreeFieldsByLocationTests(unittest.TestCase):

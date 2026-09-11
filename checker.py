@@ -19,7 +19,6 @@ from ethesis_rules import (
     CANONICAL_OPTION_1,
     CANONICAL_OPTION_2,
     DEFAULT_RULE_BY_PART,
-    FORM_FIELD_LABELS,
     MATCH_RULES,
     FRONT_MATTER_RULES,
     NOT_CHECKED,
@@ -1355,27 +1354,6 @@ def _report_missing_abstract_language(rep, has_en, has_th, en_loc="", th_loc="")
     rep.add("RED", "front_matter", "บทคัดย่อ", detail,
             "เล่มหลักสูตรไทยต้องมีบทคัดย่อทั้งภาษาไทยและภาษาอังกฤษ",
             "เพิ่มบทคัดย่อ" + "และ".join(missing), "FRONT.ABSTRACT")
-
-
-def _report_missing_form_fields(rep, approved, required_fields):
-    """ช่องข้อมูลอ้างอิงในฟอร์มที่ยังว่าง — สีส้ม ไม่ใช่สีแดง
-
-    ช่องฟอร์มว่าง = ข้อมูลอ้างอิงไม่ครบ **ไม่ใช่ข้อบกพร่องของเล่ม** จึงต้องไม่ตัดสิน
-    ว่าเล่ม "ไม่ผ่าน" และต้องไม่เข้ารายการที่นักศึกษาต้องแก้ (system_note) เพราะ
-    นักศึกษาแก้เล่มยังไงข้อนี้ก็ไม่หาย — คนที่ทำให้หายได้คือเจ้าหน้าที่ที่กรอกฟอร์ม
-
-    เจอจริงกับเล่มที่ 6: หน้า eThesis ไม่มีบรรทัดตัวย่อปริญญาภาษาอังกฤษให้อ่าน และ
-    "DOCTOR OF NURSING SCIENCE" ยังไม่มีในตารางตัวย่อ ระบบจึงเว้นช่องว่างไว้
-    แล้วฟ้องแดงใส่เล่มที่ถูกต้องทุกอย่าง
-    """
-    for field_name in required_fields:
-        if soft(approved.get(field_name, "")):
-            continue
-        rep.add("ORANGE", "front_matter", "ข้อมูลอ้างอิงในแบบฟอร์ม",
-                f"ไม่ได้กรอก{FORM_FIELD_LABELS[field_name]} ระบบจึงข้ามการเทียบข้อมูลนี้",
-                "การตรวจอย่างเข้มต้องมีข้อมูลอ้างอิงครบทุกช่องที่กำหนด",
-                "กรอกข้อมูลในฟอร์มให้ครบแล้วตรวจใหม่ หรือตรวจข้อมูลนี้ด้วยตาเทียบกับ บฑ.",
-                "FORM.REQUIRED", system_note=True)
 
 
 def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
@@ -4716,9 +4694,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     abs_en_idx = abs_en_pages[0] if abs_en_pages else None
     has_th_abs, has_en_abs = abs_th_idx is not None, abs_en_idx is not None
 
-    # ไฟล์ eThesis เป็นของนักศึกษาคนเดียวกับเล่มไหม — ต้องรู้ก่อนกฎอื่นที่ใช้ข้อมูลอนุมัติ
-    # (รวมถึงกฎชนิดเลขหน้าส่วนนำ ที่อ่าน program_language จากข้อมูลอนุมัติ)
-    same_student, sig_checked, _sig_found = (
+    # ไฟล์ eThesis เป็นของนักศึกษาคนเดียวกับเล่มไหม — ใช้ภายในเท่านั้น ไม่มีการ์ดแล้ว
+    # (เจ้าหน้าที่สั่ง ก.ย. 2569: เลือกไฟล์ผิดคนก็ตรวจผิด ให้เจ้าหน้าที่ตรวจใหม่เอง)
+    # ยังต้องรู้ไว้กันข้อสรุปที่ "หยุดตรวจทั้งเล่ม" หรือ "เดาโครงเล่ม" จากข้อมูลของคนอื่น
+    # คือด่านภาษาของเล่ม ผังบท และชนิดเลขหน้าส่วนนำ ส่วนการเทียบข้อมูลอนุมัติทำตามปกติ
+    same_student, _checked, _found = (
         ethesis_matches_book(approved, pages)
         if approved and not skip_identity_check else (True, [], []))
     # ---------- ภาษาของเล่มต้องตรงกับที่ได้รับอนุมัติ ----------
@@ -5425,21 +5405,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # ---------- เทียบข้อมูลอนุมัติ ----------
     _p("เทียบข้อมูลอนุมัติ (ชื่อเรื่อง/ชื่อนักศึกษา)")
-    if approved and not same_student:
-        # ข้ามการเทียบข้อมูลอนุมัติทั้งชุด — ถ้าปล่อยให้เทียบต่อ รายงานจะแดงยาวเป็นสิบข้อ
-        # โดยไม่มีข้อไหนช่วยอะไร และเสี่ยงที่เจ้าหน้าที่จะส่งกลับให้นักศึกษาแก้ทั้งที่เล่มไม่ผิด
-        rep.add("ORANGE", "front_matter", "ไฟล์ที่อัปโหลด",
-                "ข้อมูลอนุมัติกับเล่มไม่ตรงกันเลยสักอย่าง ("
-                + " / ".join(sig_checked) + ") น่าจะเป็นคนละคนกัน",
-                "ไฟล์ eThesis กับไฟล์เล่มต้องเป็นของนักศึกษาคนเดียวกัน",
-                "ตรวจว่าเลือกไฟล์ eThesis ตรงกับเล่มหรือไม่ แล้วสั่งตรวจใหม่ "
-                "(ระบบข้ามการเทียบข้อมูลอนุมัติทั้งหมดไว้ก่อน)",
-                "FORM.REQUIRED", system_note=True)
-    elif approved:
+    # ไม่มีการ์ด "ไฟล์ eThesis คนละคนกับเล่ม" และ "ไม่ได้กรอกข้อมูลอนุมัติ" แล้ว
+    # (เจ้าหน้าที่สั่ง ก.ย. 2569) สองเรื่องนี้เป็นงานของเจ้าหน้าที่ ไม่ใช่ความผิดของเล่ม
+    #   - ช่องข้อมูลอนุมัติว่าง: หน้าเว็บบังคับกรอก และ /check ปฏิเสธก่อนสร้างงาน
+    #     (ใช้รายการเดียวกัน FRONT_MATTER_RULES["required_form_fields"]) จึงมาไม่ถึงตรงนี้
+    #   - ไฟล์ eThesis ผิดคน: เทียบตามข้อมูลที่ให้มาตามปกติ ชื่อ/รหัส/ชื่อเรื่องที่ไม่ตรง
+    #     จะขึ้นแดงให้เห็นเองว่าเลือกไฟล์ผิด **ห้ามข้ามการเทียบเงียบ ๆ** — วัดกับเล่มจริง
+    #     เล่ม 1 คู่กับไฟล์ของเล่ม 3 ถ้าข้ามโดยไม่มีการ์ด จะได้ "ผ่าน" ทั้งที่ไม่ได้เทียบอะไรเลย
+    if approved:
         A = approved
         program_language = A.get("program_language", "")
-        required_fields = FRONT_MATTER_RULES["required_form_fields"].get(program_language, ())
-        _report_missing_form_fields(rep, A, required_fields)
 
         missing_cover_items = [
             (label, expected_text)
