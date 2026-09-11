@@ -154,6 +154,7 @@
   .vf-topic:hover { background:#e9eff7; }
   .vf-topic.fail { background:var(--red-bg); }
   .vf-topic.pending { background:var(--orange-bg); }
+  .vf-topic.notice { background:var(--yellow-bg); }
   .vf-topic-name { flex:1; min-width:150px; }
   .vf-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
   details[open] > .vf-topic .vf-arrow { transform:rotate(90deg); }
@@ -164,7 +165,11 @@
   .vf-badge { font-size:.74rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
   .vf-badge.pass { background:var(--green-bg); color:var(--green); }
   .vf-badge.fail { background:var(--red-bg); color:var(--red); }
+  /* สีของป้ายตรงกับสีของการ์ดที่คู่กัน — ส้ม = มีการ์ดรอยืนยัน, เหลือง = มีการ์ดข้อสังเกต,
+     เทา = ไม่มีการ์ดที่ตำแหน่งนี้ (ไม่มีหน้านั้นในเล่ม) */
   .vf-badge.pending { background:var(--orange-bg); color:var(--orange); }
+  .vf-badge.notice { background:var(--yellow-bg); color:var(--yellow); }
+  .vf-badge.skipped { background:#eef1f5; color:#586576; }
   .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
   /* จัดกลุ่มรายงานตามหมวด (กด expand ดูรายละเอียด) */
@@ -277,6 +282,8 @@
   .vf-topic:hover { background:#f6f8fb; }
   .vf-topic.fail { background:#fff; box-shadow:inset 4px 0 0 var(--red); }
   .vf-topic.pending { background:#fff; box-shadow:inset 4px 0 0 var(--orange); }
+  .vf-topic.notice { background:#fff; box-shadow:inset 4px 0 0 var(--yellow); }
+  .vf-topic.skipped { background:#fff; box-shadow:inset 4px 0 0 #a3aebb; }
   .vf-count { background:#f1f4f8; padding:2px 10px; border-radius:99px; }
   .hc { background:#fff; border-color:#e8def0; border-left:4px solid #b28bc8; box-shadow:var(--shadow-sm); }
   .hc.state-pass { background:var(--green-bg); }
@@ -373,17 +380,28 @@
     <h2 class="sec" style="margin-top:0;"><span data-th="📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" data-en="📋 Approved-data verification by location">📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง</span></h2>
     {% for group in report.verification %}
     {% set statuses = group.checks | map(attribute='status') | list %}
-    {% set gstatus = 'fail' if 'fail' in statuses else ('pending' if 'pending' in statuses else 'pass') %}
+    {# ป้ายต้องตรงกับสีของการ์ดที่คู่กับตำแหน่งนั้น (เจ้าหน้าที่สั่ง ก.ย. 2569 ให้กฎสัมพันธ์กัน)
+       เดิมทุกกรณีที่ตัดสินไม่ได้ขึ้น "รอยืนยัน" สีส้ม แม้ไม่มีการ์ดส้มให้กด เจ้าหน้าที่จึงมองหา
+       การ์ดที่ไม่มีอยู่ — ดู Report.add_verification สำหรับความหมายของแต่ละสถานะ #}
+    {% set gstatus = 'fail' if 'fail' in statuses else ('pending' if 'pending' in statuses
+                     else ('notice' if 'notice' in statuses
+                     else ('skipped' if 'skipped' in statuses and 'pass' not in statuses else 'pass'))) %}
     <details class="vf-group">
       <summary class="vf-topic {{ gstatus }}">
         <span class="vf-arrow">▸</span>
         <span class="vf-topic-name tr-dyn">{{ group.topic }}</span>
-        {% if gstatus == 'pass' %}
+        {% if gstatus == 'pass' and 'skipped' in statuses %}
+        <span class="vf-badge pass" data-th="✓ ตรงทุกหน้าที่ตรวจ" data-en="✓ All checked pages match">✓ ตรงทุกหน้าที่ตรวจ</span>
+        {% elif gstatus == 'pass' %}
         <span class="vf-badge pass" data-th="✓ ตรงทุกหน้า" data-en="✓ All match">✓ ตรงทุกหน้า</span>
         {% elif gstatus == 'fail' %}
         <span class="vf-badge fail" data-th="✗ พบไม่ตรง" data-en="✗ Mismatch found">✗ พบไม่ตรง</span>
-        {% else %}
+        {% elif gstatus == 'pending' %}
         <span class="vf-badge pending" data-th="❓ รอยืนยัน" data-en="❓ To confirm">❓ รอยืนยัน</span>
+        {% elif gstatus == 'notice' %}
+        <span class="vf-badge notice" data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span>
+        {% else %}
+        <span class="vf-badge skipped" data-th="— ไม่ได้ตรวจ" data-en="— Not checked">— ไม่ได้ตรวจ</span>
         {% endif %}
         <span class="vf-count">{{ group.checks | length }} <span data-th="ตำแหน่ง" data-en="locations">ตำแหน่ง</span></span>
       </summary>
@@ -394,8 +412,12 @@
         <span class="vf-badge pass" data-th="✓ ตรง" data-en="✓ Match">✓ ตรง</span>
         {% elif c.status == 'fail' %}
         <span class="vf-badge fail" data-th="✗ ไม่ตรง" data-en="✗ Mismatch">✗ ไม่ตรง</span>
-        {% else %}
+        {% elif c.status == 'pending' %}
         <span class="vf-badge pending" data-th="❓ รอยืนยัน" data-en="❓ To confirm">❓ รอยืนยัน</span>
+        {% elif c.status == 'notice' %}
+        <span class="vf-badge notice" data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span>
+        {% else %}
+        <span class="vf-badge skipped" data-th="— ไม่ได้ตรวจ" data-en="— Not checked">— ไม่ได้ตรวจ</span>
         {% endif %}
         {% if c.detail %}<span class="vf-detail tr-dyn">{{ c.detail }}</span>{% endif %}
       </div>
@@ -909,6 +931,12 @@ var TR = [
   // ชื่อกับรหัสต้องอยู่บรรทัดเดียวกันตาม template
   [/บรรทัดที่พิมพ์รหัสนักศึกษาไม่มี(.+?)อยู่ด้วย คือ ("[^"]*")/g, '$1 is missing from the line that carries the student ID: $2'],
   [/(.+?)กับรหัสนักศึกษาต้องอยู่บรรทัดเดียวกัน คือ ("[^"]*")/g, '$1 and the student ID must be on the same line: $2'],
+  [/ระบบอ่านรหัสนักศึกษาบนหน้านี้ไม่ออก เพราะฟอนต์ในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น ("[^"]*")/g, 'The system cannot read the student ID on this page: the font embedded in the file turns the digits into $1'],
+  [/รหัสนักศึกษาต้องเป็น ("[^"]*")/g, 'The student ID must be $1'],
+  [/เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน/g, 'Check the student ID on this page by eye; if it is printed correctly, press Pass'],
+  [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ที่ระบบอ่านได้คือ ("[^"]*") ซึ่งอาจเพี้ยนเพราะฟอนต์ในไฟล์/g, 'The name the system could read is $2, which may be garbled by the font in the file'],
+  [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ต้องเป็น ("[^"]*")/g, 'The name must be $2'],
+  [/เปิดหน้านี้ดูชื่อด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน/g, 'Check the name on this page by eye; if it is printed correctly, press Pass'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย ("[^"]*")/g, 'The student-name line prints the ID in Thai numerals: $1'],
   [/รหัสนักศึกษาใน(บทคัดย่ออังกฤษ|บทคัดย่อไทย)ต้องเป็นเลขอารบิกเท่านั้น คือ ("[^"]*")/g, 'The student ID must use Arabic numerals only: $2'],
   [/แก้รหัสนักศึกษาเป็นเลขอารบิก/g, 'Change the student ID to Arabic numerals'],
@@ -1285,10 +1313,6 @@ var TR = [
   [/ชื่อเรื่อง "(.+?)" ต้องปรากฏในบทคัดย่อภาษานั้น/g, 'Title "$1" must appear in that abstract'],
   [/ไม่พบชื่อ "(.+?)" ในเล่ม \(คะแนน ([\d.]+)\)/g, 'Name "$1" not found in the document (similarity $2)'],
   [/ชื่อ-นามสกุลต้องตรงข้อมูลอนุมัติทุกจุด/g, 'The student name must match the approved data everywhere'],
-  [/ไม่ได้กรอกชื่อภาษาไทยของนักศึกษาในฟอร์ม/g, "Student's Thai name was not entered in the form"],
-  [/ไม่ได้กรอกชื่อภาษาอังกฤษของนักศึกษาในฟอร์ม/g, "Student's English name was not entered in the form"],
-  [/หลักสูตรไทยต้องตรวจ(.+?)ในหน้า(.+)/g, 'Thai programs require checking the name on the abstract page'],
-  [/กรอกฟอร์มให้ครบแล้วตรวจใหม่/g, 'Complete the form and re-run the check'],
   [/ระบบหาหน้า(.+?)ไม่เจอ จึงเทียบ(.+?)ไม่ได้/g, 'That abstract page was not found, so the name could not be compared'],
   [/ไม่พบ(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา) "(.+?)" หรือสะกดไม่ตรง \(คะแนน ([\d.]+)\)/g, 'Name "$2" not found or misspelled (similarity $3)'],
   [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ของนักศึกษาต้องปรากฏในหน้า(.+?) สะกดตรงข้อมูลอนุมัติ/g, 'The student name must appear on that abstract page, spelled per the approved data'],
@@ -1321,6 +1345,7 @@ var TR = [
   [/ผลการตรวจ: ไม่ผ่าน/g, 'Result: Not passed'],
   [/ผลการตรวจ: รอยืนยัน/g, 'Result: Pending review'],
   [/ผลการตรวจ: ผ่าน/g, 'Result: Passed'],
+  [/รอยืนยัน (\d+) จุด ดังต่อไปนี้/g, '$1 item(s) awaiting confirmation:'],
   [/กรุณาแก้ไขทั้งหมด (\d+) จุด ดังต่อไปนี้/g, 'Please fix all $1 item(s) as follows'],
   [/ไม่พบจุดที่ต้องแก้ไข/g, 'No items to fix'],
   [/(\d+)\. ใน/g, '$1. In '],

@@ -370,16 +370,21 @@ class SystemNoteNotSentToStudent(unittest.TestCase):
         return {"issues_by_zone": {"RED": [], "ORANGE": list(orange), "YELLOW": []}}
 
     def test_system_note_is_excluded(self):
+        """ข้อส้มที่ยังไม่กดอยู่กลุ่มรอยืนยัน (ก.ย. 2569) — ข้อจำกัดของระบบไม่อยู่ทั้งสองกลุ่ม"""
+        import checker
         report = self._report(
             {"found": "ระบบยังไม่ได้เปิดใช้ AI", "system_note": True},
             {"found": "ชื่อเรื่องไม่ตรง", "system_note": False},
         )
-        found = [i["found"] for i in issues_to_fix(report)]
-        self.assertEqual(found, ["ชื่อเรื่องไม่ตรง"])
+        self.assertEqual(issues_to_fix(report), [])
+        self.assertEqual([i["found"] for i in checker.issues_pending(report)],
+                         ["ชื่อเรื่องไม่ตรง"])
 
     def test_issue_without_the_flag_is_kept(self):
+        import checker
         report = self._report({"found": "ชื่อเรื่องไม่ตรง"})
-        self.assertEqual(len(issues_to_fix(report)), 1)
+        self.assertEqual(len(checker.issues_pending(report)), 1)
+        self.assertEqual(len(issues_to_fix(report, failed=["ORANGE:0"])), 1)
 
     def test_a_system_note_the_staff_rejected_is_sent(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569): สีส้มกดไม่ผ่าน = สีแดง = แก้ไข ไม่เว้นข้อไหน"""
@@ -388,7 +393,7 @@ class SystemNoteNotSentToStudent(unittest.TestCase):
             {"found": "ชื่อเรื่องไม่ตรง", "system_note": False},
         )
         found = [i["found"] for i in issues_to_fix(report, failed=["ORANGE:0"])]
-        self.assertEqual(found, ["ไม่ได้กรอกชื่อเรื่อง", "ชื่อเรื่องไม่ตรง"])
+        self.assertEqual(found, ["ไม่ได้กรอกชื่อเรื่อง"])
 
     def test_red_system_note_is_also_excluded(self):
         report = {"issues_by_zone": {

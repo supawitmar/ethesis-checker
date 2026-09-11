@@ -1598,7 +1598,9 @@ class ExamDatePerSignaturePageTests(unittest.TestCase):
     def test_no_signature_page_is_pending_not_red(self):
         rep = self._run(["ปก"], sig_pages=())
         self.assertEqual(rep.zones["RED"], [])
-        self.assertEqual(rep.verification[0]["checks"][0]["status"], "pending")
+        # ไม่มีหน้าลงนาม = ไม่ได้ตรวจ (หน้าที่ขาดถูกฟ้องในกฎของมันเอง) ไม่ใช่ "รอยืนยัน"
+        # ซึ่งหมายถึงมีการ์ดส้มให้กด (ก.ย. 2569 ป้ายในตารางต้องตรงกับสีการ์ด)
+        self.assertEqual(rep.verification[0]["checks"][0]["status"], "skipped")
 
 
 class CoverYearLineTests(unittest.TestCase):
@@ -1788,19 +1790,24 @@ class PlainSummaryProseTests(unittest.TestCase):
         text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
-    def test_orange_is_included_by_default(self):
-        # สีส้ม (รอยืนยัน) ต้องเข้าสรุปโดยปริยาย นับรวมเป็นจุดที่ต้องแก้
+    def test_an_unpressed_orange_is_listed_as_pending_not_as_a_fix(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569): "สีส้มที่ยังไม่ได้กด จะเข้าว่ารอยืนยัน"
+
+        ของเดิมปนอยู่กลุ่ม "กรุณาแก้ไข" หัวรายงานจึงเขียน "ต้องแก้ 0" คู่กับข้อความสรุปที่
+        เขียนว่า "กรุณาแก้ไข 1 จุด" ทั้งที่เจ้าหน้าที่ยังไม่ได้ยืนยัน
+        """
         report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
             "part": "front_matter", "location": "สารบัญ (หน้า ฉ) เทียบกับ บทที่ 3 (หน้า 45)",
             "found": "สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45",
             "expected": "เลขหน้าบทในสารบัญควรเป็น 45", "fix": "",
         }], "YELLOW": []}}
         text = plain_summary(report)
-        self.assertIn("ทั้งหมด 1 จุด", text)
+        self.assertNotIn("กรุณาแก้ไข", text)
+        self.assertIn("รอยืนยัน 1 จุด ดังต่อไปนี้", text)
         self.assertIn("สารบัญระบุหน้า 42 แต่บทอยู่จริงหน้า 45", text)
-        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) ไม่มีหัวข้อแยกระดับความรุนแรง
+        # จัดกลุ่มตามส่วนของเล่ม (สารบัญ) เหมือนกลุ่มกรุณาแก้ไข
         self.assertIn("\nสารบัญ\n1.", text)
-        self.assertEqual(text.count("รอยืนยัน"), 1)   # โผล่แค่ในบรรทัดผลการตรวจ
+        self.assertNotIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
     def test_orange_dropped_when_staff_passes_it(self):
         report = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
@@ -2832,6 +2839,86 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class AnEmptyNameFieldIsStoppedAtTheForm(unittest.TestCase):
+    """การ์ดแดง "ไม่ได้กรอกชื่อ...ของนักศึกษาในฟอร์ม" ไม่มีแล้ว (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
+
+    "ระบบควรไม่ให้ตรวจเพราะยังกรอกข้อมูลยังไม่ครบ อยู่แล้ว" — ช่องชื่อบังคับกรอกทั้งหน้าเว็บ
+    และ /check การ์ดนี้จึงขึ้นผ่านหน้าเว็บไม่ได้
+    """
+
+    def test_the_card_is_gone(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn('f"ไม่ได้กรอก{nlbl}ของนักศึกษาในฟอร์ม"', source)
+        self.assertNotIn('"กรอกฟอร์มให้ครบแล้วตรวจใหม่"', source)
+
+    def test_the_form_still_requires_both_names_for_thai_programmes(self):
+        """ควบคุมเชิงลบ — การ์ดหายไปได้เพราะด่านนี้ยังอยู่"""
+        from ethesis_rules import FRONT_MATTER_RULES
+        for program in ("thai", "thai_english"):
+            want = FRONT_MATTER_RULES["required_form_fields"][program]
+            self.assertIn("student_name_th", want, program)
+            self.assertIn("student_name", want, program)
+
+
+class TheSummaryGroupsMatchTheHeaderBoxes(unittest.TestCase):
+    """ข้อความสรุปสองกลุ่มต้องนับเท่ากับสองกล่องบนหัวรายงานเสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+        กล่อง "ต้องแก้"   = "กรุณาแก้ไขทั้งหมด N จุด"  ข้อแดง + ข้อที่กดไม่ผ่าน
+        กล่อง "รอยืนยัน"  = "รอยืนยัน M จุด"           ข้อส้มที่ยังไม่ได้กด
+
+    กดสลับไปมาได้ ✗ ย้ายข้อไปกลุ่มแก้ไข ✓ เอาออก กดปุ่มเดิมซ้ำเพื่อยกเลิกแล้วข้อกลับมารอยืนยัน
+    """
+
+    def _report(self, red=1, orange=2, yellow=1):
+        rep = Report()
+        for i in range(red):
+            rep.add("RED", "front_matter", f"หน้าปก {i}", f"แดง {i}", f'ต้องเป็น "R{i}"')
+        for i in range(orange):
+            rep.add("ORANGE", "front_matter", f"หน้าลงนาม {i} (หน้า i)", f"ส้ม {i}",
+                    f'ต้องเป็น "O{i}"')
+        for i in range(yellow):
+            rep.add("YELLOW", "body", f"หน้า {10 + i}", f"เหลือง {i}", f'ต้องเป็น "Y{i}"')
+        return checker_module.check_result(rep)
+
+    def _numbers(self, report, failed=(), passed=()):
+        import re
+        text = checker_module.plain_summary(report, failed, passed)
+        fix = re.search(r"กรุณาแก้ไขทั้งหมด (\d+) จุด", text)
+        wait = re.search(r"รอยืนยัน (\d+) จุด", text)
+        return (int(fix.group(1)) if fix else 0, int(wait.group(1)) if wait else 0), text
+
+    def test_every_toggle_keeps_the_summary_equal_to_the_header(self):
+        report = self._report()
+        cases = [((), ()), (["ORANGE:0"], ()), ((), ["ORANGE:0"]),
+                 (["ORANGE:0", "ORANGE:1"], ()), (["YELLOW:0"], ["ORANGE:1"]),
+                 (["ORANGE:1", "YELLOW:0"], ["ORANGE:0"])]
+        for failed, passed in cases:
+            counts = checker_module.zone_counts(report, failed, passed)
+            (fix, wait), _text = self._numbers(report, failed, passed)
+            self.assertEqual((fix, wait), (counts["RED"], counts["ORANGE"]), (failed, passed))
+
+    def test_rejecting_moves_the_item_between_groups(self):
+        report = self._report(red=0, orange=1, yellow=0)
+        (_n, before) = self._numbers(report)
+        (_n, after) = self._numbers(report, failed=["ORANGE:0"])
+        self.assertIn("รอยืนยัน 1 จุด", before)
+        self.assertNotIn("กรุณาแก้ไข", before)
+        self.assertIn("กรุณาแก้ไขทั้งหมด 1 จุด", after)
+        self.assertNotIn("รอยืนยัน 1 จุด", after)
+
+    def test_numbers_run_on_across_the_two_groups(self):
+        """นักศึกษาอ้าง "ข้อ 2" ได้โดยไม่ซ้ำกันระหว่างสองกลุ่ม"""
+        (_n, text) = self._numbers(self._report(red=1, orange=1, yellow=0))
+        self.assertIn("1. ", text.split("รอยืนยัน 1 จุด", 1)[0])
+        self.assertIn("2. ", text.split("รอยืนยัน 1 จุด", 1)[1])
+
+    def test_the_pending_heading_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("รอยืนยัน 2 จุด ดังต่อไปนี้", pairs)
+        self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
 class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
     """ข้อสีเหลืองที่กดไม่ผ่าน ต้องไม่พาท่อนที่เขียนถึงเจ้าหน้าที่ไปในข้อความสรุป
 
@@ -3408,27 +3495,28 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
                 "อรณิชา หนูนาคสกุล PHIE / M", "6636480 PHIE/M",
                 ("ONNICHA NOONAK",)), "")
 
-    def test_the_page_is_not_reported_as_a_problem(self):
-        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าห้ามฟ้องหน้านี้เป็นจุดผิด
-
-        เรนเดอร์หน้าจริงออกมาดูแล้ว หน้ากระดาษถูกต้องทุกตัวอักษร เห็นรหัส 6437028
-        ชัดเจน เสียแค่การดึงข้อความ (PyMuPDF ซึ่งเป็นคนละเอนจินก็ได้ JKLMNOP
-        เหมือนกัน) ข้อสีส้มใบเดิมพูดซ้ำกับตารางผลเทียบที่บันทึกไว้อยู่แล้ว และยัง
-        ลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
-        """
+    def _id_block(self):
         source = inspect.getsource(checker_module.run_check)
-        head = source.split("unreadable_digit_pages = {}", 1)[1][:1400]
-        self.assertIn("rep.add_info", head)
-        self.assertNotIn('"UNCERTAIN.REVIEW", system_note=True', head)
+        start = source.index("for _aidx, _misread in sorted(unreadable_digit_pages.items()):")
+        return source[start:start + 1600]
+
+    def test_the_page_is_an_orange_card(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้ามันเพี้ยนแบบนี้ งั้นควรใส่สีส้ม"
+
+        ประวัติ: เคยเป็นการ์ดส้ม แล้วถูกย้ายไปเป็นข้อมูลประกอบตามกติกา "ฟอนต์เพี้ยนปล่อยผ่าน"
+        ซึ่งไม่มีปุ่ม เจ้าหน้าที่ที่เปิดหน้าจริงแล้วเจอว่ารหัสพิมพ์ผิดจึงส่งเข้าข้อความสรุปไม่ได้
+        และตารางผลเทียบขึ้นสีส้มโดยไม่มีการ์ดคู่กัน
+        """
+        block = self._id_block()
+        self.assertIn("rep.add(FONT_UNREADABLE_ZONE", block)
+        self.assertIn('"FORM.FONT_UNREADABLE"', block)
+        self.assertNotIn("rep.add_info", block)
+        self.assertEqual(checker_module.FONT_UNREADABLE_ZONE, "ORANGE")
+        self.assertEqual(RULE_CATALOG["FORM.FONT_UNREADABLE"]["failure_zone"], "ORANGE")
 
     def test_staff_are_told_to_open_the_page_themselves(self):
-        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่า "ปล่อยผ่าน ทำเพียงแจ้งบอกว่าเกิดปัญหาอะไร
-        ให้เจ้าหน้าที่ทราบและต้องไปดูเอง" — คำสั่งให้ไปดูต้องอยู่ในบรรทัดนั้นด้วย
-        ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
-        """
-        source = inspect.getsource(checker_module.run_check)
-        head = source.split("unreadable_digit_pages = {}", 1)[1][:3200]
-        self.assertIn("กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง", head)
+        """คำสั่งให้เปิดหน้าจริงดูต้องอยู่บนการ์ด ไม่งั้นอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ"""
+        self.assertIn("เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน", self._id_block())
 
     def test_the_name_on_that_page_is_still_compared(self):
         """ของเดิมข้ามทั้งหน้า ทั้งที่ชื่อบนหน้านั้นอ่านได้ปกติ
@@ -3441,25 +3529,30 @@ class PagesWhoseFontTurnsDigitsIntoLetters(unittest.TestCase):
             "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
             source)
 
-    def test_a_mismatched_name_on_that_page_is_never_accused(self):
-        """ควบคุมเชิงลบของข้อบน — ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่า
-        เล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ ต้องลงเป็น pending ไม่ใช่ฟ้องแดง
+    def test_a_mismatched_name_on_that_page_is_orange_not_red(self):
+        """ชื่อที่เทียบไม่ตรงบนหน้าที่ฟอนต์เสีย แยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ
+
+        เดิมข้ามเงียบ ๆ ไม่มีการ์ด — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ฟอนต์เพี้ยนเป็นสีส้ม
+        และกฎทั้งหน้าต้องไปทางเดียวกัน จึงเป็นการ์ดส้มให้ดูหน้าจริง ไม่ใช่ฟ้องแดง
         """
         source = inspect.getsource(checker_module.run_check)
         block = source.split(
             "if aidx in unreadable_digit_pages and compared['status'] != 'exact':",
-            1)[1][:700]
+            1)[1].split("continue", 1)[0]
         self.assertIn('"pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"', block)
+        self.assertIn("rep.add(FONT_UNREADABLE_ZONE", block)
         self.assertNotIn('rep.add("RED"', block)
 
     def test_the_wording_translates(self):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
-        for th in ("ระบบไม่ได้เทียบรหัสนักศึกษาที่ บทคัดย่อไทย (หน้า vi)",
-                   "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น \"JKLMNOP\" "
-                   "ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ "
-                   "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
-                   "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง",
+        for th in ("ระบบอ่านรหัสนักศึกษาบนหน้านี้ไม่ออก เพราะฟอนต์ในไฟล์ทำให้ตัวเลข"
+                   "ถูกดึงออกมาเป็น \"JKLMNOP\"",
+                   'รหัสนักศึกษาต้องเป็น "6437028 PHPH/M"',
+                   "เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
+                   'ชื่อภาษาไทยที่ระบบอ่านได้คือ "กีรติ ยูประสทธ" ซึ่งอาจเพี้ยนเพราะฟอนต์ในไฟล์',
+                   'ชื่อภาษาไทยต้องเป็น "กีรติ ยู้ประสิทธิ์"',
+                   "เปิดหน้านี้ดูชื่อด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
                    "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก",
                    "ระบบอ่านข้อความบนหน้านี้ไม่ครบ"):
             en = i18n.tr_en(th, pairs)
@@ -4838,7 +4931,7 @@ class TheLanguageOfTheDocumentShowsInTheVerificationTable(unittest.TestCase):
     def test_a_file_the_system_cannot_read_is_pending_not_a_pass(self):
         """อ่านไม่ออกไม่ใช่ผ่าน ถ้านับเป็นผ่านเจ้าหน้าที่จะเชื่อว่าตรวจครบแล้ว"""
         rows = self._rows({"cover": "", "signature": "", "chapter": ""})
-        self.assertEqual([r["status"] for r in rows], ["pending", "pending"])
+        self.assertEqual([r["status"] for r in rows], ["skipped", "skipped"])
         self.assertEqual(rows[1]["detail"], "ระบบอ่านภาษาจากไฟล์ไม่ได้")
 
     def test_no_approved_programme_means_no_rows(self):

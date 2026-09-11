@@ -42,6 +42,9 @@ SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
+# ฟอนต์ทำให้อ่านรหัส/ชื่อนักศึกษาไม่ออก = สีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้ามันเพี้ยนแบบนี้
+# งั้นควรใส่สีส้ม") เดิมปล่อยผ่านเป็นข้อมูลประกอบ ซึ่งไม่มีปุ่มให้กดเมื่อเปิดหน้าจริงแล้วพบว่าผิด
+FONT_UNREADABLE_ZONE = rule_zone("FORM.FONT_UNREADABLE", "ORANGE")
 # เลขหน้าที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ทั้งส่วนนำและเนื้อหา
 # กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด / ไม่มีเลขหน้า / เลขหน้าอารบิกไม่เริ่มที่บทที่ 1)
 # ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
@@ -1943,7 +1946,7 @@ def _check_exam_date(rep, exam_date, sig_pages, pages, page_ref):
     ถ้าอีกหน้าหนึ่งถูก และตารางยืนยันก็ขึ้นเป็นแถวเดียวแทนที่จะแยกรายหน้า
     """
     if not sig_pages:
-        rep.add_verification("วันที่สอบผ่าน", "หน้าลงนาม", "pending",
+        rep.add_verification("วันที่สอบผ่าน", "หน้าลงนาม", "skipped",
                              "ระบบหาหน้าลงนามไม่เจอ")
         return
     for k, idx in enumerate(sig_pages):
@@ -2339,7 +2342,7 @@ def book_language_rows(want_language, signals):
         # สัญญาณขัดกันเอง ตัดสินภาษาทั้งเล่มไม่ได้ แต่รู้แน่ว่าส่วนไหนคนละภาษา
         status, in_file = "fail", f"{other_name} ในส่วน {_join_and(wrong_parts)}"
     else:
-        status, in_file = "pending", "ระบบอ่านภาษาจากไฟล์ไม่ได้"
+        status, in_file = "skipped", "ระบบอ่านภาษาจากไฟล์ไม่ได้"
     return [("ข้อมูลอนุมัติ", status, want_name),
             ("ในไฟล์รูปเล่ม", status, in_file)]
 
@@ -3095,12 +3098,13 @@ def staff_issue(check, choice):
 
 
 def issues_to_fix(report, failed=None, passed=None, staff=None):
-    """รายการที่ต้องแก้ในสรุป
+    """รายการในกลุ่ม "กรุณาแก้ไข" ของข้อความสรุป — นับเท่ากับกล่อง "ต้องแก้" บนหัวรายงานเสมอ
 
-    - สีแดง: เข้าสรุปเสมอ
-    - สีส้ม (รอยืนยัน): เข้าสรุป**โดยปริยาย** เพราะเป็นจุดที่ต่างจากข้อมูลอนุมัติ
-      นักศึกษาควรรับรู้ เว้นแต่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) จึงตัดออก
-    - สีเหลือง (ข้อสังเกต): เข้าสรุปเฉพาะที่เจ้าหน้าที่กด "ไม่ผ่าน"
+    - สีแดง: เข้าเสมอ
+    - สีส้ม / สีเหลือง: เข้าเมื่อเจ้าหน้าที่กด "ไม่ผ่าน" เท่านั้น (กลายเป็นสีแดงทันที)
+    - สีส้มที่ยังไม่กด อยู่กลุ่ม "รอยืนยัน" แยกต่างหาก (ดู issues_pending) — เจ้าหน้าที่สั่ง
+      (ก.ย. 2569) ของเดิมสีส้มที่ยังไม่กดปนอยู่กลุ่มนี้ หัวรายงานจึงเขียน "ต้องแก้ 0" คู่กับ
+      ข้อความสรุปที่เขียนว่า "กรุณาแก้ไข 2 จุด" ทั้งที่เจ้าหน้าที่ยังไม่ได้ยืนยันสักข้อ
 
     ข้อที่ตั้ง system_note=True ไม่เข้าสรุป "โดยปริยาย" เพราะเป็นปัญหาฝั่งเจ้าหน้าที่
     (เช่น ยังไม่ได้กรอกข้อมูลอนุมัติ หรือเลือกไฟล์ eThesis คนละคนกับเล่ม) นักศึกษาแก้
@@ -3122,13 +3126,24 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     for check, choice in staff_choices(staff, "section"):
         items.append(staff_issue(check, choice))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
-        key = f"ORANGE:{index}"
-        if key in failed or (key not in passed and not issue.get("system_note")):
+        if f"ORANGE:{index}" in failed:
             items.append(issue)
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
             items.append(issue)
     return items
+
+
+def issues_pending(report, failed=None, passed=None):
+    """สีส้มที่เจ้าหน้าที่ยังไม่ได้กด — กลุ่ม "รอยืนยัน" ของข้อความสรุป
+
+    นับเท่ากับกล่อง "รอยืนยัน" บนหัวรายงาน กด ✗ แล้วย้ายไปกลุ่ม "กรุณาแก้ไข" กด ✓ แล้วหายไป
+    กดซ้ำปุ่มเดิมเพื่อยกเลิกได้ ข้อจะกลับมาอยู่กลุ่มนี้ (สลับไปมาได้ตามที่เจ้าหน้าที่สั่ง)
+    """
+    failed, passed = set(failed or ()), set(passed or ())
+    return [issue for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or [])
+            if f"ORANGE:{index}" not in failed and f"ORANGE:{index}" not in passed
+            and not issue.get("system_note")]
 
 
 def _corrected_value(issue):
@@ -3327,13 +3342,36 @@ def summary_verdict(report, failed=None, passed=None, staff=None):
     return verdict
 
 
+def _summary_block(lines, items, number):
+    """เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
+    grouped = {}
+    for issue in items:
+        grouped.setdefault(summary_section(issue), []).append(issue)
+    for section in SUMMARY_SECTION_ORDER:
+        section_items = grouped.get(section)
+        if not section_items:
+            continue
+        lines.append(f"\n{section}")
+        for issue in section_items:
+            number += 1
+            # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
+            # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
+            skip_loc = _prose_location(issue.get("location")) == section
+            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+    return number
+
+
 def plain_summary(report, failed=None, passed=None, staff=None):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
-    ไม่แยกระดับความรุนแรง — ทุกข้อในสรุปคือ "กรุณาแก้ไข" เหมือนกันหมด (รวมสีส้มด้วย)
+    แยกสองกลุ่มตามหัวรายงาน (เจ้าหน้าที่สั่ง ก.ย. 2569):
+      "กรุณาแก้ไขทั้งหมด N จุด"  = ข้อแดง + ข้อที่กดไม่ผ่าน   (เท่ากับกล่อง "ต้องแก้")
+      "รอยืนยัน M จุด"           = ข้อส้มที่ยังไม่ได้กด         (เท่ากับกล่อง "รอยืนยัน")
+    เลขข้อไล่ต่อกันข้ามสองกลุ่ม นักศึกษาอ้าง "ข้อ 3" ได้โดยไม่ซ้ำกัน
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    pending = _dedupe_issues(issues_pending(report, failed, passed))
     verdict = summary_verdict(report, failed, passed, staff)
     # ข้อความปิดท้าย (เช่น เรื่องค่าปรับและช่องทางติดต่อ) ไม่ใช่จุดที่ต้องแก้ จึงไม่ถูกนับ
     # และต้องตามไปด้วยเสมอ แม้เล่มจะไม่มีจุดต้องแก้เลย
@@ -3344,31 +3382,20 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     # ถ้อยคำชุด "ผ่าน" ขึ้นต้นด้วย "การส่ง E-thesis ... เสร็จสิ้นแล้ว" อยู่แล้ว
     finished = any(check.get("applies_to") == "pass" for check, _choice in picked)
     lines = [f"ผลการตรวจ: {verdict}"]
-    if not items:
+    if not items and not pending:
         # "ผลการตรวจ: ผ่าน" ตามด้วย "ไม่พบจุดที่ต้องแก้ไข" อ่านรวมกันว่า "จบแล้ว
         # ไม่ต้องทำอะไร" นักศึกษาหยุดอ่านตรงนั้น แล้วพลาดกำหนดส่งหน้าลงนามภายใน
         # 30 วันที่อยู่ข้างล่าง (เจ้าหน้าที่รายงานพฤติกรรมนี้ ก.ย. 2569) เล่มที่มี
         # ถ้อยคำชุด "ผ่าน" ต่อท้ายอยู่แล้วจึงไม่ต้องพิมพ์บรรทัดนี้ซ้ำ
         if not finished:
             lines.append("\nไม่พบจุดที่ต้องแก้ไข")
-    else:
+    number = 0
+    if items:
         lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
-        grouped = {}
-        for issue in items:
-            grouped.setdefault(summary_section(issue), []).append(issue)
-        number = 0
-        for section in SUMMARY_SECTION_ORDER:
-            section_items = grouped.get(section)
-            if not section_items:
-                continue
-            lines.append(f"\n{section}")
-            for issue in section_items:
-                number += 1
-                # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
-                # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
-                skip_loc = _prose_location(issue.get("location")) == section
-                lines.append(
-                    f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+        number = _summary_block(lines, items, number)
+    if pending:
+        lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
+        number = _summary_block(lines, pending, number)
     for text in closing:
         lines.append("\n" + text.strip())
     return "\n".join(lines).strip()
@@ -4514,7 +4541,16 @@ class Report:
         self.verification = []
 
     def add_verification(self, topic, location, status, detail=""):
-        """บันทึกผลเทียบข้อมูลอนุมัติรายตำแหน่ง — status: pass | fail | pending"""
+        """บันทึกผลเทียบข้อมูลอนุมัติรายตำแหน่ง
+
+        สถานะต้องตรงกับการ์ดที่คู่กับตำแหน่งนั้น (เจ้าหน้าที่สั่ง ก.ย. 2569 ให้กฎสัมพันธ์กัน)
+          pass     ตรง
+          fail     ไม่ตรง — มีการ์ดแดงคู่กัน
+          pending  มีการ์ดส้มคู่กัน (รอเจ้าหน้าที่กด ✓/✗)
+          notice   มีการ์ดเหลืองคู่กัน (ข้อสังเกต)
+          skipped  ไม่มีการ์ดที่ตำแหน่งนี้ — ไม่มีหน้านั้นในเล่ม หรืออ่านไม่ได้ทั้งไฟล์
+                   (หน้าที่ขาดถูกฟ้องแดงในกฎของมันเองอยู่แล้ว)
+        """
         group = next((g for g in self.verification if g["topic"] == topic), None)
         if group is None:
             group = {"topic": topic, "checks": []}
@@ -5558,7 +5594,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             else:
                 # ไม่มีหน้าบทคัดย่อภาษานั้นในเล่ม = ถูกฟ้องเป็นสีแดงในกฎ "ภาษาครบตามหลักสูตร"
                 # อยู่แล้ว จึงไม่ฟ้องซ้ำด้วยข้อความที่ฟังเหมือนระบบอ่านไม่ได้
-                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "pending",
+                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", alt_lbl, "skipped",
                                      "เล่มไม่มีหน้าบทคัดย่อภาษานี้")
 
         # ---------- หน้าปกและหน้าลงนามต้องมีชื่อเรื่องภาษาเดียว ----------
@@ -5717,46 +5753,52 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         for _aidx, _misread in sorted(unreadable_digit_pages.items()):
             _loc = (f"{abstract_page_label(_aidx, abs_en_pages, abs_th_pages)}"
                     f" ({page_ref(_aidx)})")
-            # ตารางผลเทียบข้อมูลอนุมัติบันทึกไว้อยู่แล้วว่าช่องนี้ยังไม่ได้เทียบ
-            # ("รหัสนักศึกษา ... ระบบอ่านตัวเลขบนหน้านี้ไม่ออก") ข้อสีส้มอีกใบจึงเป็น
-            # การพูดซ้ำ และยังลากผลตรวจของทั้งเล่มไปค้างที่ "รอยืนยัน" ด้วย
-            # เว้นวรรคหน้าตำแหน่งไว้ให้คำแปลจับ "คำนำ" กับ "ชื่อตำแหน่ง" แยกกันได้
-            # (ชื่อตำแหน่งมีคำแปลของตัวเองอยู่แล้ว ถ้ามัดรวมเป็นประโยคเดียวจะแปลไม่ออก)
-            rep.add_info("front_matter", f"ระบบไม่ได้เทียบรหัสนักศึกษาที่ {_loc}",
-                         "ฟอนต์ที่ฝังมาในไฟล์ทำให้ตัวเลขถูกดึงออกมาเป็น "
-                         f'"{_misread}" ส่วนหน้ากระดาษแสดงผลถูกต้องตามปกติ '
-                         "และรหัสนักศึกษาถูกเทียบกับข้อมูลอนุมัติที่หน้าอื่นแล้ว "
-                         "กรุณาเปิดหน้านี้ดูรหัสนักศึกษาด้วยตาอีกครั้ง")
+            # การ์ดสีส้ม มีปุ่ม ✓/✗ (เจ้าหน้าที่สั่ง ก.ย. 2569) — เดิมเป็นข้อมูลประกอบตามกติกา
+            # "ฟอนต์เพี้ยนปล่อยผ่าน" แต่เจ้าหน้าที่ที่เปิดหน้าจริงแล้วพบว่ารหัสพิมพ์ผิดจริง
+            # ไม่มีปุ่มส่งเข้าข้อความสรุป และตารางผลเทียบขึ้นสีส้มโดยไม่มีการ์ดคู่กัน
+            rep.add(FONT_UNREADABLE_ZONE, "front_matter", _loc,
+                    "ระบบอ่านรหัสนักศึกษาบนหน้านี้ไม่ออก เพราะฟอนต์ในไฟล์ทำให้ตัวเลข"
+                    f'ถูกดึงออกมาเป็น "{_misread}"',
+                    f'รหัสนักศึกษาต้องเป็น "{soft(A.get("student_id", ""))}"',
+                    "เปิดหน้านี้ดูรหัสนักศึกษาด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
+                    "FORM.FONT_UNREADABLE")
 
         # ชื่อนักศึกษาในบทคัดย่อ: ไม่พบ = 🔴, มีคำนำหน้า = 🟠
         if A.get("program_language") in ("thai", "thai_english"):
             name_checks = [
-                (student_name_th, abs_th_idx, "บทคัดย่อภาษาไทย", "ชื่อภาษาไทย", True),
-                (student_name, abs_en_idx, "บทคัดย่อภาษาอังกฤษ", "ชื่อภาษาอังกฤษ", True),
+                (student_name_th, abs_th_idx, "บทคัดย่อภาษาไทย", "ชื่อภาษาไทย"),
+                (student_name, abs_en_idx, "บทคัดย่อภาษาอังกฤษ", "ชื่อภาษาอังกฤษ"),
             ]
         else:
-            name_checks = [(student_name, abs_en_idx, "บทคัดย่อ", "ชื่อนักศึกษา", False)]
-        for nm3, aidx, albl, nlbl, required in name_checks:
+            name_checks = [(student_name, abs_en_idx, "บทคัดย่อ", "ชื่อนักศึกษา")]
+        for nm3, aidx, albl, nlbl in name_checks:
+            # ไม่มีชื่อให้เทียบ = ข้าม ไม่ขึ้นการ์ด — ช่องชื่อบังคับกรอกทั้งหน้าเว็บและ /check
+            # (FRONT_MATTER_RULES["required_form_fields"]) เล่มจึงถูกปฏิเสธก่อนถึงตรงนี้
+            # เดิมมีการ์ดแดง "ไม่ได้กรอก...ของนักศึกษาในฟอร์ม" ซึ่งขึ้นผ่านหน้าเว็บไม่ได้
+            # เจ้าหน้าที่ยืนยันให้เอาออก (ก.ย. 2569) เหมือนการ์ด "ไม่ได้กรอกข้อมูลอนุมัติ"
             if not nm3:
-                if required:
-                    rep.add(FRONT_FAILURE_ZONE, "front_matter", albl, f"ไม่ได้กรอก{nlbl}ของนักศึกษาในฟอร์ม",
-                            f"หลักสูตรไทยต้องตรวจ{nlbl}ในหน้า{albl}",
-                            "กรอกฟอร์มให้ครบแล้วตรวจใหม่", "FORM.REQUIRED")
                 continue
             if aidx is None:
                 # เล่มไม่มีหน้าบทคัดย่อภาษานี้ — กฎ "ภาษาครบตามหลักสูตร" ฟ้องแดงไปแล้ว
-                rep.add_verification("ชื่อนักศึกษา", albl, "pending",
+                rep.add_verification("ชื่อนักศึกษา", albl, "skipped",
                                      f"เล่มไม่มีหน้า{albl}")
                 continue
             core3 = _strip_student_title(nm3)
             compared = compare_reference_text(pages[aidx], core3, 'student_name')
             if aidx in unreadable_digit_pages and compared['status'] != 'exact':
-                # หน้าที่ฟอนต์เสีย ตรวจ "สิ่งที่อ่านได้" ตามปกติ แต่ห้ามฟ้อง — ชื่อที่
-                # เทียบไม่ตรงบนหน้าแบบนี้แยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ
-                # ของเดิมข้ามทั้งหน้า ทั้งที่เล่มจริงเทียบชื่อไทยได้ 1.00 เต็มบนหน้า
-                # เดียวกับที่อ่านตัวเลขไม่ออก — ทิ้งผลที่ใช้ได้ไปเปล่า ๆ
+                # หน้าที่ฟอนต์เสีย ตรวจ "สิ่งที่อ่านได้" ตามปกติ ชื่อที่ตรงก็ผ่าน (เล่มจริงเทียบ
+                # ชื่อไทยได้ 1.00 เต็มบนหน้าเดียวกับที่อ่านตัวเลขไม่ออก) ส่วนชื่อที่เทียบไม่ตรง
+                # แยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านมาไม่ครบ จึงเป็นการ์ดส้มให้เจ้าหน้าที่ดู
+                # หน้าจริง ไม่ใช่แดง — เดิมข้ามเงียบ ๆ ไม่มีการ์ด (เจ้าหน้าที่สั่ง ก.ย. 2569
+                # ให้ฟอนต์เพี้ยนเป็นสีส้ม และกฎทั้งหน้าต้องไปทางเดียวกัน)
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "pending", "ระบบอ่านข้อความบนหน้านี้ไม่ครบ")
+                rep.add(FONT_UNREADABLE_ZONE, "front_matter", f"{albl} ({page_ref(aidx)})",
+                        f'{nlbl}ที่ระบบอ่านได้คือ "{compared["actual"]}" '
+                        "ซึ่งอาจเพี้ยนเพราะฟอนต์ในไฟล์",
+                        f'{nlbl}ต้องเป็น "{core3}"',
+                        "เปิดหน้านี้ดูชื่อด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน",
+                        "FORM.FONT_UNREADABLE")
                 continue
             if compared['status'] != 'exact':
                 # ช่องของชื่อบนหน้าบทคัดย่อคือข้อความหน้ารหัสนักศึกษา ต้องรายงานสิ่งที่
@@ -5799,7 +5841,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
             abstract_spots = [(abs_en_idx, "บทคัดย่ออังกฤษ"), (abs_th_idx, "บทคัดย่อไทย")]
             if not any(idx is not None for idx, _ in abstract_spots):
-                rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "pending",
+                rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "skipped",
                                      "ระบบหาหน้าบทคัดย่อไม่เจอ")
             for abs_idx, abs_label in abstract_spots:
                 if abs_idx is None:
@@ -5925,7 +5967,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # ตัวอักษรครบทุกตัว ต่างเฉพาะเครื่องหมายวรรคตอน/การเว้นวรรค
                     # (เช่น "M.Sc. ()" กับ "M.Sc.()") = ข้อสังเกตสีเหลือง ผ่านได้
                     # ตามที่เจ้าหน้าที่กำหนด ส.ค. 2569
-                    rep.add_verification("ชื่อปริญญา", spot_name, "pending",
+                    rep.add_verification("ชื่อปริญญา", spot_name, "notice",
                                          "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                     rep.add(DEGREE_SPACING_ZONE, "front_matter", spot_name,
                             f'พบชื่อปริญญาแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
@@ -5962,7 +6004,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("ชื่อปริญญา", vloc, "pass")
             elif degree_differs_only_in_spacing(abbr, abstract_text):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
-                rep.add_verification("ชื่อปริญญา", vloc, "pending", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
+                rep.add_verification("ชื่อปริญญา", vloc, "notice", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                 rep.add(DEGREE_SPACING_ZONE, "front_matter", box,
                         f'พบชื่อปริญญาแบบย่อแต่เครื่องหมายวรรคตอน/ช่องว่างต่างจากข้อมูลอนุมัติ: "{compared["actual"]}"',
                         f"ข้อมูลอนุมัติ: \"{abbr}\"",

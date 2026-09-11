@@ -616,3 +616,114 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
                      "ethSourceHtml = '';", "document.getElementById('overlay').style.display = 'none';",
                      "updateConditionalRequirements();"):
             self.assertIn(step, body)
+
+
+class TheTableBadgeMatchesTheCardColour(unittest.TestCase):
+    """ป้ายในตารางผลเทียบต้องตรงกับสีของการ์ดที่คู่กัน (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ที่มา: แถวรหัสนักศึกษาบนบทคัดย่อไทยที่ฟอนต์ทำตัวเลขเพี้ยนขึ้น "❓ รอยืนยัน" สีส้ม แต่ไม่มี
+    การ์ดส้มให้กด เจ้าหน้าที่ถามว่าทำไมไม่เหมือนสีส้มอื่น แล้วสั่งว่า "ถ้ามันเพี้ยนแบบนี้ งั้นควร
+    ใส่สีส้ม แก้กฎการตรวจให้สัมพันธ์กันด้วย" — ข้อฟอนต์เพี้ยนจึงเป็นการ์ดส้ม และป้ายในตาราง
+    บอกสีของการ์ดที่คู่กัน
+    """
+
+    ROWS = (("รหัสนักศึกษา", "บทคัดย่อไทย (หน้า vi)", "pending", "ระบบอ่านตัวเลขบนหน้านี้ไม่ออก"),
+            ("ชื่อปริญญา", "หน้าลงนาม 1 (หน้า i)", "notice", "ต่างเฉพาะวรรคตอน/ช่องว่าง"),
+            ("ชื่อเรื่อง (ตาม บฑ.1)", "บทคัดย่อภาษาไทย", "skipped", "เล่มไม่มีหน้าบทคัดย่อภาษานี้"))
+
+    def _render(self, rows):
+        import jinja2
+        import checker
+        rep = checker.Report()
+        for topic, loc, status, detail in rows:
+            rep.add_verification(topic, loc, status, detail)
+        env = jinja2.Environment(loader=jinja2.FileSystemLoader(
+            str(Path(__file__).resolve().parents[1] / "templates")), autoescape=True)
+        return env.get_template("report.html").render(
+            report=checker.check_result(rep, {"n_pages": 10}), zone_label=main.ZONE_LABEL,
+            job_id="t", pdf_name="book.pdf", student={})
+
+    @staticmethod
+    def _group(html, topic):
+        start = html.index(topic, html.index('class="vf-group"'))
+        return html[start:html.index("</details>", start)]
+
+    def test_each_status_shows_the_colour_of_its_card(self):
+        html = self._render(self.ROWS)
+        self.assertIn("❓ รอยืนยัน", self._group(html, "รหัสนักศึกษา"))
+        self.assertIn("ข้อสังเกต", self._group(html, "ชื่อปริญญา"))
+        self.assertIn("— ไม่ได้ตรวจ", self._group(html, "ชื่อเรื่อง (ตาม บฑ.1)"))
+
+    def test_a_missing_page_is_not_called_pending(self):
+        """ควบคุมเชิงลบ — แถวที่ไม่มีการ์ดคู่กันต้องไม่ใช้คำว่า "รอยืนยัน" อีก"""
+        group = self._group(self._render(self.ROWS[2:]), "ชื่อเรื่อง (ตาม บฑ.1)")
+        self.assertNotIn("รอยืนยัน", group)
+        self.assertNotIn("ข้อสังเกต", group)
+
+    def test_a_group_with_passes_and_a_missing_page_says_checked_pages_match(self):
+        rows = (("ชื่อเรื่อง (ตาม บฑ.1)", "หน้าปก", "pass", ""),) + self.ROWS[2:]
+        self.assertIn("✓ ตรงทุกหน้าที่ตรวจ", self._group(self._render(rows), "ชื่อเรื่อง (ตาม บฑ.1)"))
+
+    def test_the_badge_colours_follow_the_zones(self):
+        html = self._render(self.ROWS)
+        rule = lambda sel: html.split(sel + " {", 1)[1].split("}", 1)[0]
+        self.assertIn("--orange", rule(".vf-badge.pending"))
+        self.assertIn("--yellow", rule(".vf-badge.notice"))
+        self.assertNotIn("--orange", rule(".vf-badge.skipped"))
+
+
+class AForeignStudentsNameFillsTheThaiNameField(unittest.TestCase):
+    """นักศึกษาต่างชาติ: ช่องชื่อไทยของ eThesis เป็นชื่ออังกฤษ ต้องดึงมาใส่ช่องชื่อไทย (ก.ย. 2569)
+
+    เจ้าหน้าที่: "ก็ให้ดึงชื่อไทย ซึ่งก็จะเป็นชื่อภาษาอังกฤษ มา เพื่อไม่ให้ช่องว่าง" — หลักสูตรไทย/
+    ไทย-อังกฤษบังคับกรอกช่องนี้ ถ้าว่างระบบไม่ให้ตรวจ ("แบบฟอร์มก่อนตรวจถ้ากรอกไม่ครบ ระบบไม่ตรวจ")
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def test_the_pdf_importer_fills_both_names(self):
+        import ethesis_import
+        for lines, want in (
+                (["ชื่อ-สกุล", "MR. JOHN SMITH", "JOHN SMITH"], ("JOHN SMITH", "JOHN SMITH")),
+                (["ชื่อ-สกุล MS. ANNA LEE"], ("ANNA LEE", "ANNA LEE")),
+                (["ชื่อ-สกุล", "นาย โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"],
+                 ("โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"))):
+            self.assertEqual(ethesis_import.student_names(lines), want, lines)
+
+    def test_a_thai_student_keeps_the_thai_name(self):
+        """ควบคุมเชิงลบ — นักศึกษาไทยต้องไม่ถูกเขียนทับด้วยชื่ออังกฤษ"""
+        import ethesis_import
+        th, en = ethesis_import.student_names(["ชื่อ-สกุล", "น.ส. ธัญชนก โสภาคดิษฐ",
+                                               "THANCHANOK SOPARDIT"])
+        self.assertEqual((th, en), ("ธัญชนก โสภาคดิษฐ", "THANCHANOK SOPARDIT"))
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_pasted_text_importer_does_the_same(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        start = html.index("<script>") + len("<script>")
+        block = html[start:html.index("let ethSourceHtml")]
+        script = r"""
+const vm = require('vm');
+vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
+const out = {};
+for (const [key, text] of Object.entries({
+    foreign: "ชื่อ-สกุล\nMR. JOHN SMITH\nJOHN SMITH",
+    thai: "ชื่อ-สกุล\nนาย โฆษิต เที่ยงตรง\nKOSITH THEINGTRONG"})) {
+  const d = parseEthesisText(text, '');
+  out[key] = [d.student_name_th || '', d.student_name || ''];
+}
+console.log(JSON.stringify(out));
+"""
+        run = subprocess.run(["node", "-e", script], input=block, capture_output=True,
+                             text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout)
+        self.assertEqual(out["foreign"], ["JOHN SMITH", "JOHN SMITH"])
+        self.assertEqual(out["thai"], ["โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"])
+
+    def test_an_empty_thai_name_is_still_refused(self):
+        """ควบคุมเชิงลบ — กติกา "กรอกไม่ครบ ระบบไม่ตรวจ" ต้องยังอยู่"""
+        from ethesis_rules import FRONT_MATTER_RULES
+        for program in ("thai", "thai_english"):
+            self.assertIn("student_name_th",
+                          FRONT_MATTER_RULES["required_form_fields"][program], program)
