@@ -1345,6 +1345,60 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
             bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE")
 
 
+# ตำแหน่งระดับหลักสูตร — ใช้ได้เฉพาะมุมล่างขวาของหน้าลงนาม 1 (ประธานหลักสูตร)
+_PROGRAMME_HEAD_EN = re.compile(r'Program(?:me)?\s*Director', re.I)
+_PROGRAMME_HEAD_TH = ("ประธานหลักสูตร", "ผู้อำนวยการหลักสูตร")
+
+
+def programme_head_title(bottom_text):
+    """ตำแหน่งระดับหลักสูตรในแถวล่างสุดของหน้าลงนาม — คืน (คำที่พบ, "en"/"th") หรือ None
+
+    ค้นจากข้อความ ไม่ใช่จากพิกัดของช่อง (เจ้าหน้าที่แนะนำให้ดูจากสิ่งที่ควรอยู่ในหน้า) —
+    ช่องล่างซ้ายเป็นคณบดีบัณฑิตวิทยาลัยเสมอ ตำแหน่งระดับหลักสูตรที่โผล่ในแถวนี้จึงเป็นของ
+    ช่องล่างขวา
+
+    ฝั่งอังกฤษใช้ regex ที่ยอมแค่ช่องว่างคั่นสองคำ ห้ามใช้ norm — norm ตัดวงเล็บทิ้ง
+    คุณวุฒิอย่าง "Ph.D. (Tropical Health Program)" ที่อยู่เหนือบรรทัด "Director" จะถูกอ่าน
+    ต่อกันเป็น PROGRAMDIRECTOR ส่วนฝั่งไทยต้องใช้ norm เพราะสระ/วรรณยุกต์ใน PDF เพี้ยนประจำ
+    """
+    text = bottom_text or ""
+    match = _PROGRAMME_HEAD_EN.search(text)
+    if match:
+        return soft(match.group(0)), "en"
+    squashed = norm(text)
+    for title in _PROGRAMME_HEAD_TH:
+        if norm(title) in squashed:
+            return title, "th"
+    return None
+
+
+def _check_faculty_head_title(rep, bottom_text, loc):
+    """หน้าลงนาม 2 มุมล่างขวาต้องเป็นตำแหน่ง Dean หรือ Director ไม่ใช่ Program Director
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569): "หน้า ii หรือ ข ... มุมล่างขวา ต้องเป็น Dean ก็ Director
+    ไม่ใช่ Program director" — ช่องนี้เป็นของหัวหน้าส่วนงาน (คณบดีคณะ / ผู้อำนวยการสถาบัน)
+    ส่วนประธานหลักสูตรลงนามมุมเดียวกันของหน้าลงนาม 1
+
+    เล่มจริง 6736545 PHIE/M คัดช่องนี้มาจากหน้าลงนาม 1 ทั้งช่อง ("Program Director /
+    Master of Science Program in ...") แล้วระบบไม่ฟ้องเลย เพราะเล่มอังกฤษข้ามการเทียบชื่อคณะ
+    (_check_signature_institution) กฎนี้ไม่พึ่งข้อมูลอนุมัติ จึงตรวจได้ทั้งเล่มไทยและอังกฤษ
+
+    ค่าที่ถูกมีสองตัวเลือก ประโยค expected จึงห้ามจบด้วยเครื่องหมายคำพูด ไม่งั้น
+    _corrected_value ดึงตัวท้ายไปพิมพ์ในข้อความสรุปว่า 'ต้องแก้เป็น "Director"' ตัวเดียว
+    สีส้มเหมือนข้ออื่นของช่องเดียวกัน เจ้าหน้าที่กด ✗ แล้วเป็นสีแดง
+    """
+    found = programme_head_title(bottom_text)
+    if not found:
+        return
+    title, lang = found
+    heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+    rep.add("ORANGE", "front_matter", loc,
+            f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
+            f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
+            "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+            "FRONT.COMMITTEE")
+
+
 def _report_sig_placeholders(rep, found, loc):
     """ช่องกรรมการที่ไม่ได้ใช้ต้อง "เปลี่ยนสีตัวอักษรเป็นสีขาว" ไม่ใช่ลบทิ้ง
 
@@ -1472,6 +1526,11 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                           "ระบบเทียบตามลำดับหน้าไว้ก่อน โปรดตรวจว่าหน้าลงนาม 1 "
                           "เป็นคณะกรรมการที่ปรึกษา และหน้าลงนาม 2 เป็นคณะกรรมการสอบ",
                           "UNCERTAIN.REVIEW")
+        # ตำแหน่งมุมล่างขวาของหน้าลงนาม 2 เป็นกฎของ template ไม่ต้องมีรายชื่อจาก eThesis
+        # จึงตรวจก่อนบรรทัดข้ามข้างล่าง — ถ้าหัวข้อบนหน้าบอกว่าเป็นหน้าที่ปรึกษา (สลับหน้ากัน)
+        # ไม่ฟ้อง เพราะหน้าที่ปรึกษาต้องมี Program Director อยู่แล้ว มีรายการสีม่วงเตือนเรื่องสลับหน้าแทน
+        if kind == "exam" and heading_kind in ("", "exam"):
+            _check_faculty_head_title(rep, bottom_text, f"{page_label} คณบดีคณะ ({page_ref(idx)})")
         if not expected:
             continue
         handled_any = True

@@ -2891,6 +2891,104 @@ class TheProgrammeChairBoxReportsASpellingMistakeInTheBooksCase(unittest.TestCas
             "ICT FOR HEALTH", "Information Technology"), "ICT for Health")
 
 
+class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
+    """หน้าลงนาม 2 มุมล่างขวา: ตำแหน่งต้องเป็น Dean หรือ Director ไม่ใช่ Program Director (ก.ย. 2569)
+
+    เจ้าหน้าที่: "หน้า ii หรือ ข ... มุมล่างขวา ต้องเป็น Dean ก็ Director ไม่ใช่ Program director"
+    เล่มจริง 6736545 PHIE/M คัดช่องนี้มาจากหน้าลงนาม 1 ทั้งช่อง แล้วระบบไม่ฟ้องเลย
+    """
+
+    # แถวล่างสุดของหน้าลงนาม 2 ของเล่มจริง 6736545 PHIE/M (ซ้าย = บัณฑิตวิทยาลัย ถูกแล้ว)
+    SIRIPHON = ("Prof. Chartchalerm Isarankura-Na- Ayudhya, Asst. Prof. Tawee Saiwichai "
+                "Ph.D. (Medical Technology) Ph.D. (Tropical Medicine) Dean Program Director "
+                "Faculty of Graduate Studies Master of Science Program in Public "
+                "Mahidol University Health Infectious Disease and Epidemiology "
+                "Faculty of Public health Mahidol University")
+
+    def _found(self, bottom):
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, bottom, "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
+        return rep.zones["ORANGE"]
+
+    def test_the_real_book_is_reported(self):
+        issues = self._found(self.SIRIPHON)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["found"],
+                         'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"')
+        self.assertEqual(issues[0]["expected"], 'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น')
+        self.assertEqual(issues[0]["rule_id"], "FRONT.COMMITTEE")
+
+    def test_every_programme_level_title_is_caught(self):
+        for bottom, title in (("Dean Faculty of Graduate Studies PROGRAMME DIRECTOR Faculty of X",
+                               "PROGRAMME DIRECTOR"),
+                              ("Dean Programme  Director", "Programme Director"),
+                              ("คณบดี ประธานหลักสูตร บัณฑิตวิทยาลัย คณะสังคมศาสตร์", "ประธานหลักสูตร"),
+                              ("คณบดี ผู้อำนวยการหลักสูตร บัณฑิตวิทยาลัย", "ผู้อำนวยการหลักสูตร")):
+            issues = self._found(bottom)
+            self.assertEqual(len(issues), 1, bottom)
+            self.assertIn(f'"{title}"', issues[0]["found"], bottom)
+
+    def test_a_thai_book_is_told_the_thai_titles(self):
+        issues = self._found("คณบดี ประธานหลักสูตร บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
+        self.assertEqual(issues[0]["expected"],
+                         'ตำแหน่งต้องเป็น "คณบดี" หรือ "ผู้อำนวยการ" เท่านั้น')
+
+    def test_dean_and_director_pass(self):
+        """ควบคุมเชิงลบ — แถวล่างของหน้าลงนาม 2 ในเล่มจริงที่ถูกต้องทุกแบบต้องไม่ฟ้อง"""
+        for bottom in ("Dean Faculty of Graduate Studies, Mahidol University Dean Faculty of "
+                       "Tropical Medicine Mahidol University",
+                       "Dean Faculty of Graduate Studies Director Institute of Nutrition",
+                       "คณบดี คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณะสังคมศาสตร์และมนุษยศาสตร์",
+                       "คณบดี ผู้อำนวยการ บัณฑิตวิทยาลัย สถาบันวิจัยประชากรและสังคม", ""):
+            self.assertEqual(self._found(bottom), [], bottom)
+
+    def test_a_qualification_ending_in_program_is_not_a_title(self):
+        """ควบคุมเชิงลบ — "(Tropical Health Program)" ตามด้วยบรรทัด "Director" ไม่ใช่ Program Director"""
+        self.assertEqual(self._found(
+            "Assoc. Prof. A B, Ph.D. (Tropical Health Program) Director Institute of X"), [])
+
+    def test_the_summary_keeps_both_choices(self):
+        """ค่าที่ถูกมีสองตัวเลือก — ข้อความสรุปต้องไม่เหลือ 'ต้องแก้เป็น "Director"' ตัวเดียว"""
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, self.SIRIPHON,
+                                                 "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น', summary)
+        self.assertNotIn("ต้องแก้เป็น", summary)
+
+    def test_only_the_exam_page_is_checked(self):
+        """หน้าลงนาม 1 มุมล่างขวาต้องเป็น Program Director อยู่แล้ว — ห้ามฟ้อง"""
+        committees = {"advisory": ["A B"], "exam": ["C D"]}
+        pages = ["Thesis Advisory Committee", "Thesis Examination Committee"]
+        slot = ({1: "A B"}, {1: "Ph.D."}, self.SIRIPHON, {1: "A B"})
+
+        class _Pdf:
+            pages = [object(), object()]
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        rep = Report()
+        with mock.patch.object(checker_module.pdfplumber, "open", lambda _p: _Pdf()), \
+                mock.patch.object(checker_module, "signature_committee_slots", lambda _pg: slot), \
+                mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
+            checker_module._check_committees(rep, committees, [0, 1], pages, "x.pdf",
+                                             lambda i: ["หน้า i", "หน้า ii"][i], "international", {})
+        hits = [i for i in rep.zones["ORANGE"] if "ใช้ตำแหน่ง" in i["found"]]
+        self.assertEqual([i["location"] for i in hits], ["หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"])
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"',
+                     'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น',
+                     "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+                     "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"):
+            en = i18n.tr_en(text, pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
 class TheAbstractTitleAlignmentFindingIsShort(unittest.TestCase):
     """ข้อชื่อเรื่องไม่ชิดซ้าย บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่อง (ก.ย. 2569)
 
