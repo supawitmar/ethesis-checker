@@ -1159,7 +1159,7 @@ def signature_page_position(sig_pages, page_index):
         return "หน้าลงนาม"
 
 
-def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
+def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None, label_style=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
     เลขหน้าสองหน้านี้ไม่ใช่แค่การเรียงเลข — เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการ
@@ -1176,6 +1176,13 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     จึงไม่ชนกับข้อความในเนื้อหน้า
 
     คืนดัชนีหน้าที่ฟ้องไป ให้ _check_front_page_numbers ไม่ฟ้องหน้าเดิมซ้ำอีกข้อ
+
+    label_style ("thai" / "roman" จาก _expected_front_label_style) = บอกเลขหน้าเฉพาะภาษาของเล่ม
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) "บอกเลขหน้าตามภาษาที่เขียนของแต่ละเล่ม" — เดิมบอกทั้งสองแบบ
+    'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i" (อังกฤษ)' นักศึกษาเล่มไทยต้องเดาเองว่าใช้ตัวไหน
+    ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ / ไฟล์ eThesis เป็นของคนอื่น) ยังบอกทั้งสองแบบ
+    ยังรับเลขหน้าได้ทั้งสองชนิดเหมือนเดิม — เล่มไทยที่พิมพ์ i/ii ถูกกฎชนิดเลขหน้าส่วนนำฟ้องอยู่แล้ว
+    หน้าลงนามที่ไม่มีเลขหน้าเป็นสีส้มเหมือนพิมพ์เลขผิด (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
     """
     zone = zone or SIG_LABEL_ZONE
     flagged = []
@@ -1191,10 +1198,16 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
         found_lab = _extract_page_label(pages[idx])
         what = ("เลขหน้าของหน้านี้ไม่ถูกต้อง" if found_lab
                 else "ไม่พบเลขหน้าบนหน้า")
+        if label_style == "thai":
+            want = f'ต้องเป็นเลขหน้า "{lab_th}"'
+        elif label_style == "roman":
+            want = f'ต้องเป็นเลขหน้า "{lab_en}"'
+        else:
+            want = f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)'
         rep.add(zone, "front_matter",
                 f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
                 what,
-                f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                want,
                 "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
                 "เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย",
                 "PAGE.SIGNATURE_LABEL")
@@ -1418,14 +1431,15 @@ def _check_faculty_head_title(rep, bottom_text, loc):
 
     ค่าที่ถูกมีสองตัวเลือก ประโยค expected จึงห้ามจบด้วยเครื่องหมายคำพูด ไม่งั้น
     _corrected_value ดึงตัวท้ายไปพิมพ์ในข้อความสรุปว่า 'ต้องแก้เป็น "Director"' ตัวเดียว
-    สีส้มเหมือนข้ออื่นของช่องเดียวกัน เจ้าหน้าที่กด ✗ แล้วเป็นสีแดง
+    **สีแดง** ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) "อันนี้ขอสีแดงเลย" — ต่างจากข้ออื่นของช่องเดียวกัน
+    (ชื่อสาขา/คณะ = ส้ม) เพราะคำตำแหน่งอ่านได้แน่นอน ไม่ใช่การเทียบข้อความที่อาจอ่านเพี้ยน
     """
     found = programme_head_title(bottom_text)
     if not found:
         return
     title, lang = found
     heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
-    rep.add("ORANGE", "front_matter", loc,
+    rep.add("RED", "front_matter", loc,
             f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
             f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
             "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
@@ -2680,7 +2694,9 @@ def issue_sort_key(issue):
 # ตัดข้อความเชิงเทคนิค/คำต่อรองออกจากข้อความสรุป (รายละเอียดในรายงานยังคงเดิมทุกตัวอักษร)
 _SUMMARY_NOISE = re.compile(
     r"\s*\(\s*typo[^)]*\)"
-    r"|\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]\s*เจ้าหน้าที่ยืนยันได้"
+    # ถ้อยคำปัจจุบันไม่มีขีดคั่นแล้ว ('ประกาศใช้ "X" แต่คู่มือแสดงแบบที่พบ เจ้าหน้าที่ยืนยันได้')
+    # ขีดจึงต้องเป็นทางเลือก ไม่งั้นท่อนที่เขียนถึงเจ้าหน้าที่หลุดไปถึงนักศึกษา (ก.ย. 2569)
+    r"|\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]?\s*เจ้าหน้าที่ยืนยันได้"
     r"|\s*[—-]\s*เจ้าหน้าที่ยืนยันได้", re.I)
 _SUMMARY_LEAD = re.compile(r"^(ข้อความที่ถูกต้อง|ควรเป็น|ต้องเป็น|ที่ถูก)\s*[:：]?\s*")
 
@@ -3300,9 +3316,15 @@ def _corrected_value(issue):
     # "เล่มผิดภาษา" ไม่มีค่าเดี่ยวให้พิมพ์แก้ในเล่ม สิ่งที่ต้องทำคือจัดทำเล่มใหม่ทั้งเล่ม
     # ถ้าดึงค่าท้ายประโยคไป สรุปจะเหลือแค่ 'ต้องแก้เป็น "ภาษาอังกฤษ"' ซึ่งกลืนถ้อยคำ
     # ที่เจ้าหน้าที่กำหนดไว้ทั้งประโยคหายไป — ปล่อยให้ตกไปใช้ประโยค expected เต็ม ๆ
-    if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+    #
+    # เลขหน้าหน้าลงนามพิมพ์ประโยคเต็ม 'ต้องเป็นเลขหน้า "ก"' ตามแบบที่เจ้าหน้าที่เลือก (ก.ย. 2569
+    # "เอาตามข้อ 2 ก็พอ") — ถ้าดึงค่าไป จะเหลือ 'ต้องแก้เป็น "ก"' ซึ่งไม่บอกว่าเป็นเลขหน้า
+    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL"):
         return ""
-    raw = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+    # บรรทัดที่เขียนถึงเจ้าหน้าที่ไม่ใช่ค่าที่ต้องแก้ ข้ามไปใช้ช่องถัดไป (ดู is_staff_only_line)
+    raw = next((text for text in (summary_tidy(issue.get("expected")),
+                                  summary_tidy(issue.get("fix")))
+                if text and not is_staff_only_line(text)), "")
     raw = _SUMMARY_LEAD.sub("", raw)
     match = re.search(r'"([^"]+)"\s*$', raw)
     return match.group(1) if match else ""
@@ -3344,12 +3366,22 @@ def _prose_location(location):
 SUMMARY_INDENT = "   "
 
 
-# ท่อนที่เขียนถึง "เจ้าหน้าที่" บนการ์ดสีเหลือง — อยู่ในรายงานได้ แต่ห้ามติดไปกับข้อความ
-# สรุปที่ส่งนักศึกษา เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากดไม่ผ่านข้อเลขหน้าในสารบัญแล้ว
-# นักศึกษาได้บรรทัด "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย
-# ซึ่งอ่านแล้วขัดกับการที่ถูกสั่งให้แก้ ส่วนบรรทัด fix "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่า
-# ควรแก้" เป็นตัวสำรองเมื่อ expected ว่าง จึงต้องกันด้วย ไม่งั้นหลุดมาแทนที่กัน
-_STAFF_ONLY_DIRECTIVES = ("เป็นข้อสังเกต ไม่ได้ตรวจ", "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่")
+# บรรทัดที่เขียนถึงเจ้าหน้าที่ ไม่ใช่ถึงนักศึกษา — อยู่บนการ์ดในรายงานได้ แต่ห้ามติดไปกับข้อความ
+# สรุปที่ส่งนักศึกษา เจ้าหน้าที่สั่ง (ก.ย. 2569): "ไม่ต้องเอาข้อความที่เขียนถึงเจ้าหน้าที่ไปแจ้ง
+# นักศึกษา" รู้จักจากเนื้อความ ไม่ใช่รายการประโยค กฎใหม่ที่เขียนแบบเดียวกันจึงถูกกันด้วย
+#   เอ่ยถึงเจ้าหน้าที่          "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง ..."
+#                             "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้"
+#   บอกว่าเป็นข้อสังเกต/ผ่านได้   "หน้าลักษณะนี้ ... เป็นข้อสังเกตและผ่านได้" — ขัดกับการถูกสั่งให้แก้
+#   สั่งให้ตรวจเอง              "ตรวจว่าเป็นหน้าภาพหรือหน้าว่าง..." / "ตรวจด้วยตา"
+# ต้องกันทั้งช่อง "ควรเป็น" และช่อง "ต้องแก้" ที่เป็นตัวสำรอง ไม่งั้นตัดช่องแรกแล้วช่องหลังหลุดมาแทน
+_STAFF_ONLY_WORDS = ("เจ้าหน้าที่", "ข้อสังเกต", "ผ่านได้")
+_STAFF_ONLY_LEADS = ("ตรวจว่า", "ตรวจด้วยตา")
+
+
+def is_staff_only_line(text):
+    """บรรทัดนี้เขียนถึงเจ้าหน้าที่ (ไม่ใช่นักศึกษา) ไหม — ดู _STAFF_ONLY_WORDS"""
+    text = (text or "").strip()
+    return any(word in text for word in _STAFF_ONLY_WORDS) or text.startswith(_STAFF_ONLY_LEADS)
 
 
 def _summary_sentence(issue, skip_location=False):
@@ -3383,7 +3415,7 @@ def _summary_sentence(issue, skip_location=False):
         directive = next(
             (text for text in (summary_tidy(issue.get("expected")),
                                summary_tidy(issue.get("fix")))
-             if text and not text.startswith(_STAFF_ONLY_DIRECTIVES)), "")
+             if text and not is_staff_only_line(text)), "")
         if directive:
             lines.append(directive)
     kept = [line for line in lines if line]
@@ -5131,7 +5163,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    sig_label_reported = _report_signature_page_labels(rep, sig_pages, pages, page_ref)
+    sig_label_reported = _report_signature_page_labels(
+        rep, sig_pages, pages, page_ref,
+        label_style=_expected_front_label_style(
+            (approved or {}).get("program_language", "") if same_student else ""))
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")

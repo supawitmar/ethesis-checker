@@ -630,6 +630,7 @@ var TR = [
   [/^กรรมการที่ปรึกษา$/g, 'advisory committee members'],
   // ประโยคเต็มที่ขึ้นต้นด้วยคำอื่นแล้วตามด้วย ต้องเป็น "..." ต้องอยู่ก่อนกฎ ต้องเป็น ทั่วไปข้างล่าง
   [/หัวข้อในสารบัญต้องเป็น ("[^"]*")/g, 'The heading in the table of contents must be $1'],
+  [/ต้องเป็นเลขหน้า ("[^"]*")/g, 'Must be page label $1'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],

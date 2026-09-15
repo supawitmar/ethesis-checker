@@ -2908,7 +2908,8 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
     def _found(self, bottom):
         rep = Report()
         checker_module._check_faculty_head_title(rep, bottom, "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
-        return rep.zones["ORANGE"]
+        self.assertEqual(rep.zones["ORANGE"], [])      # สีแดง ไม่ใช่ส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        return rep.zones["RED"]
 
     def test_the_real_book_is_reported(self):
         issues = self._found(self.SIRIPHON)
@@ -2975,7 +2976,7 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
                 mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
             checker_module._check_committees(rep, committees, [0, 1], pages, "x.pdf",
                                              lambda i: ["หน้า i", "หน้า ii"][i], "international", {})
-        hits = [i for i in rep.zones["ORANGE"] if "ใช้ตำแหน่ง" in i["found"]]
+        hits = [i for i in rep.zones["RED"] if "ใช้ตำแหน่ง" in i["found"]]
         self.assertEqual([i["location"] for i in hits], ["หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"])
 
     def test_it_translates(self):
@@ -3059,6 +3060,164 @@ class AQualificationIsReadFromItsOwnCell(unittest.TestCase):
         self.assertEqual(run(), [])
         self.assertEqual(run(degree=False),
                          ['ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook"'])
+
+
+class NoStaffLineReachesTheStudent(unittest.TestCase):
+    """ข้อความสรุปถึงนักศึกษาต้องไม่มีบรรทัดที่เขียนถึงเจ้าหน้าที่ (ก.ย. 2569)
+
+    เจ้าหน้าที่: "ไม่ต้องเอาข้อความที่เขียนถึงเจ้าหน้าที่ไปแจ้งนักศึกษา" — เล่มจริง 6736545 ได้บรรทัด
+    "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง ..." ในกลุ่มรอยืนยัน และการ์ดเหลืองหน้าว่างที่กด ✗
+    ได้ "... เป็นข้อสังเกตและผ่านได้" ในกลุ่มกรุณาแก้ไข
+    """
+
+    STAFF_LINES = (
+        "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
+        "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
+        "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "ตรวจด้วยตา",
+        "แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้", "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่",
+        "เจ้าหน้าที่ตรวจสอบรูปแบบตัวหนาในบทคัดย่อ",
+        "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+    )
+    # คำที่ห้ามโผล่ในบรรทัดสั่งแก้ของข้อความสรุป — เขียนแยกจากค่าคงที่ในเครื่องตรวจโดยตั้งใจ
+    # ถ้าใช้ค่าคงที่ตัวเดียวกัน เทสต์จะผ่านไปพร้อมกับตัวกรองที่พัง
+    BANNED = ("เจ้าหน้าที่", "ข้อสังเกต", "ผ่านได้")
+    BANNED_LEADS = ("ตรวจว่า", "ตรวจด้วยตา")
+
+    def _clean(self, line):
+        line = line.strip()
+        return not any(w in line for w in self.BANNED) and not line.startswith(self.BANNED_LEADS)
+
+    def test_the_known_staff_lines_are_recognised(self):
+        for line in self.STAFF_LINES:
+            self.assertTrue(checker_module.is_staff_only_line(line), line)
+
+    def test_student_directives_are_kept(self):
+        """ควบคุมเชิงลบ — บรรทัดสั่งแก้ปกติต้องยังไปถึงนักศึกษา"""
+        for line in ('ต้องแก้เป็น "LITERATURE REVIEW"', "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                     'ต้องเป็นเลขหน้า "ก"', "ช่องกรรมการที่ไม่ได้ใช้ต้องเปลี่ยนสีตัวอักษรเป็นสีขาว",
+                     "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
+                     'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น'):
+            self.assertFalse(checker_module.is_staff_only_line(line), line)
+
+    def test_the_blank_page_items_reach_the_student_without_staff_lines(self):
+        rep = Report()
+        rep.add("ORANGE", "-", "หน้า 140 ถึง หน้า 145 (6 หน้า)",
+                "ระบบดึงข้อความจากหน้านี้ไม่ได้ (มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น) "
+                "และยืนยันลำดับเลขหน้าไม่ได้", self.STAFF_LINES[0], "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
+        rep.add("YELLOW", "body/end", "หน้า 198 ถึง หน้า 205 (8 หน้า)",
+                "ระบบดึงข้อความจากหน้านี้ไม่ได้ (มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น) "
+                "แต่เลขหน้าเรียงต่อเนื่องถูกต้อง", self.STAFF_LINES[1], self.STAFF_LINES[2],
+                "PAGE.BLANK")
+        summary = checker_module.plain_summary(checker_module.check_result(rep),
+                                               failed=["YELLOW:0"])
+        self.assertIn("หน้า 140 ถึง หน้า 145", summary)          # ข้อยังอยู่ แค่ไม่มีบรรทัดถึงเจ้าหน้าที่
+        self.assertIn("หน้า 198 ถึง หน้า 205", summary)
+        for line in summary.splitlines():
+            self.assertTrue(self._clean(line), line)
+
+    def test_the_manual_variant_chapter_title_keeps_only_the_correction(self):
+        rep = Report()
+        rep.add("ORANGE", "body", "บทที่ 2 (หน้า 15)", 'ชื่อบทในเล่มเขียนว่า "ทบทวนวรรณกรรม"',
+                'ประกาศใช้ "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง" แต่คู่มือแสดงแบบที่พบ เจ้าหน้าที่ยืนยันได้',
+                "", "BODY.OPTION1")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ต้องแก้เป็น "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง"', summary)
+        self.assertNotIn("เจ้าหน้าที่", summary)
+
+    def test_a_quoted_value_in_a_staff_line_is_not_a_correction(self):
+        """ค่าในเครื่องหมายคำพูดของบรรทัดที่เขียนถึงเจ้าหน้าที่ อาจเป็นสิ่งที่เล่มพิมพ์ผิด ไม่ใช่ค่าที่ต้องแก้"""
+        rep = Report()
+        rep.add("ORANGE", "body", "หน้า 10", "พบข้อความที่ต้องตรวจ",
+                'เจ้าหน้าที่ยืนยันว่าเล่มพิมพ์ "ABC"', "", "UNCERTAIN.REVIEW")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("พบข้อความที่ต้องตรวจ", summary)
+        self.assertNotIn('ต้องแก้เป็น "ABC"', summary)
+
+    def test_no_rule_in_the_engine_sends_a_staff_line_to_the_student(self):
+        """ไล่ rep.add ทุกจุดในเครื่องตรวจ แล้วจำลองบรรทัดที่ข้อความสรุปจะพิมพ์ต่อจากสิ่งที่พบ
+
+        กันกฎใหม่ในอนาคตที่เขียนถึงเจ้าหน้าที่ไว้ในช่อง "ควรเป็น" หรือ "ต้องแก้" แล้วหลุดไปถึงนักศึกษา
+        """
+        import ast
+
+        def text_of(node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            if isinstance(node, ast.JoinedStr):
+                return "".join(v.value if isinstance(v, ast.Constant) else "X" for v in node.values)
+            return None
+
+        tree = ast.parse(inspect.getsource(checker_module))
+        checked = 0
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add" and len(node.args) >= 5):
+                continue
+            expected = text_of(node.args[4])
+            fix = text_of(node.args[5]) if len(node.args) > 5 else ""
+            if expected is None or fix is None:
+                continue
+            sentence = checker_module._summary_sentence(
+                {"location": "", "found": "x", "expected": expected, "fix": fix, "rule_id": ""},
+                skip_location=True)
+            checked += 1
+            for line in sentence.split("\n")[1:]:
+                self.assertTrue(self._clean(line), f"บรรทัด {node.lineno}: {line}")
+        self.assertGreater(checked, 80)          # ตอนนี้ 88 จุดที่เขียนข้อความตรง ๆ
+
+
+class TheSignaturePageNumberFollowsTheBookLanguage(unittest.TestCase):
+    """บอกเลขหน้าหน้าลงนามตามภาษาของเล่ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    "บอกเลขหน้าตามภาษาที่เขียนของแต่ละเล่ม" — เดิมบอก 'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i"
+    (อังกฤษ)' ทั้งที่เล่มที่ 4 (6538041 SHPP/D) เป็นหลักสูตรไทย
+    """
+
+    PAGES = ["ปก", "วิทยานิพนธ์ เรื่อง X", "วิทยานิพนธ์ เรื่อง X"]
+
+    def _expected(self, style):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [1, 2], self.PAGES, lambda i: f"แผ่นที่ {i + 1}", label_style=style)
+        return [i["expected"] for i in rep.zones["ORANGE"]], rep
+
+    def test_a_thai_book_is_told_the_thai_letters(self):
+        self.assertEqual(self._expected("thai")[0],
+                         ['ต้องเป็นเลขหน้า "ก"', 'ต้องเป็นเลขหน้า "ข"'])
+
+    def test_an_english_book_is_told_the_roman_numerals(self):
+        self.assertEqual(self._expected("roman")[0],
+                         ['ต้องเป็นเลขหน้า "i"', 'ต้องเป็นเลขหน้า "ii"'])
+
+    def test_an_unknown_language_still_gets_both(self):
+        """ควบคุมเชิงลบ — ไม่รู้ภาษาเล่มต้องบอกทั้งสองแบบเหมือนเดิม"""
+        self.assertEqual(self._expected(None)[0][0], 'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i" (อังกฤษ)')
+
+    def test_it_stays_orange(self):
+        """ไม่มีเลขหน้า = สีส้มเหมือนพิมพ์เลขผิด (เจ้าหน้าที่ยืนยัน ก.ย. 2569)"""
+        _exp, rep = self._expected("thai")
+        self.assertEqual(len(rep.zones["ORANGE"]), 2)
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_the_summary_says_page_number(self):
+        _exp, rep = self._expected("thai")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ต้องเป็นเลขหน้า "ก"', summary)
+        self.assertNotIn('ต้องแก้เป็น "ก"', summary)
+        self.assertNotIn("(อังกฤษ)", summary)
+
+    def test_the_run_passes_the_book_language(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("rep, sig_pages, pages, page_ref,\n        label_style=_expected_front_label_style(",
+                      source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('ต้องเป็นเลขหน้า "ก"', 'ต้องเป็นเลขหน้า "ii"'):
+            en = i18n.tr_en(text, pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en)), [], en)
 
 
 class ABiographyHeadedJustPrathawat(unittest.TestCase):
@@ -3401,7 +3560,7 @@ class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
         source = inspect.getsource(checker_module)
         for phrase in (self.NOTE, self.FIX):
             self.assertIn(phrase, source)
-            self.assertTrue(phrase.startswith(checker_module._STAFF_ONLY_DIRECTIVES), phrase)
+            self.assertTrue(checker_module.is_staff_only_line(phrase), phrase)
 
 
 class AStudentIdInThaiNumeralsIsRed(unittest.TestCase):
