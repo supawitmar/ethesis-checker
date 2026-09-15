@@ -374,6 +374,14 @@ _SIG_QUAL_PLACEHOLDERS = (
 )
 
 
+# ป้ายบทบาทใต้คุณวุฒิที่บางเล่มพิมพ์เพิ่ม (Chair / Member / Candidate ...) ไม่ใช่คุณวุฒิ
+# เทียบทั้งช่อง (norm) ไม่ใช่ค้นคำย่อย — คุณวุฒิจริงไม่มีทางเป็นคำเหล่านี้ล้วน ๆ
+_SIG_ROLE_LABELS = frozenset(norm(label) for label in (
+    'Candidate', 'Chair', 'Chairperson', 'Chairman', 'Member', 'Major advisor',
+    'Co-advisor', 'Advisor', 'ผู้วิจัย', 'ประธาน', 'ประธานกรรมการ', 'กรรมการ',
+    'อาจารย์ที่ปรึกษาหลัก', 'อาจารย์ที่ปรึกษาร่วม'))
+
+
 def _sig_qual_text(text):
     """ข้อความคุณวุฒิใต้ชื่อกรรมการ — คืน '' ถ้าว่างหรือเป็น placeholder (ยังไม่กรอกจริง)"""
     n = norm(text)
@@ -482,14 +490,19 @@ def signature_committee_slots(pdf_page):
                   if _sig_is_dotted(w['text']) and float(w['x0']) > mid * 0.6]
     if dot_starts:
         mid = min(dot_starts) - 2.0     # เผื่อคำที่เริ่มชิดขอบซ้ายของช่องพอดี
-    # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวคุณวุฒิ = บรรทัดถัดจากชื่อ (ถ้าไม่ใช่เส้นประ)
+    # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวใต้ชื่อ = ทุกบรรทัดจนถึงเส้นประถัดไป (ช่องของคนนั้น)
+    # คุณวุฒิหาจากข้อความในช่อง ไม่ใช่ "บรรทัดถัดจากชื่อ" เป๊ะ — ดู qual_cell ข้างล่าง
     name_rows, qual_rows = [], []
     for i in range(len(lines) - 1):
         if not line_dotted[i]:
             continue
         name_rows.append(lines[i + 1])
-        qual_rows.append(lines[i + 2] if (i + 2 < len(lines) and not line_dotted[i + 2])
-                         else None)
+        below = []
+        for j in range(i + 2, len(lines)):
+            if line_dotted[j]:
+                break
+            below.append(lines[j])
+        qual_rows.append(below)
 
     def cell(row, left):
         """ข้อความในช่องหนึ่งของแถว — ประกอบจาก chars ไม่ใช่ต่อ text ของ extract_words
@@ -511,6 +524,21 @@ def signature_committee_slots(pdf_page):
             return _compose_thai_line(chars)
         return ' '.join(w['text'] for w in ws).strip()      # fixture ที่ไม่มี chars
 
+    def qual_cell(rows, left):
+        """คุณวุฒิใต้ชื่อ = ข้อความแรกในช่องเดียวกัน ใต้บรรทัดชื่อ ถึงเส้นประถัดไป
+
+        ข้ามบรรทัดที่ช่องนี้ว่าง และป้ายบทบาท (Chair / Member / Candidate ...)
+        เดิมดูแค่ "บรรทัดถัดจากชื่อ" เล่มจริง 6736545 PHIE/M ป้าย "Candidate" ของช่องซ้าย
+        อยู่สูงกว่าคุณวุฒิของช่องขวา 7 pt จึงแยกเป็นคนละบรรทัด บรรทัดถัดจากชื่อฝั่งขวาว่าง
+        ระบบฟ้องแดง "ไม่พบคุณวุฒิ" ทั้งที่คุณวุฒิพิมพ์อยู่ใต้ชื่อ (เจ้าหน้าที่แนะนำให้ดูจาก
+        ข้อความในหน้า ไม่ใช่บรรทัดเป๊ะ) — เล่มที่คุณวุฒิอยู่บรรทัดถัดจากชื่อได้ผลเท่าเดิม
+        """
+        for row in rows or ():
+            text = cell(row, left)
+            if text and norm(text) not in _SIG_ROLE_LABELS:
+                return text
+        return ''
+
     members, member_quals, member_raw = {}, {}, {}
     # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
     # (เดิมตัดด้วย [:5] ซึ่งพึ่งว่าต้องอ่านเส้นประเจอครบ 6 แถวพอดี ถ้าเจอไม่ครบ
@@ -520,12 +548,12 @@ def signature_committee_slots(pdf_page):
         right = cell(nrow, left=False)
         members[idx + 1] = _sig_clean_name(right)                    # ขวา → 1..5
         member_raw[idx + 1] = right
-        member_quals[idx + 1] = _sig_qual_text(cell(qrow, left=False))
+        member_quals[idx + 1] = _sig_qual_text(qual_cell(qrow, left=False))
         if idx >= 1:
             left = cell(nrow, left=True)
             members[10 - idx] = _sig_clean_name(left)                # ซ้าย → 9,8,7,6
             member_raw[10 - idx] = left
-            member_quals[10 - idx] = _sig_qual_text(cell(qrow, left=True))
+            member_quals[10 - idx] = _sig_qual_text(qual_cell(qrow, left=True))
     # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย
     #
     # ไม่มีวิธีเรียงคำวิธีเดียวที่ถูกกับทุกเล่ม เพราะสองช่องนี้กว้างไม่เท่ากันและข้อความยาว
@@ -1131,7 +1159,7 @@ def signature_page_position(sig_pages, page_index):
         return "หน้าลงนาม"
 
 
-def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
+def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None, label_style=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
     เลขหน้าสองหน้านี้ไม่ใช่แค่การเรียงเลข — เป็นตัวบอกว่าหน้าไหนเป็นของคณะกรรมการ
@@ -1146,8 +1174,18 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่บรรทัดแรก
     เสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่เป็นเลขหน้าล้วน
     จึงไม่ชนกับข้อความในเนื้อหน้า
+
+    คืนดัชนีหน้าที่ฟ้องไป ให้ _check_front_page_numbers ไม่ฟ้องหน้าเดิมซ้ำอีกข้อ
+
+    label_style ("thai" / "roman" จาก _expected_front_label_style) = บอกเลขหน้าเฉพาะภาษาของเล่ม
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) "บอกเลขหน้าตามภาษาที่เขียนของแต่ละเล่ม" — เดิมบอกทั้งสองแบบ
+    'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i" (อังกฤษ)' นักศึกษาเล่มไทยต้องเดาเองว่าใช้ตัวไหน
+    ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ / ไฟล์ eThesis เป็นของคนอื่น) ยังบอกทั้งสองแบบ
+    ยังรับเลขหน้าได้ทั้งสองชนิดเหมือนเดิม — เล่มไทยที่พิมพ์ i/ii ถูกกฎชนิดเลขหน้าส่วนนำฟ้องอยู่แล้ว
+    หน้าลงนามที่ไม่มีเลขหน้าเป็นสีส้มเหมือนพิมพ์เลขผิด (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
     """
     zone = zone or SIG_LABEL_ZONE
+    flagged = []
     for k, idx in enumerate(sig_pages[:2]):
         lab_en, lab_th = SIGNATURE_PAGE_LABELS[k]
         page_lines = [l.strip() for l in pages[idx].split('\n') if l.strip()]
@@ -1160,13 +1198,21 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
         found_lab = _extract_page_label(pages[idx])
         what = ("เลขหน้าของหน้านี้ไม่ถูกต้อง" if found_lab
                 else "ไม่พบเลขหน้าบนหน้า")
+        if label_style == "thai":
+            want = f'ต้องเป็นเลขหน้า "{lab_th}"'
+        elif label_style == "roman":
+            want = f'ต้องเป็นเลขหน้า "{lab_en}"'
+        else:
+            want = f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)'
         rep.add(zone, "front_matter",
                 f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
                 what,
-                f'ต้องเป็นเลขหน้า "{lab_th}" (ไทย) หรือ "{lab_en}" (อังกฤษ)',
+                want,
                 "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
                 "เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย",
                 "PAGE.SIGNATURE_LABEL")
+        flagged.append(idx)
+    return flagged
 
 
 def _is_white_fill(color):
@@ -1258,14 +1304,57 @@ def signature_template_zone(page_text, degree):
     return text[:cut] if cut > 0 else text
 
 
+_SMALL_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the",
+                "to", "with"}
+
+
+def match_printed_case(want, printed):
+    """ค่าที่ถูกต้องในตัวพิมพ์แบบเดียวกับที่เล่มพิมพ์ — สำหรับบอกนักศึกษาว่าต้องแก้เป็นอะไร
+
+    ชื่อสาขาจาก eThesis เป็นตัวพิมพ์ใหญ่ทั้งหมด ("PUBLIC HEALTH INFECTIOUS DISEASES ...")
+    แต่ช่องประธานหลักสูตรบนหน้าลงนามพิมพ์แบบ Sentence Case ซึ่งถูกต้องแล้ว ของเดิมยกค่า
+    จาก eThesis มาตรง ๆ ข้อความจึงเหมือนสั่งให้แก้เป็นตัวใหญ่ทั้งหมด ทั้งที่ผิดแค่สะกด
+    (เจ้าหน้าที่แจ้ง ก.ย. 2569: "ชื่อหลักสูตรมันต้องเป็น Sentence Case ซึ่งถูกแล้ว แต่สะกดผิด
+    ก็แจ้งผิดไป")
+
+    คำที่เล่มพิมพ์ไว้แล้ว ใช้ตัวพิมพ์ตามเล่ม คำที่ผิดหรือขาด ขึ้นต้นตัวใหญ่ (คำเชื่อมเป็นตัวเล็ก
+    ตัวย่อสั้น ๆ อย่าง HIV คงไว้) ถ้าเล่มพิมพ์ตัวใหญ่ทั้งหมด ก็คืนตัวใหญ่ทั้งหมด
+    """
+    if not want or not printed or not re.search(r'[A-Za-z]', want):
+        return want
+    if printed.isupper():
+        return want.upper()
+    seen = {w.lower(): w for w in re.findall(r"[A-Za-z][A-Za-z'-]*", printed)}
+    first = [True]
+
+    def recase(match):
+        word, low = match.group(0), match.group(0).lower()
+        if low in seen:
+            out = seen[low]
+        elif not first[0] and low in _SMALL_WORDS:
+            out = low
+        elif len(word) <= 3 and word.isupper():
+            out = word
+        else:
+            out = word[:1].upper() + word[1:].lower()
+        first[0] = False
+        return out
+
+    return re.sub(r"[A-Za-z][A-Za-z'-]*", recase, want)
+
+
 def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
-    """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน"""
+    """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน
+
+    เทียบแบบไม่สนตัวพิมพ์เล็ก-ใหญ่ (ตัวพิมพ์ตาม template ถูกแล้ว) ข้อที่ขึ้นจึงเป็นเรื่อง
+    สะกดผิด ต้องบอกว่าสะกดผิด และค่าที่ต้องแก้เป็นต้องใช้ตัวพิมพ์ตามที่เล่มพิมพ์
+    """
     near = _closest_run(bottom_text, want)
     if near:
+        want = match_printed_case(want, near)
         diff = describe_diff(near, want)
-        found_msg = f'{box} เขียนว่า "{near}"'
-        if diff:
-            found_msg += f' {diff}'
+        found_msg = (f'{box} สะกด{label}ผิด เขียนว่า "{near}" {diff}' if diff
+                     else f'{box} เขียนว่า "{near}"')
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     rep.add("ORANGE", "front_matter", loc, found_msg,
@@ -1300,6 +1389,61 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         _institution_mismatch(
             rep, f"{loc_prefix}คณบดีคณะ{loc_suffix}", "ชื่อคณะ", faculty,
             bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE")
+
+
+# ตำแหน่งระดับหลักสูตร — ใช้ได้เฉพาะมุมล่างขวาของหน้าลงนาม 1 (ประธานหลักสูตร)
+_PROGRAMME_HEAD_EN = re.compile(r'Program(?:me)?\s*Director', re.I)
+_PROGRAMME_HEAD_TH = ("ประธานหลักสูตร", "ผู้อำนวยการหลักสูตร")
+
+
+def programme_head_title(bottom_text):
+    """ตำแหน่งระดับหลักสูตรในแถวล่างสุดของหน้าลงนาม — คืน (คำที่พบ, "en"/"th") หรือ None
+
+    ค้นจากข้อความ ไม่ใช่จากพิกัดของช่อง (เจ้าหน้าที่แนะนำให้ดูจากสิ่งที่ควรอยู่ในหน้า) —
+    ช่องล่างซ้ายเป็นคณบดีบัณฑิตวิทยาลัยเสมอ ตำแหน่งระดับหลักสูตรที่โผล่ในแถวนี้จึงเป็นของ
+    ช่องล่างขวา
+
+    ฝั่งอังกฤษใช้ regex ที่ยอมแค่ช่องว่างคั่นสองคำ ห้ามใช้ norm — norm ตัดวงเล็บทิ้ง
+    คุณวุฒิอย่าง "Ph.D. (Tropical Health Program)" ที่อยู่เหนือบรรทัด "Director" จะถูกอ่าน
+    ต่อกันเป็น PROGRAMDIRECTOR ส่วนฝั่งไทยต้องใช้ norm เพราะสระ/วรรณยุกต์ใน PDF เพี้ยนประจำ
+    """
+    text = bottom_text or ""
+    match = _PROGRAMME_HEAD_EN.search(text)
+    if match:
+        return soft(match.group(0)), "en"
+    squashed = norm(text)
+    for title in _PROGRAMME_HEAD_TH:
+        if norm(title) in squashed:
+            return title, "th"
+    return None
+
+
+def _check_faculty_head_title(rep, bottom_text, loc):
+    """หน้าลงนาม 2 มุมล่างขวาต้องเป็นตำแหน่ง Dean หรือ Director ไม่ใช่ Program Director
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569): "หน้า ii หรือ ข ... มุมล่างขวา ต้องเป็น Dean ก็ Director
+    ไม่ใช่ Program director" — ช่องนี้เป็นของหัวหน้าส่วนงาน (คณบดีคณะ / ผู้อำนวยการสถาบัน)
+    ส่วนประธานหลักสูตรลงนามมุมเดียวกันของหน้าลงนาม 1
+
+    เล่มจริง 6736545 PHIE/M คัดช่องนี้มาจากหน้าลงนาม 1 ทั้งช่อง ("Program Director /
+    Master of Science Program in ...") แล้วระบบไม่ฟ้องเลย เพราะเล่มอังกฤษข้ามการเทียบชื่อคณะ
+    (_check_signature_institution) กฎนี้ไม่พึ่งข้อมูลอนุมัติ จึงตรวจได้ทั้งเล่มไทยและอังกฤษ
+
+    ค่าที่ถูกมีสองตัวเลือก ประโยค expected จึงห้ามจบด้วยเครื่องหมายคำพูด ไม่งั้น
+    _corrected_value ดึงตัวท้ายไปพิมพ์ในข้อความสรุปว่า 'ต้องแก้เป็น "Director"' ตัวเดียว
+    **สีแดง** ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) "อันนี้ขอสีแดงเลย" — ต่างจากข้ออื่นของช่องเดียวกัน
+    (ชื่อสาขา/คณะ = ส้ม) เพราะคำตำแหน่งอ่านได้แน่นอน ไม่ใช่การเทียบข้อความที่อาจอ่านเพี้ยน
+    """
+    found = programme_head_title(bottom_text)
+    if not found:
+        return
+    title, lang = found
+    heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+    rep.add("RED", "front_matter", loc,
+            f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
+            f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
+            "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+            "FRONT.COMMITTEE")
 
 
 def _report_sig_placeholders(rep, found, loc):
@@ -1429,6 +1573,11 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
                           "ระบบเทียบตามลำดับหน้าไว้ก่อน โปรดตรวจว่าหน้าลงนาม 1 "
                           "เป็นคณะกรรมการที่ปรึกษา และหน้าลงนาม 2 เป็นคณะกรรมการสอบ",
                           "UNCERTAIN.REVIEW")
+        # ตำแหน่งมุมล่างขวาของหน้าลงนาม 2 เป็นกฎของ template ไม่ต้องมีรายชื่อจาก eThesis
+        # จึงตรวจก่อนบรรทัดข้ามข้างล่าง — ถ้าหัวข้อบนหน้าบอกว่าเป็นหน้าที่ปรึกษา (สลับหน้ากัน)
+        # ไม่ฟ้อง เพราะหน้าที่ปรึกษาต้องมี Program Director อยู่แล้ว มีรายการสีม่วงเตือนเรื่องสลับหน้าแทน
+        if kind == "exam" and heading_kind in ("", "exam"):
+            _check_faculty_head_title(rep, bottom_text, f"{page_label} คณบดีคณะ ({page_ref(idx)})")
         if not expected:
             continue
         handled_any = True
@@ -2002,15 +2151,23 @@ def _expected_front_label_style(program_language):
 
 
 def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
-                              expected_style=None, page_texts=None):
+                              expected_style=None, page_texts=None, reported=()):
     """เลขหน้าส่วนนำ: ชนิดต้องตรงภาษาเล่ม และเรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
 
     เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
-    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจทั้งช่วง จึงไม่ทับกับกฎเดิมที่ตรวจ "ค่าเริ่มต้น"
-    ของหน้าลงนาม
+    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจทั้งช่วง
+
+    reported = หน้าที่กฎเลขหน้าหน้าลงนาม (_report_signature_page_labels) ฟ้องไปแล้ว —
+    ไม่นับซ้ำในข้อ "ไม่ได้พิมพ์เลขหน้าไว้" / "เลขหน้าผิดชนิด" เล่มจริง 6538041 SHPP/D
+    หน้าลงนามสองหน้าไม่มีเลขหน้า แล้วได้สามข้อจากความผิดเดียว: หน้าลงนาม 1 และ 2
+    (สีส้ม) กับ "2 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 2 และ 3" (สีแดง) เจ้าหน้าที่สั่ง
+    (ก.ย. 2569) "ข้อ 8 กับ 2 ตรวจเหมือนกัน เอาตามข้อ 2 ก็พอ" — ตรงกับกติกา ส.ค. 2569
+    ที่ให้เลขหน้าหน้าลงนามเป็นสีส้มเพื่อไม่ให้ฟ้องสองข้อจากความผิดเดียว
+    หน้าที่ฟ้องไปแล้วยังนับเป็นหน้าคั่นในการตรวจความต่อเนื่องเหมือนเดิม
     """
     if stop_idx is None or stop_idx <= start_idx:
         return
+    reported = set(reported or ())
     entries, unread = [], []
     for i in range(start_idx, stop_idx):
         label = page_labels.get(i, "")
@@ -2033,7 +2190,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                 else "เลขโรมัน (i, ii, iii) หรือพยัญชนะไทย (ก, ข, ค)")
         want_sentence = f"เลขหน้าส่วนนำต้องเป็น{want} ทั้งส่วน"
 
-    off_style = [(i, lab, s) for i, lab, s, _v in entries if s != main_style]
+    off_style = [(i, lab, s) for i, lab, s, _v in entries
+                 if s != main_style and i not in reported]
     if off_style:
         found_names = " / ".join(sorted({_PAGE_LABEL_STYLE_NAME[s]
                                          for _i, _lab, s in off_style}))
@@ -2087,8 +2245,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                 return False
             return bool((page_texts[idx] or "").strip())
 
-        no_number = [i for i in unread if _has_text(i)]
-        unreadable = [i for i in unread if i not in no_number]
+        no_number = [i for i in unread if i not in reported and _has_text(i)]
+        unreadable = [i for i in unread if i not in reported and not _has_text(i)]
         for group, zone, detail, rule_id, fix in (
             (no_number, "RED", "ไม่ได้พิมพ์เลขหน้าไว้", "PAGE.NUMBERING",
              "เพิ่มเลขหน้าให้ครบทุกหน้า"),
@@ -2536,7 +2694,9 @@ def issue_sort_key(issue):
 # ตัดข้อความเชิงเทคนิค/คำต่อรองออกจากข้อความสรุป (รายละเอียดในรายงานยังคงเดิมทุกตัวอักษร)
 _SUMMARY_NOISE = re.compile(
     r"\s*\(\s*typo[^)]*\)"
-    r"|\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]\s*เจ้าหน้าที่ยืนยันได้"
+    # ถ้อยคำปัจจุบันไม่มีขีดคั่นแล้ว ('ประกาศใช้ "X" แต่คู่มือแสดงแบบที่พบ เจ้าหน้าที่ยืนยันได้')
+    # ขีดจึงต้องเป็นทางเลือก ไม่งั้นท่อนที่เขียนถึงเจ้าหน้าที่หลุดไปถึงนักศึกษา (ก.ย. 2569)
+    r"|\s*แต่คู่มือแสดงแบบที่พบ\s*[—-]?\s*เจ้าหน้าที่ยืนยันได้"
     r"|\s*[—-]\s*เจ้าหน้าที่ยืนยันได้", re.I)
 _SUMMARY_LEAD = re.compile(r"^(ข้อความที่ถูกต้อง|ควรเป็น|ต้องเป็น|ที่ถูก)\s*[:：]?\s*")
 
@@ -3156,9 +3316,15 @@ def _corrected_value(issue):
     # "เล่มผิดภาษา" ไม่มีค่าเดี่ยวให้พิมพ์แก้ในเล่ม สิ่งที่ต้องทำคือจัดทำเล่มใหม่ทั้งเล่ม
     # ถ้าดึงค่าท้ายประโยคไป สรุปจะเหลือแค่ 'ต้องแก้เป็น "ภาษาอังกฤษ"' ซึ่งกลืนถ้อยคำ
     # ที่เจ้าหน้าที่กำหนดไว้ทั้งประโยคหายไป — ปล่อยให้ตกไปใช้ประโยค expected เต็ม ๆ
-    if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+    #
+    # เลขหน้าหน้าลงนามพิมพ์ประโยคเต็ม 'ต้องเป็นเลขหน้า "ก"' ตามแบบที่เจ้าหน้าที่เลือก (ก.ย. 2569
+    # "เอาตามข้อ 2 ก็พอ") — ถ้าดึงค่าไป จะเหลือ 'ต้องแก้เป็น "ก"' ซึ่งไม่บอกว่าเป็นเลขหน้า
+    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL"):
         return ""
-    raw = summary_tidy(issue.get("expected")) or summary_tidy(issue.get("fix"))
+    # บรรทัดที่เขียนถึงเจ้าหน้าที่ไม่ใช่ค่าที่ต้องแก้ ข้ามไปใช้ช่องถัดไป (ดู is_staff_only_line)
+    raw = next((text for text in (summary_tidy(issue.get("expected")),
+                                  summary_tidy(issue.get("fix")))
+                if text and not is_staff_only_line(text)), "")
     raw = _SUMMARY_LEAD.sub("", raw)
     match = re.search(r'"([^"]+)"\s*$', raw)
     return match.group(1) if match else ""
@@ -3200,12 +3366,22 @@ def _prose_location(location):
 SUMMARY_INDENT = "   "
 
 
-# ท่อนที่เขียนถึง "เจ้าหน้าที่" บนการ์ดสีเหลือง — อยู่ในรายงานได้ แต่ห้ามติดไปกับข้อความ
-# สรุปที่ส่งนักศึกษา เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากดไม่ผ่านข้อเลขหน้าในสารบัญแล้ว
-# นักศึกษาได้บรรทัด "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว" ติดไปด้วย
-# ซึ่งอ่านแล้วขัดกับการที่ถูกสั่งให้แก้ ส่วนบรรทัด fix "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่า
-# ควรแก้" เป็นตัวสำรองเมื่อ expected ว่าง จึงต้องกันด้วย ไม่งั้นหลุดมาแทนที่กัน
-_STAFF_ONLY_DIRECTIVES = ("เป็นข้อสังเกต ไม่ได้ตรวจ", "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่")
+# บรรทัดที่เขียนถึงเจ้าหน้าที่ ไม่ใช่ถึงนักศึกษา — อยู่บนการ์ดในรายงานได้ แต่ห้ามติดไปกับข้อความ
+# สรุปที่ส่งนักศึกษา เจ้าหน้าที่สั่ง (ก.ย. 2569): "ไม่ต้องเอาข้อความที่เขียนถึงเจ้าหน้าที่ไปแจ้ง
+# นักศึกษา" รู้จักจากเนื้อความ ไม่ใช่รายการประโยค กฎใหม่ที่เขียนแบบเดียวกันจึงถูกกันด้วย
+#   เอ่ยถึงเจ้าหน้าที่          "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง ..."
+#                             "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้"
+#   บอกว่าเป็นข้อสังเกต/ผ่านได้   "หน้าลักษณะนี้ ... เป็นข้อสังเกตและผ่านได้" — ขัดกับการถูกสั่งให้แก้
+#   สั่งให้ตรวจเอง              "ตรวจว่าเป็นหน้าภาพหรือหน้าว่าง..." / "ตรวจด้วยตา"
+# ต้องกันทั้งช่อง "ควรเป็น" และช่อง "ต้องแก้" ที่เป็นตัวสำรอง ไม่งั้นตัดช่องแรกแล้วช่องหลังหลุดมาแทน
+_STAFF_ONLY_WORDS = ("เจ้าหน้าที่", "ข้อสังเกต", "ผ่านได้")
+_STAFF_ONLY_LEADS = ("ตรวจว่า", "ตรวจด้วยตา")
+
+
+def is_staff_only_line(text):
+    """บรรทัดนี้เขียนถึงเจ้าหน้าที่ (ไม่ใช่นักศึกษา) ไหม — ดู _STAFF_ONLY_WORDS"""
+    text = (text or "").strip()
+    return any(word in text for word in _STAFF_ONLY_WORDS) or text.startswith(_STAFF_ONLY_LEADS)
 
 
 def _summary_sentence(issue, skip_location=False):
@@ -3239,7 +3415,7 @@ def _summary_sentence(issue, skip_location=False):
         directive = next(
             (text for text in (summary_tidy(issue.get("expected")),
                                summary_tidy(issue.get("fix")))
-             if text and not text.startswith(_STAFF_ONLY_DIRECTIVES)), "")
+             if text and not is_staff_only_line(text)), "")
         if directive:
             lines.append(directive)
     kept = [line for line in lines if line]
@@ -4008,9 +4184,11 @@ def _report_abstract_title_format(rep, lines, loc):
     off = [l['text'] for l in title_lines if l['x0'] - margin > 6]
     if not off:
         return
-    shown = ", ".join(f'"{t}"' for t in dict.fromkeys(off))
+    # บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่องมาทั้งหมด (เจ้าหน้าที่สั่ง ก.ย. 2569 "แจ้งแค่ว่า
+    # หัวข้อไม่ได้ชิดซ้ายก็พอ ไม่ต้องเอาชื่อหัวข้อมาใส่") — ชื่อเรื่องยาวสามบรรทัดทำให้ข้อความ
+    # สรุปยาวโดยไม่ช่วยอะไร ตำแหน่ง (หน้าบทคัดย่อ) บอกอยู่แล้วว่าต้องไปแก้ที่ไหน
     rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: {shown}",
+            "ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย",
             "ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา",
             "แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย",
             "FORMAT.ABSTRACT_LAYOUT")
@@ -4105,6 +4283,11 @@ def _toc_page_label(text):
     return str(int(label)) if label.isdigit() else label.lower()
 
 
+# ชื่ออังกฤษต่อท้ายชื่อส่วนในข้อ "เล่มมี... แต่ไม่ปรากฏในสารบัญ" — ถ้อยคำเดิมของข้อภาคผนวก
+# มี "(APPENDIX)" อยู่แล้ว นักศึกษาเล่มอังกฤษจะรู้ว่าต้องเพิ่มหัวข้อคำไหน
+_TOC_SECTION_GLOSS = {"appendix": " (APPENDIX)", "biography": " (BIOGRAPHY)"}
+
+
 def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
     """บรรทัดในสารบัญที่ "น่าจะใช่หัวข้อนี้แต่สะกดผิด" — คืน (หัวข้อที่พบ, ดัชนีหน้า)
 
@@ -4197,7 +4380,7 @@ def _toc_section_kind(text):
         return "list_abbreviations"
     if any(normalized.startswith(term) for term in N_REF):
         return "references"
-    if normalized in N_BIO:
+    if normalized in N_BIO or normalized == N_BIO_SHORT:
         return "biography"
     if any(normalized.startswith(term) for term in N_APPENDIX):
         return "appendix"
@@ -4303,6 +4486,78 @@ N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญ�
 N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
+# หัวข้อ "ประวัติ" เฉย ๆ — เล่มจริง 6538041 SHPP/D ตั้งหัวข้อหน้าสุดท้ายแบบนี้ ระบบเลยฟ้องผิดว่า
+# "ไม่พบประวัติผู้วิจัย" (เจ้าหน้าที่: "ประวัติผู้วิจัย ... ในส่วนท้ายมีนะ") คำเดียวนี้อาจเป็นหัวข้อ
+# ในเนื้อหาได้ หน้าเล่มจึงต้องมีช่องข้อมูลของประวัติด้วย (looks_like_biography) ส่วนในสารบัญ
+# บรรทัด "ประวัติ <เลขหน้า>" คือรายการของหน้านี้แน่นอน
+N_BIO_SHORT = norm('ประวัติ')
+# ช่องข้อมูลที่หน้าประวัติผู้วิจัยของ template มีทุกเล่ม (วัดจากเล่มจริงไทย 2 เล่ม อังกฤษ 4 เล่ม)
+_BIO_FIELDS = (norm('ชื่อ-สกุล'), norm('วัน เดือน ปีเกิด'), norm('สถานที่เกิด'),
+               norm('ประวัติการศึกษา'), norm('วุฒิการศึกษา'),
+               'DATEOFBIRTH', 'PLACEOFBIRTH', 'INSTITUTIONSATTENDED')
+
+
+def looks_like_biography(page_text):
+    """หน้านี้มีช่องข้อมูลของประวัติผู้วิจัยอย่างน้อยสองช่องไหม — ดูจากสิ่งที่ควรอยู่ในหน้า
+
+    ชื่อ-สกุล / วัน เดือน ปีเกิด / สถานที่เกิด / ประวัติการศึกษา (อังกฤษ: DATE OF BIRTH /
+    PLACE OF BIRTH / INSTITUTIONS ATTENDED) เทียบด้วย norm จึงรับ "ชื่อ – สกุล" และ
+    "ประวิติการศึกษา" (สะกดผิดในเล่มจริง) ได้
+    """
+    text = norm(page_text)
+    return sum(1 for field in _BIO_FIELDS if field in text) >= 2
+
+
+def expected_biography_heading(program_language, printed=""):
+    """หัวข้อหน้าประวัติผู้วิจัยที่ถูกต้อง: เล่มไทย "ประวัติผู้วิจัย" เล่มอังกฤษ "BIOGRAPHY"
+
+    ประกาศฯ ข้อ 4.1.3.3 หน้า 6 และ 4.2.3.3 หน้า 7 เรียกส่วนนี้ว่า "ประวัติผู้วิจัย (Biography)"
+    คู่มือใช้ "ประวัติผู้วิจัย" ในตัวอย่างเล่มไทยทุกหน้า และ "BIOGRAPHY" ในเล่มอังกฤษทุกหน้า
+    ไทย-อังกฤษทำเล่มเป็นภาษาอังกฤษ จึงใช้ BIOGRAPHY เหมือนนานาชาติ
+    ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ หรือไฟล์ eThesis เป็นของคนอื่น) ยึดอักษรของหัวข้อที่พิมพ์
+    """
+    if program_language == "thai":
+        return "ประวัติผู้วิจัย"
+    if program_language in ("international", "thai_english"):
+        return "BIOGRAPHY"
+    return "ประวัติผู้วิจัย" if re.search(r"[ก-๙]", printed or "") else "BIOGRAPHY"
+
+
+def _report_biography_heading(rep, printed, want, loc):
+    """หัวข้อหน้าประวัติผู้วิจัยต้องตรงตามประกาศฯ — เจ้าหน้าที่สั่ง (ก.ย. 2569)
+
+    "หน้าประวัติเล่มนี้เขียนหัวข้อแค่ "ประวัติ" ไม่ใช่ "ประวัติผู้วิจัย" หัวข้อประวัติผู้วิจัย
+    ก็ควรต้องถูก" (เล่มจริง 6538041 SHPP/D) — ระบบหาหน้านี้เจอได้จากหัวข้อ "ประวัติ" /
+    "ประวัติผู้เขียน" ด้วย (is_biography_heading) แต่หาเจอไม่ได้แปลว่าหัวข้อถูก
+    เทียบด้วย norm จึงไม่ฟ้องเรื่องตัวพิมพ์ ("Biography" กับ "BIOGRAPHY") หรือช่องว่าง
+    สีแดงแบบเดียวกับหัวข้อหน้าสารบัญที่ไม่ใช่ TABLE OF CONTENTS
+    """
+    if not printed or norm(printed) == norm(want):
+        return
+    rep.add("RED", "end_matter", loc,
+            f'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "{soft(printed)}"',
+            f'ต้องแก้เป็น "{want}"', "", "END.STRUCTURE")
+
+
+def _report_toc_biography_heading(rep, raw, want, loc):
+    """บรรทัดประวัติผู้วิจัยในสารบัญต้องใช้หัวข้อเดียวกับที่ประกาศฯ กำหนด
+
+    สารบัญนับ "ประวัติ <เลขหน้า>" เป็นรายการประวัติผู้วิจัยได้ (ไม่ฟ้องว่าไม่มี) แต่หัวข้อยังผิด
+    ถ้าไม่ฟ้องตรงนี้ นักศึกษาแก้หัวข้อในหน้าจริงแล้วสารบัญยังเขียนว่า "ประวัติ" อยู่
+    """
+    head = soft(_strip_toc_page_number(raw or ""))
+    if not head or norm(head) == norm(want):
+        return
+    rep.add("RED", "front_matter", loc,
+            f'สารบัญเขียนหัวข้อนี้ว่า "{head}"',
+            f'หัวข้อในสารบัญต้องเป็น "{want}"',
+            f'แก้หัวข้อในสารบัญเป็น "{want}"', "FRONT.TOC_CONTENT")
+
+
+def is_biography_heading(line, page_text):
+    """บรรทัดหัวหน้านี้คือหัวข้อประวัติผู้วิจัยไหม — "ประวัติ" เฉย ๆ ต้องมีช่องข้อมูลประวัติในหน้าด้วย"""
+    nl = norm(line)
+    return nl in N_BIO or (nl == N_BIO_SHORT and looks_like_biography(page_text))
 
 # คำเรียกส่วนอ้างอิง — ต้องเลือกใช้ "คำเดียว" และสารบัญต้องใช้คำเดียวกับหน้าจริง
 _REF_TERM_GROUPS = (
@@ -4908,7 +5163,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    _report_signature_page_labels(rep, sig_pages, pages, page_ref)
+    sig_label_reported = _report_signature_page_labels(
+        rep, sig_pages, pages, page_ref,
+        label_style=_expected_front_label_style(
+            (approved or {}).get("program_language", "") if same_student else ""))
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -5241,6 +5499,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("ตรวจส่วนท้ายเล่ม (อ้างอิง/ภาคผนวก/ประวัติ)")
     ref_head = None
     bio_page = None
+    bio_heading = ""
     last_major = None
     has_appendix_body = False
     appendix_page = None
@@ -5279,8 +5538,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if n_ref_terms and (nl in N_REF or n_ref_terms > 1):
                 ref_head = (l, i, n_ref_terms)
                 last_major = ("REF", i)
-            if nl in N_BIO:
+            if is_biography_heading(l, t):
                 bio_page = i
+                bio_heading = l
                 last_major = ("BIO", i)
             if any(nl.startswith(w) for w in N_APPENDIX):
                 has_appendix_body = True
@@ -5295,10 +5555,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     else:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
                 "ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ", "")
+    # ภาษาเล่มจากข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
+    bio_want = expected_biography_heading(
+        (approved or {}).get("program_language", "") if same_student else "", bio_heading)
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
     else:
+        _report_biography_heading(rep, bio_heading, bio_want,
+                                  f"ประวัติผู้วิจัย ({page_ref(bio_page)})")
         # ลำดับส่วนท้ายเล่มตามประกาศ: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
         #
         # เดิมตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" ซึ่งจับได้เฉพาะกรณีที่ประวัติ
@@ -5328,7 +5593,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     )
     toc_has_appendix = appendix_toc_idx is not None
     toc_location = f"สารบัญ ({page_ref(toc_pages[0])})" if toc_pages else "สารบัญ"
-    if has_appendix_body and not toc_has_appendix:
+    # มีข้อมูลอนุมัติและมีหน้าสารบัญ = กฎหัวข้อบังคับในสารบัญ (FRONT.TOC_CONTENT) ฟ้องข้อนี้เอง
+    # พร้อมแยกกรณี "สะกดผิด" ออกได้ — เดิมฟ้องทั้งสองกฎ เล่มจริง 6538041 SHPP/D จึงได้สองข้อ
+    # เรื่องเดียวกัน ("เล่มมีภาคผนวก ... แต่ไม่ปรากฏในสารบัญ" กับ "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ")
+    if has_appendix_body and not toc_has_appendix and not (approved and toc_pages):
         rep.add("RED", "front_matter", toc_location, "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ",
                 "หัวข้อภาคผนวกต้องอยู่ในสารบัญ", "เพิ่ม APPENDIX/ภาคผนวก ในสารบัญ", "FRONT.TOC")
     if toc_has_appendix and not has_appendix_body:
@@ -5347,7 +5615,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         body_ch[0][2] if body_ch else None,
         _expected_front_label_style(
             (approved or {}).get("program_language", "") if same_student else ""),
-        page_texts=pages)
+        page_texts=pages, reported=sig_label_reported)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
@@ -6132,15 +6400,23 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "FRONT.TOC_CONTENT",
                         )
                         continue
+                    # หัวข้อทุกตัวในชุดนี้ "มีอยู่ในเล่ม" แล้ว (หาเจอจากหน้าจริง) จึงบอกแบบนั้น
+                    # เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้แจ้งแบบข้อภาคผนวก "เล่มมี... แต่ไม่ปรากฏ
+                    # ในสารบัญ" — คำว่า "ไม่พบหัวข้อ" อ่านเหมือนเล่มไม่มีส่วนนั้น
                     rep.add(
                         "RED", "front_matter", f"สารบัญ ({page_ref(toc_pages[0])})",
-                        f"ไม่พบหัวข้อ {section_label} ในสารบัญ",
+                        f"เล่มมี{section_label}{_TOC_SECTION_GLOSS.get(section_kind, '')} "
+                        "แต่ไม่ปรากฏในสารบัญ",
                         f"สารบัญต้องมีหัวข้อ {section_label} พร้อมเลขหน้า",
                         f"เพิ่มหัวข้อ {section_label} และเลขหน้าจริงลงในสารบัญ",
                         "FRONT.TOC_CONTENT",
                     )
                     continue
                 entry = candidates[0]
+                if section_kind == "biography":
+                    _report_toc_biography_heading(
+                        rep, entry["raw"], bio_want,
+                        f"สารบัญ ({page_ref(entry['source_page_idx'])})")
                 if section_kind == "references":
                     # (1) สารบัญต้องเลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY (ไม่ใช่ทั้งคู่)
                     toc_terms = reference_terms(entry["raw"])

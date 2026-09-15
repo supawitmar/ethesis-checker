@@ -804,7 +804,8 @@ class AbstractTitleMustBeLeftAligned(unittest.TestCase):
              "x0": 75.5, "bold_ratio": 1.0},
             {"text": "OBSTETRIC COMPLICATIONS", "x0": 194.4, "bold_ratio": 1.0})
         self.assertEqual(len(found), 1)
-        self.assertIn("OBSTETRIC COMPLICATIONS", found[0])
+        # บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่องมา (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        self.assertEqual(found[0], "ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย")
         self.assertNotIn("ตัวหนา", found[0])      # ตัวหนามีกฎเหลืองของตัวเองแล้ว
 
     def test_running_head_is_not_mistaken_for_the_title(self):
@@ -2839,6 +2840,602 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
 
+class TheProgrammeChairBoxReportsASpellingMistakeInTheBooksCase(unittest.TestCase):
+    """ช่องประธานหลักสูตร: บอกว่าสะกดผิด และค่าที่ต้องแก้เป็นใช้ตัวพิมพ์ตามเล่ม (ก.ย. 2569)
+
+    รายงานจริง (6736545 PHIE/M) เขียนว่า ต่างที่ "Disease" ต้องเป็น "DISEASES" / ต้องแก้เป็น
+    "PUBLIC HEALTH INFECTIOUS DISEASES AND EPIDEMIOLOGY" — เจ้าหน้าที่: "ชื่อหลักสูตรมันต้องเป็น
+    Sentence Case ซึ่งถูกแล้ว แต่สะกดผิดก็แจ้งผิดไป"
+    """
+
+    PRINTED = "Public Health Infectious Disease and Epidemiology"
+    WANT = "PUBLIC HEALTH INFECTIOUS DISEASES AND EPIDEMIOLOGY"
+
+    def _issue(self, bottom):
+        rep = Report()
+        checker_module._institution_mismatch(
+            rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT, bottom,
+            "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        return rep.zones["ORANGE"][0]
+
+    def test_it_says_misspelled_and_keeps_the_books_case(self):
+        issue = self._issue("Dean, Faculty of Graduate Studies Program Director "
+                            + self.PRINTED + " Programme")
+        self.assertIn("สะกดชื่อสาขาผิด", issue["found"])
+        self.assertIn('ต้องเป็น "Diseases"', issue["found"])
+        self.assertIn('"Public Health Infectious Diseases and Epidemiology"', issue["expected"])
+        self.assertNotIn(self.WANT, issue["found"] + issue["expected"])
+
+    def test_the_summary_line_asks_for_the_right_spelling_only(self):
+        rep = Report()
+        checker_module._institution_mismatch(
+            rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT,
+            self.PRINTED, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        summary = checker_module.plain_summary(checker_module.check_result(rep),
+                                               failed=["ORANGE:0"])
+        self.assertIn('ต้องแก้เป็น "Public Health Infectious Diseases and Epidemiology"', summary)
+
+    def test_an_all_caps_box_gets_an_all_caps_correction(self):
+        """ควบคุมเชิงลบ — ตามตัวพิมพ์ของเล่ม ไม่ใช่บังคับเป็น Sentence Case"""
+        self.assertEqual(checker_module.match_printed_case(self.WANT, self.PRINTED.upper()),
+                         self.WANT)
+
+    def test_thai_text_is_left_alone(self):
+        self.assertEqual(checker_module.match_printed_case("สาธารณสุขศาสตร์", "สาธารณสุขศาสตร"),
+                         "สาธารณสุขศาสตร์")
+
+    def test_short_acronyms_and_small_words(self):
+        self.assertEqual(checker_module.match_printed_case(
+            "HIV AND AIDS OF THE WORLD", "Hiv and Aids"), "Hiv and Aids of the World")
+        self.assertEqual(checker_module.match_printed_case(
+            "ICT FOR HEALTH", "Information Technology"), "ICT for Health")
+
+
+class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
+    """หน้าลงนาม 2 มุมล่างขวา: ตำแหน่งต้องเป็น Dean หรือ Director ไม่ใช่ Program Director (ก.ย. 2569)
+
+    เจ้าหน้าที่: "หน้า ii หรือ ข ... มุมล่างขวา ต้องเป็น Dean ก็ Director ไม่ใช่ Program director"
+    เล่มจริง 6736545 PHIE/M คัดช่องนี้มาจากหน้าลงนาม 1 ทั้งช่อง แล้วระบบไม่ฟ้องเลย
+    """
+
+    # แถวล่างสุดของหน้าลงนาม 2 ของเล่มจริง 6736545 PHIE/M (ซ้าย = บัณฑิตวิทยาลัย ถูกแล้ว)
+    SIRIPHON = ("Prof. Chartchalerm Isarankura-Na- Ayudhya, Asst. Prof. Tawee Saiwichai "
+                "Ph.D. (Medical Technology) Ph.D. (Tropical Medicine) Dean Program Director "
+                "Faculty of Graduate Studies Master of Science Program in Public "
+                "Mahidol University Health Infectious Disease and Epidemiology "
+                "Faculty of Public health Mahidol University")
+
+    def _found(self, bottom):
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, bottom, "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
+        self.assertEqual(rep.zones["ORANGE"], [])      # สีแดง ไม่ใช่ส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        return rep.zones["RED"]
+
+    def test_the_real_book_is_reported(self):
+        issues = self._found(self.SIRIPHON)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["found"],
+                         'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"')
+        self.assertEqual(issues[0]["expected"], 'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น')
+        self.assertEqual(issues[0]["rule_id"], "FRONT.COMMITTEE")
+
+    def test_every_programme_level_title_is_caught(self):
+        for bottom, title in (("Dean Faculty of Graduate Studies PROGRAMME DIRECTOR Faculty of X",
+                               "PROGRAMME DIRECTOR"),
+                              ("Dean Programme  Director", "Programme Director"),
+                              ("คณบดี ประธานหลักสูตร บัณฑิตวิทยาลัย คณะสังคมศาสตร์", "ประธานหลักสูตร"),
+                              ("คณบดี ผู้อำนวยการหลักสูตร บัณฑิตวิทยาลัย", "ผู้อำนวยการหลักสูตร")):
+            issues = self._found(bottom)
+            self.assertEqual(len(issues), 1, bottom)
+            self.assertIn(f'"{title}"', issues[0]["found"], bottom)
+
+    def test_a_thai_book_is_told_the_thai_titles(self):
+        issues = self._found("คณบดี ประธานหลักสูตร บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
+        self.assertEqual(issues[0]["expected"],
+                         'ตำแหน่งต้องเป็น "คณบดี" หรือ "ผู้อำนวยการ" เท่านั้น')
+
+    def test_dean_and_director_pass(self):
+        """ควบคุมเชิงลบ — แถวล่างของหน้าลงนาม 2 ในเล่มจริงที่ถูกต้องทุกแบบต้องไม่ฟ้อง"""
+        for bottom in ("Dean Faculty of Graduate Studies, Mahidol University Dean Faculty of "
+                       "Tropical Medicine Mahidol University",
+                       "Dean Faculty of Graduate Studies Director Institute of Nutrition",
+                       "คณบดี คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณะสังคมศาสตร์และมนุษยศาสตร์",
+                       "คณบดี ผู้อำนวยการ บัณฑิตวิทยาลัย สถาบันวิจัยประชากรและสังคม", ""):
+            self.assertEqual(self._found(bottom), [], bottom)
+
+    def test_a_qualification_ending_in_program_is_not_a_title(self):
+        """ควบคุมเชิงลบ — "(Tropical Health Program)" ตามด้วยบรรทัด "Director" ไม่ใช่ Program Director"""
+        self.assertEqual(self._found(
+            "Assoc. Prof. A B, Ph.D. (Tropical Health Program) Director Institute of X"), [])
+
+    def test_the_summary_keeps_both_choices(self):
+        """ค่าที่ถูกมีสองตัวเลือก — ข้อความสรุปต้องไม่เหลือ 'ต้องแก้เป็น "Director"' ตัวเดียว"""
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, self.SIRIPHON,
+                                                 "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น', summary)
+        self.assertNotIn("ต้องแก้เป็น", summary)
+
+    def test_only_the_exam_page_is_checked(self):
+        """หน้าลงนาม 1 มุมล่างขวาต้องเป็น Program Director อยู่แล้ว — ห้ามฟ้อง"""
+        committees = {"advisory": ["A B"], "exam": ["C D"]}
+        pages = ["Thesis Advisory Committee", "Thesis Examination Committee"]
+        slot = ({1: "A B"}, {1: "Ph.D."}, self.SIRIPHON, {1: "A B"})
+
+        class _Pdf:
+            pages = [object(), object()]
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        rep = Report()
+        with mock.patch.object(checker_module.pdfplumber, "open", lambda _p: _Pdf()), \
+                mock.patch.object(checker_module, "signature_committee_slots", lambda _pg: slot), \
+                mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
+            checker_module._check_committees(rep, committees, [0, 1], pages, "x.pdf",
+                                             lambda i: ["หน้า i", "หน้า ii"][i], "international", {})
+        hits = [i for i in rep.zones["RED"] if "ใช้ตำแหน่ง" in i["found"]]
+        self.assertEqual([i["location"] for i in hits], ["หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"])
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"',
+                     'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น',
+                     "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+                     "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"):
+            en = i18n.tr_en(text, pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
+class AQualificationIsReadFromItsOwnCell(unittest.TestCase):
+    """คุณวุฒิใต้ชื่อกรรมการ: ดูข้อความในช่องเดียวกัน ไม่ใช่ "บรรทัดถัดไป" เป๊ะ (ก.ย. 2569)
+
+    เล่มจริง 6736545 PHIE/M หน้า ii ฟ้องแดง "ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook""
+    ทั้งที่ "Ph.D. (Clinical epidemiology)" พิมพ์อยู่ใต้ชื่อ — ป้าย "Candidate" ช่องซ้าย (y=350)
+    สูงกว่าคุณวุฒิช่องขวา (y=357) 7 pt จึงแยกเป็นคนละบรรทัด พิกัดข้างล่างคัดมาจากเล่มจริง
+    """
+
+    def _words(self, degree=True, label=True):
+        def w(text, top, x0):
+            return {"text": text, "top": top, "x0": x0}
+        words = [w("………………", 322.4, 113.4), w("………………", 322.4, 305.2),
+                 w("Miss", 336.2, 113.4), w("Siriphon", 336.2, 139.8), w("Siwina", 336.2, 184.2),
+                 w("Sutthichai", 336.2, 305.2), w("Nakphook", 336.2, 356.9),
+                 w("Candidate", 350.0, 113.4)]
+        if degree:
+            words += [w("Ph.D.", 357.0, 305.2), w("(Clinical", 357.0, 335.6),
+                      w("epidemiology)", 357.0, 380.5)]
+        if label:
+            words.append(w("Chair", 377.6, 305.2))
+        words += [w("………………", 419.1, 305.2),
+                  w("Hathaichon", 432.9, 305.2), w("Inchai", 432.9, 363.5),
+                  w("Dr.P.H", 446.7, 305.2), w("Member", 460.5, 305.2),
+                  w("………………", 600.0, 113.4), w("………………", 600.0, 305.2),
+                  w("Dean", 640.0, 113.4), w("Dean", 640.0, 305.2)]
+        return words
+
+    def _slots(self, **kw):
+        page = SignatureCommitteeTests._Page(842, 595, self._words(**kw))
+        return signature_committee_slots(page)
+
+    def test_the_real_books_qualification_is_found(self):
+        members, quals, _bottom, _raw = self._slots()
+        self.assertEqual(members[1], "Sutthichai Nakphook")
+        self.assertEqual(quals[1], "Ph.D. (Clinical epidemiology)")
+        self.assertEqual(quals[2], "Dr.P.H")            # แถวปกติยังได้บรรทัดถัดจากชื่อเหมือนเดิม
+
+    def test_a_role_label_is_not_a_qualification(self):
+        """ควบคุมเชิงลบ — ไม่มีคุณวุฒิ มีแต่ป้าย "Chair" ต้องยังนับว่าไม่มีคุณวุฒิ"""
+        _members, quals, _bottom, _raw = self._slots(degree=False)
+        self.assertEqual(quals[1], "")
+
+    def test_an_empty_cell_still_has_no_qualification(self):
+        """ควบคุมเชิงลบ — ใต้ชื่อไม่มีอะไรเลยจนถึงเส้นประถัดไป"""
+        _members, quals, _bottom, _raw = self._slots(degree=False, label=False)
+        self.assertEqual(quals[1], "")
+
+    def test_the_red_finding_goes_away_on_the_signature_page(self):
+        def run(**kw):
+            page = SignatureCommitteeTests._Page(842, 595, self._words(**kw))
+
+            class _Pdf:
+                pages = [page, page]
+                def __enter__(self):
+                    return self
+                def __exit__(self, *exc):
+                    return False
+
+            rep = Report()
+            with mock.patch.object(checker_module.pdfplumber, "open", lambda _p: _Pdf()), \
+                    mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
+                checker_module._check_committees(
+                    rep, {"exam": ["Sutthichai Nakphook", "Hathaichon Inchai"]}, [0, 1],
+                    ["Thesis Advisory Committee", "Thesis Examination Committees"], "x.pdf",
+                    lambda i: ["หน้า i", "หน้า ii"][i], "international", {})
+            return [i["found"] for i in rep.zones["RED"] if "ไม่พบคุณวุฒิ" in i["found"]]
+
+        self.assertEqual(run(), [])
+        self.assertEqual(run(degree=False),
+                         ['ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook"'])
+
+
+class NoStaffLineReachesTheStudent(unittest.TestCase):
+    """ข้อความสรุปถึงนักศึกษาต้องไม่มีบรรทัดที่เขียนถึงเจ้าหน้าที่ (ก.ย. 2569)
+
+    เจ้าหน้าที่: "ไม่ต้องเอาข้อความที่เขียนถึงเจ้าหน้าที่ไปแจ้งนักศึกษา" — เล่มจริง 6736545 ได้บรรทัด
+    "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง ..." ในกลุ่มรอยืนยัน และการ์ดเหลืองหน้าว่างที่กด ✗
+    ได้ "... เป็นข้อสังเกตและผ่านได้" ในกลุ่มกรุณาแก้ไข
+    """
+
+    STAFF_LINES = (
+        "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
+        "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
+        "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "ตรวจด้วยตา",
+        "แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้", "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่",
+        "เจ้าหน้าที่ตรวจสอบรูปแบบตัวหนาในบทคัดย่อ",
+        "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
+        "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
+    )
+    # คำที่ห้ามโผล่ในบรรทัดสั่งแก้ของข้อความสรุป — เขียนแยกจากค่าคงที่ในเครื่องตรวจโดยตั้งใจ
+    # ถ้าใช้ค่าคงที่ตัวเดียวกัน เทสต์จะผ่านไปพร้อมกับตัวกรองที่พัง
+    BANNED = ("เจ้าหน้าที่", "ข้อสังเกต", "ผ่านได้")
+    BANNED_LEADS = ("ตรวจว่า", "ตรวจด้วยตา")
+
+    def _clean(self, line):
+        line = line.strip()
+        return not any(w in line for w in self.BANNED) and not line.startswith(self.BANNED_LEADS)
+
+    def test_the_known_staff_lines_are_recognised(self):
+        for line in self.STAFF_LINES:
+            self.assertTrue(checker_module.is_staff_only_line(line), line)
+
+    def test_student_directives_are_kept(self):
+        """ควบคุมเชิงลบ — บรรทัดสั่งแก้ปกติต้องยังไปถึงนักศึกษา"""
+        for line in ('ต้องแก้เป็น "LITERATURE REVIEW"', "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
+                     'ต้องเป็นเลขหน้า "ก"', "ช่องกรรมการที่ไม่ได้ใช้ต้องเปลี่ยนสีตัวอักษรเป็นสีขาว",
+                     "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
+                     'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น'):
+            self.assertFalse(checker_module.is_staff_only_line(line), line)
+
+    def test_the_blank_page_items_reach_the_student_without_staff_lines(self):
+        rep = Report()
+        rep.add("ORANGE", "-", "หน้า 140 ถึง หน้า 145 (6 หน้า)",
+                "ระบบดึงข้อความจากหน้านี้ไม่ได้ (มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น) "
+                "และยืนยันลำดับเลขหน้าไม่ได้", self.STAFF_LINES[0], "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
+        rep.add("YELLOW", "body/end", "หน้า 198 ถึง หน้า 205 (8 หน้า)",
+                "ระบบดึงข้อความจากหน้านี้ไม่ได้ (มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น) "
+                "แต่เลขหน้าเรียงต่อเนื่องถูกต้อง", self.STAFF_LINES[1], self.STAFF_LINES[2],
+                "PAGE.BLANK")
+        summary = checker_module.plain_summary(checker_module.check_result(rep),
+                                               failed=["YELLOW:0"])
+        self.assertIn("หน้า 140 ถึง หน้า 145", summary)          # ข้อยังอยู่ แค่ไม่มีบรรทัดถึงเจ้าหน้าที่
+        self.assertIn("หน้า 198 ถึง หน้า 205", summary)
+        for line in summary.splitlines():
+            self.assertTrue(self._clean(line), line)
+
+    def test_the_manual_variant_chapter_title_keeps_only_the_correction(self):
+        rep = Report()
+        rep.add("ORANGE", "body", "บทที่ 2 (หน้า 15)", 'ชื่อบทในเล่มเขียนว่า "ทบทวนวรรณกรรม"',
+                'ประกาศใช้ "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง" แต่คู่มือแสดงแบบที่พบ เจ้าหน้าที่ยืนยันได้',
+                "", "BODY.OPTION1")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ต้องแก้เป็น "วรรณกรรมและงานวิจัยที่เกี่ยวข้อง"', summary)
+        self.assertNotIn("เจ้าหน้าที่", summary)
+
+    def test_a_quoted_value_in_a_staff_line_is_not_a_correction(self):
+        """ค่าในเครื่องหมายคำพูดของบรรทัดที่เขียนถึงเจ้าหน้าที่ อาจเป็นสิ่งที่เล่มพิมพ์ผิด ไม่ใช่ค่าที่ต้องแก้"""
+        rep = Report()
+        rep.add("ORANGE", "body", "หน้า 10", "พบข้อความที่ต้องตรวจ",
+                'เจ้าหน้าที่ยืนยันว่าเล่มพิมพ์ "ABC"', "", "UNCERTAIN.REVIEW")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("พบข้อความที่ต้องตรวจ", summary)
+        self.assertNotIn('ต้องแก้เป็น "ABC"', summary)
+
+    def test_no_rule_in_the_engine_sends_a_staff_line_to_the_student(self):
+        """ไล่ rep.add ทุกจุดในเครื่องตรวจ แล้วจำลองบรรทัดที่ข้อความสรุปจะพิมพ์ต่อจากสิ่งที่พบ
+
+        กันกฎใหม่ในอนาคตที่เขียนถึงเจ้าหน้าที่ไว้ในช่อง "ควรเป็น" หรือ "ต้องแก้" แล้วหลุดไปถึงนักศึกษา
+        """
+        import ast
+
+        def text_of(node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            if isinstance(node, ast.JoinedStr):
+                return "".join(v.value if isinstance(v, ast.Constant) else "X" for v in node.values)
+            return None
+
+        tree = ast.parse(inspect.getsource(checker_module))
+        checked = 0
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add" and len(node.args) >= 5):
+                continue
+            expected = text_of(node.args[4])
+            fix = text_of(node.args[5]) if len(node.args) > 5 else ""
+            if expected is None or fix is None:
+                continue
+            sentence = checker_module._summary_sentence(
+                {"location": "", "found": "x", "expected": expected, "fix": fix, "rule_id": ""},
+                skip_location=True)
+            checked += 1
+            for line in sentence.split("\n")[1:]:
+                self.assertTrue(self._clean(line), f"บรรทัด {node.lineno}: {line}")
+        self.assertGreater(checked, 80)          # ตอนนี้ 88 จุดที่เขียนข้อความตรง ๆ
+
+
+class TheSignaturePageNumberFollowsTheBookLanguage(unittest.TestCase):
+    """บอกเลขหน้าหน้าลงนามตามภาษาของเล่ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    "บอกเลขหน้าตามภาษาที่เขียนของแต่ละเล่ม" — เดิมบอก 'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i"
+    (อังกฤษ)' ทั้งที่เล่มที่ 4 (6538041 SHPP/D) เป็นหลักสูตรไทย
+    """
+
+    PAGES = ["ปก", "วิทยานิพนธ์ เรื่อง X", "วิทยานิพนธ์ เรื่อง X"]
+
+    def _expected(self, style):
+        rep = Report()
+        checker_module._report_signature_page_labels(
+            rep, [1, 2], self.PAGES, lambda i: f"แผ่นที่ {i + 1}", label_style=style)
+        return [i["expected"] for i in rep.zones["ORANGE"]], rep
+
+    def test_a_thai_book_is_told_the_thai_letters(self):
+        self.assertEqual(self._expected("thai")[0],
+                         ['ต้องเป็นเลขหน้า "ก"', 'ต้องเป็นเลขหน้า "ข"'])
+
+    def test_an_english_book_is_told_the_roman_numerals(self):
+        self.assertEqual(self._expected("roman")[0],
+                         ['ต้องเป็นเลขหน้า "i"', 'ต้องเป็นเลขหน้า "ii"'])
+
+    def test_an_unknown_language_still_gets_both(self):
+        """ควบคุมเชิงลบ — ไม่รู้ภาษาเล่มต้องบอกทั้งสองแบบเหมือนเดิม"""
+        self.assertEqual(self._expected(None)[0][0], 'ต้องเป็นเลขหน้า "ก" (ไทย) หรือ "i" (อังกฤษ)')
+
+    def test_it_stays_orange(self):
+        """ไม่มีเลขหน้า = สีส้มเหมือนพิมพ์เลขผิด (เจ้าหน้าที่ยืนยัน ก.ย. 2569)"""
+        _exp, rep = self._expected("thai")
+        self.assertEqual(len(rep.zones["ORANGE"]), 2)
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_the_summary_says_page_number(self):
+        _exp, rep = self._expected("thai")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ต้องเป็นเลขหน้า "ก"', summary)
+        self.assertNotIn('ต้องแก้เป็น "ก"', summary)
+        self.assertNotIn("(อังกฤษ)", summary)
+
+    def test_the_run_passes_the_book_language(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("rep, sig_pages, pages, page_ref,\n        label_style=_expected_front_label_style(",
+                      source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('ต้องเป็นเลขหน้า "ก"', 'ต้องเป็นเลขหน้า "ii"'):
+            en = i18n.tr_en(text, pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en)), [], en)
+
+
+class ABiographyHeadedJustPrathawat(unittest.TestCase):
+    """หน้าประวัติที่ตั้งหัวข้อว่า "ประวัติ" เฉย ๆ ต้องนับเป็นประวัติผู้วิจัย (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D หน้าสุดท้ายเป็นประวัติผู้วิจัย หัวข้อเขียนแค่ "ประวัติ" ระบบฟ้องแดงผิดว่า
+    "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)" — เจ้าหน้าที่: "ประวัติผู้วิจัย ... ในส่วนท้ายมีนะ"
+    ข้อมูลในหน้าเป็นค่าสมมติ ใช้แค่ป้ายช่องตามที่เล่มจริงพิมพ์ (รวม "ประวิติการศึกษา" ที่สะกดผิด)
+    """
+
+    BIO_TH = ("206\nประวัติ\nชื่อ – สกุล นายสมมติ ทดสอบ\nวัน เดือน ปีเกิด 1 มกราคม 2530\n"
+              "สถานที่เกิด กรุงเทพมหานคร ประเทศไทย\nประวิติการศึกษา มหาวิทยาลัยตัวอย่าง, พ.ศ. 2550")
+    BIO_EN = ("97\nBIOGRAPHY\nNAME Somchai Example\nDATE OF BIRTH 1 January 1990\n"
+              "PLACE OF BIRTH Bangkok, Thailand\nINSTITUTIONS ATTENDED Example University")
+    BODY = ("35\nประวัติ\nพระราชบัญญัติคุ้มครองพยานในคดีอาญา พ.ศ. 2546 เกิดขึ้นจากความจำเป็นที่ต้อง"
+            "คุ้มครองพยานซึ่งเป็นกลไกสำคัญของกระบวนการยุติธรรม")
+
+    def test_a_short_heading_with_biography_fields_is_the_biography(self):
+        self.assertTrue(checker_module.is_biography_heading("ประวัติ", self.BIO_TH))
+
+    def test_a_short_heading_on_a_body_page_is_not(self):
+        """ควบคุมเชิงลบ — "ประวัติ" เป็นหัวข้อในเนื้อหาได้ ต้องมีช่องข้อมูลประวัติในหน้าด้วย"""
+        self.assertFalse(checker_module.is_biography_heading("ประวัติ", self.BODY))
+
+    def test_the_full_headings_still_work_without_fields(self):
+        for heading in ("BIOGRAPHY", "ประวัติผู้วิจัย", "ประวัติผู้เขียน"):
+            self.assertTrue(checker_module.is_biography_heading(heading, ""), heading)
+
+    def test_both_languages_have_recognisable_fields(self):
+        self.assertTrue(checker_module.looks_like_biography(self.BIO_TH))
+        self.assertTrue(checker_module.looks_like_biography(self.BIO_EN))
+        self.assertFalse(checker_module.looks_like_biography(self.BODY))
+
+    def test_the_toc_line_counts_as_the_biography_entry(self):
+        self.assertEqual(checker_module._toc_section_kind("ประวัติ 206"), "biography")
+        self.assertEqual(checker_module._toc_section_kind("ประวัติผู้วิจัย 206"), "biography")
+        self.assertEqual(checker_module._toc_section_kind("2.1 ประวัติ 16"), "")
+
+
+class TheBiographyHeadingMustBeTheOfficialOne(unittest.TestCase):
+    """หัวข้อหน้าประวัติผู้วิจัย: เล่มไทย "ประวัติผู้วิจัย" เล่มอังกฤษ "BIOGRAPHY" (ก.ย. 2569)
+
+    เจ้าหน้าที่: "หน้าประวัติเล่มนี้เขียนหัวข้อแค่ "ประวัติ" ไม่ใช่ "ประวัติผู้วิจัย" หัวข้อ
+    ประวัติผู้วิจัยก็ควรต้องถูก" — ประกาศฯ ข้อ 4.1.3.3 / 4.2.3.3 และคู่มือ
+    """
+
+    def _page(self, printed, want):
+        rep = Report()
+        checker_module._report_biography_heading(rep, printed, want, "ประวัติผู้วิจัย (หน้า 206)")
+        return rep.zones["RED"]
+
+    def test_the_heading_follows_the_book_language(self):
+        want = checker_module.expected_biography_heading
+        self.assertEqual(want("thai", "ประวัติ"), "ประวัติผู้วิจัย")
+        self.assertEqual(want("thai_english", "ประวัติผู้วิจัย"), "BIOGRAPHY")
+        self.assertEqual(want("international", "BIOGRAPHY"), "BIOGRAPHY")
+        # ไม่รู้ภาษาเล่ม — ยึดอักษรของหัวข้อที่พิมพ์
+        self.assertEqual(want("", "ประวัติ"), "ประวัติผู้วิจัย")
+        self.assertEqual(want("", "BIOGRAPHY"), "BIOGRAPHY")
+
+    def test_the_real_book_is_reported(self):
+        issues = self._page("ประวัติ", "ประวัติผู้วิจัย")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["found"], 'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติ"')
+        self.assertEqual(issues[0]["expected"], 'ต้องแก้เป็น "ประวัติผู้วิจัย"')
+        self.assertEqual(issues[0]["rule_id"], "END.STRUCTURE")
+
+    def test_other_wrong_headings_are_reported(self):
+        for printed, want in (("ประวัติผู้เขียน", "ประวัติผู้วิจัย"),
+                              ("BIOGRAPHY", "ประวัติผู้วิจัย"),
+                              ("ประวัติผู้วิจัย", "BIOGRAPHY")):
+            self.assertEqual(len(self._page(printed, want)), 1, (printed, want))
+
+    def test_the_official_heading_passes(self):
+        """ควบคุมเชิงลบ — หัวข้อถูกต้องต้องไม่ฟ้อง ตัวพิมพ์/ช่องว่างไม่นับ"""
+        for printed, want in (("ประวัติผู้วิจัย", "ประวัติผู้วิจัย"), ("BIOGRAPHY", "BIOGRAPHY"),
+                              ("Biography", "BIOGRAPHY"), ("ประวัติ ผู้วิจัย", "ประวัติผู้วิจัย"),
+                              ("", "ประวัติผู้วิจัย")):
+            self.assertEqual(self._page(printed, want), [], (printed, want))
+
+    def test_the_summary_asks_for_the_official_heading(self):
+        rep = Report()
+        checker_module._report_biography_heading(rep, "ประวัติ", "ประวัติผู้วิจัย",
+                                                 "ประวัติผู้วิจัย (หน้า 206)")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("ส่วนท้ายเล่ม\n", summary)
+        self.assertIn('ต้องแก้เป็น "ประวัติผู้วิจัย"', summary)
+
+    def test_the_toc_line_must_use_the_same_heading(self):
+        def toc(raw, want):
+            rep = Report()
+            checker_module._report_toc_biography_heading(rep, raw, want, "สารบัญ (หน้า ฌ)")
+            return [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(toc("ประวัติ 206", "ประวัติผู้วิจัย"), ['สารบัญเขียนหัวข้อนี้ว่า "ประวัติ"'])
+        self.assertEqual(toc("ประวัติผู้วิจัย ................ 206", "ประวัติผู้วิจัย"), [])
+        self.assertEqual(toc("BIOGRAPHY 97", "BIOGRAPHY"), [])
+
+    def test_both_checks_are_wired_into_the_run(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("_report_biography_heading(rep, bio_heading, bio_want,", source)
+        self.assertIn('if section_kind == "biography":\n                    _report_toc_biography_heading(',
+                      source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติ"', 'ต้องแก้เป็น "ประวัติผู้วิจัย"',
+                     "ประวัติผู้วิจัย (หน้า 206)", 'สารบัญเขียนหัวข้อนี้ว่า "ประวัติ"',
+                     'หัวข้อในสารบัญต้องเป็น "ประวัติผู้วิจัย"',
+                     'แก้หัวข้อในสารบัญเป็น "ประวัติผู้วิจัย"'):
+            en = i18n.tr_en(text, pairs)
+            outside_quotes = i18n.re.sub(r'"[^"]*"', "", en)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", outside_quotes), [], en)
+
+    def test_the_books_own_heading_stays_as_printed(self):
+        """ค่าในเครื่องหมายคำพูดคือสิ่งที่เล่มพิมพ์ — รายงานอังกฤษต้องไม่แปลทับเป็น "Biography"
+
+        เล่มอังกฤษที่ตั้งหัวข้อเป็นไทย ถ้าแปลทับ รายงานจะเขียนว่าเล่มพิมพ์ "Biography" ซึ่งไม่จริง
+        """
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text, kept in (('หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"'),
+                           ('สารบัญเขียนหัวข้อนี้ว่า "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"'),
+                           ('หัวข้อในสารบัญต้องเป็น "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"')):
+            self.assertIn(kept, i18n.tr_en(text, pairs), text)
+
+
+class ASectionMissingFromTheTocIsReportedOnce(unittest.TestCase):
+    """ส่วนที่มีในเล่มแต่ไม่อยู่ในสารบัญ: ข้อเดียว ถ้อยคำแบบข้อภาคผนวก (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D ได้ "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ" (FRONT.TOC) กับ
+    "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ" (FRONT.TOC_CONTENT) เรื่องเดียวกันสองข้อ — เจ้าหน้าที่:
+    "ข้อ 9 ควรจะแจ้งเหมือนข้อ 5" (ข้อ 5 = ข้อภาคผนวก)
+    """
+
+    def test_the_toc_content_rule_uses_the_appendix_wording(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn("f\"เล่มมี{section_label}{_TOC_SECTION_GLOSS.get(section_kind, '')} \"", source)
+        self.assertNotIn('f"ไม่พบหัวข้อ {section_label} ในสารบัญ"', source)
+
+    def test_the_older_appendix_rule_steps_aside_when_the_toc_rule_runs(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn("if has_appendix_body and not toc_has_appendix and not (approved and toc_pages):",
+                      source)
+
+    def test_every_section_name_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for label in ("ภาคผนวก (APPENDIX)", "ประวัติผู้วิจัย (BIOGRAPHY)", "กิตติกรรมประกาศ",
+                      "บทคัดย่อภาษาอังกฤษ", "บทคัดย่อภาษาไทย", "สารบัญตาราง",
+                      "รายการอ้างอิง/บรรณานุกรม"):
+            en = i18n.tr_en(f"เล่มมี{label} แต่ไม่ปรากฏในสารบัญ", pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
+class ASignaturePageWithoutANumberIsReportedOnce(unittest.TestCase):
+    """หน้าลงนามที่ไม่มีเลขหน้า: ข้อหน้าลงนาม 1/2 (สีส้ม) เท่านั้น ไม่ฟ้องซ้ำในข้อส่วนนำ (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D ได้สามข้อจากความผิดเดียว — เจ้าหน้าที่: "ข้อ 8 กับ 2 ตรวจเหมือนกัน
+    เอาตามข้อ 2 ก็พอ"
+    """
+
+    TEXTS = ["ปก", "วิทยานิพนธ์ เรื่อง X", "วิทยานิพนธ์ เรื่อง X", "ค\nกิตติกรรมประกาศ", "ง\nบทคัดย่อ"]
+
+    def _front(self, labels, reported=(), texts=None):
+        rep = Report()
+        page_labels = {i: lab for i, lab in enumerate(labels) if lab}
+        _check_front_page_numbers(
+            rep, page_labels,
+            lambda i: (f"หน้า {page_labels[i]}" if page_labels.get(i)
+                       else f"หน้าไม่ระบุเลข (แผ่นที่ {i + 1} ของไฟล์)"),
+            1, len(labels), "thai", page_texts=texts or self.TEXTS, reported=reported)
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_the_signature_rule_says_which_pages_it_reported(self):
+        rep = Report()
+        flagged = checker_module._report_signature_page_labels(
+            rep, [1, 2], self.TEXTS, lambda i: f"แผ่นที่ {i + 1}")
+        self.assertEqual(flagged, [1, 2])
+        self.assertEqual(checker_module._report_signature_page_labels(
+            Report(), [1, 2], ["", "ก\nวิทยานิพนธ์", "ข\nวิทยานิพนธ์"], lambda i: ""), [])
+
+    def test_the_same_pages_are_not_reported_again(self):
+        self.assertEqual(self._front(["", "", "", "ค", "ง"], reported=[1, 2]), [])
+
+    def test_without_the_signature_rule_they_are_still_caught(self):
+        """ควบคุมเชิงลบ — ถ้ากฎหน้าลงนามไม่ได้ฟ้อง ข้อส่วนนำต้องยังฟ้องเหมือนเดิม"""
+        reds = self._front(["", "", "", "ค", "ง"])
+        self.assertEqual(len(reds), 1)
+        self.assertIn("แผ่นที่ 2 และ 3 ของไฟล์", reds[0])
+
+    def test_another_front_page_without_a_number_is_still_reported(self):
+        reds = self._front(["", "", "", "", "ง"], reported=[1, 2])
+        self.assertEqual(reds, ["1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์"])
+
+    def test_a_wrong_kind_of_number_on_a_reported_page_is_not_repeated(self):
+        self.assertEqual(self._front(["", "1", "2", "ค", "ง"], reported=[1, 2]), [])
+        self.assertTrue(any("เลขอารบิก" in r for r in self._front(["", "1", "2", "ค", "ง"])))
+
+
+class TheAbstractTitleAlignmentFindingIsShort(unittest.TestCase):
+    """ข้อชื่อเรื่องไม่ชิดซ้าย บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่อง (ก.ย. 2569)
+
+    เจ้าหน้าที่: "แจ้งแค่ว่าหัวข้อไม่ได้ชิดซ้ายก็พอ ไม่ต้องเอาชื่อหัวข้อมาใส่"
+    """
+
+    def test_the_finding_has_no_title_lines(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn('"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย",', source)
+        self.assertNotIn('f"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: {shown}"', source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย", pairs)
+        self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
 class AnEmptyNameFieldIsStoppedAtTheForm(unittest.TestCase):
     """การ์ดแดง "ไม่ได้กรอกชื่อ...ของนักศึกษาในฟอร์ม" ไม่มีแล้ว (เจ้าหน้าที่ยืนยัน ก.ย. 2569)
 
@@ -2963,7 +3560,7 @@ class AStaffNoteDoesNotReachTheStudent(unittest.TestCase):
         source = inspect.getsource(checker_module)
         for phrase in (self.NOTE, self.FIX):
             self.assertIn(phrase, source)
-            self.assertTrue(phrase.startswith(checker_module._STAFF_ONLY_DIRECTIVES), phrase)
+            self.assertTrue(checker_module.is_staff_only_line(phrase), phrase)
 
 
 class AStudentIdInThaiNumeralsIsRed(unittest.TestCase):
@@ -6363,6 +6960,8 @@ class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
                 f'หน้าปกพิมพ์ "{found}" ไม่ตรงข้อความบังคับ (ข้อความประเภทงาน) {diff}',
                 f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{found}" {diff}',
                 f'ช่องประธานหลักสูตร (มุมล่างขวา) เขียนว่า "{found}" {diff}',
+                f'ช่องประธานหลักสูตร (มุมล่างขวา) สะกดชื่อสาขาผิด เขียนว่า "{found}" {diff}',
+                f'ช่องคณบดีคณะ (มุมล่างขวา) สะกดชื่อคณะผิด เขียนว่า "{found}" {diff}',
             ):
                 self.assertEqual(
                     self._thai_left(sentence), [],

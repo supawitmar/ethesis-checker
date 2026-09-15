@@ -585,7 +585,7 @@ var CATMAP = {
 
 var TR = [
   // ---- การจัดวางชื่อเรื่องบนหน้าบทคัดย่อ (ประโยคเต็ม) ----
-  [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: (.+)/g, 'The thesis title on the abstract page is not left-aligned: $1'],
+  [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย/g, 'The thesis title on the abstract page is not left-aligned'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา/g, 'The thesis title on the abstract page must be left-aligned, not centred or right-aligned'],
   [/แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย/g, 'Change the alignment of the thesis title on the abstract page to left'],
   // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
@@ -628,6 +628,9 @@ var TR = [
   [/^หัวข้อสารบัญ$/g, 'The table-of-contents heading'],
   [/^กรรมการ$/g, 'committee members'],
   [/^กรรมการที่ปรึกษา$/g, 'advisory committee members'],
+  // ประโยคเต็มที่ขึ้นต้นด้วยคำอื่นแล้วตามด้วย ต้องเป็น "..." ต้องอยู่ก่อนกฎ ต้องเป็น ทั่วไปข้างล่าง
+  [/หัวข้อในสารบัญต้องเป็น ("[^"]*")/g, 'The heading in the table of contents must be $1'],
+  [/ต้องเป็นเลขหน้า ("[^"]*")/g, 'Must be page label $1'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
@@ -693,11 +696,20 @@ var TR = [
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า ("[^"]*") (.+)/g, 'This heading is misspelled in the table of contents: it reads $1, $2'],
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents: it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
+  // ---- หัวข้อหน้าประวัติผู้วิจัย (ประโยคเต็ม ต้องอยู่ก่อนกฎเศษคำ "ประวัติผู้วิจัย") ----
+  [/หัวข้อหน้าประวัติผู้วิจัยเขียนว่า ("[^"]*")/g, 'The biography page heading reads $1'],
+  [/สารบัญเขียนหัวข้อนี้ว่า ("[^"]*")/g, 'The table of contents lists this heading as $1'],
+  [/แก้หัวข้อในสารบัญเป็น ("[^"]*")/g, 'Change the heading in the table of contents to $1'],
   [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the subject; it reads'],
+  [/ช่องคณบดีคณะ \(มุมล่างขวา\) สะกดชื่อคณะผิด เขียนว่า/g, 'The faculty dean box (bottom right) misspells the faculty name; it reads'],
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) เขียนว่า/g, 'The programme chair box (bottom right) reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) เขียนว่า/g, 'The faculty dean box (bottom right) reads'],
   [/ไม่พบชื่อสาขา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The subject "$1" was not found in the programme chair box (bottom right)'],
+  [/ช่องคณบดีคณะ \(มุมล่างขวา\) ใช้ตำแหน่ง/g, 'The faculty dean box (bottom right) uses the title'],
+  [/ตำแหน่งต้องเป็น ("[^"]+") หรือ ("[^"]+") เท่านั้น/g, 'The title must be $1 or $2'],
+  [/ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1/g, 'Use the title of the head of the faculty or institute; the programme director signs on signature page 1'],
   [/ไม่พบชื่อคณะ "(.+?)" ในช่องคณบดีคณะ \(มุมล่างขวา\)/g, 'The faculty name "$1" was not found in the faculty dean box (bottom right)'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา/g, 'The text under the signature must contain the subject'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ/g, 'The text under the signature must contain the faculty name'],
@@ -947,6 +959,8 @@ var TR = [
   [/ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า/g, 'Must be spelled as in the approved data on every page'],
   [/ต้องตรงข้อมูลอนุมัติทุกตัวอักษร/g, 'Must match the approved data exactly'],
   [/เล่มมีภาคผนวก \(APPENDIX\) แต่ไม่ปรากฏในสารบัญ/g, 'The document has an appendix (APPENDIX) but it is not listed in the TOC'],
+  [/เล่มมีประวัติผู้วิจัย \(BIOGRAPHY\) แต่ไม่ปรากฏในสารบัญ/g, 'The document has a biography (BIOGRAPHY) but it is not listed in the TOC'],
+  [/เล่มมี(.+?) แต่ไม่ปรากฏในสารบัญ/g, 'The document has $1 but it is not listed in the TOC'],
   [/หัวข้อภาคผนวกต้องอยู่ในสารบัญ/g, 'The appendix heading must appear in the TOC'],
   [/เพิ่ม APPENDIX\/ภาคผนวก ในสารบัญ/g, 'Add APPENDIX to the TOC'],
   [/ไม่พบหัวข้อ (.+?) ในสารบัญ/g, 'Heading $1 not found in the TOC'],
