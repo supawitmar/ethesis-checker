@@ -374,6 +374,14 @@ _SIG_QUAL_PLACEHOLDERS = (
 )
 
 
+# ป้ายบทบาทใต้คุณวุฒิที่บางเล่มพิมพ์เพิ่ม (Chair / Member / Candidate ...) ไม่ใช่คุณวุฒิ
+# เทียบทั้งช่อง (norm) ไม่ใช่ค้นคำย่อย — คุณวุฒิจริงไม่มีทางเป็นคำเหล่านี้ล้วน ๆ
+_SIG_ROLE_LABELS = frozenset(norm(label) for label in (
+    'Candidate', 'Chair', 'Chairperson', 'Chairman', 'Member', 'Major advisor',
+    'Co-advisor', 'Advisor', 'ผู้วิจัย', 'ประธาน', 'ประธานกรรมการ', 'กรรมการ',
+    'อาจารย์ที่ปรึกษาหลัก', 'อาจารย์ที่ปรึกษาร่วม'))
+
+
 def _sig_qual_text(text):
     """ข้อความคุณวุฒิใต้ชื่อกรรมการ — คืน '' ถ้าว่างหรือเป็น placeholder (ยังไม่กรอกจริง)"""
     n = norm(text)
@@ -482,14 +490,19 @@ def signature_committee_slots(pdf_page):
                   if _sig_is_dotted(w['text']) and float(w['x0']) > mid * 0.6]
     if dot_starts:
         mid = min(dot_starts) - 2.0     # เผื่อคำที่เริ่มชิดขอบซ้ายของช่องพอดี
-    # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวคุณวุฒิ = บรรทัดถัดจากชื่อ (ถ้าไม่ใช่เส้นประ)
+    # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวใต้ชื่อ = ทุกบรรทัดจนถึงเส้นประถัดไป (ช่องของคนนั้น)
+    # คุณวุฒิหาจากข้อความในช่อง ไม่ใช่ "บรรทัดถัดจากชื่อ" เป๊ะ — ดู qual_cell ข้างล่าง
     name_rows, qual_rows = [], []
     for i in range(len(lines) - 1):
         if not line_dotted[i]:
             continue
         name_rows.append(lines[i + 1])
-        qual_rows.append(lines[i + 2] if (i + 2 < len(lines) and not line_dotted[i + 2])
-                         else None)
+        below = []
+        for j in range(i + 2, len(lines)):
+            if line_dotted[j]:
+                break
+            below.append(lines[j])
+        qual_rows.append(below)
 
     def cell(row, left):
         """ข้อความในช่องหนึ่งของแถว — ประกอบจาก chars ไม่ใช่ต่อ text ของ extract_words
@@ -511,6 +524,21 @@ def signature_committee_slots(pdf_page):
             return _compose_thai_line(chars)
         return ' '.join(w['text'] for w in ws).strip()      # fixture ที่ไม่มี chars
 
+    def qual_cell(rows, left):
+        """คุณวุฒิใต้ชื่อ = ข้อความแรกในช่องเดียวกัน ใต้บรรทัดชื่อ ถึงเส้นประถัดไป
+
+        ข้ามบรรทัดที่ช่องนี้ว่าง และป้ายบทบาท (Chair / Member / Candidate ...)
+        เดิมดูแค่ "บรรทัดถัดจากชื่อ" เล่มจริง 6736545 PHIE/M ป้าย "Candidate" ของช่องซ้าย
+        อยู่สูงกว่าคุณวุฒิของช่องขวา 7 pt จึงแยกเป็นคนละบรรทัด บรรทัดถัดจากชื่อฝั่งขวาว่าง
+        ระบบฟ้องแดง "ไม่พบคุณวุฒิ" ทั้งที่คุณวุฒิพิมพ์อยู่ใต้ชื่อ (เจ้าหน้าที่แนะนำให้ดูจาก
+        ข้อความในหน้า ไม่ใช่บรรทัดเป๊ะ) — เล่มที่คุณวุฒิอยู่บรรทัดถัดจากชื่อได้ผลเท่าเดิม
+        """
+        for row in rows or ():
+            text = cell(row, left)
+            if text and norm(text) not in _SIG_ROLE_LABELS:
+                return text
+        return ''
+
     members, member_quals, member_raw = {}, {}, {}
     # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
     # (เดิมตัดด้วย [:5] ซึ่งพึ่งว่าต้องอ่านเส้นประเจอครบ 6 แถวพอดี ถ้าเจอไม่ครบ
@@ -520,12 +548,12 @@ def signature_committee_slots(pdf_page):
         right = cell(nrow, left=False)
         members[idx + 1] = _sig_clean_name(right)                    # ขวา → 1..5
         member_raw[idx + 1] = right
-        member_quals[idx + 1] = _sig_qual_text(cell(qrow, left=False))
+        member_quals[idx + 1] = _sig_qual_text(qual_cell(qrow, left=False))
         if idx >= 1:
             left = cell(nrow, left=True)
             members[10 - idx] = _sig_clean_name(left)                # ซ้าย → 9,8,7,6
             member_raw[10 - idx] = left
-            member_quals[10 - idx] = _sig_qual_text(cell(qrow, left=True))
+            member_quals[10 - idx] = _sig_qual_text(qual_cell(qrow, left=True))
     # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย
     #
     # ไม่มีวิธีเรียงคำวิธีเดียวที่ถูกกับทุกเล่ม เพราะสองช่องนี้กว้างไม่เท่ากันและข้อความยาว

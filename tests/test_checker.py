@@ -2989,6 +2989,78 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
             self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
 
 
+class AQualificationIsReadFromItsOwnCell(unittest.TestCase):
+    """คุณวุฒิใต้ชื่อกรรมการ: ดูข้อความในช่องเดียวกัน ไม่ใช่ "บรรทัดถัดไป" เป๊ะ (ก.ย. 2569)
+
+    เล่มจริง 6736545 PHIE/M หน้า ii ฟ้องแดง "ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook""
+    ทั้งที่ "Ph.D. (Clinical epidemiology)" พิมพ์อยู่ใต้ชื่อ — ป้าย "Candidate" ช่องซ้าย (y=350)
+    สูงกว่าคุณวุฒิช่องขวา (y=357) 7 pt จึงแยกเป็นคนละบรรทัด พิกัดข้างล่างคัดมาจากเล่มจริง
+    """
+
+    def _words(self, degree=True, label=True):
+        def w(text, top, x0):
+            return {"text": text, "top": top, "x0": x0}
+        words = [w("………………", 322.4, 113.4), w("………………", 322.4, 305.2),
+                 w("Miss", 336.2, 113.4), w("Siriphon", 336.2, 139.8), w("Siwina", 336.2, 184.2),
+                 w("Sutthichai", 336.2, 305.2), w("Nakphook", 336.2, 356.9),
+                 w("Candidate", 350.0, 113.4)]
+        if degree:
+            words += [w("Ph.D.", 357.0, 305.2), w("(Clinical", 357.0, 335.6),
+                      w("epidemiology)", 357.0, 380.5)]
+        if label:
+            words.append(w("Chair", 377.6, 305.2))
+        words += [w("………………", 419.1, 305.2),
+                  w("Hathaichon", 432.9, 305.2), w("Inchai", 432.9, 363.5),
+                  w("Dr.P.H", 446.7, 305.2), w("Member", 460.5, 305.2),
+                  w("………………", 600.0, 113.4), w("………………", 600.0, 305.2),
+                  w("Dean", 640.0, 113.4), w("Dean", 640.0, 305.2)]
+        return words
+
+    def _slots(self, **kw):
+        page = SignatureCommitteeTests._Page(842, 595, self._words(**kw))
+        return signature_committee_slots(page)
+
+    def test_the_real_books_qualification_is_found(self):
+        members, quals, _bottom, _raw = self._slots()
+        self.assertEqual(members[1], "Sutthichai Nakphook")
+        self.assertEqual(quals[1], "Ph.D. (Clinical epidemiology)")
+        self.assertEqual(quals[2], "Dr.P.H")            # แถวปกติยังได้บรรทัดถัดจากชื่อเหมือนเดิม
+
+    def test_a_role_label_is_not_a_qualification(self):
+        """ควบคุมเชิงลบ — ไม่มีคุณวุฒิ มีแต่ป้าย "Chair" ต้องยังนับว่าไม่มีคุณวุฒิ"""
+        _members, quals, _bottom, _raw = self._slots(degree=False)
+        self.assertEqual(quals[1], "")
+
+    def test_an_empty_cell_still_has_no_qualification(self):
+        """ควบคุมเชิงลบ — ใต้ชื่อไม่มีอะไรเลยจนถึงเส้นประถัดไป"""
+        _members, quals, _bottom, _raw = self._slots(degree=False, label=False)
+        self.assertEqual(quals[1], "")
+
+    def test_the_red_finding_goes_away_on_the_signature_page(self):
+        def run(**kw):
+            page = SignatureCommitteeTests._Page(842, 595, self._words(**kw))
+
+            class _Pdf:
+                pages = [page, page]
+                def __enter__(self):
+                    return self
+                def __exit__(self, *exc):
+                    return False
+
+            rep = Report()
+            with mock.patch.object(checker_module.pdfplumber, "open", lambda _p: _Pdf()), \
+                    mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
+                checker_module._check_committees(
+                    rep, {"exam": ["Sutthichai Nakphook", "Hathaichon Inchai"]}, [0, 1],
+                    ["Thesis Advisory Committee", "Thesis Examination Committees"], "x.pdf",
+                    lambda i: ["หน้า i", "หน้า ii"][i], "international", {})
+            return [i["found"] for i in rep.zones["RED"] if "ไม่พบคุณวุฒิ" in i["found"]]
+
+        self.assertEqual(run(), [])
+        self.assertEqual(run(degree=False),
+                         ['ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook"'])
+
+
 class TheAbstractTitleAlignmentFindingIsShort(unittest.TestCase):
     """ข้อชื่อเรื่องไม่ชิดซ้าย บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่อง (ก.ย. 2569)
 
