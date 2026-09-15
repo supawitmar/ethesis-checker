@@ -1174,8 +1174,11 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
     ตรวจทั้งหน้า ไม่ใช่แค่บรรทัดแรก/ท้าย — เลขหน้าของหน้าลงนามอาจไม่ได้อยู่บรรทัดแรก
     เสมอ (เช่น มีหัวเรื่อง "วิทยานิพนธ์" นำหน้า) เทียบเฉพาะบรรทัดที่เป็นเลขหน้าล้วน
     จึงไม่ชนกับข้อความในเนื้อหน้า
+
+    คืนดัชนีหน้าที่ฟ้องไป ให้ _check_front_page_numbers ไม่ฟ้องหน้าเดิมซ้ำอีกข้อ
     """
     zone = zone or SIG_LABEL_ZONE
+    flagged = []
     for k, idx in enumerate(sig_pages[:2]):
         lab_en, lab_th = SIGNATURE_PAGE_LABELS[k]
         page_lines = [l.strip() for l in pages[idx].split('\n') if l.strip()]
@@ -1195,6 +1198,8 @@ def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None):
                 "แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด "
                 "เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย",
                 "PAGE.SIGNATURE_LABEL")
+        flagged.append(idx)
+    return flagged
 
 
 def _is_white_fill(color):
@@ -2132,15 +2137,23 @@ def _expected_front_label_style(program_language):
 
 
 def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
-                              expected_style=None, page_texts=None):
+                              expected_style=None, page_texts=None, reported=()):
     """เลขหน้าส่วนนำ: ชนิดต้องตรงภาษาเล่ม และเรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
 
     เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
-    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจทั้งช่วง จึงไม่ทับกับกฎเดิมที่ตรวจ "ค่าเริ่มต้น"
-    ของหน้าลงนาม
+    จึงไม่ถูกตรวจเลย ฟังก์ชันนี้ตรวจทั้งช่วง
+
+    reported = หน้าที่กฎเลขหน้าหน้าลงนาม (_report_signature_page_labels) ฟ้องไปแล้ว —
+    ไม่นับซ้ำในข้อ "ไม่ได้พิมพ์เลขหน้าไว้" / "เลขหน้าผิดชนิด" เล่มจริง 6538041 SHPP/D
+    หน้าลงนามสองหน้าไม่มีเลขหน้า แล้วได้สามข้อจากความผิดเดียว: หน้าลงนาม 1 และ 2
+    (สีส้ม) กับ "2 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 2 และ 3" (สีแดง) เจ้าหน้าที่สั่ง
+    (ก.ย. 2569) "ข้อ 8 กับ 2 ตรวจเหมือนกัน เอาตามข้อ 2 ก็พอ" — ตรงกับกติกา ส.ค. 2569
+    ที่ให้เลขหน้าหน้าลงนามเป็นสีส้มเพื่อไม่ให้ฟ้องสองข้อจากความผิดเดียว
+    หน้าที่ฟ้องไปแล้วยังนับเป็นหน้าคั่นในการตรวจความต่อเนื่องเหมือนเดิม
     """
     if stop_idx is None or stop_idx <= start_idx:
         return
+    reported = set(reported or ())
     entries, unread = [], []
     for i in range(start_idx, stop_idx):
         label = page_labels.get(i, "")
@@ -2163,7 +2176,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                 else "เลขโรมัน (i, ii, iii) หรือพยัญชนะไทย (ก, ข, ค)")
         want_sentence = f"เลขหน้าส่วนนำต้องเป็น{want} ทั้งส่วน"
 
-    off_style = [(i, lab, s) for i, lab, s, _v in entries if s != main_style]
+    off_style = [(i, lab, s) for i, lab, s, _v in entries
+                 if s != main_style and i not in reported]
     if off_style:
         found_names = " / ".join(sorted({_PAGE_LABEL_STYLE_NAME[s]
                                          for _i, _lab, s in off_style}))
@@ -2217,8 +2231,8 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                 return False
             return bool((page_texts[idx] or "").strip())
 
-        no_number = [i for i in unread if _has_text(i)]
-        unreadable = [i for i in unread if i not in no_number]
+        no_number = [i for i in unread if i not in reported and _has_text(i)]
+        unreadable = [i for i in unread if i not in reported and not _has_text(i)]
         for group, zone, detail, rule_id, fix in (
             (no_number, "RED", "ไม่ได้พิมพ์เลขหน้าไว้", "PAGE.NUMBERING",
              "เพิ่มเลขหน้าให้ครบทุกหน้า"),
@@ -4237,6 +4251,11 @@ def _toc_page_label(text):
     return str(int(label)) if label.isdigit() else label.lower()
 
 
+# ชื่ออังกฤษต่อท้ายชื่อส่วนในข้อ "เล่มมี... แต่ไม่ปรากฏในสารบัญ" — ถ้อยคำเดิมของข้อภาคผนวก
+# มี "(APPENDIX)" อยู่แล้ว นักศึกษาเล่มอังกฤษจะรู้ว่าต้องเพิ่มหัวข้อคำไหน
+_TOC_SECTION_GLOSS = {"appendix": " (APPENDIX)", "biography": " (BIOGRAPHY)"}
+
+
 def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
     """บรรทัดในสารบัญที่ "น่าจะใช่หัวข้อนี้แต่สะกดผิด" — คืน (หัวข้อที่พบ, ดัชนีหน้า)
 
@@ -4329,7 +4348,7 @@ def _toc_section_kind(text):
         return "list_abbreviations"
     if any(normalized.startswith(term) for term in N_REF):
         return "references"
-    if normalized in N_BIO:
+    if normalized in N_BIO or normalized == N_BIO_SHORT:
         return "biography"
     if any(normalized.startswith(term) for term in N_APPENDIX):
         return "appendix"
@@ -4435,6 +4454,32 @@ N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญ�
 N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
+# หัวข้อ "ประวัติ" เฉย ๆ — เล่มจริง 6538041 SHPP/D ตั้งหัวข้อหน้าสุดท้ายแบบนี้ ระบบเลยฟ้องผิดว่า
+# "ไม่พบประวัติผู้วิจัย" (เจ้าหน้าที่: "ประวัติผู้วิจัย ... ในส่วนท้ายมีนะ") คำเดียวนี้อาจเป็นหัวข้อ
+# ในเนื้อหาได้ หน้าเล่มจึงต้องมีช่องข้อมูลของประวัติด้วย (looks_like_biography) ส่วนในสารบัญ
+# บรรทัด "ประวัติ <เลขหน้า>" คือรายการของหน้านี้แน่นอน
+N_BIO_SHORT = norm('ประวัติ')
+# ช่องข้อมูลที่หน้าประวัติผู้วิจัยของ template มีทุกเล่ม (วัดจากเล่มจริงไทย 2 เล่ม อังกฤษ 4 เล่ม)
+_BIO_FIELDS = (norm('ชื่อ-สกุล'), norm('วัน เดือน ปีเกิด'), norm('สถานที่เกิด'),
+               norm('ประวัติการศึกษา'), norm('วุฒิการศึกษา'),
+               'DATEOFBIRTH', 'PLACEOFBIRTH', 'INSTITUTIONSATTENDED')
+
+
+def looks_like_biography(page_text):
+    """หน้านี้มีช่องข้อมูลของประวัติผู้วิจัยอย่างน้อยสองช่องไหม — ดูจากสิ่งที่ควรอยู่ในหน้า
+
+    ชื่อ-สกุล / วัน เดือน ปีเกิด / สถานที่เกิด / ประวัติการศึกษา (อังกฤษ: DATE OF BIRTH /
+    PLACE OF BIRTH / INSTITUTIONS ATTENDED) เทียบด้วย norm จึงรับ "ชื่อ – สกุล" และ
+    "ประวิติการศึกษา" (สะกดผิดในเล่มจริง) ได้
+    """
+    text = norm(page_text)
+    return sum(1 for field in _BIO_FIELDS if field in text) >= 2
+
+
+def is_biography_heading(line, page_text):
+    """บรรทัดหัวหน้านี้คือหัวข้อประวัติผู้วิจัยไหม — "ประวัติ" เฉย ๆ ต้องมีช่องข้อมูลประวัติในหน้าด้วย"""
+    nl = norm(line)
+    return nl in N_BIO or (nl == N_BIO_SHORT and looks_like_biography(page_text))
 
 # คำเรียกส่วนอ้างอิง — ต้องเลือกใช้ "คำเดียว" และสารบัญต้องใช้คำเดียวกับหน้าจริง
 _REF_TERM_GROUPS = (
@@ -5040,7 +5085,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
-    _report_signature_page_labels(rep, sig_pages, pages, page_ref)
+    sig_label_reported = _report_signature_page_labels(rep, sig_pages, pages, page_ref)
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -5411,7 +5456,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if n_ref_terms and (nl in N_REF or n_ref_terms > 1):
                 ref_head = (l, i, n_ref_terms)
                 last_major = ("REF", i)
-            if nl in N_BIO:
+            if is_biography_heading(l, t):
                 bio_page = i
                 last_major = ("BIO", i)
             if any(nl.startswith(w) for w in N_APPENDIX):
@@ -5460,7 +5505,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     )
     toc_has_appendix = appendix_toc_idx is not None
     toc_location = f"สารบัญ ({page_ref(toc_pages[0])})" if toc_pages else "สารบัญ"
-    if has_appendix_body and not toc_has_appendix:
+    # มีข้อมูลอนุมัติและมีหน้าสารบัญ = กฎหัวข้อบังคับในสารบัญ (FRONT.TOC_CONTENT) ฟ้องข้อนี้เอง
+    # พร้อมแยกกรณี "สะกดผิด" ออกได้ — เดิมฟ้องทั้งสองกฎ เล่มจริง 6538041 SHPP/D จึงได้สองข้อ
+    # เรื่องเดียวกัน ("เล่มมีภาคผนวก ... แต่ไม่ปรากฏในสารบัญ" กับ "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ")
+    if has_appendix_body and not toc_has_appendix and not (approved and toc_pages):
         rep.add("RED", "front_matter", toc_location, "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ",
                 "หัวข้อภาคผนวกต้องอยู่ในสารบัญ", "เพิ่ม APPENDIX/ภาคผนวก ในสารบัญ", "FRONT.TOC")
     if toc_has_appendix and not has_appendix_body:
@@ -5479,7 +5527,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         body_ch[0][2] if body_ch else None,
         _expected_front_label_style(
             (approved or {}).get("program_language", "") if same_student else ""),
-        page_texts=pages)
+        page_texts=pages, reported=sig_label_reported)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
@@ -6264,9 +6312,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "FRONT.TOC_CONTENT",
                         )
                         continue
+                    # หัวข้อทุกตัวในชุดนี้ "มีอยู่ในเล่ม" แล้ว (หาเจอจากหน้าจริง) จึงบอกแบบนั้น
+                    # เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้แจ้งแบบข้อภาคผนวก "เล่มมี... แต่ไม่ปรากฏ
+                    # ในสารบัญ" — คำว่า "ไม่พบหัวข้อ" อ่านเหมือนเล่มไม่มีส่วนนั้น
                     rep.add(
                         "RED", "front_matter", f"สารบัญ ({page_ref(toc_pages[0])})",
-                        f"ไม่พบหัวข้อ {section_label} ในสารบัญ",
+                        f"เล่มมี{section_label}{_TOC_SECTION_GLOSS.get(section_kind, '')} "
+                        "แต่ไม่ปรากฏในสารบัญ",
                         f"สารบัญต้องมีหัวข้อ {section_label} พร้อมเลขหน้า",
                         f"เพิ่มหัวข้อ {section_label} และเลขหน้าจริงลงในสารบัญ",
                         "FRONT.TOC_CONTENT",

@@ -3061,6 +3061,116 @@ class AQualificationIsReadFromItsOwnCell(unittest.TestCase):
                          ['ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook"'])
 
 
+class ABiographyHeadedJustPrathawat(unittest.TestCase):
+    """หน้าประวัติที่ตั้งหัวข้อว่า "ประวัติ" เฉย ๆ ต้องนับเป็นประวัติผู้วิจัย (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D หน้าสุดท้ายเป็นประวัติผู้วิจัย หัวข้อเขียนแค่ "ประวัติ" ระบบฟ้องแดงผิดว่า
+    "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)" — เจ้าหน้าที่: "ประวัติผู้วิจัย ... ในส่วนท้ายมีนะ"
+    ข้อมูลในหน้าเป็นค่าสมมติ ใช้แค่ป้ายช่องตามที่เล่มจริงพิมพ์ (รวม "ประวิติการศึกษา" ที่สะกดผิด)
+    """
+
+    BIO_TH = ("206\nประวัติ\nชื่อ – สกุล นายสมมติ ทดสอบ\nวัน เดือน ปีเกิด 1 มกราคม 2530\n"
+              "สถานที่เกิด กรุงเทพมหานคร ประเทศไทย\nประวิติการศึกษา มหาวิทยาลัยตัวอย่าง, พ.ศ. 2550")
+    BIO_EN = ("97\nBIOGRAPHY\nNAME Somchai Example\nDATE OF BIRTH 1 January 1990\n"
+              "PLACE OF BIRTH Bangkok, Thailand\nINSTITUTIONS ATTENDED Example University")
+    BODY = ("35\nประวัติ\nพระราชบัญญัติคุ้มครองพยานในคดีอาญา พ.ศ. 2546 เกิดขึ้นจากความจำเป็นที่ต้อง"
+            "คุ้มครองพยานซึ่งเป็นกลไกสำคัญของกระบวนการยุติธรรม")
+
+    def test_a_short_heading_with_biography_fields_is_the_biography(self):
+        self.assertTrue(checker_module.is_biography_heading("ประวัติ", self.BIO_TH))
+
+    def test_a_short_heading_on_a_body_page_is_not(self):
+        """ควบคุมเชิงลบ — "ประวัติ" เป็นหัวข้อในเนื้อหาได้ ต้องมีช่องข้อมูลประวัติในหน้าด้วย"""
+        self.assertFalse(checker_module.is_biography_heading("ประวัติ", self.BODY))
+
+    def test_the_full_headings_still_work_without_fields(self):
+        for heading in ("BIOGRAPHY", "ประวัติผู้วิจัย", "ประวัติผู้เขียน"):
+            self.assertTrue(checker_module.is_biography_heading(heading, ""), heading)
+
+    def test_both_languages_have_recognisable_fields(self):
+        self.assertTrue(checker_module.looks_like_biography(self.BIO_TH))
+        self.assertTrue(checker_module.looks_like_biography(self.BIO_EN))
+        self.assertFalse(checker_module.looks_like_biography(self.BODY))
+
+    def test_the_toc_line_counts_as_the_biography_entry(self):
+        self.assertEqual(checker_module._toc_section_kind("ประวัติ 206"), "biography")
+        self.assertEqual(checker_module._toc_section_kind("ประวัติผู้วิจัย 206"), "biography")
+        self.assertEqual(checker_module._toc_section_kind("2.1 ประวัติ 16"), "")
+
+
+class ASectionMissingFromTheTocIsReportedOnce(unittest.TestCase):
+    """ส่วนที่มีในเล่มแต่ไม่อยู่ในสารบัญ: ข้อเดียว ถ้อยคำแบบข้อภาคผนวก (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D ได้ "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ" (FRONT.TOC) กับ
+    "ไม่พบหัวข้อ ภาคผนวก ในสารบัญ" (FRONT.TOC_CONTENT) เรื่องเดียวกันสองข้อ — เจ้าหน้าที่:
+    "ข้อ 9 ควรจะแจ้งเหมือนข้อ 5" (ข้อ 5 = ข้อภาคผนวก)
+    """
+
+    def test_the_toc_content_rule_uses_the_appendix_wording(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn("f\"เล่มมี{section_label}{_TOC_SECTION_GLOSS.get(section_kind, '')} \"", source)
+        self.assertNotIn('f"ไม่พบหัวข้อ {section_label} ในสารบัญ"', source)
+
+    def test_the_older_appendix_rule_steps_aside_when_the_toc_rule_runs(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn("if has_appendix_body and not toc_has_appendix and not (approved and toc_pages):",
+                      source)
+
+    def test_every_section_name_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for label in ("ภาคผนวก (APPENDIX)", "ประวัติผู้วิจัย (BIOGRAPHY)", "กิตติกรรมประกาศ",
+                      "บทคัดย่อภาษาอังกฤษ", "บทคัดย่อภาษาไทย", "สารบัญตาราง",
+                      "รายการอ้างอิง/บรรณานุกรม"):
+            en = i18n.tr_en(f"เล่มมี{label} แต่ไม่ปรากฏในสารบัญ", pairs)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
+
+
+class ASignaturePageWithoutANumberIsReportedOnce(unittest.TestCase):
+    """หน้าลงนามที่ไม่มีเลขหน้า: ข้อหน้าลงนาม 1/2 (สีส้ม) เท่านั้น ไม่ฟ้องซ้ำในข้อส่วนนำ (ก.ย. 2569)
+
+    เล่มจริง 6538041 SHPP/D ได้สามข้อจากความผิดเดียว — เจ้าหน้าที่: "ข้อ 8 กับ 2 ตรวจเหมือนกัน
+    เอาตามข้อ 2 ก็พอ"
+    """
+
+    TEXTS = ["ปก", "วิทยานิพนธ์ เรื่อง X", "วิทยานิพนธ์ เรื่อง X", "ค\nกิตติกรรมประกาศ", "ง\nบทคัดย่อ"]
+
+    def _front(self, labels, reported=(), texts=None):
+        rep = Report()
+        page_labels = {i: lab for i, lab in enumerate(labels) if lab}
+        _check_front_page_numbers(
+            rep, page_labels,
+            lambda i: (f"หน้า {page_labels[i]}" if page_labels.get(i)
+                       else f"หน้าไม่ระบุเลข (แผ่นที่ {i + 1} ของไฟล์)"),
+            1, len(labels), "thai", page_texts=texts or self.TEXTS, reported=reported)
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_the_signature_rule_says_which_pages_it_reported(self):
+        rep = Report()
+        flagged = checker_module._report_signature_page_labels(
+            rep, [1, 2], self.TEXTS, lambda i: f"แผ่นที่ {i + 1}")
+        self.assertEqual(flagged, [1, 2])
+        self.assertEqual(checker_module._report_signature_page_labels(
+            Report(), [1, 2], ["", "ก\nวิทยานิพนธ์", "ข\nวิทยานิพนธ์"], lambda i: ""), [])
+
+    def test_the_same_pages_are_not_reported_again(self):
+        self.assertEqual(self._front(["", "", "", "ค", "ง"], reported=[1, 2]), [])
+
+    def test_without_the_signature_rule_they_are_still_caught(self):
+        """ควบคุมเชิงลบ — ถ้ากฎหน้าลงนามไม่ได้ฟ้อง ข้อส่วนนำต้องยังฟ้องเหมือนเดิม"""
+        reds = self._front(["", "", "", "ค", "ง"])
+        self.assertEqual(len(reds), 1)
+        self.assertIn("แผ่นที่ 2 และ 3 ของไฟล์", reds[0])
+
+    def test_another_front_page_without_a_number_is_still_reported(self):
+        reds = self._front(["", "", "", "", "ง"], reported=[1, 2])
+        self.assertEqual(reds, ["1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์"])
+
+    def test_a_wrong_kind_of_number_on_a_reported_page_is_not_repeated(self):
+        self.assertEqual(self._front(["", "1", "2", "ค", "ง"], reported=[1, 2]), [])
+        self.assertTrue(any("เลขอารบิก" in r for r in self._front(["", "1", "2", "ค", "ง"])))
+
+
 class TheAbstractTitleAlignmentFindingIsShort(unittest.TestCase):
     """ข้อชื่อเรื่องไม่ชิดซ้าย บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่อง (ก.ย. 2569)
 

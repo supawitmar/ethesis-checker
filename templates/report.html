@@ -952,6 +952,8 @@ var TR = [
   [/ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า/g, 'Must be spelled as in the approved data on every page'],
   [/ต้องตรงข้อมูลอนุมัติทุกตัวอักษร/g, 'Must match the approved data exactly'],
   [/เล่มมีภาคผนวก \(APPENDIX\) แต่ไม่ปรากฏในสารบัญ/g, 'The document has an appendix (APPENDIX) but it is not listed in the TOC'],
+  [/เล่มมีประวัติผู้วิจัย \(BIOGRAPHY\) แต่ไม่ปรากฏในสารบัญ/g, 'The document has a biography (BIOGRAPHY) but it is not listed in the TOC'],
+  [/เล่มมี(.+?) แต่ไม่ปรากฏในสารบัญ/g, 'The document has $1 but it is not listed in the TOC'],
   [/หัวข้อภาคผนวกต้องอยู่ในสารบัญ/g, 'The appendix heading must appear in the TOC'],
   [/เพิ่ม APPENDIX\/ภาคผนวก ในสารบัญ/g, 'Add APPENDIX to the TOC'],
   [/ไม่พบหัวข้อ (.+?) ในสารบัญ/g, 'Heading $1 not found in the TOC'],
