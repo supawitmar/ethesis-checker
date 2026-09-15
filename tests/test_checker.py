@@ -804,7 +804,8 @@ class AbstractTitleMustBeLeftAligned(unittest.TestCase):
              "x0": 75.5, "bold_ratio": 1.0},
             {"text": "OBSTETRIC COMPLICATIONS", "x0": 194.4, "bold_ratio": 1.0})
         self.assertEqual(len(found), 1)
-        self.assertIn("OBSTETRIC COMPLICATIONS", found[0])
+        # บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่องมา (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        self.assertEqual(found[0], "ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย")
         self.assertNotIn("ตัวหนา", found[0])      # ตัวหนามีกฎเหลืองของตัวเองแล้ว
 
     def test_running_head_is_not_mistaken_for_the_title(self):
@@ -2837,6 +2838,75 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
             en = i18n.tr_en(th, pairs)
             left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
             self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
+
+
+class TheProgrammeChairBoxReportsASpellingMistakeInTheBooksCase(unittest.TestCase):
+    """ช่องประธานหลักสูตร: บอกว่าสะกดผิด และค่าที่ต้องแก้เป็นใช้ตัวพิมพ์ตามเล่ม (ก.ย. 2569)
+
+    รายงานจริง (6736545 PHIE/M) เขียนว่า ต่างที่ "Disease" ต้องเป็น "DISEASES" / ต้องแก้เป็น
+    "PUBLIC HEALTH INFECTIOUS DISEASES AND EPIDEMIOLOGY" — เจ้าหน้าที่: "ชื่อหลักสูตรมันต้องเป็น
+    Sentence Case ซึ่งถูกแล้ว แต่สะกดผิดก็แจ้งผิดไป"
+    """
+
+    PRINTED = "Public Health Infectious Disease and Epidemiology"
+    WANT = "PUBLIC HEALTH INFECTIOUS DISEASES AND EPIDEMIOLOGY"
+
+    def _issue(self, bottom):
+        rep = Report()
+        checker_module._institution_mismatch(
+            rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT, bottom,
+            "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        return rep.zones["ORANGE"][0]
+
+    def test_it_says_misspelled_and_keeps_the_books_case(self):
+        issue = self._issue("Dean, Faculty of Graduate Studies Program Director "
+                            + self.PRINTED + " Programme")
+        self.assertIn("สะกดชื่อสาขาผิด", issue["found"])
+        self.assertIn('ต้องเป็น "Diseases"', issue["found"])
+        self.assertIn('"Public Health Infectious Diseases and Epidemiology"', issue["expected"])
+        self.assertNotIn(self.WANT, issue["found"] + issue["expected"])
+
+    def test_the_summary_line_asks_for_the_right_spelling_only(self):
+        rep = Report()
+        checker_module._institution_mismatch(
+            rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT,
+            self.PRINTED, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        summary = checker_module.plain_summary(checker_module.check_result(rep),
+                                               failed=["ORANGE:0"])
+        self.assertIn('ต้องแก้เป็น "Public Health Infectious Diseases and Epidemiology"', summary)
+
+    def test_an_all_caps_box_gets_an_all_caps_correction(self):
+        """ควบคุมเชิงลบ — ตามตัวพิมพ์ของเล่ม ไม่ใช่บังคับเป็น Sentence Case"""
+        self.assertEqual(checker_module.match_printed_case(self.WANT, self.PRINTED.upper()),
+                         self.WANT)
+
+    def test_thai_text_is_left_alone(self):
+        self.assertEqual(checker_module.match_printed_case("สาธารณสุขศาสตร์", "สาธารณสุขศาสตร"),
+                         "สาธารณสุขศาสตร์")
+
+    def test_short_acronyms_and_small_words(self):
+        self.assertEqual(checker_module.match_printed_case(
+            "HIV AND AIDS OF THE WORLD", "Hiv and Aids"), "Hiv and Aids of the World")
+        self.assertEqual(checker_module.match_printed_case(
+            "ICT FOR HEALTH", "Information Technology"), "ICT for Health")
+
+
+class TheAbstractTitleAlignmentFindingIsShort(unittest.TestCase):
+    """ข้อชื่อเรื่องไม่ชิดซ้าย บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่อง (ก.ย. 2569)
+
+    เจ้าหน้าที่: "แจ้งแค่ว่าหัวข้อไม่ได้ชิดซ้ายก็พอ ไม่ต้องเอาชื่อหัวข้อมาใส่"
+    """
+
+    def test_the_finding_has_no_title_lines(self):
+        source = inspect.getsource(checker_module)
+        self.assertIn('"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย",', source)
+        self.assertNotIn('f"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: {shown}"', source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en("ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย", pairs)
+        self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)
 
 
 class AnEmptyNameFieldIsStoppedAtTheForm(unittest.TestCase):
@@ -6363,6 +6433,8 @@ class EnglishReportHasNoThaiLeftOver(unittest.TestCase):
                 f'หน้าปกพิมพ์ "{found}" ไม่ตรงข้อความบังคับ (ข้อความประเภทงาน) {diff}',
                 f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{found}" {diff}',
                 f'ช่องประธานหลักสูตร (มุมล่างขวา) เขียนว่า "{found}" {diff}',
+                f'ช่องประธานหลักสูตร (มุมล่างขวา) สะกดชื่อสาขาผิด เขียนว่า "{found}" {diff}',
+                f'ช่องคณบดีคณะ (มุมล่างขวา) สะกดชื่อคณะผิด เขียนว่า "{found}" {diff}',
             ):
                 self.assertEqual(
                     self._thai_left(sentence), [],

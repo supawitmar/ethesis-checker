@@ -585,7 +585,7 @@ var CATMAP = {
 
 var TR = [
   // ---- การจัดวางชื่อเรื่องบนหน้าบทคัดย่อ (ประโยคเต็ม) ----
-  [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: (.+)/g, 'The thesis title on the abstract page is not left-aligned: $1'],
+  [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย/g, 'The thesis title on the abstract page is not left-aligned'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา/g, 'The thesis title on the abstract page must be left-aligned, not centred or right-aligned'],
   [/แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย/g, 'Change the alignment of the thesis title on the abstract page to left'],
   // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
@@ -695,6 +695,8 @@ var TR = [
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
   [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the subject; it reads'],
+  [/ช่องคณบดีคณะ \(มุมล่างขวา\) สะกดชื่อคณะผิด เขียนว่า/g, 'The faculty dean box (bottom right) misspells the faculty name; it reads'],
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) เขียนว่า/g, 'The programme chair box (bottom right) reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) เขียนว่า/g, 'The faculty dean box (bottom right) reads'],
   [/ไม่พบชื่อสาขา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The subject "$1" was not found in the programme chair box (bottom right)'],

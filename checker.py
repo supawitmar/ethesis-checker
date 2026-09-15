@@ -1258,14 +1258,57 @@ def signature_template_zone(page_text, degree):
     return text[:cut] if cut > 0 else text
 
 
+_SMALL_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the",
+                "to", "with"}
+
+
+def match_printed_case(want, printed):
+    """ค่าที่ถูกต้องในตัวพิมพ์แบบเดียวกับที่เล่มพิมพ์ — สำหรับบอกนักศึกษาว่าต้องแก้เป็นอะไร
+
+    ชื่อสาขาจาก eThesis เป็นตัวพิมพ์ใหญ่ทั้งหมด ("PUBLIC HEALTH INFECTIOUS DISEASES ...")
+    แต่ช่องประธานหลักสูตรบนหน้าลงนามพิมพ์แบบ Sentence Case ซึ่งถูกต้องแล้ว ของเดิมยกค่า
+    จาก eThesis มาตรง ๆ ข้อความจึงเหมือนสั่งให้แก้เป็นตัวใหญ่ทั้งหมด ทั้งที่ผิดแค่สะกด
+    (เจ้าหน้าที่แจ้ง ก.ย. 2569: "ชื่อหลักสูตรมันต้องเป็น Sentence Case ซึ่งถูกแล้ว แต่สะกดผิด
+    ก็แจ้งผิดไป")
+
+    คำที่เล่มพิมพ์ไว้แล้ว ใช้ตัวพิมพ์ตามเล่ม คำที่ผิดหรือขาด ขึ้นต้นตัวใหญ่ (คำเชื่อมเป็นตัวเล็ก
+    ตัวย่อสั้น ๆ อย่าง HIV คงไว้) ถ้าเล่มพิมพ์ตัวใหญ่ทั้งหมด ก็คืนตัวใหญ่ทั้งหมด
+    """
+    if not want or not printed or not re.search(r'[A-Za-z]', want):
+        return want
+    if printed.isupper():
+        return want.upper()
+    seen = {w.lower(): w for w in re.findall(r"[A-Za-z][A-Za-z'-]*", printed)}
+    first = [True]
+
+    def recase(match):
+        word, low = match.group(0), match.group(0).lower()
+        if low in seen:
+            out = seen[low]
+        elif not first[0] and low in _SMALL_WORDS:
+            out = low
+        elif len(word) <= 3 and word.isupper():
+            out = word
+        else:
+            out = word[:1].upper() + word[1:].lower()
+        first[0] = False
+        return out
+
+    return re.sub(r"[A-Za-z][A-Za-z'-]*", recase, want)
+
+
 def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
-    """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน"""
+    """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน
+
+    เทียบแบบไม่สนตัวพิมพ์เล็ก-ใหญ่ (ตัวพิมพ์ตาม template ถูกแล้ว) ข้อที่ขึ้นจึงเป็นเรื่อง
+    สะกดผิด ต้องบอกว่าสะกดผิด และค่าที่ต้องแก้เป็นต้องใช้ตัวพิมพ์ตามที่เล่มพิมพ์
+    """
     near = _closest_run(bottom_text, want)
     if near:
+        want = match_printed_case(want, near)
         diff = describe_diff(near, want)
-        found_msg = f'{box} เขียนว่า "{near}"'
-        if diff:
-            found_msg += f' {diff}'
+        found_msg = (f'{box} สะกด{label}ผิด เขียนว่า "{near}" {diff}' if diff
+                     else f'{box} เขียนว่า "{near}"')
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     rep.add("ORANGE", "front_matter", loc, found_msg,
@@ -4008,9 +4051,11 @@ def _report_abstract_title_format(rep, lines, loc):
     off = [l['text'] for l in title_lines if l['x0'] - margin > 6]
     if not off:
         return
-    shown = ", ".join(f'"{t}"' for t in dict.fromkeys(off))
+    # บอกแค่ว่าไม่ชิดซ้าย ไม่ยกบรรทัดชื่อเรื่องมาทั้งหมด (เจ้าหน้าที่สั่ง ก.ย. 2569 "แจ้งแค่ว่า
+    # หัวข้อไม่ได้ชิดซ้ายก็พอ ไม่ต้องเอาชื่อหัวข้อมาใส่") — ชื่อเรื่องยาวสามบรรทัดทำให้ข้อความ
+    # สรุปยาวโดยไม่ช่วยอะไร ตำแหน่ง (หน้าบทคัดย่อ) บอกอยู่แล้วว่าต้องไปแก้ที่ไหน
     rep.add("ORANGE", "front_matter", loc,
-            f"ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย: {shown}",
+            "ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย",
             "ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา",
             "แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย",
             "FORMAT.ABSTRACT_LAYOUT")
