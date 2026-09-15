@@ -4476,6 +4476,52 @@ def looks_like_biography(page_text):
     return sum(1 for field in _BIO_FIELDS if field in text) >= 2
 
 
+def expected_biography_heading(program_language, printed=""):
+    """หัวข้อหน้าประวัติผู้วิจัยที่ถูกต้อง: เล่มไทย "ประวัติผู้วิจัย" เล่มอังกฤษ "BIOGRAPHY"
+
+    ประกาศฯ ข้อ 4.1.3.3 หน้า 6 และ 4.2.3.3 หน้า 7 เรียกส่วนนี้ว่า "ประวัติผู้วิจัย (Biography)"
+    คู่มือใช้ "ประวัติผู้วิจัย" ในตัวอย่างเล่มไทยทุกหน้า และ "BIOGRAPHY" ในเล่มอังกฤษทุกหน้า
+    ไทย-อังกฤษทำเล่มเป็นภาษาอังกฤษ จึงใช้ BIOGRAPHY เหมือนนานาชาติ
+    ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ หรือไฟล์ eThesis เป็นของคนอื่น) ยึดอักษรของหัวข้อที่พิมพ์
+    """
+    if program_language == "thai":
+        return "ประวัติผู้วิจัย"
+    if program_language in ("international", "thai_english"):
+        return "BIOGRAPHY"
+    return "ประวัติผู้วิจัย" if re.search(r"[ก-๙]", printed or "") else "BIOGRAPHY"
+
+
+def _report_biography_heading(rep, printed, want, loc):
+    """หัวข้อหน้าประวัติผู้วิจัยต้องตรงตามประกาศฯ — เจ้าหน้าที่สั่ง (ก.ย. 2569)
+
+    "หน้าประวัติเล่มนี้เขียนหัวข้อแค่ "ประวัติ" ไม่ใช่ "ประวัติผู้วิจัย" หัวข้อประวัติผู้วิจัย
+    ก็ควรต้องถูก" (เล่มจริง 6538041 SHPP/D) — ระบบหาหน้านี้เจอได้จากหัวข้อ "ประวัติ" /
+    "ประวัติผู้เขียน" ด้วย (is_biography_heading) แต่หาเจอไม่ได้แปลว่าหัวข้อถูก
+    เทียบด้วย norm จึงไม่ฟ้องเรื่องตัวพิมพ์ ("Biography" กับ "BIOGRAPHY") หรือช่องว่าง
+    สีแดงแบบเดียวกับหัวข้อหน้าสารบัญที่ไม่ใช่ TABLE OF CONTENTS
+    """
+    if not printed or norm(printed) == norm(want):
+        return
+    rep.add("RED", "end_matter", loc,
+            f'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "{soft(printed)}"',
+            f'ต้องแก้เป็น "{want}"', "", "END.STRUCTURE")
+
+
+def _report_toc_biography_heading(rep, raw, want, loc):
+    """บรรทัดประวัติผู้วิจัยในสารบัญต้องใช้หัวข้อเดียวกับที่ประกาศฯ กำหนด
+
+    สารบัญนับ "ประวัติ <เลขหน้า>" เป็นรายการประวัติผู้วิจัยได้ (ไม่ฟ้องว่าไม่มี) แต่หัวข้อยังผิด
+    ถ้าไม่ฟ้องตรงนี้ นักศึกษาแก้หัวข้อในหน้าจริงแล้วสารบัญยังเขียนว่า "ประวัติ" อยู่
+    """
+    head = soft(_strip_toc_page_number(raw or ""))
+    if not head or norm(head) == norm(want):
+        return
+    rep.add("RED", "front_matter", loc,
+            f'สารบัญเขียนหัวข้อนี้ว่า "{head}"',
+            f'หัวข้อในสารบัญต้องเป็น "{want}"',
+            f'แก้หัวข้อในสารบัญเป็น "{want}"', "FRONT.TOC_CONTENT")
+
+
 def is_biography_heading(line, page_text):
     """บรรทัดหัวหน้านี้คือหัวข้อประวัติผู้วิจัยไหม — "ประวัติ" เฉย ๆ ต้องมีช่องข้อมูลประวัติในหน้าด้วย"""
     nl = norm(line)
@@ -5418,6 +5464,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("ตรวจส่วนท้ายเล่ม (อ้างอิง/ภาคผนวก/ประวัติ)")
     ref_head = None
     bio_page = None
+    bio_heading = ""
     last_major = None
     has_appendix_body = False
     appendix_page = None
@@ -5458,6 +5505,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 last_major = ("REF", i)
             if is_biography_heading(l, t):
                 bio_page = i
+                bio_heading = l
                 last_major = ("BIO", i)
             if any(nl.startswith(w) for w in N_APPENDIX):
                 has_appendix_body = True
@@ -5472,10 +5520,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     else:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
                 "ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ", "")
+    # ภาษาเล่มจากข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
+    bio_want = expected_biography_heading(
+        (approved or {}).get("program_language", "") if same_student else "", bio_heading)
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
     else:
+        _report_biography_heading(rep, bio_heading, bio_want,
+                                  f"ประวัติผู้วิจัย ({page_ref(bio_page)})")
         # ลำดับส่วนท้ายเล่มตามประกาศ: รายการอ้างอิง แล้วภาคผนวก (ถ้ามี) แล้วประวัติผู้วิจัย
         #
         # เดิมตรวจแค่ "ต้องไม่มีอะไรต่อจากประวัติผู้วิจัย" ซึ่งจับได้เฉพาะกรณีที่ประวัติ
@@ -6325,6 +6378,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     )
                     continue
                 entry = candidates[0]
+                if section_kind == "biography":
+                    _report_toc_biography_heading(
+                        rep, entry["raw"], bio_want,
+                        f"สารบัญ ({page_ref(entry['source_page_idx'])})")
                 if section_kind == "references":
                     # (1) สารบัญต้องเลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY (ไม่ใช่ทั้งคู่)
                     toc_terms = reference_terms(entry["raw"])

@@ -3098,6 +3098,94 @@ class ABiographyHeadedJustPrathawat(unittest.TestCase):
         self.assertEqual(checker_module._toc_section_kind("2.1 ประวัติ 16"), "")
 
 
+class TheBiographyHeadingMustBeTheOfficialOne(unittest.TestCase):
+    """หัวข้อหน้าประวัติผู้วิจัย: เล่มไทย "ประวัติผู้วิจัย" เล่มอังกฤษ "BIOGRAPHY" (ก.ย. 2569)
+
+    เจ้าหน้าที่: "หน้าประวัติเล่มนี้เขียนหัวข้อแค่ "ประวัติ" ไม่ใช่ "ประวัติผู้วิจัย" หัวข้อ
+    ประวัติผู้วิจัยก็ควรต้องถูก" — ประกาศฯ ข้อ 4.1.3.3 / 4.2.3.3 และคู่มือ
+    """
+
+    def _page(self, printed, want):
+        rep = Report()
+        checker_module._report_biography_heading(rep, printed, want, "ประวัติผู้วิจัย (หน้า 206)")
+        return rep.zones["RED"]
+
+    def test_the_heading_follows_the_book_language(self):
+        want = checker_module.expected_biography_heading
+        self.assertEqual(want("thai", "ประวัติ"), "ประวัติผู้วิจัย")
+        self.assertEqual(want("thai_english", "ประวัติผู้วิจัย"), "BIOGRAPHY")
+        self.assertEqual(want("international", "BIOGRAPHY"), "BIOGRAPHY")
+        # ไม่รู้ภาษาเล่ม — ยึดอักษรของหัวข้อที่พิมพ์
+        self.assertEqual(want("", "ประวัติ"), "ประวัติผู้วิจัย")
+        self.assertEqual(want("", "BIOGRAPHY"), "BIOGRAPHY")
+
+    def test_the_real_book_is_reported(self):
+        issues = self._page("ประวัติ", "ประวัติผู้วิจัย")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["found"], 'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติ"')
+        self.assertEqual(issues[0]["expected"], 'ต้องแก้เป็น "ประวัติผู้วิจัย"')
+        self.assertEqual(issues[0]["rule_id"], "END.STRUCTURE")
+
+    def test_other_wrong_headings_are_reported(self):
+        for printed, want in (("ประวัติผู้เขียน", "ประวัติผู้วิจัย"),
+                              ("BIOGRAPHY", "ประวัติผู้วิจัย"),
+                              ("ประวัติผู้วิจัย", "BIOGRAPHY")):
+            self.assertEqual(len(self._page(printed, want)), 1, (printed, want))
+
+    def test_the_official_heading_passes(self):
+        """ควบคุมเชิงลบ — หัวข้อถูกต้องต้องไม่ฟ้อง ตัวพิมพ์/ช่องว่างไม่นับ"""
+        for printed, want in (("ประวัติผู้วิจัย", "ประวัติผู้วิจัย"), ("BIOGRAPHY", "BIOGRAPHY"),
+                              ("Biography", "BIOGRAPHY"), ("ประวัติ ผู้วิจัย", "ประวัติผู้วิจัย"),
+                              ("", "ประวัติผู้วิจัย")):
+            self.assertEqual(self._page(printed, want), [], (printed, want))
+
+    def test_the_summary_asks_for_the_official_heading(self):
+        rep = Report()
+        checker_module._report_biography_heading(rep, "ประวัติ", "ประวัติผู้วิจัย",
+                                                 "ประวัติผู้วิจัย (หน้า 206)")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("ส่วนท้ายเล่ม\n", summary)
+        self.assertIn('ต้องแก้เป็น "ประวัติผู้วิจัย"', summary)
+
+    def test_the_toc_line_must_use_the_same_heading(self):
+        def toc(raw, want):
+            rep = Report()
+            checker_module._report_toc_biography_heading(rep, raw, want, "สารบัญ (หน้า ฌ)")
+            return [i["found"] for i in rep.zones["RED"]]
+        self.assertEqual(toc("ประวัติ 206", "ประวัติผู้วิจัย"), ['สารบัญเขียนหัวข้อนี้ว่า "ประวัติ"'])
+        self.assertEqual(toc("ประวัติผู้วิจัย ................ 206", "ประวัติผู้วิจัย"), [])
+        self.assertEqual(toc("BIOGRAPHY 97", "BIOGRAPHY"), [])
+
+    def test_both_checks_are_wired_into_the_run(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("_report_biography_heading(rep, bio_heading, bio_want,", source)
+        self.assertIn('if section_kind == "biography":\n                    _report_toc_biography_heading(',
+                      source)
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติ"', 'ต้องแก้เป็น "ประวัติผู้วิจัย"',
+                     "ประวัติผู้วิจัย (หน้า 206)", 'สารบัญเขียนหัวข้อนี้ว่า "ประวัติ"',
+                     'หัวข้อในสารบัญต้องเป็น "ประวัติผู้วิจัย"',
+                     'แก้หัวข้อในสารบัญเป็น "ประวัติผู้วิจัย"'):
+            en = i18n.tr_en(text, pairs)
+            outside_quotes = i18n.re.sub(r'"[^"]*"', "", en)
+            self.assertEqual(i18n.re.findall(r"[ก-๙]+", outside_quotes), [], en)
+
+    def test_the_books_own_heading_stays_as_printed(self):
+        """ค่าในเครื่องหมายคำพูดคือสิ่งที่เล่มพิมพ์ — รายงานอังกฤษต้องไม่แปลทับเป็น "Biography"
+
+        เล่มอังกฤษที่ตั้งหัวข้อเป็นไทย ถ้าแปลทับ รายงานจะเขียนว่าเล่มพิมพ์ "Biography" ซึ่งไม่จริง
+        """
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text, kept in (('หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"'),
+                           ('สารบัญเขียนหัวข้อนี้ว่า "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"'),
+                           ('หัวข้อในสารบัญต้องเป็น "ประวัติผู้วิจัย"', '"ประวัติผู้วิจัย"')):
+            self.assertIn(kept, i18n.tr_en(text, pairs), text)
+
+
 class ASectionMissingFromTheTocIsReportedOnce(unittest.TestCase):
     """ส่วนที่มีในเล่มแต่ไม่อยู่ในสารบัญ: ข้อเดียว ถ้อยคำแบบข้อภาคผนวก (ก.ย. 2569)
 

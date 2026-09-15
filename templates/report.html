@@ -628,6 +628,8 @@ var TR = [
   [/^หัวข้อสารบัญ$/g, 'The table-of-contents heading'],
   [/^กรรมการ$/g, 'committee members'],
   [/^กรรมการที่ปรึกษา$/g, 'advisory committee members'],
+  // ประโยคเต็มที่ขึ้นต้นด้วยคำอื่นแล้วตามด้วย ต้องเป็น "..." ต้องอยู่ก่อนกฎ ต้องเป็น ทั่วไปข้างล่าง
+  [/หัวข้อในสารบัญต้องเป็น ("[^"]*")/g, 'The heading in the table of contents must be $1'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
@@ -693,6 +695,10 @@ var TR = [
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า ("[^"]*") (.+)/g, 'This heading is misspelled in the table of contents: it reads $1, $2'],
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents: it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
+  // ---- หัวข้อหน้าประวัติผู้วิจัย (ประโยคเต็ม ต้องอยู่ก่อนกฎเศษคำ "ประวัติผู้วิจัย") ----
+  [/หัวข้อหน้าประวัติผู้วิจัยเขียนว่า ("[^"]*")/g, 'The biography page heading reads $1'],
+  [/สารบัญเขียนหัวข้อนี้ว่า ("[^"]*")/g, 'The table of contents lists this heading as $1'],
+  [/แก้หัวข้อในสารบัญเป็น ("[^"]*")/g, 'Change the heading in the table of contents to $1'],
   [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the subject; it reads'],
