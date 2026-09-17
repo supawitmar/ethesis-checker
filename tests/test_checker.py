@@ -3209,8 +3209,10 @@ class TheSignaturePageNumberFollowsTheBookLanguage(unittest.TestCase):
 
     def test_the_run_passes_the_book_language(self):
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn("rep, sig_pages, pages, page_ref,\n        label_style=_expected_front_label_style(",
+        self.assertIn("front_label_style = _expected_front_label_style(\n"
+                      '        (approved or {}).get("program_language", "") if same_student else "")',
                       source)
+        self.assertIn("rep, sig_pages, pages, page_ref, label_style=front_label_style)", source)
 
     def test_it_translates(self):
         import tools.check_i18n as i18n
@@ -3218,6 +3220,77 @@ class TheSignaturePageNumberFollowsTheBookLanguage(unittest.TestCase):
         for text in ('ต้องเป็นเลขหน้า "ก"', 'ต้องเป็นเลขหน้า "ii"'):
             en = i18n.tr_en(text, pairs)
             self.assertEqual(i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en)), [], en)
+
+
+class TheStaffWordingNamesThePagesOfThisBook(unittest.TestCase):
+    """ถ้อยคำปุ่มเจ้าหน้าที่บอกเลขหน้าลงนามตามภาษาเล่ม (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ปุ่ม "โครงสร้างหน้าลงนามผิด" พิมพ์ "ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)" ให้ทุกเล่ม
+    เจ้าหน้าที่: "เล่มที่เป็นหลักสูตรไทย เล่มอังกฤษ" ให้ขึ้นตามเล่ม — หลักการเดียวกับกฎเลขหน้า
+    หน้าลงนาม ชุดปิดท้ายของเล่มที่ผ่าน ("เฉพาะหน้า ก - ข หรือ i - ii") ก็บอกสองแบบเหมือนกัน
+    """
+
+    WRONG = "SIGNATURE_LAYOUT_WRONG"
+    PASS_NONE = "PASS_FEE_NONE"
+    PASS_YES = "PASS_FEE_YES"
+
+    def _report(self, style):
+        return checker_module.check_result(Report(), {"front_label_style": style})
+
+    def _line_after_heading(self, style):
+        lines = checker_module.plain_summary(self._report(style), staff=[self.WRONG]).split(NEWLINE)
+        return lines[lines.index("หน้าลงนาม") + 1]
+
+    def test_a_thai_book_gets_the_thai_letters(self):
+        self.assertEqual(self._line_after_heading("thai"), "1. ในหน้าลงนาม (หน้า ก - ข)")
+
+    def test_an_english_book_gets_the_roman_numerals(self):
+        self.assertEqual(self._line_after_heading("roman"), "1. ในหน้าลงนาม (หน้า i - ii)")
+
+    def test_an_unknown_language_keeps_both(self):
+        """ควบคุมเชิงลบ — ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ / ไฟล์ eThesis ของคนอื่น) คงถ้อยคำเดิม"""
+        self.assertEqual(self._line_after_heading(None), "1. ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)")
+
+    def test_the_closing_wording_of_a_passed_book_follows_too(self):
+        for style, want, gone in (("thai", "(เฉพาะหน้า ก - ข)", "i - ii"),
+                                  ("roman", "(เฉพาะหน้า i - ii)", "ก - ข")):
+            for choice in (self.PASS_NONE, self.PASS_YES):
+                text = checker_module.plain_summary(self._report(style), staff=[choice])
+                self.assertIn(want, text, (style, choice))
+                self.assertNotIn(gone, text, (style, choice))
+
+    def test_only_the_page_range_changes(self):
+        """คำอื่นในถ้อยคำเจ้าหน้าที่คงต้นฉบับทุกตัวอักษร"""
+        for check in checker_module.STAFF_CHECKS:
+            for choice in check["choices"]:
+                for style, pages in (("thai", "ก - ข"), ("roman", "i - ii")):
+                    got = checker_module.staff_text_for_book(choice["text"], style)
+                    both = re.sub(r"i - ii หรือ ก - ข|ก - ข หรือ i - ii", pages, choice["text"])
+                    self.assertEqual(got, both, (choice["id"], style))
+
+    def test_the_central_registry_is_not_changed(self):
+        import copy
+        before = copy.deepcopy(checker_module.STAFF_CHECKS)
+        checker_module.staff_checks_for_book("thai")
+        checker_module.plain_summary(self._report("thai"), staff=[self.WRONG, self.PASS_NONE])
+        self.assertEqual(checker_module.STAFF_CHECKS, before)
+
+    def test_the_page_gets_the_same_wording_as_the_summary(self):
+        """หน้ารายงานจับคู่คำแปลด้วยข้อความไทยจากทะเบียนที่ส่งไป ต้องเป็นชุดเดียวกับที่สรุปพิมพ์"""
+        report = self._report("thai")
+        sent = {choice["id"]: choice for check in report["staff_findings"]
+                for choice in check["choices"]}
+        self.assertTrue(sent[self.WRONG]["text"].startswith("ในหน้าลงนาม (หน้า ก - ข)"))
+        self.assertIn("(เฉพาะหน้า ก - ข)", sent[self.PASS_NONE]["text"])
+        # ฝั่งอังกฤษห้ามมีอักษรไทย จึงคงเดิม และจำนวนบรรทัดสองภาษายังเท่ากัน
+        english = checker_module.STAFF_CHOICE_BY_ID[self.WRONG][1]["text_en"]
+        self.assertEqual(sent[self.WRONG]["text_en"], english)
+        for field in ("text", "text_en"):
+            self.assertEqual(len([ln for ln in sent[self.WRONG][field].split(NEWLINE) if ln.strip()]), 4)
+
+    def test_the_run_stores_the_book_language(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertEqual(source.count('"front_label_style": front_label_style}'), 2)
 
 
 class ABiographyHeadedJustPrathawat(unittest.TestCase):

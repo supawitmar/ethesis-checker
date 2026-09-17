@@ -3194,6 +3194,36 @@ STAFF_CHOICE_BY_ID = {
     for check in STAFF_CHECKS for choice in check["choices"] if choice["text"]
 }
 
+# ถ้อยคำไทยของเจ้าหน้าที่บอกเลขหน้าลงนามไว้ทั้งสองแบบ ("i - ii หรือ ก - ข" และ
+# "ก - ข หรือ i - ii") เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้บอกเลขหน้าตามภาษาของเล่มแบบเดียวกับ
+# กฎเลขหน้าหน้าลงนาม — เล่มหลักสูตรไทยได้ "ก - ข" เล่มอังกฤษได้ "i - ii"
+# แก้เฉพาะท่อนเลขหน้า คำอื่นคงต้นฉบับทุกตัวอักษร ไม่รู้ภาษาเล่มคงถ้อยคำเดิมทั้งสองแบบ
+# ฝั่งอังกฤษเขียน "i - ii" แบบเดียวอยู่แล้ว และห้ามมีอักษรไทย จึงไม่แตะ
+_SIGNATURE_PAGES_BOTH = re.compile(r"i - ii หรือ ก - ข|ก - ข หรือ i - ii")
+_SIGNATURE_PAGES_BY_STYLE = {"thai": "ก - ข", "roman": "i - ii"}
+
+
+def staff_text_for_book(text, label_style):
+    """ถ้อยคำไทยของเจ้าหน้าที่ที่บอกเลขหน้าลงนามเฉพาะแบบของภาษาเล่ม"""
+    pages = _SIGNATURE_PAGES_BY_STYLE.get(label_style)
+    return _SIGNATURE_PAGES_BOTH.sub(pages, text) if pages and text else text
+
+
+def staff_checks_for_book(label_style):
+    """ทะเบียน STAFF_CHECKS ที่ถ้อยคำไทยบอกเลขหน้าตามภาษาเล่ม (สำเนา ไม่แก้ทะเบียนกลาง)
+
+    หน้ารายงานจับคู่คำแปลอังกฤษด้วยตัวข้อความไทยจากทะเบียนที่ได้รับ จึงต้องได้ถ้อยคำ
+    ชุดเดียวกับที่ข้อความสรุปพิมพ์ ไม่งั้นบรรทัดที่เปลี่ยนเลขหน้าแล้วจะหาคู่แปลไม่เจอ
+    """
+    return [dict(check, choices=[dict(choice, text=staff_text_for_book(choice["text"], label_style))
+                                 for choice in check["choices"]])
+            for check in STAFF_CHECKS]
+
+
+def report_label_style(report):
+    """ชนิดเลขหน้าส่วนนำของเล่มที่ run_check เก็บไว้ ("thai" / "roman" / None)"""
+    return ((report or {}).get("context") or {}).get("front_label_style")
+
 
 def check_applies(check, verdict):
     """หัวข้อนี้ใช้กับผลตรวจนี้หรือไม่
@@ -3237,12 +3267,13 @@ def staff_choices(keys, placement, verdict=None):
     return out
 
 
-def staff_issue(check, choice):
+def staff_issue(check, choice, label_style=None):
     """แปลงตัวเลือกที่เจ้าหน้าที่กด ให้อยู่ในรูปเดียวกับข้ออื่นในข้อความสรุป
 
     summary_text = ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า ให้พิมพ์ตรงตัว ไม่ผ่านการ
     ประกอบประโยคแบบ "ตำแหน่ง / ที่พบ / ต้องแก้เป็น" เพราะถ้อยคำชุดนี้บอกตำแหน่งไว้
     ในประโยคแรกอยู่แล้ว และเป็นคำสั่งที่เจ้าหน้าที่เขียนมาเอง
+    ยกเว้นท่อนเลขหน้าลงนามที่บอกตามภาษาเล่ม (ดู staff_text_for_book)
     """
     return {
         "part": "front_matter",
@@ -3251,7 +3282,7 @@ def staff_issue(check, choice):
         "expected": "",
         "fix": "",
         "system_note": False,
-        "summary_text": choice["text"],
+        "summary_text": staff_text_for_book(choice["text"], label_style),
         "staff_choice": choice["id"],
         **rule_reference(check["rule_id"]),
     }
@@ -3284,7 +3315,7 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
     # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
     for check, choice in staff_choices(staff, "section"):
-        items.append(staff_issue(check, choice))
+        items.append(staff_issue(check, choice, report_label_style(report)))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" in failed:
             items.append(issue)
@@ -3554,7 +3585,8 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     # ต้องอ่านค่า verdict ที่ปรับแล้วข้างบน ไม่ใช่ค่าดิบจาก report — เล่มที่ระบบว่าผ่าน
     # แต่เจ้าหน้าที่กดเพิ่มจุด ยังต้องได้ถ้อยคำ "แก้แล้วส่งกลับ" ไม่ใช่ "เสร็จสิ้นแล้ว"
     picked = staff_choices(staff, "closing", verdict)
-    closing = [choice["text"] for _check, choice in picked]
+    closing = [staff_text_for_book(choice["text"], report_label_style(report))
+               for _check, choice in picked]
     # ถ้อยคำชุด "ผ่าน" ขึ้นต้นด้วย "การส่ง E-thesis ... เสร็จสิ้นแล้ว" อยู่แล้ว
     finished = any(check.get("applies_to") == "pass" for check, _choice in picked)
     lines = [f"ผลการตรวจ: {verdict}"]
@@ -4899,6 +4931,10 @@ def check_result(rep, context=None, not_checked=NOT_CHECKED):
     {{ report.plain_summary | tojson }} — เล่มที่ภาษาไม่ตรงเปิดรายงานไม่ได้เลย
 
     ต้องเรียงข้อและจัดหมวดที่นี่ด้วย ไม่ใช่ให้ผู้เรียกทำเอง ด้วยเหตุผลเดียวกัน
+
+    context["front_label_style"] = ชนิดเลขหน้าส่วนนำตามภาษาเล่ม ใช้เลือกเลขหน้าลงนาม
+    ในถ้อยคำปุ่มเจ้าหน้าที่ (ดู staff_text_for_book) ทั้งทะเบียนที่ส่งให้หน้ารายงาน
+    และข้อความสรุปที่สร้างใหม่ทุกครั้งที่กด
     """
     for zone in rep.zones:
         for issue in rep.zones[zone]:
@@ -4919,7 +4955,7 @@ def check_result(rep, context=None, not_checked=NOT_CHECKED):
         "section_order": SUMMARY_SECTION_ORDER,
         # ส่งไปทั้งก้อนเพื่อให้หน้ารายงานสร้างปุ่มเอง และใช้ถ้อยคำอังกฤษชุดเดียวกัน
         # ตอนสลับภาษา — ไม่ใช่ให้หน้าเว็บเก็บถ้อยคำของตัวเองแล้วหลุดจากฝั่งเซิร์ฟเวอร์
-        "staff_findings": list(STAFF_CHECKS),
+        "staff_findings": staff_checks_for_book((context or {}).get("front_label_style")),
     }
     result["plain_summary"] = plain_summary(result)
     return result
@@ -5011,6 +5047,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     same_student, _checked, _found = (
         ethesis_matches_book(approved, pages)
         if approved and not skip_identity_check else (True, [], []))
+    # ชนิดเลขหน้าส่วนนำตามภาษาเล่ม (ก ข ค / i ii iii) — ใช้ทั้งกฎเลขหน้าและถ้อยคำปุ่มเจ้าหน้าที่
+    front_label_style = _expected_front_label_style(
+        (approved or {}).get("program_language", "") if same_student else "")
     # ---------- ภาษาของเล่มต้องตรงกับที่ได้รับอนุมัติ ----------
     # ต้องมาก่อน rep.add ตัวแรก เพราะเมื่อเล่มทำผิดภาษา กฎอื่นแทบทุกข้อจะฟ้องพร้อมกัน
     # หมด (ข้อความบังคับบนปก ประโยค template หน้าลงนาม ชนิดเลขหน้า ชื่อบททุกบท)
@@ -5046,7 +5085,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep,
                 {"document_type": doc_type, "option": None,
                  "chapters_mode": chapters_mode, "n_pages": n,
-                 "approved_data": bool(approved)},
+                 "approved_data": bool(approved), "front_label_style": front_label_style},
                 (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
         if wrong_parts:
             # สัญญาณขัดกันเอง (เช่น ปกอังกฤษ แต่หัวบทเป็น "บทที่ 1") ตัดสินภาษาทั้งเล่ม
@@ -5164,9 +5203,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
                 "ตรวจด้วยตา", "FRONT.APPROVAL")
     sig_label_reported = _report_signature_page_labels(
-        rep, sig_pages, pages, page_ref,
-        label_style=_expected_front_label_style(
-            (approved or {}).get("program_language", "") if same_student else ""))
+        rep, sig_pages, pages, page_ref, label_style=front_label_style)
 
     # ---------- สารบัญ ↔ บท ----------
     _p("ตรวจสารบัญและชื่อบท")
@@ -5613,8 +5650,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep, page_labels, page_ref,
         sig_pages[0] if sig_pages else 1,
         body_ch[0][2] if body_ch else None,
-        _expected_front_label_style(
-            (approved or {}).get("program_language", "") if same_student else ""),
+        front_label_style,
         page_texts=pages, reported=sig_label_reported)
 
     def span_of(start):
@@ -6507,4 +6543,4 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     return check_result(
         rep,
         {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
-         "n_pages": n, "approved_data": bool(approved)})
+         "n_pages": n, "approved_data": bool(approved), "front_label_style": front_label_style})
