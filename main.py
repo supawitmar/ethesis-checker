@@ -4,6 +4,7 @@
 E-Thesis Staff Checker — standalone web app (no Claude/LLM required).
 Run:  uvicorn main:app --host 0.0.0.0 --port 8000
 """
+import atexit
 import json
 import tempfile
 import threading
@@ -122,11 +123,27 @@ JOB_SLOTS = threading.BoundedSemaphore(MAX_ACTIVE_JOBS)
 # อายุไฟล์ผูกกับผลตรวจ — ผลตรวจถูกทิ้งเมื่อไหร่ ไฟล์ถูกลบตาม (JOB_TTL / MAX_KEPT_JOBS)
 # และกันพื้นที่ดิสก์ด้วยงบรวม MAX_KEPT_BOOKS_MB: เกินงบให้ลบไฟล์ของเล่มเก่าก่อน รายงาน
 # ยังเปิดได้ แค่ไม่มีปุ่มเปิดไฟล์ (ไม่ตั้งงบ เล่ม 25 MB x 40 เล่ม = 1 GB)
-# ไฟล์ของเราชื่อขึ้นต้น "book-" เท่านั้น ตอนเริ่ม process ลบของค้างจากรอบก่อนทิ้ง
-# (ผลตรวจอยู่ในหน่วยความจำ restart แล้วหายหมด ไฟล์ที่เหลือจึงไม่มีรายงานไหนชี้ถึงแล้ว)
-BOOKS_DIR = Path(tempfile.gettempdir()) / "ethesis-books"
+# แต่ละ process มีโฟลเดอร์ของตัวเอง (run-xxxx ใต้ ethesis-books) ไฟล์ชื่อขึ้นต้น "book-"
+# (bug test ก.ย. 2569: เดิมทุก process ใช้โฟลเดอร์เดียวกัน แล้วตอนเริ่มลบ book-*.pdf ทิ้งทั้งหมด
+# รันเทสต์ขณะเซิร์ฟเวอร์เปิดอยู่ ไฟล์ของเล่มที่เซิร์ฟเวอร์เก็บไว้หายไปด้วย วัดได้จริง 2 ใน 3 ไฟล์)
+# โฟลเดอร์ของ process ที่จบไปแล้วถูกลบเมื่อเงียบเกิน ORPHAN_BOOK_SECONDS — process ที่ยังทำงาน
+# แตะโฟลเดอร์ตัวเองทุกรอบของตัวกวาด (heartbeat) จึงไม่ถูกนับว่าจบ แม้จะไม่มีใครอัปโหลดเลย
+# (ผลตรวจอยู่ในหน่วยความจำ restart แล้วหายหมด ไฟล์ของรอบก่อนจึงไม่มีรายงานไหนชี้ถึงแล้ว)
+#
+# ต้องมีตัวกวาดตามเวลาด้วย ไม่ใช่รอให้มีคนตรวจเล่มถัดไป (bug test ก.ย. 2569): เดิม
+# _prune_jobs ถูกเรียกจาก /check ที่เดียว ถ้าไม่มีใครตรวจเล่มใหม่ ไฟล์วิทยานิพนธ์ที่ยังไม่
+# เผยแพร่ค้างบนเซิร์ฟเวอร์และเปิดผ่าน /book ได้เกิน 12 ชั่วโมงที่บอกไว้ (บน Render แบบ
+# ไม่ sleep ค้างได้เป็นวัน ๆ) — ตัวกวาดทำงานทุก BOOK_SWEEP_SECONDS และ /book กับ /result
+# ทิ้งของหมดอายุก่อนตอบเสมอ
+BOOKS_ROOT = Path(tempfile.gettempdir()) / "ethesis-books"
+BOOKS_ROOT.mkdir(parents=True, exist_ok=True)
+BOOKS_DIR = Path(tempfile.mkdtemp(prefix="run-", dir=BOOKS_ROOT))
 BOOK_PREFIX = "book-"
 MAX_KEPT_BOOKS_BYTES = _positive_env_int("MAX_KEPT_BOOKS_MB", 500) * 1024 * 1024
+BOOK_SWEEP_SECONDS = 10 * 60
+# ไฟล์ที่ไม่มีผลตรวจไหนชี้ถึง (เช่น Windows ลบไม่ได้เพราะกำลังเปิดอ่านอยู่) ลบเมื่อเก่ากว่านี้
+# ต้องนานพอไม่ให้ไปโดนไฟล์ที่กำลังอัปโหลด ซึ่งยังไม่ได้ผูกกับ job จนกว่าจะอ่านเสร็จ
+ORPHAN_BOOK_SECONDS = 60 * 60
 
 
 def _remove_book(path):
@@ -139,13 +156,77 @@ def _remove_book(path):
         pass
 
 
-def _clear_leftover_books():
-    BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    for leftover in BOOKS_DIR.glob(f"{BOOK_PREFIX}*.pdf"):
-        _remove_book(leftover)
+def _remove_book_folder(folder):
+    for path in folder.glob(f"{BOOK_PREFIX}*.pdf"):
+        _remove_book(path)
+    try:
+        folder.rmdir()
+    except OSError:
+        pass
+
+
+def _last_touched(folder):
+    times = [folder.stat().st_mtime]
+    for path in folder.iterdir():
+        try:
+            times.append(path.stat().st_mtime)
+        except OSError:
+            pass
+    return max(times)
+
+
+def _heartbeat():
+    """บอก process อื่นว่าโฟลเดอร์นี้ยังมีเจ้าของอยู่"""
+    try:
+        BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        os.utime(BOOKS_DIR)
+    except OSError:
+        pass
+
+
+def _clear_leftover_books(now=None):
+    """ลบโฟลเดอร์ของ process ที่จบไปแล้ว (เงียบเกิน ORPHAN_BOOK_SECONDS) — ของตัวเองและของ
+    process ที่ยังทำงานอยู่ห้ามแตะ รวมถึงไฟล์แบบเก่าที่วางตรงใต้ BOOKS_ROOT (ก่อนแยกโฟลเดอร์)"""
+    now = time.time() if now is None else now
+    for folder in BOOKS_ROOT.glob("run-*"):
+        if folder == BOOKS_DIR or not folder.is_dir():
+            continue
+        try:
+            if now - _last_touched(folder) <= ORPHAN_BOOK_SECONDS:
+                continue
+        except OSError:
+            continue
+        _remove_book_folder(folder)
+    for path in BOOKS_ROOT.glob(f"{BOOK_PREFIX}*.pdf"):
+        _remove_book(path)
+
+
+def _sweep_orphan_books(referenced, now):
+    """ลบไฟล์ของเราที่ไม่มีผลตรวจไหนชี้ถึงแล้ว และเก่ากว่า ORPHAN_BOOK_SECONDS"""
+    for path in BOOKS_DIR.glob(f"{BOOK_PREFIX}*.pdf"):
+        try:
+            old = now - path.stat().st_mtime > ORPHAN_BOOK_SECONDS
+        except OSError:
+            continue
+        if old and str(path) not in referenced:
+            _remove_book(path)
+
+
+def _sweep_books_forever():
+    while True:
+        time.sleep(BOOK_SWEEP_SECONDS)
+        try:
+            _heartbeat()
+            _prune_jobs()
+            _clear_leftover_books()
+        except Exception:
+            traceback.print_exc()
 
 
 _clear_leftover_books()
+threading.Thread(target=_sweep_books_forever, name="book-sweeper", daemon=True).start()
+# ปิด process ตามปกติ (Render ส่ง SIGTERM ตอน deploy ใหม่) ลบไฟล์ของตัวเองทิ้งเลย ไม่ต้องรอ
+atexit.register(_remove_book_folder, BOOKS_DIR)
 
 
 def _is_authenticated(request):
@@ -252,8 +333,10 @@ def _prune_jobs():
             if used > MAX_KEPT_BOOKS_BYTES:
                 remove.append(path)
                 job["pdf_path"] = None
+        referenced = {str(Path(j["pdf_path"])) for j in JOBS.values() if j.get("pdf_path")}
     for path in remove:
         _remove_book(path)
+    _sweep_orphan_books(referenced, now)
 
 
 def _run_job(job_id, tmp_path, approved, chapters_mode):
@@ -522,6 +605,7 @@ async def rebuild_summary(job_id: str, request: Request):
 
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result(request: Request, job_id: str):
+    _prune_jobs()   # รายงานหมดอายุแล้วต้องไม่เปิดได้ แม้ตัวกวาดยังไม่ถึงรอบ
     job = _get_job(job_id)
     if not job:
         return HTMLResponse("<h3>ไม่พบผลตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
@@ -553,6 +637,7 @@ def book_file(job_id: str):
     อยู่หลังด่านล็อกอินเหมือนทุกหน้า (require_login) และหาไฟล์จาก job เท่านั้น ไม่รับ
     ชื่อไฟล์จากคำขอ จึงเปิดไฟล์อื่นบนเครื่องไม่ได้ ห้ามแคช เพราะเป็นงานที่ยังไม่เผยแพร่
     """
+    _prune_jobs()   # ไฟล์หมดอายุแล้วต้องไม่เปิดได้ แม้ตัวกวาดยังไม่ถึงรอบ
     job = _get_job(job_id)
     path = _book_path(job)
     if path is None:

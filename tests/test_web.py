@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 import unittest
 from unittest import mock
@@ -857,10 +858,104 @@ class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
         self.assertEqual(path.parent, main.BOOKS_DIR)
         self.assertTrue(path.name.startswith(main.BOOK_PREFIX))
 
-    def test_leftovers_from_the_last_run_are_cleared_but_nothing_else(self):
+    def test_an_expired_file_cannot_be_opened_without_a_new_check(self):
+        """bug test ก.ย. 2569: เดิมทิ้งของหมดอายุเฉพาะตอนมีคนกดตรวจเล่มใหม่
+
+        ถ้าไม่มีใครตรวจต่อ ไฟล์วิทยานิพนธ์ยังเปิดผ่าน /book ได้เกิน 12 ชั่วโมงที่บอกไว้
+        """
+        path = self._put("stale", main.JOB_TTL + 60)
+        self.assertEqual(self.client.get("/book/stale").status_code, 404)
+        self.assertFalse(path.exists())
+
+    def test_an_expired_report_cannot_be_opened_either(self):
+        self._put("stale", main.JOB_TTL + 60)
+        self.assertEqual(self.client.get("/result/stale").status_code, 404)
+
+    def test_a_sweeper_runs_on_its_own(self):
+        """ไม่มีใครเปิดหน้าไหนเลย ไฟล์ก็ต้องถูกลบตามเวลา"""
+        names = {thread.name for thread in main.threading.enumerate()}
+        self.assertIn("book-sweeper", names)
+        self.assertLessEqual(main.BOOK_SWEEP_SECONDS, 3600)
+
+    def test_an_orphan_file_is_swept_but_an_upload_in_progress_is_not(self):
         main.BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-        ours = main.BOOKS_DIR / f"{main.BOOK_PREFIX}leftover.pdf"
-        other = main.BOOKS_DIR / "not-ours.pdf"
+        orphan = main.BOOKS_DIR / f"{main.BOOK_PREFIX}orphan.pdf"
+        uploading = main.BOOKS_DIR / f"{main.BOOK_PREFIX}uploading.pdf"
+        for path in (orphan, uploading):
+            path.write_bytes(b"%PDF-1.4\n")
+        old = time.time() - main.ORPHAN_BOOK_SECONDS - 60
+        os.utime(orphan, (old, old))
+        try:
+            main._prune_jobs()
+            self.assertFalse(orphan.exists())
+            self.assertTrue(uploading.exists())
+        finally:
+            main._remove_book(uploading)
+
+    def _run_folder(self, name, age_seconds):
+        folder = main.BOOKS_ROOT / name
+        folder.mkdir(parents=True, exist_ok=True)
+        book = folder / f"{main.BOOK_PREFIX}x.pdf"
+        book.write_bytes(b"%PDF-1.4\n")
+        stamp = time.time() - age_seconds
+        os.utime(book, (stamp, stamp))
+        os.utime(folder, (stamp, stamp))
+        return folder, book
+
+    def test_leftovers_from_a_finished_run_are_cleared(self):
+        folder, book = self._run_folder("run-finished-test", main.ORPHAN_BOOK_SECONDS + 60)
+        main._clear_leftover_books()
+        self.assertFalse(book.exists())
+        self.assertFalse(folder.exists())
+
+    def test_another_running_process_keeps_its_books(self):
+        """bug test ก.ย. 2569: รันเทสต์ขณะเซิร์ฟเวอร์เปิดอยู่ ไฟล์ของเซิร์ฟเวอร์หาย 2 ใน 3 ไฟล์
+
+        เดิมทุก process ใช้โฟลเดอร์เดียวกัน และตอนเริ่มลบ book-*.pdf ทิ้งทั้งหมด
+        """
+        folder, book = self._run_folder("run-alive-test", 60)
+        try:
+            main._clear_leftover_books()
+            self.assertTrue(book.exists())
+        finally:
+            main._remove_book_folder(folder)
+
+    def test_an_idle_but_running_process_is_not_mistaken_for_a_finished_one(self):
+        """ไม่มีใครอัปโหลดเกินชั่วโมง ไม่ได้แปลว่า process จบแล้ว — heartbeat แตะโฟลเดอร์ทุกรอบ"""
+        stamp = time.time() - main.ORPHAN_BOOK_SECONDS - 60
+        os.utime(main.BOOKS_DIR, (stamp, stamp))
+        main._heartbeat()
+        self.assertLess(time.time() - main.BOOKS_DIR.stat().st_mtime, 60)
+        self.assertLess(main.BOOK_SWEEP_SECONDS, main.ORPHAN_BOOK_SECONDS)
+
+    def test_our_own_folder_is_never_cleared_as_a_leftover(self):
+        path = self._put("mine", 10)
+        stamp = time.time() - main.ORPHAN_BOOK_SECONDS - 60
+        os.utime(main.BOOKS_DIR, (stamp, stamp))
+        os.utime(path, (stamp, stamp))
+        main._clear_leftover_books()
+        self.assertTrue(path.exists())
+        main._heartbeat()
+
+    def test_each_process_gets_its_own_folder(self):
+        self.assertEqual(main.BOOKS_DIR.parent, main.BOOKS_ROOT)
+        self.assertTrue(main.BOOKS_DIR.name.startswith("run-"))
+
+    def test_a_process_that_exits_cleans_up_its_own_books(self):
+        """Render ส่ง SIGTERM ตอน deploy ใหม่ ปิดตามปกติแล้วไฟล์ต้องไม่ค้างรอตัวกวาด"""
+        script = ("import main; p = main.BOOKS_DIR / (main.BOOK_PREFIX + 'x.pdf'); "
+                  "p.write_bytes(b'%PDF-1.4'); print(main.BOOKS_DIR)")
+        run = subprocess.run([sys.executable, "-c", script], cwd=Path(main.__file__).parent,
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(run.returncode, 0, run.stderr[-500:])
+        folder = Path(run.stdout.strip().splitlines()[-1])
+        self.assertEqual(folder.parent, main.BOOKS_ROOT)
+        self.assertFalse(folder.exists())
+
+    def test_files_from_before_the_split_are_cleared_but_nothing_else(self):
+        main.BOOKS_ROOT.mkdir(parents=True, exist_ok=True)
+        ours = main.BOOKS_ROOT / f"{main.BOOK_PREFIX}leftover.pdf"
+        other = main.BOOKS_ROOT / "not-ours.pdf"
         ours.write_bytes(b"%PDF-1.4\n")
         other.write_bytes(b"%PDF-1.4\n")
         try:
