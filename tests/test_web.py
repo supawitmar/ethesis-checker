@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 os.environ.setdefault("MAX_UPLOAD_MB", "1")
@@ -727,3 +728,144 @@ console.log(JSON.stringify(out));
         for program in ("thai", "thai_english"):
             self.assertIn("student_name_th",
                           FRONT_MATTER_RULES["required_form_fields"][program], program)
+
+
+class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
+    """เปิดไฟล์รูปเล่มที่ตรวจได้จากหน้ารายงาน (เจ้าหน้าที่ขอ ก.ย. 2569)
+
+    "ในหน้าสรุปผล สามารถเพิ่มให้ดูไฟล์รูปเล่มที่แนบได้ไหม" — ของเดิมลบไฟล์ทันทีที่ตรวจเสร็จ
+    ตอนนี้ไฟล์อยู่เท่าอายุผลตรวจ อยู่หลังด่านล็อกอิน และลบตามเมื่อผลตรวจถูกทิ้งหรือเกินงบดิสก์
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        response = cls.client.post(
+            "/login", data={"password": "test-password", "next": "/"},
+            follow_redirects=False)
+        if response.status_code != 303:
+            raise RuntimeError("Test login failed")
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            paths = [job.get("pdf_path") for job in main.JOBS.values()]
+            main.JOBS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def _check(self, content, name="readable.pdf"):
+        response = self.client.post(
+            "/check", data=FORM, files={"pdf": (name, content, "application/pdf")})
+        self.assertEqual(response.status_code, 200, response.text)
+        job_id = response.json()["job_id"]
+        for _ in range(500):
+            job = main._get_job(job_id)
+            if job and job["done"]:
+                return job_id
+            time.sleep(0.01)
+        self.fail("check did not finish")
+
+    def _put(self, key, age_seconds, size=100):
+        main.BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        path = main.BOOKS_DIR / f"{main.BOOK_PREFIX}{key}.pdf"
+        path.write_bytes(b"%PDF-1.4\n" + b"x" * (size - 9))
+        with main.JOBS_LOCK:
+            main.JOBS[key] = {"stage": "เสร็จ", "done": True, "error": None,
+                              "report": {}, "pdf_name": f"{key}.pdf", "approved": {},
+                              "pdf_path": str(path), "ts": time.time() - age_seconds}
+        return path
+
+    def test_the_report_opens_the_same_file_that_was_checked(self):
+        content = make_pdf()
+        job_id = self._check(content)
+        page = self.client.get(f"/result/{job_id}")
+        self.assertIn(f'href="/book/{job_id}" target="_blank" rel="noopener"', page.text)
+        response = self.client.get(f"/book/{job_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/pdf")
+        self.assertEqual(response.content, content)
+        # inline = เปิดในแท็บ ไม่ใช่ดาวน์โหลด และห้ามแคชงานที่ยังไม่เผยแพร่
+        self.assertTrue(response.headers["content-disposition"].startswith("inline"))
+        self.assertIn("no-store", response.headers["cache-control"])
+
+    def test_the_button_has_both_languages(self):
+        job_id = self._check(make_pdf())
+        page = self.client.get(f"/result/{job_id}").text
+        self.assertIn('data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file"', page)
+
+    def test_a_thai_file_name_is_kept(self):
+        job_id = self._check(make_pdf(), name="เล่มที่ 4.pdf")
+        disposition = self.client.get(f"/book/{job_id}").headers["content-disposition"]
+        self.assertIn("filename*=utf-8''", disposition)
+        self.assertIn("%E0%B9%80%E0%B8%A5%E0%B9%88%E0%B8%A1", disposition)   # "เล่ม"
+
+    def test_the_file_needs_a_login(self):
+        job_id = self._check(make_pdf())
+        stranger = TestClient(main.app)
+        response = stranger.get(f"/book/{job_id}", follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertTrue(response.headers["location"].startswith("/login"))
+
+    def test_an_unknown_job_says_the_file_is_gone(self):
+        response = self.client.get("/book/does-not-exist")
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("ไม่พบไฟล์รูปเล่มแล้ว", response.text)
+
+    def test_no_button_when_the_file_is_gone(self):
+        path = self._put("gone", 10)
+        path.unlink()
+        with main.JOBS_LOCK:
+            main.JOBS["gone"]["report"] = {
+                "verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []},
+                "info": [], "human_checklist": [], "not_checked": []}
+        page = self.client.get("/result/gone")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn("/book/gone", page.text)
+
+    def test_the_file_goes_when_the_result_goes(self):
+        path = self._put("old", main.JOB_TTL + 60)
+        main._prune_jobs()
+        self.assertNotIn("old", main.JOBS)
+        self.assertFalse(path.exists())
+
+    def test_an_hour_old_file_is_kept(self):
+        path = self._put("recent", 3600)
+        main._prune_jobs()
+        self.assertTrue(path.exists())
+
+    def test_the_disk_budget_drops_the_oldest_file_but_keeps_the_report(self):
+        paths = {key: self._put(key, age) for key, age in (("a", 300), ("b", 200), ("c", 100))}
+        with mock.patch.object(main, "MAX_KEPT_BOOKS_BYTES", 250):
+            main._prune_jobs()
+        self.assertTrue(paths["c"].exists())
+        self.assertTrue(paths["b"].exists())
+        self.assertFalse(paths["a"].exists())
+        self.assertIn("a", main.JOBS)
+        self.assertIsNone(main.JOBS["a"]["pdf_path"])
+
+    def test_a_failed_check_does_not_keep_the_file(self):
+        with mock.patch.object(main, "run_check", side_effect=RuntimeError("boom")):
+            job_id = self._check(make_pdf())
+        job = main._get_job(job_id)
+        self.assertTrue(job["error"])
+        self.assertIsNone(job["pdf_path"])
+        self.assertEqual(self.client.get(f"/book/{job_id}").status_code, 404)
+
+    def test_the_upload_lands_in_the_books_folder(self):
+        job_id = self._check(make_pdf())
+        path = Path(main._get_job(job_id)["pdf_path"])
+        self.assertEqual(path.parent, main.BOOKS_DIR)
+        self.assertTrue(path.name.startswith(main.BOOK_PREFIX))
+
+    def test_leftovers_from_the_last_run_are_cleared_but_nothing_else(self):
+        main.BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        ours = main.BOOKS_DIR / f"{main.BOOK_PREFIX}leftover.pdf"
+        other = main.BOOKS_DIR / "not-ours.pdf"
+        ours.write_bytes(b"%PDF-1.4\n")
+        other.write_bytes(b"%PDF-1.4\n")
+        try:
+            main._clear_leftover_books()
+            self.assertFalse(ours.exists())
+            self.assertTrue(other.exists())
+        finally:
+            other.unlink(missing_ok=True)
