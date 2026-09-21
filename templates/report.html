@@ -46,6 +46,11 @@
   .stu .lb { opacity:.68; font-size:.74rem; letter-spacing:.01em; }
   .stu .vl { font-weight:600; }
   .stu .pages { font-weight:400; opacity:.75; margin-left:6px; }
+  .stu .book-open { display:inline-block; margin-left:10px; padding:3px 12px; border-radius:99px;
+          font-size:.8rem; font-weight:600; color:#fff; text-decoration:none; white-space:nowrap;
+          background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35); transition:background .15s; }
+  .stu .book-open:hover { background:rgba(255,255,255,.26); }
+  .stu .book-open:focus-visible { outline:none; box-shadow:var(--ring); }
 
   .verdict-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
           background:var(--surface); padding:18px 34px; border-bottom:1px solid var(--line); }
@@ -222,7 +227,7 @@
     .wrap { box-shadow:none; }
     .body { box-shadow:none; }
     .head { background:#16365a; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .actions, .cmt-btn, .note-editor, .langbtn, .logout-form { display:none !important; }
+    .actions, .cmt-btn, .note-editor, .langbtn, .logout-form, .book-open { display:none !important; }
     .vf-arrow { display:none; }
     .vf-topic { cursor:default; }
     .copy-text { display:none; }
@@ -330,7 +335,11 @@
       <div style="grid-column:1/-1;"><div class="lb" data-th="ไฟล์ที่ตรวจ" data-en="File checked">ไฟล์ที่ตรวจ</div>
         <div class="vl">{{ pdf_name or '-' }}{% if report.context and report.context.n_pages %}
           <span class="pages" data-th="({{ report.context.n_pages }} หน้า)"
-                data-en="({{ report.context.n_pages }} pages)">({{ report.context.n_pages }} หน้า)</span>{% endif %}</div></div>
+                data-en="({{ report.context.n_pages }} pages)">({{ report.context.n_pages }} หน้า)</span>{% endif %}
+          {# เปิดไฟล์ที่ตรวจในแท็บใหม่ (เจ้าหน้าที่ขอ ก.ย. 2569) ไว้เทียบกับรายการในรายงาน
+             ไม่แสดงเมื่อไฟล์ถูกลบไปแล้ว (หมดอายุ / เกินงบดิสก์) — ดู /book ใน main.py #}
+          {% if has_book %}<a class="book-open" href="/book/{{ job_id }}" target="_blank" rel="noopener"
+             data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file">📄 เปิดดูไฟล์รูปเล่ม</a>{% endif %}</div></div>
     </div>
   </div>
 

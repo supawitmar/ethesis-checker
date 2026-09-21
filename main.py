@@ -4,6 +4,7 @@
 E-Thesis Staff Checker — standalone web app (no Claude/LLM required).
 Run:  uvicorn main:app --host 0.0.0.0 --port 8000
 """
+import atexit
 import json
 import tempfile
 import threading
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pdfplumber
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -116,6 +117,117 @@ MAX_ACTIVE_JOBS = _positive_env_int("MAX_ACTIVE_JOBS", 2)
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 JOB_SLOTS = threading.BoundedSemaphore(MAX_ACTIVE_JOBS)
 
+# ไฟล์รูปเล่มที่ตรวจแล้ว เก็บไว้ให้เปิดดูจากหน้ารายงาน (เจ้าหน้าที่ขอ ก.ย. 2569
+# "ในหน้าสรุปผล สามารถเพิ่มให้ดูไฟล์รูปเล่มที่แนบได้ไหม") ของเดิมลบทิ้งทันทีที่ตรวจเสร็จ
+#
+# อายุไฟล์ผูกกับผลตรวจ — ผลตรวจถูกทิ้งเมื่อไหร่ ไฟล์ถูกลบตาม (JOB_TTL / MAX_KEPT_JOBS)
+# และกันพื้นที่ดิสก์ด้วยงบรวม MAX_KEPT_BOOKS_MB: เกินงบให้ลบไฟล์ของเล่มเก่าก่อน รายงาน
+# ยังเปิดได้ แค่ไม่มีปุ่มเปิดไฟล์ (ไม่ตั้งงบ เล่ม 25 MB x 40 เล่ม = 1 GB)
+# แต่ละ process มีโฟลเดอร์ของตัวเอง (run-xxxx ใต้ ethesis-books) ไฟล์ชื่อขึ้นต้น "book-"
+# (bug test ก.ย. 2569: เดิมทุก process ใช้โฟลเดอร์เดียวกัน แล้วตอนเริ่มลบ book-*.pdf ทิ้งทั้งหมด
+# รันเทสต์ขณะเซิร์ฟเวอร์เปิดอยู่ ไฟล์ของเล่มที่เซิร์ฟเวอร์เก็บไว้หายไปด้วย วัดได้จริง 2 ใน 3 ไฟล์)
+# โฟลเดอร์ของ process ที่จบไปแล้วถูกลบเมื่อเงียบเกิน ORPHAN_BOOK_SECONDS — process ที่ยังทำงาน
+# แตะโฟลเดอร์ตัวเองทุกรอบของตัวกวาด (heartbeat) จึงไม่ถูกนับว่าจบ แม้จะไม่มีใครอัปโหลดเลย
+# (ผลตรวจอยู่ในหน่วยความจำ restart แล้วหายหมด ไฟล์ของรอบก่อนจึงไม่มีรายงานไหนชี้ถึงแล้ว)
+#
+# ต้องมีตัวกวาดตามเวลาด้วย ไม่ใช่รอให้มีคนตรวจเล่มถัดไป (bug test ก.ย. 2569): เดิม
+# _prune_jobs ถูกเรียกจาก /check ที่เดียว ถ้าไม่มีใครตรวจเล่มใหม่ ไฟล์วิทยานิพนธ์ที่ยังไม่
+# เผยแพร่ค้างบนเซิร์ฟเวอร์และเปิดผ่าน /book ได้เกิน 12 ชั่วโมงที่บอกไว้ (บน Render แบบ
+# ไม่ sleep ค้างได้เป็นวัน ๆ) — ตัวกวาดทำงานทุก BOOK_SWEEP_SECONDS และ /book กับ /result
+# ทิ้งของหมดอายุก่อนตอบเสมอ
+BOOKS_ROOT = Path(tempfile.gettempdir()) / "ethesis-books"
+BOOKS_ROOT.mkdir(parents=True, exist_ok=True)
+BOOKS_DIR = Path(tempfile.mkdtemp(prefix="run-", dir=BOOKS_ROOT))
+BOOK_PREFIX = "book-"
+MAX_KEPT_BOOKS_BYTES = _positive_env_int("MAX_KEPT_BOOKS_MB", 500) * 1024 * 1024
+BOOK_SWEEP_SECONDS = 10 * 60
+# ไฟล์ที่ไม่มีผลตรวจไหนชี้ถึง (เช่น Windows ลบไม่ได้เพราะกำลังเปิดอ่านอยู่) ลบเมื่อเก่ากว่านี้
+# ต้องนานพอไม่ให้ไปโดนไฟล์ที่กำลังอัปโหลด ซึ่งยังไม่ได้ผูกกับ job จนกว่าจะอ่านเสร็จ
+ORPHAN_BOOK_SECONDS = 60 * 60
+
+
+def _remove_book(path):
+    """ลบไฟล์รูปเล่ม — ไฟล์ที่กำลังถูกเปิดอ่านอยู่ (Windows) ลบไม่ได้ ปล่อยไว้ก่อน"""
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _remove_book_folder(folder):
+    for path in folder.glob(f"{BOOK_PREFIX}*.pdf"):
+        _remove_book(path)
+    try:
+        folder.rmdir()
+    except OSError:
+        pass
+
+
+def _last_touched(folder):
+    times = [folder.stat().st_mtime]
+    for path in folder.iterdir():
+        try:
+            times.append(path.stat().st_mtime)
+        except OSError:
+            pass
+    return max(times)
+
+
+def _heartbeat():
+    """บอก process อื่นว่าโฟลเดอร์นี้ยังมีเจ้าของอยู่"""
+    try:
+        BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        os.utime(BOOKS_DIR)
+    except OSError:
+        pass
+
+
+def _clear_leftover_books(now=None):
+    """ลบโฟลเดอร์ของ process ที่จบไปแล้ว (เงียบเกิน ORPHAN_BOOK_SECONDS) — ของตัวเองและของ
+    process ที่ยังทำงานอยู่ห้ามแตะ รวมถึงไฟล์แบบเก่าที่วางตรงใต้ BOOKS_ROOT (ก่อนแยกโฟลเดอร์)"""
+    now = time.time() if now is None else now
+    for folder in BOOKS_ROOT.glob("run-*"):
+        if folder == BOOKS_DIR or not folder.is_dir():
+            continue
+        try:
+            if now - _last_touched(folder) <= ORPHAN_BOOK_SECONDS:
+                continue
+        except OSError:
+            continue
+        _remove_book_folder(folder)
+    for path in BOOKS_ROOT.glob(f"{BOOK_PREFIX}*.pdf"):
+        _remove_book(path)
+
+
+def _sweep_orphan_books(referenced, now):
+    """ลบไฟล์ของเราที่ไม่มีผลตรวจไหนชี้ถึงแล้ว และเก่ากว่า ORPHAN_BOOK_SECONDS"""
+    for path in BOOKS_DIR.glob(f"{BOOK_PREFIX}*.pdf"):
+        try:
+            old = now - path.stat().st_mtime > ORPHAN_BOOK_SECONDS
+        except OSError:
+            continue
+        if old and str(path) not in referenced:
+            _remove_book(path)
+
+
+def _sweep_books_forever():
+    while True:
+        time.sleep(BOOK_SWEEP_SECONDS)
+        try:
+            _heartbeat()
+            _prune_jobs()
+            _clear_leftover_books()
+        except Exception:
+            traceback.print_exc()
+
+
+_clear_leftover_books()
+threading.Thread(target=_sweep_books_forever, name="book-sweeper", daemon=True).start()
+# ปิด process ตามปกติ (Render ส่ง SIGTERM ตอน deploy ใหม่) ลบไฟล์ของตัวเองทิ้งเลย ไม่ต้องรอ
+atexit.register(_remove_book_folder, BOOKS_DIR)
+
 
 def _is_authenticated(request):
     return session_token_valid(request.cookies.get(SESSION_COOKIE, ""))
@@ -197,6 +309,7 @@ def _prune_jobs():
     ทิ้งเฉพาะงานที่ตรวจเสร็จแล้ว งานที่ยังตรวจอยู่ห้ามแตะ
     """
     now = time.time()
+    remove = []
     with JOBS_LOCK:
         done = [(v["ts"], k) for k, v in JOBS.items() if v.get("done")]
         drop = {k for ts, k in done if now - ts > JOB_TTL}
@@ -204,7 +317,26 @@ def _prune_jobs():
         keep = sorted((pair for pair in done if pair[1] not in drop), reverse=True)
         drop.update(k for _ts, k in keep[MAX_KEPT_JOBS:])
         for k in drop:
-            JOBS.pop(k, None)
+            remove.append(JOBS.pop(k, {}).get("pdf_path"))
+        # ไฟล์รูปเล่มรวมกันเกินงบดิสก์ ลบไฟล์ของเล่มเก่าก่อน ผลตรวจยังอยู่
+        used = 0
+        for _ts, k in keep[:MAX_KEPT_JOBS]:
+            job = JOBS[k]
+            path = job.get("pdf_path")
+            if not path:
+                continue
+            try:
+                used += Path(path).stat().st_size
+            except OSError:
+                job["pdf_path"] = None
+                continue
+            if used > MAX_KEPT_BOOKS_BYTES:
+                remove.append(path)
+                job["pdf_path"] = None
+        referenced = {str(Path(j["pdf_path"])) for j in JOBS.values() if j.get("pdf_path")}
+    for path in remove:
+        _remove_book(path)
+    _sweep_orphan_books(referenced, now)
 
 
 def _run_job(job_id, tmp_path, approved, chapters_mode):
@@ -217,10 +349,12 @@ def _run_job(job_id, tmp_path, approved, chapters_mode):
     except Exception:
         tb = traceback.format_exc()
         print(f"job {job_id} failed\n{tb}", flush=True)
-        _update_job(job_id, error="ระบบไม่สามารถอ่านหรือตรวจไฟล์นี้ได้")
+        # ตรวจไม่สำเร็จ = ไม่มีหน้ารายงานให้เปิดไฟล์ ไม่ต้องเก็บไว้
+        _update_job(job_id, error="ระบบไม่สามารถอ่านหรือตรวจไฟล์นี้ได้", pdf_path=None)
+        _remove_book(tmp_path)
     finally:
+        # ตรวจสำเร็จ ไฟล์อยู่ต่อให้เปิดดูจากหน้ารายงาน จนผลตรวจถูกทิ้ง (ดู _prune_jobs)
         _update_job(job_id, done=True, ts=time.time())
-        Path(tmp_path).unlink(missing_ok=True)
         JOB_SLOTS.release()
 
 
@@ -385,7 +519,9 @@ async def check(
     try:
         total = 0
         header = b""
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(prefix=BOOK_PREFIX, suffix=".pdf",
+                                         dir=BOOKS_DIR, delete=False) as tmp:
             tmp_path = tmp.name
             while chunk := await pdf.read(UPLOAD_CHUNK_BYTES):
                 total += len(chunk)
@@ -413,7 +549,7 @@ async def check(
             JOBS[job_id] = {
                 "stage": "รอเริ่มตรวจ...", "done": False, "error": None,
                 "report": None, "pdf_name": pdf.filename, "approved": approved,
-                "ts": time.time(),
+                "pdf_path": tmp_path, "ts": time.time(),
             }
         threading.Thread(
             target=_run_job,
@@ -469,6 +605,7 @@ async def rebuild_summary(job_id: str, request: Request):
 
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result(request: Request, job_id: str):
+    _prune_jobs()   # รายงานหมดอายุแล้วต้องไม่เปิดได้ แม้ตัวกวาดยังไม่ถึงรอบ
     job = _get_job(job_id)
     if not job:
         return HTMLResponse("<h3>ไม่พบผลตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
@@ -483,7 +620,36 @@ def result(request: Request, job_id: str):
     return templates.TemplateResponse(request=request, name="report.html", context={
         "report": job["report"], "zone_label": ZONE_LABEL, "job_id": job_id,
         "pdf_name": job["pdf_name"], "student": job.get("approved") or {},
+        "has_book": _book_path(job) is not None,
     })
+
+
+def _book_path(job):
+    """ไฟล์รูปเล่มของผลตรวจนี้ที่ยังอยู่บนดิสก์ หรือ None"""
+    path = (job or {}).get("pdf_path")
+    return Path(path) if path and Path(path).is_file() else None
+
+
+@app.get("/book/{job_id}")
+def book_file(job_id: str):
+    """เปิดไฟล์รูปเล่มที่ตรวจ ในแท็บใหม่ด้วยตัวอ่าน PDF ของเบราว์เซอร์
+
+    อยู่หลังด่านล็อกอินเหมือนทุกหน้า (require_login) และหาไฟล์จาก job เท่านั้น ไม่รับ
+    ชื่อไฟล์จากคำขอ จึงเปิดไฟล์อื่นบนเครื่องไม่ได้ ห้ามแคช เพราะเป็นงานที่ยังไม่เผยแพร่
+    """
+    _prune_jobs()   # ไฟล์หมดอายุแล้วต้องไม่เปิดได้ แม้ตัวกวาดยังไม่ถึงรอบ
+    job = _get_job(job_id)
+    path = _book_path(job)
+    if path is None:
+        return HTMLResponse(
+            "<h3>ไม่พบไฟล์รูปเล่มแล้ว</h3>"
+            f"<p>ระบบเก็บไฟล์ไว้ไม่เกิน {JOB_TTL // 3600} ชั่วโมงหลังตรวจ และเก็บเฉพาะเล่มล่าสุด "
+            "กรุณาตรวจเล่มนี้ใหม่อีกครั้งเพื่อเปิดดูไฟล์</p>"
+            "<a href='/'>&larr; กลับไปตรวจใหม่</a>", status_code=404)
+    return FileResponse(
+        path, media_type="application/pdf",
+        filename=job.get("pdf_name") or "book.pdf", content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/health")
