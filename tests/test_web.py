@@ -811,6 +811,51 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
             self.assertIn(f'id="{sec}"', self.html)
 
 
+class TheReportPageKeepsItsNewLayout(unittest.TestCase):
+    """หน้ารายงานออกแบบใหม่ (ก.ย. 2569): แถบบน · การ์ดผลตรวจ · การ์ดแยกทีละส่วน หัวการ์ดมีสีตามเรื่อง"""
+
+    @classmethod
+    def setUpClass(cls):
+        import checker
+        report = {"verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []},
+                  "info": [{"topic": "t", "detail": "d"}], "human_checklist": [{"item": "i", "why": "w"}],
+                  "not_checked": ["x"], "verification": [{"topic": "ชื่อเรื่อง", "checks": [{"location": "หน้าปก", "status": "pass"}]}],
+                  "section_order": checker.SUMMARY_SECTION_ORDER, "staff_findings": list(checker.STAFF_CHECKS),
+                  "plain_summary": "ผลการตรวจ: ผ่าน", "context": {}}
+        with main.JOBS_LOCK:
+            main.JOBS["layout"] = {"stage": "done", "done": True, "error": None, "report": report,
+                                   "pdf_name": "b.pdf", "approved": {}, "ts": time.time()}
+        client = TestClient(main.app)
+        client.post("/login", data={"password": "test-password", "next": "/"}, follow_redirects=False)
+        cls.html = client.get("/result/layout").text
+        with main.JOBS_LOCK:
+            main.JOBS.pop("layout", None)
+
+    def test_the_top_bar_has_the_language_switch_and_a_new_check_link(self):
+        top = self.html.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
+        self.assertIn('id="langbtn"', top)
+        self.assertIn('class="top-new" href="/"', top)
+        self.assertIn('action="/logout"', top)
+
+    def test_every_section_card_has_a_colour(self):
+        import re
+        cards = re.findall(r'<section class="panel ([^"]+)"', self.html)
+        self.assertIn("result-card", cards)
+        for tone in ("tone-blue", "tone-purple", "tone-lavender", "tone-teal", "tone-slate"):
+            self.assertIn(tone, cards)
+        self.assertEqual(sum(c.startswith("zone-panel") for c in cards), 3)
+
+    def test_an_empty_zone_can_turn_grey(self):
+        """หัวโซนที่ไม่มีข้อเป็นสีเทาด้วย :has(> .empty) — .empty ต้องเป็นลูกตรงของการ์ด"""
+        self.assertIn(".zone-panel:has(> .empty)", self.html)
+        zone = self.html.split('<section class="panel zone-panel RED">', 1)[1].split("</section>", 1)[0]
+        self.assertRegex(zone, r'</h2>\s*<div class="empty"')
+
+    def test_the_result_card_follows_the_verdict(self):
+        for kind in ("fail", "pass", "pending"):
+            self.assertIn(f".result-card:has(.verdict-pill.{kind})", self.html)
+
+
 class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
     """เปิดไฟล์รูปเล่มที่ตรวจได้จากหน้ารายงาน (เจ้าหน้าที่ขอ ก.ย. 2569)
 
