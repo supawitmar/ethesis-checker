@@ -841,6 +841,8 @@ var TR = [
   [/^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า (.+)$/g, 'The document type does not match the approved one: the document says $1'],
   [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") โดยหน้าปกต้องเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2; the cover must read $3'],
   [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") หรือ ("[^"]+") ตามภาษาของหน้า โดยหน้าปกต้องเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2 or $3, following the language of the page; the cover must read $4'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") หรือ ("[^"]+") ตามภาษาของหน้า$/g, 'The approved document type is $1. Change every occurrence to $2 or $3, following the language of the page'],
   [/^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด$/g, 'Check that the document type in the eThesis file is correct; if it is, send the document back for the student to correct every occurrence'],
   [/^ข้อมูลอนุมัติ$/g, 'Approved data'],
   [/^ในไฟล์รูปเล่ม$/g, 'In the submitted file'],

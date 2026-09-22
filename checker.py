@@ -2391,12 +2391,16 @@ def _join_and(names):
 #                / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์" / "คณะกรรมการสอบวิทยานิพนธ์"
 #   บทคัดย่อ     "THESIS ADVISORY COMMITTEE:" / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์:"
 # อ่านเฉพาะตำแหน่งเหล่านี้ ไม่ค้นคำทั้งหน้า — เนื้อความบทคัดย่อเขียน "this thesis" ได้ตามปกติ
-# และคำที่ไม่ใช่สามประเภทนี้ (เช่น DISSERTATION) ไม่ถูกนับเป็นประเภทใด
+#
+# DISSERTATION / ดุษฎีนิพนธ์ ไม่ใช่ประเภทที่อนุมัติได้ (eThesis มีแค่สามประเภท ปริญญาเอกก็เป็น
+# THESIS / วิทยานิพนธ์) แต่ถ้าพิมพ์อยู่ตรงตำแหน่งเหล่านี้ = ประเภทเล่มไม่ตรง เล่มที่ 4 (ป.เอก
+# หลักสูตรไทย) เขียน "DISSERTATION ADVISORY COMMITTEE" ในบทคัดย่ออังกฤษ เจ้าหน้าที่ยืนยัน
+# (ก.ย. 2569) ว่าต้องเป็น THESIS "ต้องแก้ไข"
 DOC_TYPE_NAME_EN = {"THESIS": "THESIS", "THEMATIC PAPER": "THEMATIC PAPER",
-                    "INDEPENDENT STUDY": "INDEPENDENT STUDY"}
+                    "INDEPENDENT STUDY": "INDEPENDENT STUDY", "DISSERTATION": "DISSERTATION"}
 DOC_TYPE_NAME_TH = {"THESIS": "วิทยานิพนธ์", "THEMATIC PAPER": "สารนิพนธ์",
-                    "INDEPENDENT STUDY": "การค้นคว้าอิสระ"}
-_DOC_TYPE_EN_WORD = r"(THESIS|THEMATIC\s+PAPER|INDEPENDENT\s+STUDY)"
+                    "INDEPENDENT STUDY": "การค้นคว้าอิสระ", "DISSERTATION": "ดุษฎีนิพนธ์"}
+_DOC_TYPE_EN_WORD = r"(THESIS|THEMATIC\s+PAPER|INDEPENDENT\s+STUDY|DISSERTATION)"
 _DOC_TYPE_EN_SPOTS = tuple(re.compile(p, re.I) for p in (
     rf"\bAN?\s+{_DOC_TYPE_EN_WORD}\s+SUBMITTED\b",
     rf"^\s*(?:AN?\s+)?{_DOC_TYPE_EN_WORD}\s*$",
@@ -2404,6 +2408,7 @@ _DOC_TYPE_EN_SPOTS = tuple(re.compile(p, re.I) for p in (
     rf"\b{_DOC_TYPE_EN_WORD}\s+(?:ADVISORY|EXAMINATION)\s+COMMITTEES?\b",
 ))
 _DOC_TYPE_TH_SPOTS = ("{}นี้เป็นส่วนหนึ่ง", "คณะกรรมการที่ปรึกษา{}", "คณะกรรมการสอบ{}")
+_THAI_CHAR = re.compile(r"[\u0E00-\u0E7F]")
 _DOC_TYPE_BY_EN = {norm(name): key for key, name in DOC_TYPE_NAME_EN.items()}
 
 
@@ -2469,9 +2474,20 @@ def doc_type_check(approved_type, program_language, spots, form_type=""):
 
     def item(zone, want_type, spots_off, fix):
         want = doc_type_name(want_type, program_language)
-        names = dict.fromkeys(doc_type_name(t, program_language) for spot, found in printed
-                              if spot in spots_off for t, _ in found if t != want_type)
-        must_be = f'ประเภทเล่มที่ได้รับอนุมัติคือ "{want}" ต้องแก้ทุกจุดเป็น "{want}"'
+        # ชื่อที่บอกให้แก้ ใช้ภาษาของคำที่หน้านั้นพิมพ์ ไม่ใช่ภาษาของเล่ม — เล่มไทยพิมพ์คำอังกฤษ
+        # ในบทคัดย่ออังกฤษ (เล่มที่ 4 "DISSERTATION") ถ้าใช้ภาษาของเล่ม จะได้ "เล่มเขียนว่า
+        # ดุษฎีนิพนธ์ ต้องแก้เป็นวิทยานิพนธ์" ทั้งที่หน้านั้นต้องแก้เป็น THESIS
+        off = [(t, word) for spot, found in printed if spot in spots_off
+               for t, word in found if t != want_type]
+
+        def named(doc_type, word):
+            return (DOC_TYPE_NAME_TH if _THAI_CHAR.search(word) else DOC_TYPE_NAME_EN)[doc_type]
+
+        names = dict.fromkeys(named(t, word) for t, word in off)
+        fix_to = dict.fromkeys(named(want_type, word) for _, word in off)
+        must_be = (f'ประเภทเล่มที่ได้รับอนุมัติคือ "{want}" ต้องแก้ทุกจุดเป็น '
+                   + " หรือ ".join(f'"{name}"' for name in fix_to)
+                   + (" ตามภาษาของหน้า" if len(fix_to) > 1 else ""))
         if "หน้าปก" in spots_off:
             cover_sentence = dict(cover_required_items(want_type, program_language))["ข้อความประเภทงาน"]
             must_be += f' โดยหน้าปกต้องเป็น "{cover_sentence}"'

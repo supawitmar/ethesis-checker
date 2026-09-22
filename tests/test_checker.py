@@ -5842,14 +5842,49 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
             self.assertEqual([t for t, _ in read(line)], [want], line)
 
     def test_words_outside_the_template_spots_do_not_count(self):
-        """เนื้อความเขียน "this thesis" ได้ตามปกติ และ DISSERTATION ไม่ใช่หนึ่งในสามประเภท"""
+        """เนื้อความเขียน "this thesis" / "this dissertation" ได้ตามปกติ"""
         read = checker_module.doc_types_printed
         for line in ("The objective of this thesis is to describe sepsis in Udon Thani.",
                      "This independent study was conducted at Udon Thani Hospital.",
-                     "DISSERTATION ADVISORY COMMITTEE: SIRIPORN YAMNILL, Ph.D.",
+                     "The findings of this dissertation suggest a collaborative model.",
                      "วิทยานิพนธ์ฉบับนี้ศึกษาการจัดการภาครัฐ",
                      "A THESIS ON SEPSIS IN RURAL THAILAND"):
             self.assertEqual(read(line), [], line)
+
+    def test_dissertation_in_a_template_spot_is_a_wrong_type(self):
+        """เล่มที่ 4 (ป.เอก หลักสูตรไทย) เขียน "DISSERTATION ADVISORY COMMITTEE" ในบทคัดย่ออังกฤษ
+
+        เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าต้องเป็น THESIS "ต้องแก้ไข" — ปริญญาเอกก็เป็น THESIS /
+        วิทยานิพนธ์ เดิมระบบไม่นับ DISSERTATION เป็นประเภทใดจึงไม่ฟ้อง
+        """
+        read = checker_module.doc_types_printed
+        self.assertEqual([t for t, _ in read("DISSERTATION ADVISORY COMMITTEE: SIRIPORN YAMNILL, Ph.D.")],
+                         ["DISSERTATION"])
+        self.assertEqual([t for t, _ in read("A DISSERTATION SUBMITTED IN PARTIAL FULFILLMENT")],
+                         ["DISSERTATION"])
+        self.assertEqual([t for t, _ in read("คณะกรรมการที่ปรึกษาดุษฎีนิพนธ์: ศิริพร แย้มนิล")],
+                         ["DISSERTATION"])
+        spots = [("หน้าลงนาม 1 (หน้า ข)", "วิทยานิพนธ์\nคณะกรรมการที่ปรึกษาวิทยานิพนธ์"),
+                 ("บทคัดย่อไทย (หน้า ง)", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์ : ศิริพร แย้มนิล, Ph.D."),
+                 ("บทคัดย่ออังกฤษ (หน้า ฉ)",
+                  "DISSERTATION ADVISORY COMMITTEE: SIRIPORN YAMNILL, Ph.D., SRISOMBAT CHOKPRAJAKCHAT,")]
+        rows, issues, _cover = checker_module.doc_type_check("THESIS", "thai", spots)
+        self.assertEqual(len(issues), 1)
+        zone, location, found, expected, _fix = issues[0]
+        self.assertEqual((zone, location), ("RED", "บทคัดย่ออังกฤษ (หน้า ฉ)"))
+        self.assertEqual(found, 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "DISSERTATION"')
+        # หน้านั้นเป็นภาษาอังกฤษ ต้องแก้เป็น THESIS ไม่ใช่ "วิทยานิพนธ์" ตามภาษาของเล่ม
+        self.assertEqual(expected, 'ประเภทเล่มที่ได้รับอนุมัติคือ "วิทยานิพนธ์" ต้องแก้ทุกจุดเป็น "THESIS"')
+        self.assertEqual([r[1] for r in rows], ["fail", "pass", "pass", "fail"])
+
+    def test_the_fix_follows_the_language_of_each_page(self):
+        """เล่มไทยที่เขียนผิดทั้งหน้าไทยและหน้าอังกฤษ ต้องบอกทั้งสองคำ"""
+        spots = [("บทคัดย่อไทย (หน้า ง)", "คณะกรรมการที่ปรึกษาสารนิพนธ์: ยอด สุขะมงคล"),
+                 ("บทคัดย่ออังกฤษ (หน้า จ)", "THEMATIC PAPER ADVISORY COMMITTEE: YOD SUKAMONGKOL")]
+        _rows, issues, _cover = checker_module.doc_type_check("THESIS", "thai", spots)
+        self.assertEqual(issues[0][2], 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "สารนิพนธ์" และ "THEMATIC PAPER"')
+        self.assertEqual(issues[0][3], 'ประเภทเล่มที่ได้รับอนุมัติคือ "วิทยานิพนธ์" '
+                                       'ต้องแก้ทุกจุดเป็น "วิทยานิพนธ์" หรือ "THESIS" ตามภาษาของหน้า')
 
     def test_the_mctm_book_gets_one_item_that_lists_every_place(self):
         rows, issues, cover_type = checker_module.doc_type_check(
@@ -5969,6 +6004,7 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
         report_html = (Path(checker_module.__file__).parent
                        / "templates" / "report.html").read_text(encoding="utf-8")
         for phrase in ("^ช่องประเภทเล่มในแบบฟอร์ม$", "^ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis",
+                       'หรือ ("[^"]+") ตามภาษาของหน้า$',
                        "^ประเภทเล่ม$", "^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า ",
                        "^ประเภทเล่มที่ได้รับอนุมัติคือ ", "โดยหน้าปกต้องเป็น",
                        "^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง"):
