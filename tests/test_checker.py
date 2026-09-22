@@ -2283,6 +2283,68 @@ class AbstractLocationSaysWhichLanguage(unittest.TestCase):
             self.assertEqual(summary_section(issue), "บทคัดย่อ")
 
 
+class TheEnglishTextLeavesOutTheApprovedNames(unittest.TestCase):
+    """ฉบับอังกฤษไม่ยกรายชื่อตาม บฑ.1/บฑ.2 (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    "ถ้าเป็นข้อความเฉพาะภาษาอังกฤษเอา รายชื่อตาม บฑ.1 หรือ 2. ออก" — ฟอร์มเก็บชื่อไทย
+    (เล่มจริง 6838776 TMCT/M ได้ "The list must match GR.1 in full: 1. วิรงค์รอง เจียรกุล ...")
+    นักศึกษาต่างชาติอ่านไม่ออก ฉบับไทยยังยกรายชื่อครบเหมือนเดิม
+    """
+
+    FORM = [{"name": "พญ. วิรงค์รอง เจียรกุล"}, {"name": "นพ. โลกเชษฐ์ ธนสุกาญจน์"}]
+    THAI = re.compile(r"[ก-๙]")
+
+    @classmethod
+    def setUpClass(cls):
+        import tools.check_i18n as i18n
+        cls.i18n = i18n
+        _block, cls.pairs = i18n.load_tr()
+
+    def _en(self, text):
+        return self.i18n.tr_en(text, self.pairs)
+
+    def _count_issue(self, found, form):
+        rep = Report()
+        checker_module._report_committee_count(rep, self.FORM, found, "บทคัดย่ออังกฤษ (หน้า iv)", form)
+        return rep.zones["RED"][0]
+
+    def test_the_thai_text_still_lists_the_names(self):
+        issue = self._count_issue(["A", "B", "C"], "บฑ.1")
+        self.assertIn("วิรงค์รอง เจียรกุล", issue["expected"])
+        self.assertIn("โลกเชษฐ์ ธนสุกาญจน์", issue["expected"])
+
+    def test_the_english_red_line_has_no_names(self):
+        for form, gr in (("บฑ.1", "GR.1"), ("บฑ.2", "GR.2")):
+            for found in (["A", "B", "C"], ["A"]):
+                issue = self._count_issue(found, form)
+                self.assertEqual(self._en(issue["expected"]), f"The list must match {gr}")
+
+    def test_the_english_purple_note_has_no_names(self):
+        for status in ("counted", "unclear"):
+            rep = Report()
+            checker_module._note_committee_reference(
+                rep, self.FORM, "หน้าลงนาม 1 (หน้า i)", form="บฑ.1", status=status)
+            why = rep.human_checklist[0]["why"]
+            self.assertIn("วิรงค์รอง", why)
+            en = self._en(why)
+            self.assertFalse(self.THAI.search(en), en)
+            self.assertTrue(en.endswith("GR.1") or "against GR.1," in en, en)
+
+    def test_the_form_is_not_named_twice(self):
+        """เดิมได้ "Form GR.GR.1" — ค่าที่จับได้ (บฑ.1) ถูกแปลเป็น GR.1 อยู่แล้ว"""
+        for found, want in ((["A", "B", "C"], "Remove the extra names so only the ones on Form GR.1 remain"),
+                            (["A"], "Add the missing names so the list matches Form GR.1")):
+            en = self._en(self._count_issue(found, "บฑ.1")["fix"])
+            self.assertEqual(en, want)
+            self.assertNotIn("GR.GR", en)
+
+    def test_the_blank_page_notice_reads_as_one_sentence(self):
+        """เดิมได้ "...still correctChange to:an observation and can pass" (กฎกว้างจับ "ต้องเป็น" กลางประโยค)"""
+        self.assertEqual(
+            self._en("หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้"),
+            "Such pages with correct numbering are a notice only and can pass")
+
+
 class CommitteeFindingsAreNotFiledUnderOther(unittest.TestCase):
     """ข้อของหน้าลงนามต้องไม่ตกหมวด "อื่นๆ"
 
