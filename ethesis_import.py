@@ -32,11 +32,14 @@ THAI_MONTHS = {
 # เพราะแบบแผนไม่สม่ำเสมอ: DOCTOR OF PUBLIC HEALTH ย่อว่า "Dr. P.H." ไม่ใช่ "D.P.H."
 # ขณะที่ DOCTOR OF PUBLIC ADMINISTRATION ย่อว่า "D.P.A." ตามแบบปกติ
 # ชื่อที่ไม่อยู่ในตารางคืน '' เพื่อให้เจ้าหน้าที่กรอกเอง ดีกว่าเดาผิดแล้วฟ้องเล่มที่ถูก
+# ตารางนี้เป็นชุดเดียวของระบบ — หน้าเว็บเคยมีตารางซ้ำสำหรับทางวางข้อความ (หลุดกันจริง ขาด
+# D.N.S. / D.P.A. / Dr. P.H. / M.P.A.) ทางนั้นถูกถอดออกแล้ว (ก.ย. 2569) อย่าเพิ่มตารางซ้ำกลับไป
 DEGREE_ABBR = {
     'DOCTOR OF PHILOSOPHY': 'Ph.D.',
     'DOCTOR OF NURSING SCIENCE': 'D.N.S.',      # ยืนยันจากเล่มจริง (เล่มที่ 6)
     'DOCTOR OF PUBLIC ADMINISTRATION': 'D.P.A.',
     'DOCTOR OF PUBLIC HEALTH': 'Dr. P.H.',      # ไม่ใช่ D.P.H. — เจ้าหน้าที่ยืนยัน ส.ค. 2569
+    'MASTER OF CLINICAL TROPICAL MEDICINE': 'M.C.T.M.',   # เจ้าหน้าที่พบในแบบฟอร์ม ก.ย. 2569
     'MASTER OF ENGINEERING': 'M.Eng.',
     'MASTER OF SCIENCE': 'M.Sc.',
     'MASTER OF ARTS': 'M.A.',

@@ -48,6 +48,28 @@ class EnglishDegreeAbbreviation(unittest.TestCase):
     def test_unknown_degree_is_left_blank_not_guessed(self):
         self.assertEqual(_degree_abbr("DOCTOR OF SOMETHING UNLISTED"), "")
 
+    def test_master_of_clinical_tropical_medicine(self):
+        """เจ้าหน้าที่พบในแบบฟอร์ม (ก.ย. 2569) ว่าย่อเป็น M.C.T.M. — เดาจากอักษรแรกได้ตรงก็จริง
+        แต่ระบบไม่เดา จึงต้องอยู่ในตาราง ไม่งั้นช่องฟอร์มว่างให้เจ้าหน้าที่กรอกเองทุกครั้ง"""
+        self.assertEqual(_degree_abbr("MASTER OF CLINICAL TROPICAL MEDICINE"), "M.C.T.M.")
+        self.assertEqual(_degree_abbr("Master of Clinical Tropical Medicine"), "M.C.T.M.")
+
+
+class TheAbbreviationTableLivesInOnePlace(unittest.TestCase):
+    """ตารางตัวย่อปริญญามีที่เดียว (ethesis_import.py) — หน้าเว็บไม่มีตารางของตัวเองแล้ว
+
+    เดิมทางวางข้อความในหน้าเว็บมีตารางซ้ำ และหลุดกันจริง (ขาด D.N.S. / D.P.A. / Dr. P.H. /
+    M.P.A.) เจ้าหน้าที่สั่งถอดทางวางข้อความออก (ก.ย. 2569) เหลือทางแนบไฟล์ที่ใช้ตารางนี้
+    """
+
+    def test_the_web_form_has_no_copy_of_the_table(self):
+        from pathlib import Path
+        from ethesis_import import DEGREE_ABBR
+        html = (Path(__file__).resolve().parents[1] / "templates" / "index.html"
+                ).read_text(encoding="utf-8")
+        for full_name in DEGREE_ABBR:
+            self.assertNotIn(f"'{full_name}'", html, full_name)
+
 
 class CommitteeParsingTests(unittest.TestCase):
     """ดึงชื่อ-สกุลกรรมการจากหน้า eThesis (ตัดคำนำหน้าวิชาการ + บทบาทท้ายบรรทัด)"""

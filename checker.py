@@ -1378,9 +1378,21 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
             or approved.get("degree_cover_en", "")
         subject = _degree_subject(degree)
-        if subject and norm(subject) not in found_text:
+        subject_found = not subject or norm(subject) in found_text
+        if not subject_found:
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
+                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        # ชื่อปริญญาหน้าวงเล็บก็พิมพ์อยู่ในช่องนี้ ("ศิลปศาสตรมหาบัณฑิต สาขาวิชา..." /
+        # "Doctor of Philosophy Program in ...") — เดิมเทียบแค่ชื่อสาขา เล่มจริง repo 3 พิมพ์
+        # "ศิลปศาสตรมหาบัณทิต" (ฑ เป็น ท) แล้วไม่มีใครเห็น ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569)
+        # วัดกับเล่มจริง 8 เล่ม: 7 เล่มพิมพ์ตรง อีกเล่มคือ repo 3 ที่สะกดผิดจริง
+        # เทียบเฉพาะเมื่อเจอชื่อสาขาแล้ว — ถ้าทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว
+        # ไม่ต้องได้สองข้อจากช่องเดียวกัน
+        degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
+        if subject_found and degree_name and norm(degree_name) not in found_text:
+            _institution_mismatch(
+                rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อปริญญา", degree_name,
                 bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
@@ -1737,6 +1749,12 @@ def unreadable_id_digits(page_text, student_id, names=()):
             if len(slot) != len(digits) or _THAI_CONSONANT.search(slot):
                 continue
             if _THAI_DIGITS_ONLY.fullmatch(slot):
+                continue
+            # เลขอารบิกที่อ่านได้ครบแต่คนละตัวกับข้อมูลอนุมัติ ไม่ใช่ฟอนต์เพี้ยน — คือรหัสไม่ตรง
+            # (เล่มพิมพ์ผิด หรือแบบฟอร์มกรอกผิด) ต้องฟ้องแดงตามปกติ ตรวจทุกช่องในแบบฟอร์ม
+            # (ก.ย. 2569): ใส่รหัสในแบบฟอร์มผิดหลักเดียว ได้การ์ดส้ม "ระบบอ่านรหัสไม่ออก
+            # เพราะฟอนต์" แทนที่จะบอกว่ารหัสไม่ตรง
+            if slot.isascii() and slot.isdigit():
                 continue
             if any(norm(slot) in name for name in known if name):
                 continue
@@ -2361,6 +2379,141 @@ def _join_and(names):
     if len(names) <= 1:
         return names[0] if names else ""
     return " และ ".join([", ".join(names[:-1]), names[-1]])
+
+
+# ---------- ประเภทเล่มที่เล่มเขียนไว้ ต้องตรงกับที่ได้รับอนุมัติ ----------
+# เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังเล่ม 6838776 TMCT/M: eThesis อนุมัติเป็นสารนิพนธ์ แต่เล่มเขียน
+# INDEPENDENT STUDY ทั้งเล่ม "ให้ฟ้องด้วย"
+#
+# template วางคำระบุประเภทไว้ตายตัวสามที่ (วัดจากเล่มจริงครบ 8 เล่ม ทั้งสามประเภทและทั้งสองภาษา)
+#   หน้าปก       "A THESIS SUBMITTED ..." / "วิทยานิพนธ์นี้เป็นส่วนหนึ่ง ..."
+#   หน้าลงนาม    บรรทัด "Thesis" เดี่ยว ๆ และ "Thesis Advisory/Examination Committees"
+#                / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์" / "คณะกรรมการสอบวิทยานิพนธ์"
+#   บทคัดย่อ     "THESIS ADVISORY COMMITTEE:" / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์:"
+# อ่านเฉพาะตำแหน่งเหล่านี้ ไม่ค้นคำทั้งหน้า — เนื้อความบทคัดย่อเขียน "this thesis" ได้ตามปกติ
+#
+# DISSERTATION / ดุษฎีนิพนธ์ ไม่ใช่ประเภทที่อนุมัติได้ (eThesis มีแค่สามประเภท ปริญญาเอกก็เป็น
+# THESIS / วิทยานิพนธ์) แต่ถ้าพิมพ์อยู่ตรงตำแหน่งเหล่านี้ = ประเภทเล่มไม่ตรง เล่มที่ 4 (ป.เอก
+# หลักสูตรไทย) เขียน "DISSERTATION ADVISORY COMMITTEE" ในบทคัดย่ออังกฤษ เจ้าหน้าที่ยืนยัน
+# (ก.ย. 2569) ว่าต้องเป็น THESIS "ต้องแก้ไข"
+DOC_TYPE_NAME_EN = {"THESIS": "THESIS", "THEMATIC PAPER": "THEMATIC PAPER",
+                    "INDEPENDENT STUDY": "INDEPENDENT STUDY", "DISSERTATION": "DISSERTATION"}
+DOC_TYPE_NAME_TH = {"THESIS": "วิทยานิพนธ์", "THEMATIC PAPER": "สารนิพนธ์",
+                    "INDEPENDENT STUDY": "การค้นคว้าอิสระ", "DISSERTATION": "ดุษฎีนิพนธ์"}
+_DOC_TYPE_EN_WORD = r"(THESIS|THEMATIC\s+PAPER|INDEPENDENT\s+STUDY|DISSERTATION)"
+_DOC_TYPE_EN_SPOTS = tuple(re.compile(p, re.I) for p in (
+    rf"\bAN?\s+{_DOC_TYPE_EN_WORD}\s+SUBMITTED\b",
+    rf"^\s*(?:AN?\s+)?{_DOC_TYPE_EN_WORD}\s*$",
+    rf"\b{_DOC_TYPE_EN_WORD}\s+ENTITLED\b",
+    rf"\b{_DOC_TYPE_EN_WORD}\s+(?:ADVISORY|EXAMINATION)\s+COMMITTEES?\b",
+))
+_DOC_TYPE_TH_SPOTS = ("{}นี้เป็นส่วนหนึ่ง", "คณะกรรมการที่ปรึกษา{}", "คณะกรรมการสอบ{}")
+_THAI_CHAR = re.compile(r"[\u0E00-\u0E7F]")
+_DOC_TYPE_BY_EN = {norm(name): key for key, name in DOC_TYPE_NAME_EN.items()}
+
+
+def doc_types_printed(page_text):
+    """ประเภทเล่มที่หน้านี้เขียนไว้ตรงตำแหน่งของ template — [(ประเภท, คำที่พิมพ์), ...]"""
+    found = []
+    for line in (page_text or "").splitlines():
+        match = next((m for m in (p.search(line) for p in _DOC_TYPE_EN_SPOTS) if m), None)
+        if match:
+            found.append((_DOC_TYPE_BY_EN[norm(match.group(1))], soft(match.group(1))))
+            continue
+        nl = norm(line)
+        for key, name in DOC_TYPE_NAME_TH.items():
+            if nl == norm(name) or any(norm(spot.format(name)) in nl for spot in _DOC_TYPE_TH_SPOTS):
+                found.append((key, name))
+                break
+    return found
+
+
+def doc_type_check(approved_type, program_language, spots, form_type=""):
+    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับที่ได้รับอนุมัติ และกับที่เลือกในแบบฟอร์ม
+
+    spots = [(ตำแหน่ง, ข้อความของหน้า), ...] ตามลำดับในเล่ม หน้าปกมาก่อน
+    คืน (แถวในตารางผลเทียบ, [(สี, ตำแหน่ง, ที่พบ, ควรเป็น, ต้องแก้), ...],
+         ประเภทที่ใช้เทียบข้อความบังคับบนหน้าปก)
+
+    approved_type = ค่าจากไฟล์ eThesis (ถ้าไฟล์ไม่ระบุ คือค่าที่เลือกในแบบฟอร์ม)
+    form_type     = ค่าที่เลือกในแบบฟอร์ม — เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้าในแบบฟอร์มที่กรอก/ดึงมา
+                    จากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" เล่มจึงเทียบกับทั้งสองค่า
+      ไม่ตรงกับไฟล์ eThesis               = แดง
+      ไม่ตรงกับที่เลือกในแบบฟอร์ม (ซึ่งต่างจาก
+      ไฟล์ eThesis)                       = ส้ม ระบบไม่รู้ว่าค่าไหนถูก เจ้าหน้าที่ตัดสินเอง
+
+    จุดผิดหลายหน้ารวมเป็นข้อเดียว เพราะนักศึกษาแก้เรื่องเดียว (เปลี่ยนประเภทเล่ม) ส่วนตาราง
+    ผลเทียบลงทุกจุดที่อ่านเจอ ทั้งตอนตรงและไม่ตรง จะได้แยก "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ" ออก
+
+    หน้าปกที่เขียนประเภทอื่น ถูกฟ้องในข้อนี้แล้ว ข้อความบังคับบนปกจึงเทียบกับประเภทที่ปกเขียนเอง
+    (ยังจับคำพิมพ์ผิดอื่นได้) — ถ้าเทียบกับประเภทที่อนุมัติ จะได้อีกข้อที่บอกว่าปก "ขาด
+    A THEMATIC PAPER" ทั้งที่ปกเขียน AN INDEPENDENT STUDY อยู่ นักศึกษาอ่านแล้วจะเติมซ้อน
+    """
+    if not approved_type:
+        return [], [], approved_type
+    form_type = form_type if form_type and form_type != approved_type else ""
+    printed = [(spot, doc_types_printed(text)) for spot, text in spots]
+
+    def differs(want_type):
+        return [spot for spot, found in printed if any(t != want_type for t, _ in found)]
+
+    wrong = differs(approved_type)
+    off_form = differs(form_type) if form_type else []
+    rows = []
+    if any(found for _, found in printed):
+        rows.append(("ข้อมูลอนุมัติ", "fail" if wrong else "pass",
+                     f'"{doc_type_name(approved_type, program_language)}"'))
+        if form_type:
+            rows.append(("ช่องประเภทเล่มในแบบฟอร์ม", "pending" if off_form else "pass",
+                         f'"{doc_type_name(form_type, program_language)}"'))
+        for spot, found in printed:
+            if found:
+                words = dict.fromkeys(word for _, word in found)
+                status = "fail" if spot in wrong else "pending" if spot in off_form else "pass"
+                rows.append((spot, status, ", ".join(f'"{word}"' for word in words)))
+
+    def item(zone, want_type, spots_off, fix):
+        want = doc_type_name(want_type, program_language)
+        # ชื่อที่บอกให้แก้ ใช้ภาษาของคำที่หน้านั้นพิมพ์ ไม่ใช่ภาษาของเล่ม — เล่มไทยพิมพ์คำอังกฤษ
+        # ในบทคัดย่ออังกฤษ (เล่มที่ 4 "DISSERTATION") ถ้าใช้ภาษาของเล่ม จะได้ "เล่มเขียนว่า
+        # ดุษฎีนิพนธ์ ต้องแก้เป็นวิทยานิพนธ์" ทั้งที่หน้านั้นต้องแก้เป็น THESIS
+        off = [(t, word) for spot, found in printed if spot in spots_off
+               for t, word in found if t != want_type]
+
+        def named(doc_type, word):
+            return (DOC_TYPE_NAME_TH if _THAI_CHAR.search(word) else DOC_TYPE_NAME_EN)[doc_type]
+
+        names = dict.fromkeys(named(t, word) for t, word in off)
+        fix_to = dict.fromkeys(named(want_type, word) for _, word in off)
+        must_be = (f'ประเภทเล่มที่ได้รับอนุมัติคือ "{want}" ต้องแก้ทุกจุดเป็น '
+                   + " หรือ ".join(f'"{name}"' for name in fix_to)
+                   + (" ตามภาษาของหน้า" if len(fix_to) > 1 else ""))
+        if "หน้าปก" in spots_off:
+            cover_sentence = dict(cover_required_items(want_type, program_language))["ข้อความประเภทงาน"]
+            must_be += f' โดยหน้าปกต้องเป็น "{cover_sentence}"'
+        return (zone, _join_and(spots_off),
+                "ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "
+                + " และ ".join(f'"{name}"' for name in names),
+                must_be, fix)
+
+    issues = []
+    if wrong:
+        issues.append(item("RED", approved_type, wrong,
+                           "ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด"))
+    if off_form:
+        issues.append(item("ORANGE", form_type, off_form,
+                           "ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis "
+                           f'(ไฟล์ eThesis ระบุ "{doc_type_name(approved_type, program_language)}") '
+                           "ถ้าประเภทที่ถูกต้องคือค่าที่เลือกในแบบฟอร์ม ให้กดไม่ผ่านเพื่อแจ้งนักศึกษา"))
+    cover_wrong = [t for t, _ in (printed[0][1] if printed and printed[0][0] == "หน้าปก" else [])
+                   if t != approved_type]
+    return rows, issues, (cover_wrong[0] if cover_wrong else approved_type)
+
+
+def doc_type_name(doc_type, program_language):
+    """ชื่อประเภทเล่มตามภาษาของเล่ม — เล่มไทยเขียน "สารนิพนธ์" เล่มอังกฤษเขียน "THEMATIC PAPER" """
+    names = DOC_TYPE_NAME_TH if program_language == "thai" else DOC_TYPE_NAME_EN
+    return names.get(doc_type, doc_type)
 
 
 def _cover_language_markers(doc_type, language):
@@ -3350,7 +3503,10 @@ def _corrected_value(issue):
     #
     # เลขหน้าหน้าลงนามพิมพ์ประโยคเต็ม 'ต้องเป็นเลขหน้า "ก"' ตามแบบที่เจ้าหน้าที่เลือก (ก.ย. 2569
     # "เอาตามข้อ 2 ก็พอ") — ถ้าดึงค่าไป จะเหลือ 'ต้องแก้เป็น "ก"' ซึ่งไม่บอกว่าเป็นเลขหน้า
-    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL"):
+    #
+    # ประเภทเล่มผิดต้องแก้หลายหน้า ค่าท้ายประโยคคือข้อความบนหน้าปกอย่างเดียว ถ้าดึงไป
+    # สรุปจะบอกแค่ให้แก้ปก แล้วหน้าลงนามกับบทคัดย่อที่เขียนผิดอยู่ด้วยหายไปจากข้อความ
+    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL", "FORM.DOC_TYPE"):
         return ""
     # บรรทัดที่เขียนถึงเจ้าหน้าที่ไม่ใช่ค่าที่ต้องแก้ ข้ามไปใช้ช่องถัดไป (ดู is_staff_only_line)
     raw = next((text for text in (summary_tidy(issue.get("expected")),
@@ -3626,7 +3782,9 @@ def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
 _DEGREE_SEARCH_STOP = re.compile(
     r'^[ \t]*(?:'
     r'[…]{3,}|\.{6,}'                                    # เส้นประสำหรับลงนาม
-    r'|(?:THESIS\s+|THEMATIC\s+PAPER\s+)?(?:ADVISORY|EXAMINATION)\s+COMMITTEE'
+    # INDEPENDENT STUDY ด้วย (เล่มจริง ก.ย. 2569 "INDEPENDENT STUDY ADVISORY COMMITTEE:") — ของเดิม
+    # รู้จักแค่ THESIS/THEMATIC PAPER โซนกรรมการของเล่มการค้นคว้าอิสระจึงไม่ถูกตัดทิ้ง
+    r'|(?:THESIS\s+|THEMATIC\s+PAPER\s+|INDEPENDENT\s+STUDY\s+)?(?:ADVISORY|EXAMINATION)\s+COMMITTEE'
     r'|คณะกรรมการที่ปรึกษา|คณะกรรมการสอบ'
     r')', re.I | re.M)
 
@@ -3640,6 +3798,12 @@ _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2
 # "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ถ้าไม่ตัดคำนี้ก่อน เล่มไทยที่ถูกต้อง
 # จะโดนฟ้องว่ามีข้อความเกินทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
 _DEGREE_LINE_TEMPLATE_PREFIXES = (norm("ปริญญา"),)
+
+
+def degree_line_search_text(page_text):
+    """ส่วนของหน้าที่บรรทัดชื่อปริญญาอยู่ได้: ก่อนโซนรายชื่อกรรมการ และไม่รวมบรรทัดชื่อ-รหัสนักศึกษา"""
+    return "\n".join(line for line in _degree_search_text(page_text).splitlines()
+                     if not _STUDENT_ID_SHAPE.search(line))
 
 
 def degree_line_extras(page_text, expected):
@@ -3662,20 +3826,43 @@ def degree_line_extras(page_text, expected):
     ใช้เฉพาะช่องที่ template วางชื่อปริญญาไว้ "บรรทัดของมันเอง" (หน้าปก และบรรทัด
     ชื่อย่อในบทคัดย่อ) — หน้าลงนามไม่ใช้ เพราะชื่อปริญญาอยู่กลางประโยค template
     ("for the degree of ...") ซึ่งมีคำอื่นล้อมรอบโดยชอบอยู่แล้ว
+
+    **มีบรรทัดที่ตรงพอดีอยู่แล้ว = ไม่มีคำเกิน** (ก.ย. 2569 ตอนเพิ่ม M.C.T.M.) — ตัวย่อที่ไม่มี
+    สาขาในวงเล็บสั้นมากหลัง norm() ("MCTM") จึงไปโผล่ในบรรทัดอื่นได้โดยบังเอิญ เช่นรหัส
+    นักศึกษา "6700000 TMCT/M" (norm แล้ว "...TMCTM") หรือคุณวุฒิกรรมการ "M.D., M.C.T.M."
+    ของเดิมข้ามบรรทัดที่ตรงพอดีแล้วคืนบรรทัดพวกนั้นแทน เล่มที่ถูกต้องจึงได้แดง "มีข้อความเกิน"
+    บรรทัดชื่อ-รหัสนักศึกษาไม่มีวันเป็นบรรทัดชื่อปริญญา จึงข้ามไปเลย และตัดโซนรายชื่อกรรมการ
+    ทิ้งก่อน (_degree_search_text ตัวเดียวกับที่ใช้หาบรรทัดปริญญา) ไม่งั้นเล่มที่พิมพ์ชื่อปริญญา
+    ผิดจะได้ข้อความสั่งให้ "ลบข้อความเกิน" ที่ยกบรรทัดชื่อตัวเองหรือบรรทัดกรรมการมาอ้าง
     """
     want = norm(expected)
     if not want:
         return ""
     hits = []
-    for line in (page_text or "").splitlines():
+    for line in degree_line_search_text(page_text).splitlines():
         nl = norm(line)
         for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
             if prefix and nl.startswith(prefix):
                 nl = nl[len(prefix):]
                 break
-        if want in nl and nl != want:
+        if nl == want:
+            return ""
+        if want in nl:
             hits.append(soft(line))
     return min(hits, key=len) if hits else ""
+
+
+def degree_abbr_expected(abbr):
+    """บรรทัด "ควรเป็น" ของข้อชื่อปริญญาแบบย่อในบทคัดย่อ
+
+    ถ้อยคำเดียวทุกตัวย่อ ไม่พูดถึง "สาขาในวงเล็บ" — เจ้าหน้าที่ (ก.ย. 2569) สองรอบ
+      1. "ตัวย่อปริญญาบางอัน ไม่มีวงเล็บ ถ้าใส่ข้อความวงเล็บจะสับสนได้" (เล่มจริง M.C.T.M.
+         ได้ "...ตามรูปแบบชื่อย่อและสาขาในวงเล็บ" นักศึกษาจะไปหาสาขามาใส่เอง)
+      2. "ถ้าเป็นชื่อปริญญาอื่นๆ ที่มีวงเล็บละ ก็ให้ใช้รูปแบบนี้" — ค่าในเครื่องหมายคำพูดแสดง
+         สาขาในวงเล็บครบอยู่แล้ว และเมื่อเล่มผิดที่ตัวปริญญา (M.Sc. แทน Ph.D., วศ.บ. แทน วศ.ม.)
+         คำว่า "และสาขาในวงเล็บ" ชี้ให้ไปดูวงเล็บซึ่งถูกอยู่แล้ว
+    """
+    return f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อ'
 
 
 def _looks_like_degree_line(line):
@@ -3684,10 +3871,18 @@ def _looks_like_degree_line(line):
     ใช้แยก "เล่มพิมพ์ชื่อปริญญาผิด" ออกจาก "เล่มไม่มีบรรทัดชื่อปริญญาเลย" ซึ่งวิธีแก้
     คนละอย่างกัน — ถ้าไม่แยก ระบบจะยกบรรทัดที่ใกล้เคียงที่สุดบนหน้ามาอ้างว่าเป็น
     ชื่อปริญญา (เคยได้บรรทัดชื่อ-รหัสนักศึกษา) แล้วเจ้าหน้าที่นึกว่าระบบอ่านเพี้ยน
+
+    ชื่อปริญญาแบบเต็มก็นับ (เล่มจริง ก.ย. 2569 พิมพ์ "MASTER OF CLINICAL TROPICAL MEDICINE"
+    ตรงบรรทัดที่ต้องเป็น "M.C.T.M.") — มีบรรทัดปริญญาอยู่ แค่เขียนผิดรูป ต้องยกมาบอกว่าเล่มเขียน
+    ว่าอะไร ไม่ใช่บอกว่า "ไม่พบบรรทัด" ซึ่งทำให้นักศึกษาไปเพิ่มบรรทัดใหม่ซ้อนอีกบรรทัด
     """
     text = soft(line)
     return bool(text) and bool(_ABS_DEGREE_HEAD.match(text)
-                               or _DEGREE_ABBR_TOKEN.search(text))
+                               or _DEGREE_ABBR_TOKEN.search(text)
+                               or _FULL_DEGREE_NAME.search(text))
+
+
+_FULL_DEGREE_NAME = re.compile(r'^\s*(?:MASTER|DOCTOR|BACHELOR)\s+OF\s+\S|มหาบัณฑิต|ดุษฎีบัณฑิต', re.I)
 
 
 def _degree_search_text(page_text):
@@ -3770,8 +3965,16 @@ def compare_values(actual, expected, rule_name):
 
 
 def compare_reference_text(page_text, expected, rule_name, degree_line=False):
-    """Find the relevant PDF line, then classify exact/case/typo/mismatch."""
+    """Find the relevant PDF line, then classify exact/case/typo/mismatch.
+
+    degree_line=True ค้นเฉพาะส่วนที่บรรทัดชื่อปริญญาอยู่ได้ (degree_line_search_text) — การค้น
+    ทั้งหน้าเอาทุกบรรทัดมาต่อกัน ตัวย่อสั้นอย่าง "M.C.T.M." (norm แล้ว "MCTM") จึงไปเจอใน
+    รหัสนักศึกษา "6700000 TMCT/M" หรือคุณวุฒิกรรมการ แล้วตอบว่า exact ทั้งที่เล่มพิมพ์ผิดเป็น
+    "M.Sc." (เจอตอนเพิ่ม M.C.T.M. ก.ย. 2569)
+    """
     rule = MATCH_RULES[rule_name]
+    if degree_line:
+        page_text = degree_line_search_text(page_text)
     if not rule['case_sensitive'] and norm(expected) in norm(page_text):
         return {'status': 'exact', 'actual': soft(expected), 'score': 1.0}
     matched, reason = exact_reference_status(page_text, expected)
@@ -3859,9 +4062,13 @@ def degree_differs_only_in_spacing(expected, page_text):
     ด้วย norm() ที่แปลงเป็นตัวใหญ่ทั้งหมด ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่
     ("MASTER OF SCIENCE" กับ "Master of Science") จึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบาย
     ที่ผิด แล้วเล่มผ่านได้ — ตัวพิมพ์ผิดต้องเป็นแดงเหมือนเดิม (ดู mismatch_detail)
+
+    ค้นเฉพาะส่วนที่บรรทัดชื่อปริญญาอยู่ได้ (degree_line_search_text) — เล่มจริง ก.ย. 2569 พิมพ์
+    "MASTER OF CLINICAL TROPICAL MEDICINE" แทนตัวย่อ "M.C.T.M." แต่ค้นทั้งหน้าแล้วไปเจอ "MCTM"
+    ในรหัสนักศึกษา "6838776 TMCT/M" จึงตอบว่าต่างแค่วรรคตอน ได้สีเหลืองผ่านทั้งที่ผิดคนละคำ
     """
     want = _letters_keep_case(expected)
-    return bool(want) and want in _letters_keep_case(page_text)
+    return bool(want) and want in _letters_keep_case(degree_line_search_text(page_text))
 
 
 def mismatch_detail(label, compared, expected=''):
@@ -4772,6 +4979,10 @@ def classify(issue):
     # "เล่มทำผิดภาษา" ไม่ใช่ "ภาษาไม่ครบตามหลักสูตร" (ซึ่งแปลว่าเล่มขาดบทคัดย่ออีกภาษา)
     if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
         return "ภาษาของเล่ม"
+    # ตำแหน่งของข้อประเภทเล่มเป็นรายชื่อหน้า (หน้าปก หน้าลงนาม บทคัดย่อ) ถ้าปล่อยให้เดาจากคำ
+    # จะตกหมวด "โครงสร้างเล่ม" ทั้งที่เป็นเรื่องเล่มไม่ตรงกับข้อมูลอนุมัติ
+    if issue.get("rule_id") == "FORM.DOC_TYPE":
+        return "ไม่ตรงข้อมูลอนุมัติ"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -5775,9 +5986,26 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         A = approved
         program_language = A.get("program_language", "")
 
+        # ---- ประเภทเล่ม: ทุกจุดที่เล่มเขียนประเภทไว้ ต้องตรงกับที่ได้รับอนุมัติ ----
+        # ประเภทที่อนุมัติมาจากไฟล์ eThesis (main.py ยึดค่าจากไฟล์ก่อนช่องที่เลือกเอง) และเทียบกับ
+        # ค่าที่เลือกในแบบฟอร์มด้วย (doc_type_form) — เล่ม 6838776 ไม่ถูกฟ้องเรื่องนี้ เพราะช่อง
+        # ประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม
+        approved_type = A.get("doc_type", "")
+        type_spots = [("หน้าปก", cover_text)] + [
+            (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx]) for k, idx in enumerate(sig_pages)
+        ] + [
+            (f"{abstract_page_label(idx, abs_en_pages, abs_th_pages)} ({page_ref(idx)})", pages[idx])
+            for idx in sorted(i for i in (abs_th_idx, abs_en_idx) if i is not None)
+        ]
+        type_rows, type_issues, cover_type = doc_type_check(
+            approved_type, program_language, type_spots, A.get("doc_type_form", ""))
+        for where, status, detail in type_rows:
+            rep.add_verification("ประเภทเล่ม", where, status, detail)
+        for zone, *type_item in type_issues:
+            rep.add(zone, "front_matter", *type_item, "FORM.DOC_TYPE")
         missing_cover_items = [
             (label, expected_text)
-            for label, expected_text in cover_required_items(A.get("doc_type", ""), program_language)
+            for label, expected_text in cover_required_items(cover_type, program_language)
             if expected_text and norm(expected_text) not in norm(cover_text)
         ]
         for label, expected_text in missing_cover_items:
@@ -5798,9 +6026,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "แก้ข้อความบนหน้าปกให้ตรง template ทางการทุกตัวอักษร",
                 "FRONT.COVER_REQUIRED",
             )
-        if A.get("doc_type") and doc_type and A["doc_type"] != doc_type:
-            rep.add("RED", "front_matter", "หน้าปก", f"เล่มเป็น {doc_type}",
-                    f"ข้อมูลอนุมัติ: {A['doc_type']}", "ตรวจว่าใช้ template ประเภทถูก", "FORM.APPROVED_MATCH")
         if chapters_mode == "strict" and A.get("format") and str(option) != str(A["format"]):
             # บอกให้ครบว่า "เล่มเป็นแบบไหน / ต้องเป็นแบบไหน / แก้ตรงไหนได้บ้าง"
             # ของเดิมบอกแค่สองค่าเทียบกัน คนอ่านไม่รู้ว่าต้องแก้ฝั่งไหน
@@ -5808,6 +6033,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f"ข้อมูลอนุมัติระบุรูปแบบ {A['format']}",
                     f"แก้เล่มให้เป็นรูปแบบ {A['format']} หรือแก้ข้อมูลอนุมัติให้เป็นรูปแบบ {option}",
                     "FORM.APPROVED_MATCH")
+        # โหมด free ใช้รูปแบบตามที่เลือกตรวจต่อ (resolve_option) จึงไม่เคยเทียบกับเล่มเลย
+        # ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569): เลือกรูปแบบผิดในโหมด free แล้วไม่มีอะไรฟ้อง
+        # ยังต้องแจ้ง แต่เป็นสีส้ม — โหมดนี้ไม่บังคับชื่อบท การดูรูปแบบจากชื่อบทที่ 1
+        # ("บทสรุป/SUMMARY" = รูปแบบ 2) จึงเชื่อได้น้อยกว่าโหมด strict
+        if chapters_mode == "free" and A.get("format") and any(c[0] == 1 for c in body_ch):
+            book_option = resolve_option(body_ch, None, "strict")
+            if str(book_option) != str(A["format"]):
+                rep.add("ORANGE", "body", "โครงบท", f"เล่มจัดบทตามรูปแบบ {book_option}",
+                        f"ข้อมูลอนุมัติระบุรูปแบบ {A['format']}",
+                        "โหมด free ระบบดูรูปแบบจากชื่อบทที่ 1 เท่านั้น เปิดเล่มดูว่าจัดบทตามรูปแบบใด "
+                        "ถ้าไม่ตรงกับข้อมูลอนุมัติให้กดไม่ผ่าน",
+                        "FORM.APPROVED_MATCH")
 
         thai_book = A.get("program_language") == "thai"
 
@@ -6327,7 +6564,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
                 rep.add("RED", "front_matter", box,
                         mismatch_detail("ชื่อปริญญาแบบย่อ", compared, abbr),
-                        f"ต้องเป็น \"{abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
+                        degree_abbr_expected(abbr),
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
         _check_degree_abbr(soft(A.get("degree_abbr_en", "")), abs_en_idx, "บทคัดย่ออังกฤษ")

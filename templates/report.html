@@ -8,117 +8,174 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <title>Electronic file checking report</title>
 <style>
-  :root { --navy:#16365a; --navy-2:#23548a; --navy-soft:#edf3fa;
+  /* ออกแบบใหม่ (ก.ย. 2569) ชุดเดียวกับหน้าอัปโหลด: แถบบนบาง · คอลัมน์เดียว 980px · การ์ดแยกทีละส่วน
+     คลาสของส่วนประกอบ (issue / hc / sf / pf / copy-* / vf-* / cat-*) และ id ทุกตัวคงเดิม สคริปต์อ้างถึง */
+  :root { --navy:#16365a; --navy-2:#23548a; --navy-3:#2f6db3; --navy-soft:#eef3fa;
           --gold:#c9a227; --gold-soft:#fcf7e6; --gold-line:#efe1b0;
-          --bg:#f2f5f9; --surface:#ffffff; --line:#e3e8ef; --line-2:#d2dae5;
-          --ink:#1c2733; --ink-2:#4a5868; --ink-3:#7b8898;
+          --bg:#f4f6fa; --surface:#ffffff; --line:#e4e9f0; --line-2:#d5dde8;
+          --ink:#16212e; --ink-2:#465567; --ink-3:#7a8797;
           --ok:#1e8449; --ok-bg:#eaf7ef;
           --red:#c0392b; --red-bg:#fdf1f0; --orange:#c77c0e; --orange-bg:#fdf5ea;
           --yellow:#a8870a; --yellow-bg:#fdf9e7; --green:#1e8449; --green-bg:#eaf7ef;
           --purple:#7d3c98; --purple-bg:#f8f2fb;
-          --ring:0 0 0 3px rgba(35,84,138,.2);
-          --shadow-sm:0 1px 2px rgba(16,24,40,.06);
-          --shadow:0 1px 3px rgba(16,24,40,.05), 0 12px 32px -14px rgba(16,24,40,.18);
+          --ring:0 0 0 3px rgba(47,109,179,.22);
+          --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+          --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px -12px rgba(16,24,40,.14);
+          --radius:16px;
           --font:'IBM Plex Sans Thai','Noto Sans Thai','Sarabun','Segoe UI',Tahoma,sans-serif; }
   * { box-sizing:border-box; font-family:var(--font); }
-  body { background:var(--bg); margin:0; padding:32px 16px 56px; color:var(--ink);
-         font-size:15px; line-height:1.55; }
-  .wrap { max-width:960px; margin:0 auto; border-radius:20px; box-shadow:var(--shadow); }
+  body { margin:0; color:var(--ink); font-size:15px; line-height:1.55;
+         background:linear-gradient(180deg,#e9eff8 0, var(--bg) 320px) no-repeat, var(--bg); }
 
-  .head { position:relative; color:#fff; border-radius:20px 20px 0 0; padding:26px 34px 22px;
-          background:radial-gradient(700px 240px at 100% 0%, rgba(201,162,39,.28) 0%, transparent 60%),
-                     linear-gradient(135deg,#132f50 0%,#1f4a7c 100%); }
-  .head::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
-          background:linear-gradient(90deg,transparent 0%,var(--gold) 50%,transparent 100%); opacity:.7; }
-  .head h1 { font-size:1.35rem; margin:0; font-weight:700; letter-spacing:-.01em; padding-right:190px; }
-  .head .sub { font-size:.84rem; opacity:.78; margin-top:2px; padding-right:190px; }
-  .langbtn { position:absolute; top:22px; right:26px; background:rgba(255,255,255,.14);
-          color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:99px;
-          padding:7px 18px; font-size:.82rem; cursor:pointer; font-weight:700; transition:background .15s; }
-  .langbtn:hover { background:rgba(255,255,255,.26); }
-  .logout-form { position:absolute; top:22px; right:88px; margin:0; }
-  .logout-form button { background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.3);
-                        border-radius:99px; padding:7px 14px; font-size:.82rem; cursor:pointer; transition:background .15s; }
-  .logout-form button:hover { background:rgba(255,255,255,.22); }
-  .stu { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px 26px;
-          margin-top:18px; padding:14px 18px; font-size:.9rem; border-radius:14px;
-          background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); }
-  .stu .lb { opacity:.68; font-size:.74rem; letter-spacing:.01em; }
-  .stu .vl { font-weight:600; }
-  .stu .pages { font-weight:400; opacity:.75; margin-left:6px; }
-  .stu .book-open { display:inline-block; margin-left:10px; padding:3px 12px; border-radius:99px;
-          font-size:.8rem; font-weight:600; color:#fff; text-decoration:none; white-space:nowrap;
-          background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35); transition:background .15s; }
-  .stu .book-open:hover { background:rgba(255,255,255,.26); }
+  /* ---- แถบบน ---- */
+  .topbar { position:sticky; top:0; z-index:20; background:rgba(255,255,255,.82);
+       -webkit-backdrop-filter:saturate(1.4) blur(10px); backdrop-filter:saturate(1.4) blur(10px);
+       border-bottom:1px solid var(--line); }
+  .topbar-in { max-width:980px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; gap:14px; }
+  .brand-mark { flex:none; display:grid; place-items:center; width:40px; height:40px; border-radius:11px;
+       font-size:1.2rem; color:#fff; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%);
+       box-shadow:0 6px 14px -6px rgba(22,54,90,.6); }
+  .brand-name { font-weight:700; font-size:1.02rem; color:var(--navy); line-height:1.2; }
+  .brand-sub { font-size:.78rem; color:var(--ink-3); }
+  .top-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+  .top-new { text-decoration:none; font-size:.82rem; font-weight:700; color:#fff; white-space:nowrap;
+       background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); border-radius:99px; padding:7px 16px;
+       box-shadow:0 6px 14px -8px rgba(22,54,90,.7); }
+  .top-new:hover { filter:brightness(1.08); }
+  .langbtn, .logout-form button { background:#fff; color:var(--ink-2); border:1px solid var(--line-2);
+       border-radius:99px; padding:7px 14px; font-size:.82rem; cursor:pointer; white-space:nowrap; transition:all .15s; }
+  .langbtn { font-weight:700; color:var(--navy); min-width:52px; }
+  .langbtn:hover { background:var(--navy-soft); border-color:#b9c7d8; }
+  .logout-form { margin:0; }
+  .logout-form button:hover { color:#a12626; border-color:#e8bcb7; background:#fdf6f5; }
+  .top-new:focus-visible, .langbtn:focus-visible, .logout-form button:focus-visible { outline:none; box-shadow:var(--ring); }
+
+  /* ---- โครงหน้า ---- */
+  .page { max-width:980px; margin:0 auto; padding:28px 24px 48px; }
+  .hero h1 { margin:0; font-size:1.55rem; font-weight:700; color:var(--navy); letter-spacing:-.01em; }
+  .hero .sub { margin:4px 0 0; color:var(--ink-2); font-size:.92rem; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+       box-shadow:var(--shadow); padding:22px 24px 24px; margin-top:16px; }
+
+  /* ---- การ์ดผลตรวจ: ข้อมูลนักศึกษา + ผลการพิจารณา ---- */
+  .stu { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 28px; }
+  .stu .lb { font-size:.74rem; font-weight:600; color:var(--ink-3); letter-spacing:.01em; }
+  .stu .vl { font-weight:600; color:var(--ink); overflow-wrap:anywhere; }
+  .stu .pages { font-weight:400; color:var(--ink-3); margin-left:6px; }
+  .stu .book-open { display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:4px 12px;
+       border-radius:99px; font-size:.8rem; font-weight:600; color:var(--navy); text-decoration:none; white-space:nowrap;
+       background:var(--navy-soft); border:1px solid #d6e2f1; transition:background .15s, border-color .15s; }
+  .stu .book-open:hover { background:#e2ebf7; border-color:#b9cbe3; }
   .stu .book-open:focus-visible { outline:none; box-shadow:var(--ring); }
-
-  .verdict-bar { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
-          background:var(--surface); padding:18px 34px; border-bottom:1px solid var(--line); }
-  .verdict-label { font-size:.85rem; color:var(--ink-2); font-weight:600; }
-  .verdict-pill { font-size:1rem; font-weight:700; padding:9px 22px; border-radius:99px;
-          border:1px solid transparent; }
+  .verdict-bar { display:flex; align-items:center; gap:16px 18px; flex-wrap:wrap;
+       margin-top:20px; padding-top:20px; border-top:1px solid var(--line); }
+  .verdict-label { font-size:.86rem; color:var(--ink-2); font-weight:600; }
+  .verdict-pill { font-size:1.1rem; font-weight:700; padding:10px 22px 10px 16px; border-radius:99px;
+       border:1px solid transparent; display:inline-flex; align-items:center; gap:10px; }
+  .verdict-pill::before { display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
+       color:#fff; font-size:.9rem; font-weight:700; }
   .verdict-pill.pass { background:var(--green-bg); color:var(--green); border-color:#bfe3cd; }
+  .verdict-pill.pass::before { content:"✓"; background:var(--green); }
   .verdict-pill.fail { background:var(--red-bg); color:var(--red); border-color:#f3cfca; }
+  .verdict-pill.fail::before { content:"✕"; background:var(--red); }
   .verdict-pill.pending { background:var(--orange-bg); color:var(--orange); border-color:#f2dcb8; }
+  .verdict-pill.pending::before { content:"…"; background:var(--orange); }
   .stats { display:flex; gap:10px; margin-left:auto; flex-wrap:wrap; }
-  .stat { text-align:center; min-width:92px; padding:9px 14px; border-radius:12px; border:1px solid transparent; }
-  .stat b { display:block; font-size:1.45rem; line-height:1.15; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stat { text-align:center; min-width:96px; padding:10px 14px 8px; border-radius:12px; background:#fff;
+       border:1px solid var(--line); border-top:4px solid currentColor; box-shadow:var(--shadow-sm); }
+  .stat b { display:block; font-size:1.75rem; line-height:1.1; font-weight:700; font-variant-numeric:tabular-nums; }
   .stat span { font-size:.74rem; font-weight:600; }
-  .stat.r { background:var(--red-bg); color:var(--red); border-color:#f6dcd8; }
-  .stat.o { background:var(--orange-bg); color:var(--orange); border-color:#f4e2c6; }
-  .stat.y { background:var(--yellow-bg); color:var(--yellow); border-color:#efe5bd; }
+  .stat.r { color:var(--red); } .stat.o { color:var(--orange); } .stat.y { color:var(--yellow); }
 
-  .body { background:var(--surface); border-radius:0 0 20px 20px; padding:26px 34px 32px; }
-  h2.sec { font-size:1.02rem; color:var(--navy); display:flex; align-items:center; gap:10px;
-           margin:28px 0 12px; padding-bottom:10px; border-bottom:1px solid var(--line); }
-  h2.sec::before { content:""; flex:none; width:4px; height:18px; border-radius:4px; background:var(--gold); }
-  h2.sec .count { font-size:.74rem; font-weight:600; padding:2px 10px; border-radius:99px;
-           background:#eef2f7; color:var(--ink-2); }
+  /* ---- หัวข้อของแต่ละการ์ด: แถบสีตามเรื่อง (เจ้าหน้าที่ขอ ก.ย. 2569 "หัวข้อการ์ดต่างๆ มีการใช้สีมาช่วย") ----
+     แต่ละการ์ดตั้งตัวแปรสีของตัวเอง (tone-*) หัวการ์ดใช้ตัวแปรชุดนั้น */
+  .panel { --tone-bg:#f3f6fa; --tone-ink:var(--navy); --tone-line:var(--line); --tone-dot:var(--navy-3); }
+  .tone-blue   { --tone-bg:#edf3fc; --tone-ink:#1d4f91; --tone-line:#d3e1f5; --tone-dot:#2f6db3; }
+  .tone-purple { --tone-bg:#f5eefa; --tone-ink:#5e2d7a; --tone-line:#e6d6f1; --tone-dot:#8e44ad; }
+  .tone-lavender { --tone-bg:#f8f4fc; --tone-ink:#6b4a86; --tone-line:#ece2f5; --tone-dot:#a47fc4; }
+  .tone-teal   { --tone-bg:#eaf6f6; --tone-ink:#1d6667; --tone-line:#cde8e8; --tone-dot:#2a9d9f; }
+  .tone-slate  { --tone-bg:#f2f4f7; --tone-ink:#44505f; --tone-line:#e1e6ec; --tone-dot:#8492a3; }
+  .zone-panel.RED    { --tone-bg:#fdf1f0; --tone-ink:#a5271c; --tone-line:#f6d5d1; --tone-dot:var(--red); }
+  .zone-panel.ORANGE { --tone-bg:#fdf5ea; --tone-ink:#9a5d06; --tone-line:#f3e1c3; --tone-dot:var(--orange); }
+  .zone-panel.YELLOW { --tone-bg:#fdf9e7; --tone-ink:#836905; --tone-line:#efe5bd; --tone-dot:var(--yellow); }
+  /* โซนที่ไม่มีข้อเลย เป็นสีเทา — ไม่ให้หัวแดงโผล่ทั้งที่ไม่มีอะไรต้องแก้ */
+  .zone-panel:has(> .empty) { --tone-bg:#f2f4f7; --tone-ink:#5b6878; --tone-line:#e1e6ec; --tone-dot:#9aa6b4; }
+  .panel > h2.sec { margin:-22px -24px 16px; padding:14px 24px; border-radius:var(--radius) var(--radius) 0 0;
+       background:var(--tone-bg); color:var(--tone-ink); border-bottom:1px solid var(--tone-line); }
+  h2.sec { font-size:1.05rem; color:var(--navy); display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+       margin:0 0 14px; }
+  h2.sec .count { font-size:.74rem; font-weight:700; padding:2px 10px; border-radius:99px;
+       background:#fff; color:var(--tone-ink, var(--ink-2)); border:1px solid var(--tone-line, var(--line)); }
+  /* แถบสีบนการ์ดผลตรวจตามผลการพิจารณา — ปุ่มที่เปลี่ยนผลตรวจเปลี่ยนคลาสของ verdict-pill อยู่แล้ว สีจึงตามทันที */
+  .result-card { border-top:5px solid var(--line-2); }
+  .result-card:has(.verdict-pill.fail) { border-top-color:var(--red); }
+  .result-card:has(.verdict-pill.pass) { border-top-color:var(--green); }
+  .result-card:has(.verdict-pill.pending) { border-top-color:var(--orange); }
 
-  .issue { display:grid; grid-template-columns:5px 1fr; border-radius:12px;
-           overflow:hidden; margin-bottom:10px; background:#fafbfd; border:1px solid var(--line);
-           transition:box-shadow .15s; }
-  .issue:hover { box-shadow:var(--shadow-sm); }
-  .issue .bar { background:#cfd6df; }
-  .issue.RED .bar { background:var(--red); } .issue.RED { background:var(--red-bg); border-color:#f6dcd8; }
-  .issue.ORANGE .bar { background:var(--orange); } .issue.ORANGE { background:var(--orange-bg); border-color:#f4e2c6; }
-  .issue.YELLOW .bar { background:var(--yellow); } .issue.YELLOW { background:var(--yellow-bg); border-color:#efe5bd; }
-  .issue .in { padding:13px 18px; }
+  /* ---- การ์ดข้อที่พบ ---- */
+  .issue { display:grid; grid-template-columns:5px 1fr; border-radius:12px; overflow:hidden; margin-bottom:10px;
+       background:#fff; border:1px solid var(--line); box-shadow:var(--shadow-sm); transition:box-shadow .15s; }
+  .issue .bar { background:#cfd6df; width:5px; }
+  .issue.RED .bar { background:var(--red); } .issue.ORANGE .bar { background:var(--orange); }
+  .issue.YELLOW .bar { background:var(--yellow); }
+  .issue .in { padding:14px 18px; }
   .issue .loc { font-size:.78rem; font-weight:700; color:var(--ink-2); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .issue .loc .part { background:rgba(22,54,90,.07); border-radius:6px; padding:1px 8px; font-weight:600; }
   .issue .loc .cat { background:#fff; border:1px solid rgba(22,54,90,.14); border-radius:99px;
-        padding:1px 10px; font-weight:600; font-size:.72rem; color:#5a4a70; }
-  .issue .found { font-size:.96rem; margin:7px 0 3px; font-weight:600; color:var(--ink); }
-  .issue .expected { font-size:.86rem; color:var(--ink-2); }
+       padding:1px 10px; font-weight:600; font-size:.72rem; color:#5a4a70; }
+  .issue .found { font-size:.96rem; margin:8px 0 3px; font-weight:600; color:var(--ink); }
+  .issue .expected { font-size:.88rem; color:var(--ink-2); }
   .issue .expected b { color:var(--navy); }
   .issue .fix { font-size:.8rem; color:var(--ink-3); margin-top:6px; }
-  .rule-source { font-size:.76rem; color:#617184; margin-top:8px; padding-top:8px;
-        border-top:1px dashed rgba(60,80,100,.18); }
+  .issue .lbl { color:var(--ink-3); font-weight:600; }
+  .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
+  .issue.state-pass .bar { background:var(--green); }
+  .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
+  .issue.state-fail .bar { background:var(--red); }
+  .rule-source { font-size:.76rem; color:#617184; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(60,80,100,.18); }
   .rule-source b { color:var(--navy); }
   .rule-source ul { margin:3px 0 0; padding-left:19px; }
-  .empty { color:var(--ink-3); font-size:.86rem; background:#f7f9fb; border:1px dashed var(--line-2);
-           border-radius:12px; padding:14px 18px; }
+  .empty { color:var(--ink-3); font-size:.86rem; background:#f8fafc; border:1px dashed var(--line-2);
+       border-radius:12px; padding:14px 18px; }
 
-  .hc { background:var(--purple-bg); border:1px solid #eadcf3; border-radius:12px;
-        padding:13px 18px; margin-bottom:10px; }
-  .hc .row1 { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
-  .hc .t { font-weight:600; font-size:.92rem; color:#4a2a5c; }
-  .hc .w { font-size:.82rem; color:#7a668a; margin-top:2px; }
-  .hc .btns { margin-left:auto; display:flex; gap:8px; }
-  .pf { border:1.5px solid #cbb3da; background:#fff; color:#6a4a80; font-size:.82rem;
-        padding:7px 16px; border-radius:99px; cursor:pointer; font-weight:600;
-        transition:background .15s, border-color .15s, color .15s, box-shadow .15s; }
+  /* กลุ่มตามส่วนของเล่ม (กดเปิดดูรายละเอียด) */
+  .cat-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; background:#fff; }
+  .cat-sum { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer; font-weight:700; font-size:.9rem;
+       padding:12px 18px; list-style:none; user-select:none; color:var(--ink); transition:background .15s; }
+  .cat-sum::-webkit-details-marker { display:none; }
+  .cat-sum:hover { background:#f6f8fb; }
+  .cat-group[open] > .cat-sum { border-bottom:1px solid var(--line); }
+  .cat-name { flex:1; min-width:150px; }
+  .cat-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
+  details[open] > .cat-sum .cat-arrow { transform:rotate(90deg); }
+  .cat-n { font-size:.72rem; font-weight:600; background:#f1f4f8; color:var(--ink-2); padding:2px 10px; border-radius:99px; }
+  .cat-group .issue { margin:0; border-width:1px 0 0; border-top-color:#eef1f5; border-radius:0; box-shadow:none; }
+  .cat-group .issue:first-of-type { border-top-width:0; }
+  /* ในกลุ่มมีแถบสีที่หัวการ์ดโซนอยู่แล้ว แถบของแต่ละข้อจึงเหลือไว้บอก "ผลที่เจ้าหน้าที่กด" เท่านั้น */
+  .cat-group .issue .bar { background:transparent; }
+  .cat-group .issue.state-pass .bar { background:var(--green); }
+  .cat-group .issue.state-fail .bar { background:var(--red); }
+
+  /* ---- ปุ่มผ่าน/ไม่ผ่าน · สวิตช์ของเจ้าหน้าที่ ---- */
+  .pf { border:1.5px solid #cbb3da; background:#fff; color:#6a4a80; font-size:.82rem; padding:7px 16px;
+       border-radius:99px; cursor:pointer; font-weight:600; transition:background .15s, border-color .15s, color .15s, box-shadow .15s; }
   .pf:hover { box-shadow:var(--shadow-sm); }
   .pf:focus-visible { outline:none; box-shadow:var(--ring); }
   .pf.pass.on { background:var(--green-bg); border-color:var(--green); color:var(--green); }
   .pf.fail.on { background:var(--red-bg); border-color:var(--red); color:var(--red); }
-  /* จุดที่เจ้าหน้าที่กดแล้วมีผลกับข้อความที่ส่งให้นักศึกษา — ขีดข้างซ้ายให้ต่างจาก
-     รายการตรวจเองที่กดไว้เพื่อเป็นหลักฐานเฉย ๆ */
-  .hc.sf { border-left:4px solid #9b59b6; }
-  /* สวิตช์สองทาง: กรอบเดียวสองข้าง ข้างที่เลือกอยู่ถูกถม ไม่ใช่ปุ่มแยกสองปุ่ม
-     เพราะสองหัวข้อนี้เป็น "สถานะ" ไม่ใช่คำตัดสินผ่าน/ไม่ผ่านของการตรวจ */
-  .sw { display:inline-flex; border:1.5px solid #cbb3da; border-radius:999px;
-        overflow:hidden; background:#fff; }
+  .issue-decide { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .issue-decide .lbl { font-size:.78rem; font-weight:600; color:var(--ink-2); }
+  .issue-decide .pf { border-color:#c3cede; color:#4a5a70; }
+  .hc { background:#fff; border:1px solid #e8def0; border-left:4px solid #b28bc8; border-radius:12px;
+       padding:14px 18px; margin-bottom:10px; box-shadow:var(--shadow-sm); }
+  .hc .row1 { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  .hc .t { font-weight:600; font-size:.92rem; color:#4a2a5c; }
+  .hc .w { font-size:.82rem; color:#7a668a; margin-top:2px; }
+  .hc .btns { margin-left:auto; display:flex; gap:8px; }
+  /* จุดที่เจ้าหน้าที่กดแล้วมีผลกับข้อความที่ส่งให้นักศึกษา — ขีดข้างซ้ายเข้มกว่ารายการตรวจเอง */
+  .hc.sf { border-left-color:#9b59b6; }
+  /* สวิตช์สองทาง: กรอบเดียวสองข้าง ข้างที่เลือกอยู่ถูกถม — เป็น "สถานะ" ไม่ใช่คำตัดสินของการตรวจ */
+  .sw { display:inline-flex; border:1.5px solid #cbb3da; border-radius:999px; overflow:hidden; background:#fff; }
   .sw .pf { border:none; border-radius:0; margin:0; padding:7px 18px; }
   .sw .pf + .pf { border-left:1.5px solid #e3d5ee; }
   .sw .pf.pass.on { background:var(--green); border-color:var(--green); color:#fff; }
@@ -127,45 +184,40 @@
   .hc.state-fail .sf-state { color:#8a2f24; }
   .hc.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
   .hc.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
-  .issue-decide { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
-  .issue-decide .lbl { font-size:.78rem; font-weight:600; color:var(--ink-2); }
-  .issue-decide .pf { border-color:#c3cede; color:#4a5a70; }
-  .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
-  .issue.state-pass .bar { background:var(--green); }
-  .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
-  .issue.state-fail .bar { background:var(--red); }
 
-  .cmt-btn { border:none; background:transparent; color:var(--ink-3); font-size:.78rem;
-        cursor:pointer; padding:4px 8px; border-radius:8px; margin-top:6px; }
+  .cmt-btn { border:none; background:transparent; color:var(--ink-3); font-size:.78rem; cursor:pointer;
+       padding:4px 8px; border-radius:8px; margin-top:6px; }
   .cmt-btn:hover { background:rgba(22,54,90,.06); color:var(--navy); }
   .note-editor { display:none; margin-top:8px; }
   .note-editor.open { display:block; }
-  .note-editor textarea { width:100%; border:1px solid var(--line-2); border-radius:10px;
-        padding:9px 12px; font-size:.86rem; min-height:60px; resize:vertical; }
-  .note-editor textarea:focus { outline:none; border-color:var(--navy-2); box-shadow:var(--ring); }
-  .note-editor .save { margin-top:6px; background:var(--navy); color:#fff; border:none;
-        border-radius:9px; padding:7px 18px; font-size:.8rem; cursor:pointer; font-weight:600; }
+  .note-editor textarea { width:100%; border:1px solid var(--line-2); border-radius:10px; padding:9px 12px;
+       font-size:.86rem; min-height:60px; resize:vertical; }
+  .note-editor textarea:focus { outline:none; border-color:var(--navy-3); box-shadow:var(--ring); }
+  .note-editor .save { margin-top:6px; background:var(--navy); color:#fff; border:none; border-radius:9px;
+       padding:7px 18px; font-size:.8rem; cursor:pointer; font-weight:600; }
   .note-editor .save:hover { background:var(--navy-2); }
-  .note-view { display:none; margin-top:8px; background:#fff; border-left:3px solid var(--gold);
-        padding:8px 12px; font-size:.86rem; color:var(--ink-2); white-space:pre-wrap; border-radius:0 8px 8px 0; }
+  .note-view { display:none; margin-top:8px; background:#fff; border-left:3px solid var(--gold); padding:8px 12px;
+       font-size:.86rem; color:var(--ink-2); white-space:pre-wrap; border-radius:0 8px 8px 0; }
   .note-view.show { display:block; }
   .note-view b { color:var(--navy); }
 
-  .vf-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
-  .vf-topic { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
-              background:#f3f6fa; font-weight:700; font-size:.88rem; color:var(--navy);
-              padding:12px 18px; list-style:none; user-select:none; transition:background .15s; }
+  /* ---- ผลเทียบข้อมูลอนุมัติรายตำแหน่ง ---- */
+  .vf-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; background:#fff; }
+  .vf-topic { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer; background:#fff;
+       font-weight:700; font-size:.88rem; color:var(--navy); padding:12px 18px; list-style:none; user-select:none;
+       transition:background .15s; }
   .vf-topic::-webkit-details-marker { display:none; }
-  .vf-topic:hover { background:#e9eff7; }
-  .vf-topic.fail { background:var(--red-bg); }
-  .vf-topic.pending { background:var(--orange-bg); }
-  .vf-topic.notice { background:var(--yellow-bg); }
+  .vf-topic:hover { background:#f6f8fb; }
+  .vf-topic.fail { box-shadow:inset 4px 0 0 var(--red); }
+  .vf-topic.pending { box-shadow:inset 4px 0 0 var(--orange); }
+  .vf-topic.notice { box-shadow:inset 4px 0 0 var(--yellow); }
+  .vf-topic.skipped { box-shadow:inset 4px 0 0 #a3aebb; }
   .vf-topic-name { flex:1; min-width:150px; }
   .vf-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
   details[open] > .vf-topic .vf-arrow { transform:rotate(90deg); }
-  .vf-count { font-size:.72rem; font-weight:600; color:#8091a6; }
-  .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
-            padding:8px 18px 8px 36px; border-top:1px solid #eef1f5; font-size:.86rem; }
+  .vf-count { font-size:.72rem; font-weight:600; color:#8091a6; background:#f1f4f8; padding:2px 10px; border-radius:99px; }
+  .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:8px 18px 8px 36px;
+       border-top:1px solid #eef1f5; font-size:.86rem; }
   .vf-loc { min-width:220px; color:#3d4c5e; }
   .vf-badge { font-size:.74rem; font-weight:700; padding:2px 12px; border-radius:99px; white-space:nowrap; }
   .vf-badge.pass { background:var(--green-bg); color:var(--green); }
@@ -177,142 +229,115 @@
   .vf-badge.skipped { background:#eef1f5; color:#586576; }
   .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
-  /* จัดกลุ่มรายงานตามหมวด (กด expand ดูรายละเอียด) */
-  .cat-group { border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
-  .cat-sum { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
-             font-weight:700; font-size:.88rem; padding:11px 18px; list-style:none; user-select:none; }
-  .cat-sum::-webkit-details-marker { display:none; }
-  .cat-group.RED .cat-sum { background:var(--red-bg); color:var(--red); }
-  .cat-group.ORANGE .cat-sum { background:var(--orange-bg); color:var(--orange); }
-  .cat-group.YELLOW .cat-sum { background:var(--yellow-bg,#fdf6e3); color:#8a6d00; }
-  .cat-name { flex:1; min-width:150px; }
-  .cat-arrow { font-size:.8rem; transition:transform .15s; opacity:.7; }
-  details[open] > .cat-sum .cat-arrow { transform:rotate(90deg); }
-  .cat-n { font-size:.72rem; font-weight:600; opacity:.8; }
-  .cat-group .issue { margin:0; border-width:1px 0 0; border-top-color:#eef1f5; border-radius:0; }
-  .cat-group .issue:hover { box-shadow:none; }
-  .copybox { border:1px solid #cdd8e6; border-radius:12px; margin:0 0 16px; overflow:hidden;
-             box-shadow:var(--shadow-sm); }
-  .copy-sum { display:flex; align-items:center; gap:12px; flex-wrap:wrap; cursor:pointer;
-              background:var(--navy-soft); font-weight:700; font-size:.9rem; color:var(--navy);
-              padding:12px 18px; list-style:none; user-select:none; }
+  /* ---- กล่องข้อความสรุป (คัดลอกได้) ---- */
+  .copybox { background:#fff; border:1px solid #cdd8e6; border-radius:var(--radius); margin:16px 0 0; overflow:hidden;
+       box-shadow:var(--shadow); }
+  .copybox .copy-sum { border-bottom:1px solid #d3e1f1; }
+  .copy-sum { display:flex; align-items:center; gap:12px; flex-wrap:wrap; cursor:pointer; background:var(--navy-soft);
+       font-weight:700; font-size:.95rem; color:var(--navy); padding:14px 20px; list-style:none; user-select:none; }
   .copy-sum::-webkit-details-marker { display:none; }
-  .copy-btn { margin-left:auto; border:1px solid var(--navy); background:#fff; color:var(--navy);
-              border-radius:99px; padding:5px 16px; font-size:.8rem; font-weight:700; cursor:pointer;
-              transition:background .15s, color .15s; }
-  .copy-btn:hover { background:var(--navy); color:#fff; }
-  .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee;
-               padding:14px 18px; font:0.84rem/1.6 var(--font); resize:vertical;
-               min-height:140px; background:#fbfdff; color:#22303f; white-space:pre; }
+  .copy-btn { margin-left:auto; border:none; color:#fff; border-radius:99px; padding:7px 18px; font-size:.82rem;
+       font-weight:700; cursor:pointer; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%);
+       box-shadow:0 6px 14px -8px rgba(22,54,90,.7); transition:filter .15s; }
+  .copy-btn:hover { filter:brightness(1.08); }
+  .copy-btn:focus-visible { outline:none; box-shadow:var(--ring); }
+  .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee; padding:16px 20px;
+       font:0.86rem/1.65 var(--font); resize:vertical; min-height:160px; background:#fbfdff; color:#22303f; white-space:pre; }
   .copy-text:focus { outline:none; background:#fff; }
   .copy-print { display:none; }
-  .copy-error { margin:8px 14px 12px; padding:9px 12px; border-radius:10px;
-                background:var(--red-bg); border:1px solid #f0ccc7; color:#8a2f24;
-                font-size:.85rem; line-height:1.6; }
+  .copy-error { margin:8px 14px 12px; padding:9px 12px; border-radius:10px; background:var(--red-bg);
+       border:1px solid #f0ccc7; color:#8a2f24; font-size:.85rem; line-height:1.6; }
 
-  .infobox { background:#f2f6fb; border:1px solid #e1e9f3; border-radius:12px; padding:10px 16px;
-             font-size:.84rem; margin-bottom:8px; color:#3d4c5e; }
+  .infobox { background:#fff; border:1px solid var(--line); border-left:4px solid var(--navy-3); border-radius:12px;
+       padding:10px 16px; font-size:.84rem; margin-bottom:8px; color:#3d4c5e; }
   .infobox b { color:var(--navy); }
-  .actions { display:flex; gap:12px; margin-top:30px; padding-top:22px; border-top:1px solid var(--line); flex-wrap:wrap; }
-  .btn { text-decoration:none; font-size:.92rem; font-weight:600; padding:11px 22px; border-radius:11px;
-         cursor:pointer; border:none; transition:background .15s, color .15s, box-shadow .15s; }
-  .btn.primary { background:var(--navy); color:#fff; box-shadow:0 10px 22px -10px rgba(22,54,90,.65); }
-  .btn.primary:hover { background:var(--navy-2); }
-  .btn.ghost { background:#fff; color:var(--navy); border:1.5px solid var(--navy); }
-  .btn.ghost:hover { background:var(--navy-soft); }
+  .infobox:last-child { margin-bottom:0; }
+
+  /* ---- ปุ่มท้ายหน้า ---- */
+  .actions { display:flex; justify-content:space-between; gap:12px; margin-top:16px; flex-wrap:wrap;
+       background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+       padding:14px 16px; }
+  .btn { text-decoration:none; font-size:.92rem; font-weight:600; padding:11px 22px; border-radius:11px; cursor:pointer;
+       border:none; transition:filter .15s, background .15s, color .15s, box-shadow .15s; }
+  .btn.primary { color:#fff; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%);
+       box-shadow:0 10px 22px -10px rgba(22,54,90,.65); }
+  .btn.primary:hover { filter:brightness(1.08); }
+  .btn.ghost { background:#fff; color:var(--navy); border:1.5px solid var(--line-2); }
+  .btn.ghost:hover { background:var(--navy-soft); border-color:#b9c7d8; }
   .btn:focus-visible { outline:none; box-shadow:var(--ring); }
 
   @media print {
-    body { background:#fff; padding:0; }
-    .wrap { box-shadow:none; }
-    .body { box-shadow:none; }
-    .head { background:#16365a; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .actions, .cmt-btn, .note-editor, .langbtn, .logout-form, .book-open { display:none !important; }
+    body { background:#fff; }
+    .topbar, .actions, .cmt-btn, .note-editor, .langbtn, .logout-form, .book-open, .top-new { display:none !important; }
+    .page { padding:0; max-width:none; }
+    .panel, .copybox, .stat, .issue, .hc, .cat-group, .vf-group { box-shadow:none !important; }
+    /* การ์ดทั้งใบห้ามตั้ง break-inside:avoid — การ์ดที่ไม่พอดีหน้าจะถูกดันไปหน้าใหม่ทั้งใบ
+       ทิ้งที่ว่างครึ่งหน้า (รายงานเล่มเดียวกันเคยพิมพ์ 5 หน้า กลายเป็น 7 หน้า) ให้การ์ดขึ้นหน้าใหม่ได้
+       กันไว้แค่ก้อนเล็กที่อ่านรู้เรื่องเป็นหน่วยเดียว และไม่ให้หัวการ์ดค้างท้ายหน้าโดยไม่มีเนื้อหา */
+    .panel > h2.sec, .cat-sum, .vf-topic { break-after:avoid-page; }
+    .result-card, .issue, .hc, .vf-row { break-inside:avoid-page; }
+    .panel > h2.sec, .copy-sum { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     .vf-arrow { display:none; }
     .vf-topic { cursor:default; }
     .copy-text { display:none; }
-    .copy-print { display:block; padding:12px 16px; border-top:1px solid #dbe4ee;
-                  font:0.82rem/1.6 var(--font);
-                  white-space:pre-wrap; color:#22303f; }
+    .copy-print { display:block; padding:12px 16px; border-top:1px solid #dbe4ee; font:0.82rem/1.6 var(--font);
+         white-space:pre-wrap; color:#22303f; }
   }
-  @media (max-width:640px) {
-    body { padding:14px 8px 36px; }
-    .head, .verdict-bar, .body { padding-left:18px; padding-right:18px; }
-    .head h1, .head .sub { padding-right:0; }
-    .langbtn, .logout-form { position:static; display:inline-block; margin:0 6px 12px 0; }
-    .stats { margin-left:0; }
+  @media (max-width:720px) {
+    .topbar-in { padding:10px 14px; gap:10px; }
+    .brand-sub { display:none; }
+    .brand-name { font-size:.95rem; }
+    .brand-mark { width:36px; height:36px; font-size:1.05rem; }
+    .top-new { display:none; }
+    .page { padding:18px 12px 32px; }
+    .hero h1 { font-size:1.25rem; }
+    .panel { padding:18px 16px 20px; border-radius:14px; }
+    .panel > h2.sec { margin:-18px -16px 14px; padding:12px 16px; border-radius:14px 14px 0 0; }
+    .stu { grid-template-columns:minmax(0,1fr); }
+    .stats { margin-left:0; width:100%; }
+    .stat { flex:1; min-width:0; }
+    .vf-row { padding-left:18px; }
+    .vf-loc { min-width:0; flex:1 1 100%; }
   }
-
-  /* ---------- รอบสอง: แยกสามการ์ด การ์ดข้อพื้นขาว ---------- */
-  body { background:radial-gradient(1100px 520px at 0% -10%, #dbe6f4 0%, transparent 60%),
-                    radial-gradient(900px 480px at 100% 0%, #f3ead0 0%, transparent 55%), var(--bg);
-         background-attachment:fixed; }
-  .wrap { box-shadow:none; border-radius:0; }
-  .head { border-radius:22px; box-shadow:0 18px 40px -22px rgba(18,44,75,.8); overflow:hidden; }
-  .verdict-bar { margin-top:16px; border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow);
-          padding:20px 28px; gap:18px; }
-  .verdict-label { font-size:.9rem; }
-  .verdict-pill { font-size:1.12rem; padding:11px 24px 11px 20px; display:inline-flex; align-items:center; gap:10px; }
-  .verdict-pill::before { display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
-          color:#fff; font-size:.9rem; font-weight:700; }
-  .verdict-pill.pass::before { content:"✓"; background:var(--green); }
-  .verdict-pill.fail::before { content:"✕"; background:var(--red); }
-  .verdict-pill.pending::before { content:"…"; background:var(--orange); }
-  .stat { min-width:104px; padding:12px 16px 10px; background:#fff !important; border:1px solid var(--line);
-          border-top:4px solid currentColor; border-radius:14px; box-shadow:var(--shadow-sm); }
-  .stat b { font-size:1.9rem; }
-  .body { margin-top:16px; border:1px solid var(--line); border-radius:22px; box-shadow:var(--shadow);
-          padding:24px 30px 30px; }
-  h2.sec { font-size:1.1rem; }
-
-  .issue { background:#fff; border-color:var(--line); box-shadow:var(--shadow-sm); }
-  .issue.RED, .issue.ORANGE, .issue.YELLOW { background:#fff; border-color:var(--line); }
-  .issue .bar { width:5px; }
-  .issue.state-pass { background:var(--green-bg); border-color:#bfe3cd; }
-  .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
-  .cat-group { background:#fff; border-left-width:4px; }
-  .cat-group.RED { border-left-color:var(--red); }
-  .cat-group.ORANGE { border-left-color:var(--orange); }
-  .cat-group.YELLOW { border-left-color:var(--yellow); }
-  .cat-group.RED .cat-sum, .cat-group.ORANGE .cat-sum, .cat-group.YELLOW .cat-sum { background:#fff; }
-  .cat-group[open] > .cat-sum { border-bottom:1px solid var(--line); }
-  .cat-group .issue { box-shadow:none; }
-  /* ในกลุ่มมีแถบสีโซนที่ขอบกลุ่มอยู่แล้ว แถบของแต่ละข้อจึงเหลือไว้บอก "ผลที่เจ้าหน้าที่กด" เท่านั้น */
-  .cat-group .issue .bar { background:transparent; }
-  .cat-group .issue.state-pass .bar { background:var(--green); }
-  .cat-group .issue.state-fail .bar { background:var(--red); }
-  .cat-n { background:#f1f4f8; color:var(--ink-2); padding:2px 10px; border-radius:99px; opacity:1; }
-  .vf-group { background:#fff; }
-  .vf-topic { background:#fff; }
-  .vf-topic:hover { background:#f6f8fb; }
-  .vf-topic.fail { background:#fff; box-shadow:inset 4px 0 0 var(--red); }
-  .vf-topic.pending { background:#fff; box-shadow:inset 4px 0 0 var(--orange); }
-  .vf-topic.notice { background:#fff; box-shadow:inset 4px 0 0 var(--yellow); }
-  .vf-topic.skipped { background:#fff; box-shadow:inset 4px 0 0 #a3aebb; }
-  .vf-count { background:#f1f4f8; padding:2px 10px; border-radius:99px; }
-  .hc { background:#fff; border-color:#e8def0; border-left:4px solid #b28bc8; box-shadow:var(--shadow-sm); }
-  .hc.state-pass { background:var(--green-bg); }
-  .hc.state-fail { background:var(--red-bg); }
-  .infobox { background:#fff; border-color:var(--line); border-left:4px solid var(--navy-2); }
-
+  /* พิมพ์: ระยะห่างของการ์ดบนจอกินกระดาษ — บีบให้ใกล้รายงานแบบเก่า (วางหลังชุดจอเล็ก
+     เพราะความกว้างกระดาษ A4 หักขอบแล้วอาจตกช่วง max-width:720px) */
   @media print {
-    body { background:#fff; }
-    .head, .verdict-bar, .body, .stat, .issue, .hc { box-shadow:none !important; }
-  }
-  @media (max-width:640px) {
-    .verdict-bar, .body { border-radius:16px; }
-    .head { border-radius:18px; }
+    .hero .sub { margin-top:2px; }
+    .panel { padding:12px 16px 14px; margin-top:10px; border-radius:10px; }
+    .panel > h2.sec { margin:-12px -16px 10px; padding:8px 16px; border-radius:10px 10px 0 0; font-size:.98rem; }
+    .stu { gap:8px 24px; }
+    .verdict-bar { margin-top:12px; padding-top:12px; }
+    .issue, .hc, .cat-group, .vf-group { margin-bottom:8px; }
+    .hc { padding:10px 14px; }
+    .vf-topic { padding:8px 14px; }
+    .vf-row { padding:4px 14px 4px 28px; }
+    .copybox { margin-top:10px; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="head">
-    <button type="button" class="langbtn" id="langbtn" onclick="toggleLang()">EN</button>
-    <form class="logout-form" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand-mark" aria-hidden="true">📋</div>
+    <div>
+      <div class="brand-name">E-Thesis Staff Checker</div>
+      <div class="brand-sub" data-th="ตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ · บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"
+           data-en="Electronic thesis format check · Faculty of Graduate Studies, Mahidol University">ตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ · บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล</div>
+    </div>
+    <div class="top-actions">
+      <a class="top-new" href="/" data-th="＋ ตรวจเล่มใหม่" data-en="＋ New check">＋ ตรวจเล่มใหม่</a>
+      <button type="button" class="langbtn" id="langbtn" onclick="toggleLang()">EN</button>
+      <form class="logout-form" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+    </div>
+  </div>
+</header>
+<main class="page">
+  <div class="hero">
     <h1>Electronic file checking report</h1>
     <div class="sub" data-th="รายงานผลการตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ บัณฑิตวิทยาลัย"
          data-en="Graduate Studies e-thesis format checking report">รายงานผลการตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ บัณฑิตวิทยาลัย</div>
+  </div>
+  <section class="panel result-card">
     <div class="stu">
       <div><div class="lb" data-th="ชื่อ-นามสกุลนักศึกษา" data-en="Student name">ชื่อ-นามสกุลนักศึกษา</div>
         <div class="vl">{{ student.student_name or '-' }}</div></div>
@@ -341,7 +366,6 @@
           {% if has_book %}<a class="book-open" href="/book/{{ job_id }}" target="_blank" rel="noopener"
              data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file">📄 เปิดดูไฟล์รูปเล่ม</a>{% endif %}</div></div>
     </div>
-  </div>
 
   <div class="verdict-bar">
     <div class="verdict-label" data-th="แจ้งผลการพิจารณา" data-en="Result of consideration">แจ้งผลการพิจารณา</div>
@@ -354,6 +378,7 @@
       <div class="stat y"><b id="stat-yellow">{{ report.issues_by_zone.YELLOW | length }}</b><span data-th="ข้อสังเกต" data-en="Notice">ข้อสังเกต</span></div>
     </div>
   </div>
+  </section>
 
   <div class="body">
     {# ถ้อยคำของจุดที่เจ้าหน้าที่กดเพิ่มเอง ทั้งไทยและอังกฤษ มาจากทะเบียนชุดเดียว
@@ -386,7 +411,8 @@
     </details>
     {% endif %}
     {% if report.verification %}
-    <h2 class="sec" style="margin-top:0;"><span data-th="📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" data-en="📋 Approved-data verification by location">📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง</span></h2>
+    <section class="panel tone-blue">
+    <h2 class="sec"><span data-th="📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" data-en="📋 Approved-data verification by location">📋 ผลเทียบข้อมูลอนุมัติรายตำแหน่ง</span></h2>
     {% for group in report.verification %}
     {% set statuses = group.checks | map(attribute='status') | list %}
     {# ป้ายต้องตรงกับสีของการ์ดที่คู่กับตำแหน่งนั้น (เจ้าหน้าที่สั่ง ก.ย. 2569 ให้กฎสัมพันธ์กัน)
@@ -433,6 +459,7 @@
       {% endfor %}
     </details>
     {% endfor %}
+    </section>
     {% endif %}
 
     {% set PART_LABEL = {'front_matter':'ส่วนนำ', 'body':'ส่วนเนื้อหา',
@@ -440,6 +467,7 @@
                          '-':'ทั้งเล่ม'} %}
     {% set zone_meta = [('RED','🔴 ไม่ผ่าน','🔴 Must fix'),('ORANGE','🟠 รอยืนยัน','🟠 Pending confirmation'),('YELLOW','🟡 ข้อสังเกต','🟡 Notice')] %}
     {% for zone, th_lbl, en_lbl in zone_meta %}
+    <section class="panel zone-panel {{ zone }}">
     <h2 class="sec"><span data-th="{{ th_lbl }}" data-en="{{ en_lbl }}">{{ th_lbl }}</span>
       <span class="count"><b>{{ report.issues_by_zone[zone] | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% if report.issues_by_zone[zone] %}
@@ -486,10 +514,12 @@
     {% else %}
       <div class="empty" data-th="ไม่พบปัญหาในกลุ่มนี้" data-en="No issues in this group">ไม่พบปัญหาในกลุ่มนี้</div>
     {% endif %}
+    </section>
     {% endfor %}
 
 
     {% if report.staff_findings %}
+    <section class="panel tone-purple">
     <h2 class="sec" id="sf-head"><span data-th="✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที"
         data-en="✍️ Decisions only staff can make — pressing adds the wording to the summary">✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
       <span class="count"><b>{{ report.staff_findings | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
@@ -524,9 +554,11 @@
       <div class="note-view"></div>
     </div>
     {% endfor %}
+    </section>
     {% endif %}
 
     {% if report.human_checklist %}
+    <section class="panel tone-lavender">
     <h2 class="sec"><span data-th="🟣 รายการที่เจ้าหน้าที่ตรวจเอง" data-en="🟣 Staff manual checks">🟣 รายการที่เจ้าหน้าที่ตรวจเอง</span>
       <span class="count"><b>{{ report.human_checklist | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for hc in report.human_checklist %}
@@ -544,16 +576,20 @@
       <div class="note-view"></div>
     </div>
     {% endfor %}
+    </section>
     {% endif %}
 
     {% if report.info %}
+    <section class="panel tone-teal">
     <h2 class="sec"><span data-th="ℹ️ ข้อมูลประกอบ" data-en="ℹ️ Information">ℹ️ ข้อมูลประกอบ</span></h2>
     {% for it in report.info %}
     <div class="infobox"><b class="tr-dyn">{{ it.topic }}</b> — <span class="tr-dyn">{{ it.detail }}</span></div>
     {% endfor %}
+    </section>
     {% endif %}
 
     {% if report.not_checked %}
+    <section class="panel tone-slate">
     <h2 class="sec"><span data-th="⚠️ รายการที่ระบบไม่ได้ตรวจ" data-en="⚠️ Items not checked">⚠️ รายการที่ระบบไม่ได้ตรวจ</span></h2>
     <div class="infobox">
       <ul style="margin:0; padding-left:22px;">
@@ -562,6 +598,7 @@
       {% endfor %}
       </ul>
     </div>
+    </section>
     {% endif %}
 
     <div class="actions">
@@ -569,7 +606,7 @@
       <button class="btn ghost" onclick="window.print()" data-th="🖨 พิมพ์ / บันทึก PDF" data-en="🖨 Print / Save PDF">🖨 พิมพ์ / บันทึก PDF</button>
     </div>
   </div>
-</div>
+</main>
 
 <script>
 var LANG = 'th';
@@ -641,6 +678,8 @@ var TR = [
   [/หัวข้อในสารบัญต้องเป็น ("[^"]*")/g, 'The heading in the table of contents must be $1'],
   [/ต้องเป็นเลขหน้า ("[^"]*")/g, 'Must be page label $1'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
+  // ตัวย่อที่ไม่มีวงเล็บ (เช่น M.C.T.M.) ไม่พูดถึงวงเล็บ — ต้องอยู่หลังกฎยาวข้างบน
+  [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อ/g, 'Must be $1, in the form of the abbreviation'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
   [/บทคัดย่ออังกฤษ \(หน้า (\S+)\)/g, 'English abstract (page $1)'],
@@ -685,6 +724,7 @@ var TR = [
   [/บรรทัดชื่อนักศึกษาในบทคัดย่อไทยต้องมีรหัส ("[^"]*")/g, 'The student-name line on the Thai abstract must include the ID $1'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา ("[^"]*")/g, 'The text under the signature must contain the subject $1'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ ("[^"]*")/g, 'The text under the signature must contain the faculty name $1'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อปริญญา ("[^"]*")/g, 'The text under the signature must contain the degree name $1'],
   [/(.+?)ของนักศึกษาในหน้าบทคัดย่อต้องสะกดตรงข้อมูลอนุมัติ: ("[^"]*")/g, 'The student\'s $1 on the abstract page must be spelled as in the approved data: $2'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*")$/g, '$1 in the document reads $2'],
   [/(.+?)ในเล่มเขียนว่า ("[^"]*") พิมพ์ผิดเล็กน้อย/g, '$1 in the document reads $2, a small typo'],
@@ -713,16 +753,20 @@ var TR = [
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the subject; it reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) สะกดชื่อคณะผิด เขียนว่า/g, 'The faculty dean box (bottom right) misspells the faculty name; it reads'],
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อปริญญาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the degree name; it reads'],
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) เขียนว่า/g, 'The programme chair box (bottom right) reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) เขียนว่า/g, 'The faculty dean box (bottom right) reads'],
   [/ไม่พบชื่อสาขา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The subject "$1" was not found in the programme chair box (bottom right)'],
+  [/ไม่พบชื่อปริญญา "(.+?)" ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The degree name "$1" was not found in the programme chair box (bottom right)'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) ใช้ตำแหน่ง/g, 'The faculty dean box (bottom right) uses the title'],
   [/ตำแหน่งต้องเป็น ("[^"]+") หรือ ("[^"]+") เท่านั้น/g, 'The title must be $1 or $2'],
   [/ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1/g, 'Use the title of the head of the faculty or institute; the programme director signs on signature page 1'],
   [/ไม่พบชื่อคณะ "(.+?)" ในช่องคณบดีคณะ \(มุมล่างขวา\)/g, 'The faculty name "$1" was not found in the faculty dean box (bottom right)'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา/g, 'The text under the signature must contain the subject'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ/g, 'The text under the signature must contain the faculty name'],
+  [/ข้อความใต้ลายเซ็นต้องมีชื่อปริญญา/g, 'The text under the signature must contain the degree name'],
   [/โปรดตรวจชื่อสาขามุมล่างขวาให้ถูกต้อง/g, 'Please verify the subject name at the bottom right'],
+  [/โปรดตรวจชื่อปริญญามุมล่างขวาให้ถูกต้อง/g, 'Please verify the degree name at the bottom right'],
   // ---- ประโยคเต็มที่เคยถูกกฎเศษคำฉีกจนแปลไม่ครบ ----
   [/ชื่อบัณฑิตวิทยาลัยและมหาวิทยาลัย/g, 'Name of the Faculty of Graduate Studies and the University'],
   [/บทที่ (\d+)\/ส่วนเนื้อหา/g, 'Chapter $1 (start of the body)'],
@@ -767,8 +811,8 @@ var TR = [
   [/ชื่อกรรมการบนหน้านี้ไม่ใช่ Sentence Case:/g, 'These committee names on this page are not in Sentence Case:'],
   [/ชื่อกรรมการบนหน้าลงนามต้องเป็น Sentence Case คือตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล ไม่ใช่ตัวพิมพ์ใหญ่ทั้งหมดแบบหน้าบทคัดย่อ/g, 'Committee names on the approval pages must be in Sentence Case, with only the first letter of the given name and of the surname capitalised, not the all-uppercase form used on the abstract page'],
   [/แก้ชื่อกรรมการบนหน้านี้เป็น Sentence Case แล้วให้เจ้าหน้าที่ยืนยัน/g, 'Change the committee names on this page to Sentence Case; staff to confirm'],
-  [/เพิ่มรายชื่อที่ขาดให้ครบตาม (บฑ\.\d)/g, 'Add the missing names so the list matches Form GR.$1'],
-  [/ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อตาม (บฑ\.\d)/g, 'Remove the extra names so only the ones on Form GR.$1 remain'],
+  [/เพิ่มรายชื่อที่ขาดให้ครบตาม (บฑ\.\d)/g, 'Add the missing names so the list matches Form $1'],
+  [/ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อตาม (บฑ\.\d)/g, 'Remove the extra names so only the ones on Form $1 remain'],
   [/ฟอนต์ในไฟล์ทำให้ระบบอ่านข้อความเพี้ยน (\d+) หน้า/g, 'A font in the file makes the text extract incorrectly on $1 page(s)'],
   [/หน้าที่พบคือ (.+?) หน้ากระดาษแสดงผลถูกต้องตามปกติ เสียเฉพาะการดึงข้อความออกจากไฟล์ กรุณาเปิดหน้าเหล่านี้ดูด้วยตาอีกครั้ง/g, 'The pages affected are $1. The printed pages themselves are correct; only the text extraction is wrong. Please open these pages and check them by eye'],
   [/ และอีก (\d+) หน้า/g, ' and $1 more page(s)'],
@@ -788,6 +832,18 @@ var TR = [
   // ต้องมาก่อนกฎเศษคำข้างล่าง ไม่งั้นจะได้ประโยคยาวมาวางในช่องตาราง
   [/^หัวบทในเนื้อหา$/g, 'Chapter headings'],
   [/^ภาษาที่เขียน$/g, 'Language of the document'],
+  // ประเภทเล่มต้องตรงกับที่ได้รับอนุมัติ (FORM.DOC_TYPE) — ค่าในเครื่องหมายคำพูดคงตามเล่ม
+  [/^ประเภทเล่ม$/g, 'Document type'],
+  [/^ช่องประเภทเล่มในแบบฟอร์ม$/g, 'Document type selected on the form'],
+  [/^ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis \(ไฟล์ eThesis ระบุ ("[^"]+")\) ถ้าประเภทที่ถูกต้องคือค่าที่เลือกในแบบฟอร์ม ให้กดไม่ผ่านเพื่อแจ้งนักศึกษา$/g, 'The document type selected on the form differs from the eThesis file (the eThesis file says $1). If the type selected on the form is the correct one, press Fail to notify the student'],
+  // โหมด free เทียบรูปแบบเล่มกับแบบฟอร์มเป็นสีส้ม (ดูรูปแบบจากชื่อบทที่ 1)
+  [/^โหมด free ระบบดูรูปแบบจากชื่อบทที่ 1 เท่านั้น เปิดเล่มดูว่าจัดบทตามรูปแบบใด ถ้าไม่ตรงกับข้อมูลอนุมัติให้กดไม่ผ่าน$/g, 'In free mode the system judges the format from the title of chapter 1 only. Open the document to see which format it follows; if it does not match the approved data, press Fail'],
+  [/^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า (.+)$/g, 'The document type does not match the approved one: the document says $1'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") โดยหน้าปกต้องเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2; the cover must read $3'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") หรือ ("[^"]+") ตามภาษาของหน้า โดยหน้าปกต้องเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2 or $3, following the language of the page; the cover must read $4'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") หรือ ("[^"]+") ตามภาษาของหน้า$/g, 'The approved document type is $1. Change every occurrence to $2 or $3, following the language of the page'],
+  [/^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด$/g, 'Check that the document type in the eThesis file is correct; if it is, send the document back for the student to correct every occurrence'],
   [/^ข้อมูลอนุมัติ$/g, 'Approved data'],
   [/^ในไฟล์รูปเล่ม$/g, 'In the submitted file'],
   [/^ระบบอ่านภาษาจากไฟล์ไม่ได้$/g, 'The system could not read the language from the file'],
@@ -910,7 +966,6 @@ var TR = [
   [/หัวข้อบทในสารบัญต้องระบุเลขหน้า/g, 'Every chapter heading in the TOC must show a page number'],
   [/แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้/g, 'Reported as a bold-text observation only; the document can still pass'],
   [/เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่/g, 'Staff to decide whether this needs fixing'],
-  [/หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูก(.*?)ข้อสังเกตและผ่านได้/g, 'For such pages, if the page numbering is still correct$1an observation and can pass'],
   [/ข้อความใต้ลายเซ็นต้องเป็นชื่อหลักสูตรที่มีสาขา/g, 'The text under the signature must be the program name containing the subject'],
   [/ข้อความใต้ลายเซ็นควรเป็นคณะที่นักศึกษาสังกัด คือ/g, 'The text under the signature should be the student\'s faculty:'],
   [/รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ/g, 'The advisory committee list has the subject in parentheses'],
@@ -1378,8 +1433,13 @@ var TR = [
   [/ชื่อบทในสารบัญข้อความไม่ตรง: /g, 'Chapter title in the TOC does not match: '],
   [/รายชื่อไม่ครบตามที่ได้รับอนุมัติใน (บฑ\.\d): หน้านี้มี (\d+) ชื่อ แต่อนุมัติไว้ (\d+) ชื่อ/g, 'The list is short of what $1 approved: this page has $2 names but $3 were approved'],
   [/รายชื่อเกินจากที่ได้รับอนุมัติใน (บฑ\.\d): หน้านี้มี (\d+) ชื่อ แต่อนุมัติไว้ (\d+) ชื่อ/g, 'The list has more names than $1 approved: this page has $2 names but $3 were approved'],
+  // ฉบับอังกฤษไม่ยกรายชื่อตาม บฑ.1/บฑ.2 (เจ้าหน้าที่สั่ง ก.ย. 2569) — ฟอร์มเก็บชื่อเป็นภาษาไทย
+  // นักศึกษาต่างชาติอ่านไม่ออก ฉบับไทยยังยกรายชื่อครบเหมือนเดิม กฎเต็มประโยคจึงกินรายชื่อทิ้งทั้งท่อน
+  [/ต้องมีรายชื่อครบตาม (บฑ\.\d) คือ .+/g, 'The list must match $1'],
   [/ต้องมีรายชื่อครบตาม (บฑ\.\d) คือ/g, 'The list must match $1 in full:'],
   [/ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the page really lists everyone; if it does, the system simply could not read some cells and this can pass'],
+  [/ระบบนับจำนวนอาจารย์เทียบกับ (บฑ\.\d) ให้แล้ว แต่ไม่ได้เทียบชื่อ โปรดทานรายชื่อเอง รายชื่อตาม (บฑ\.\d) คือ .+/g, 'The system compared the number of professors against $1 but did not compare the names themselves — please check them by eye against $2'],
+  [/ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ (บฑ\.\d) ไม่ได้ โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม (บฑ\.\d) คือ .+/g, 'The system could not read the names on this page clearly, so it could not even compare the count with $1 — please check by eye against $2, and see what the system did read under supporting information'],
   [/ระบบนับจำนวนอาจารย์เทียบกับ (บฑ\.\d) ให้แล้ว แต่ไม่ได้เทียบชื่อ โปรดทานรายชื่อเอง รายชื่อตาม (บฑ\.\d) คือ/g, 'The system compared the number of professors against $1 but did not compare the names themselves — please check them by eye. The $2 list is:'],
   [/ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ (บฑ\.\d) ไม่ได้ โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม (บฑ\.\d) คือ/g, 'The system could not read the names on this page clearly, so it could not even compare the count with $1 — please check by eye, and see what the system did read under supporting information. The $2 list is:'],
   [/แก้เลขหน้านี้ก่อน แล้วไล่เลขหน้าส่วนนำที่เหลือใหม่ทั้งชุด เพราะเลขหน้าหน้านี้ผิดทำให้หน้าถัดไปผิดตามไปด้วย/g, 'Fix this page label first, then renumber the rest of the front matter, because a wrong label here shifts every page after it'],

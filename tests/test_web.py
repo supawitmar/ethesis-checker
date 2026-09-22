@@ -524,7 +524,7 @@ if __name__ == "__main__":
 class ImportingASecondStudentClearsTheFirst(unittest.TestCase):
     """/code-review (ก.ย. 2569): นำเข้าข้อมูลนักศึกษาคนที่สองแล้วรายชื่อกรรมการคนแรกค้าง
 
-    applyParsed เขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า วิธีวางข้อความไม่อ่านรายชื่อกรรมการเลย
+    applyParsed เขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า ไฟล์ของคนที่สองที่ไม่มีรายชื่อกรรมการ
     ช่องซ่อน committees_json จึงค้างรายชื่อของคนแรก แล้วเล่มของคนที่สองถูกนับกรรมการ
     เทียบกับรายชื่อคนอื่น ได้ข้อแดง "รายชื่อไม่ครบ/เกิน" ที่โชว์ชื่อของอีกคน
     """
@@ -573,7 +573,7 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
     def _block(self):
         html = self.SOURCE.read_text(encoding="utf-8")
         start = html.index("const IMPORT_LABELS")
-        end = html.index("// ---- แท็บเลือกวิธีนำเข้า ----")
+        end = html.index("// ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----")
         return html[start:end]
 
     def _node_output(self):
@@ -615,7 +615,7 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
         self.assertIn("window.addEventListener('pageshow', resetCheckForm);", html)
         body = html.split("function resetCheckForm() {", 1)[1].split("\n}", 1)[0]
         for step in ("document.getElementById('f').reset();", "clearImportedFields();",
-                     "ethSourceHtml = '';", "document.getElementById('overlay').style.display = 'none';",
+                     "document.getElementById('overlay').style.display = 'none';",
                      "updateConditionalRequirements();"):
             self.assertIn(step, body)
 
@@ -699,36 +699,309 @@ class AForeignStudentsNameFillsTheThaiNameField(unittest.TestCase):
                                                "THANCHANOK SOPARDIT"])
         self.assertEqual((th, en), ("ธัญชนก โสภาคดิษฐ", "THANCHANOK SOPARDIT"))
 
-    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
-    def test_the_pasted_text_importer_does_the_same(self):
-        html = self.SOURCE.read_text(encoding="utf-8")
-        start = html.index("<script>") + len("<script>")
-        block = html[start:html.index("let ethSourceHtml")]
-        script = r"""
-const vm = require('vm');
-vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
-const out = {};
-for (const [key, text] of Object.entries({
-    foreign: "ชื่อ-สกุล\nMR. JOHN SMITH\nJOHN SMITH",
-    thai: "ชื่อ-สกุล\nนาย โฆษิต เที่ยงตรง\nKOSITH THEINGTRONG"})) {
-  const d = parseEthesisText(text, '');
-  out[key] = [d.student_name_th || '', d.student_name || ''];
-}
-console.log(JSON.stringify(out));
-"""
-        run = subprocess.run(["node", "-e", script], input=block, capture_output=True,
-                             text=True, encoding="utf-8", timeout=30)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        out = json.loads(run.stdout)
-        self.assertEqual(out["foreign"], ["JOHN SMITH", "JOHN SMITH"])
-        self.assertEqual(out["thai"], ["โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"])
-
     def test_an_empty_thai_name_is_still_refused(self):
         """ควบคุมเชิงลบ — กติกา "กรอกไม่ครบ ระบบไม่ตรวจ" ต้องยังอยู่"""
         from ethesis_rules import FRONT_MATTER_RULES
         for program in ("thai", "thai_english"):
             self.assertIn("student_name_th",
                           FRONT_MATTER_RULES["required_form_fields"][program], program)
+
+
+class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
+    """หน้าอัปโหลดนำเข้าข้อมูลได้ทางเดียว คือแนบไฟล์ eThesis PDF (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    "ระบบตรวจสอบ เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสารเพื่ออ่านข้อมูลพอ"
+    ของเดิมมีสองทาง และแต่ละทางมีตัวอ่านของตัวเอง (JS ในหน้าเว็บ กับ ethesis_import.py) ซึ่ง
+    หลุดจากกันจริงแล้ว — ตารางตัวย่อปริญญาของทางวางข้อความขาด D.N.S. / D.P.A. / Dr. P.H. / M.P.A.
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def test_the_paste_box_and_its_parser_are_gone(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for gone in ('id="ethesis-source"', 'id="parse-ethesis"', 'id="tab-text"',
+                     "parseEthesisText", "formatDegreeAbbreviation", "ethSourceHtml",
+                     "addEventListener('paste'", "วางข้อความ"):
+            self.assertNotIn(gone, html, gone)
+
+    def test_the_file_import_is_still_there(self):
+        """ควบคุมเชิงลบ — ทางแนบไฟล์ต้องยังครบ"""
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for kept in ('id="ethesis-pdf"', 'id="parse-ethesis-pdf"', "fetch('/parse-ethesis'",
+                     "function applyParsed(parsed)", "wireDrop('drop-ethesis'"):
+            self.assertIn(kept, html, kept)
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_page_script_still_runs(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        run = subprocess.run(["node", "-e", "new Function(require('fs').readFileSync(0, 'utf8'))"],
+                             input=script, capture_output=True, text=True, encoding="utf-8",
+                             timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_the_upload_page_still_renders(self):
+        client = TestClient(main.app)
+        client.post("/login", data={"password": "test-password", "next": "/"},
+                    follow_redirects=False)
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="parse-ethesis-pdf"', page.text)
+        self.assertNotIn('id="ethesis-source"', page.text)
+
+
+class AnIncompleteFormIsNeverChecked(unittest.TestCase):
+    """ไม่ครบ = ไม่ตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้าไม่ครบ ต้องไม่ตรวจนะ")
+
+    กันสามชั้น: เบราว์เซอร์ (required) · สคริปต์ก่อนส่ง (readyToCheck) · เซิร์ฟเวอร์ (/check ตอบ 400)
+    หน้าจอบอกในแถบล่างว่าขาดขั้นไหน ช่องที่ขาดขึ้นกรอบแดง และเลื่อนไปช่องแรกให้
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = cls.SOURCE.read_text(encoding="utf-8")
+        cls.client = TestClient(main.app)
+        cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                        follow_redirects=False)
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            paths = [job.get("pdf_path") for job in main.JOBS.values()]
+            main.JOBS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def test_the_script_checks_before_it_sends(self):
+        handler = self.html.split("document.getElementById('f').addEventListener('submit'", 1)[1]
+        guard = handler.index("if (!readyToCheck()) return;")
+        self.assertLess(guard, handler.index("fetch('/check'"))
+
+    def test_the_browser_still_enforces_required_fields(self):
+        """ควบคุมเชิงลบ — ห้ามปิดการตรวจ required ของเบราว์เซอร์ (ชั้นแรก)"""
+        form_tag = self.html.split('<form id="f"', 1)[1].split(">", 1)[0]
+        self.assertNotIn("novalidate", form_tag)
+
+    def test_reading_the_form_never_fires_invalid_events(self):
+        """checkValidity() ยิงเหตุการณ์ invalid ทุกช่องที่ว่าง ซึ่งตัวดัก invalid ถือเป็นการกดตรวจเล่ม
+
+        ของที่ commit ไปรอบแรกเรียก checkValidity() ในตัวนับความพร้อม ตัวดักจึงเรียกซ้ำวนไม่รู้จบ
+        วัดในเบราว์เซอร์ได้ราว 1,950 ครั้งต่อวินาทีตั้งแต่เปิดหน้า ข้อความ "ยังกรอกไม่ครบ" ขึ้นเอง
+        ทั้งที่ยังไม่ได้กด และหน้าจอถูกดึงกลับไปที่ช่องแรกที่ขาดตลอดเวลา
+        """
+        import re
+        code = re.sub(r"//[^\n]*", "", self.html.split("<script>", 1)[1])
+        self.assertNotIn(".checkValidity(", code)
+        self.assertNotIn(".reportValidity(", code)
+        self.assertIn("validity.valid", code)
+
+    def test_the_bar_says_what_is_missing(self):
+        self.assertIn('<p class="bar-msg" id="progress-msg" role="alert" hidden></p>', self.html)
+        self.assertIn("addEventListener('invalid'", self.html)
+        self.assertIn("'ยังกรอกไม่ครบ: '", self.html)
+
+    def test_the_server_refuses_a_thai_book_without_thai_fields(self):
+        form = {**FORM, "program_language": "thai"}
+        response = self.client.post("/check", data=form,
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(response.status_code, 400)
+        detail = response.json()["detail"]
+        self.assertIn("กรุณากรอกข้อมูลอ้างอิงให้ครบก่อนตรวจ", detail)
+        self.assertEqual(main.JOBS, {})
+
+    def test_the_server_refuses_a_missing_book_file(self):
+        response = self.client.post("/check", data=FORM)
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertLess(response.status_code, 500)
+        self.assertEqual(main.JOBS, {})
+
+    def test_every_checklist_step_points_at_a_real_section(self):
+        import re
+        steps = re.findall(r'<li data-sec="([^"]+)">', self.html)
+        self.assertEqual(steps, ["sec-files", "sec-type", "sec-title", "sec-student"])
+        for sec in steps:
+            self.assertIn(f'id="{sec}"', self.html)
+
+
+class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
+    """ประเภทเล่มที่อนุมัติยึดตามไฟล์ eThesis ก่อนช่องที่เลือกเอง (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย")
+
+    เล่ม 6838776: eThesis อนุมัติเป็นสารนิพนธ์ เล่มเขียน INDEPENDENT STUDY แล้วช่องประเภทเล่ม
+    ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงเทียบเล่มกับค่าที่เพิ่งเปลี่ยน และไม่ฟ้องเรื่องนี้เลย
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = cls.SOURCE.read_text(encoding="utf-8")
+        cls.client = TestClient(main.app)
+        cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                        follow_redirects=False)
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            paths = [job.get("pdf_path") for job in main.JOBS.values()]
+            main.JOBS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def _approved_type(self, key="doc_type", **fields):
+        seen = []
+
+        def capture(path, approved, **kwargs):
+            seen.append(approved.get(key))
+            raise RuntimeError("stop")
+
+        with mock.patch.object(main, "run_check", side_effect=capture):
+            response = self.client.post("/check", data={**FORM, **fields},
+                                        files={"pdf": ("b.pdf", make_pdf(), "application/pdf")})
+            if response.status_code != 200:
+                return response.status_code
+            job_id = response.json()["job_id"]
+            for _ in range(500):
+                job = main._get_job(job_id)
+                if job and job["done"]:
+                    break
+                time.sleep(0.01)
+        return seen[0]
+
+    def test_the_ethesis_type_wins_over_the_dropdown(self):
+        self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY",
+                                             ethesis_doc_type="THEMATIC PAPER"), "THEMATIC PAPER")
+
+    def test_the_type_chosen_on_the_form_goes_along_too(self):
+        """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" — ค่าที่เลือกห้ามหายไป"""
+        self.assertEqual(self._approved_type("doc_type_form", doc_type="INDEPENDENT STUDY",
+                                             ethesis_doc_type="THEMATIC PAPER"), "INDEPENDENT STUDY")
+
+    def test_the_dropdown_is_used_when_the_file_gives_no_type(self):
+        """ควบคุมเชิงบวก — ไม่มีค่าจากไฟล์ ช่องที่เลือกยังใช้งานได้ตามเดิม"""
+        self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY"), "INDEPENDENT STUDY")
+
+    def test_an_unknown_type_from_the_file_is_refused(self):
+        self.assertEqual(self._approved_type(ethesis_doc_type="DISSERTATION"), 400)
+
+    def test_the_page_sends_the_type_from_the_file(self):
+        self.assertIn('<input type="hidden" name="ethesis_doc_type" id="ethesis-doc-type">', self.html)
+        self.assertIn("'ethesis-doc-type'", self.html.split("const HIDDEN_IMPORT_FIELDS", 1)[1]
+                      .split("\n", 1)[0])
+
+    SCRIPT = r"""
+const vm = require('vm');
+const opts = [{value: '', defaultSelected: true, textContent: 'กรุณาเลือกประเภทเล่ม'},
+              {value: 'THESIS', textContent: 'วิทยานิพนธ์ (Thesis)'},
+              {value: 'THEMATIC PAPER', textContent: 'สารนิพนธ์ (Thematic Paper)'},
+              {value: 'INDEPENDENT STUDY', textContent: 'การค้นคว้าอิสระ (Independent Study)'}];
+const select = {tagName: 'SELECT', options: opts, selectedIndex: 0,
+  get value() { return opts[this.selectedIndex].value; },
+  set value(v) { const i = opts.findIndex(o => o.value === v); this.selectedIndex = i < 0 ? 0 : i; },
+  classList: {add() {}, remove() {}}, dispatchEvent() {}};
+const fields = {'ethesis-doc-type': {value: ''}, 'doc-type-note': {hidden: true, textContent: ''}};
+global.Event = class { constructor(type) { this.type = type; } };
+global.document = {
+  getElementById: id => fields[id] || null,
+  querySelectorAll: () => [],
+  querySelector: sel => (/name="doc_type"/.test(sel) ? select : null)
+};
+vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
+const note = () => [fields['ethesis-doc-type'].value, fields['doc-type-note'].hidden,
+                    fields['doc-type-note'].textContent];
+const out = {};
+applyParsed({doc_type: 'THEMATIC PAPER'});
+out.imported = note();
+select.value = 'INDEPENDENT STUDY';
+updateDocTypeNote();
+out.changed = note();
+clearImportedFields();
+out.cleared = note();
+console.log(JSON.stringify(out));
+"""
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_page_says_so_when_the_dropdown_differs_from_the_file(self):
+        start = self.html.index("const IMPORT_LABELS")
+        end = self.html.index("// ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----")
+        run = subprocess.run(["node", "-e", self.SCRIPT], input=self.html[start:end],
+                             capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout)
+        # นำเข้าแล้วช่องตรงกับไฟล์ — ไม่มีข้อความเตือน
+        self.assertEqual(out["imported"], ["THEMATIC PAPER", True, ""])
+        # เปลี่ยนช่องให้ต่างจากไฟล์ — บอกว่าระบบยังเทียบกับประเภทตามไฟล์
+        self.assertEqual(out["changed"][:2], ["THEMATIC PAPER", False])
+        self.assertIn("สารนิพนธ์ (Thematic Paper)", out["changed"][2])
+        self.assertIn("ทั้งสองค่า", out["changed"][2])
+        # เริ่มเล่มใหม่ — ค่าจากไฟล์เดิมต้องไม่ค้าง
+        self.assertEqual(out["cleared"], ["", True, ""])
+
+    def test_the_dropdown_change_updates_the_note(self):
+        self.assertIn("document.querySelector('select[name=\"doc_type\"]')"
+                      ".addEventListener('change', updateDocTypeNote);", self.html)
+
+
+class TheReportPageKeepsItsNewLayout(unittest.TestCase):
+    """หน้ารายงานออกแบบใหม่ (ก.ย. 2569): แถบบน · การ์ดผลตรวจ · การ์ดแยกทีละส่วน หัวการ์ดมีสีตามเรื่อง"""
+
+    @classmethod
+    def setUpClass(cls):
+        import checker
+        report = {"verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []},
+                  "info": [{"topic": "t", "detail": "d"}], "human_checklist": [{"item": "i", "why": "w"}],
+                  "not_checked": ["x"], "verification": [{"topic": "ชื่อเรื่อง", "checks": [{"location": "หน้าปก", "status": "pass"}]}],
+                  "section_order": checker.SUMMARY_SECTION_ORDER, "staff_findings": list(checker.STAFF_CHECKS),
+                  "plain_summary": "ผลการตรวจ: ผ่าน", "context": {}}
+        with main.JOBS_LOCK:
+            main.JOBS["layout"] = {"stage": "done", "done": True, "error": None, "report": report,
+                                   "pdf_name": "b.pdf", "approved": {}, "ts": time.time()}
+        client = TestClient(main.app)
+        client.post("/login", data={"password": "test-password", "next": "/"}, follow_redirects=False)
+        cls.html = client.get("/result/layout").text
+        with main.JOBS_LOCK:
+            main.JOBS.pop("layout", None)
+
+    def test_the_top_bar_has_the_language_switch_and_a_new_check_link(self):
+        top = self.html.split('<header class="topbar">', 1)[1].split("</header>", 1)[0]
+        self.assertIn('id="langbtn"', top)
+        self.assertIn('class="top-new" href="/"', top)
+        self.assertIn('action="/logout"', top)
+
+    def test_every_section_card_has_a_colour(self):
+        import re
+        cards = re.findall(r'<section class="panel ([^"]+)"', self.html)
+        self.assertIn("result-card", cards)
+        for tone in ("tone-blue", "tone-purple", "tone-lavender", "tone-teal", "tone-slate"):
+            self.assertIn(tone, cards)
+        self.assertEqual(sum(c.startswith("zone-panel") for c in cards), 3)
+
+    def test_an_empty_zone_can_turn_grey(self):
+        """หัวโซนที่ไม่มีข้อเป็นสีเทาด้วย :has(> .empty) — .empty ต้องเป็นลูกตรงของการ์ด"""
+        self.assertIn(".zone-panel:has(> .empty)", self.html)
+        zone = self.html.split('<section class="panel zone-panel RED">', 1)[1].split("</section>", 1)[0]
+        self.assertRegex(zone, r'</h2>\s*<div class="empty"')
+
+    def test_the_result_card_follows_the_verdict(self):
+        for kind in ("fail", "pass", "pending"):
+            self.assertIn(f".result-card:has(.verdict-pill.{kind})", self.html)
+
+    def test_printing_does_not_push_whole_cards_to_a_new_page(self):
+        """เจ้าหน้าที่บันทึกรายงานเป็น PDF — การ์ดทั้งใบห้าม break-inside:avoid
+
+        ตอนออกแบบใหม่รอบแรกตั้งไว้ การ์ดที่ไม่พอดีหน้าถูกดันไปหน้าใหม่ทั้งใบ ทิ้งที่ว่างครึ่งหน้า
+        เล่ม M.C.T.M. จากเดิมพิมพ์ 5 หน้า (A4) กลายเป็น 7 หน้า กันไว้ได้แค่ก้อนเล็ก (ข้อ/แถว)
+        """
+        import re
+        css = re.sub(r"/\*.*?\*/", "", self.html.split("<style>", 1)[1].split("</style>", 1)[0], flags=re.S)
+        whole_cards = {".panel", ".copybox", ".zone-panel", ".cat-group", ".vf-group"}
+        for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            if re.search(r"break-inside\s*:\s*avoid", body):
+                names = {s.strip() for s in selectors.split(",")}
+                self.assertFalse(names & whole_cards, selectors.strip())
+        # หัวการ์ดไม่ค้างท้ายหน้าโดยไม่มีเนื้อหาตามมา
+        self.assertRegex(css, r"\.panel > h2\.sec[^{}]*\{[^{}]*break-after\s*:\s*avoid")
+        # ชุดบีบระยะตอนพิมพ์ต้องมาหลังชุดจอเล็ก — กระดาษ A4 หักขอบแล้วตกช่วง max-width:720px ได้
+        self.assertGreater(css.rindex("@media print"), css.index("@media (max-width:720px)"))
 
 
 class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
