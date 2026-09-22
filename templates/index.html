@@ -73,7 +73,6 @@
   .cm-role { flex:1 1 auto; font-size:.74rem; color:var(--ink-3); }
   .import-box { background:#f7f9fc; border:1px solid var(--line); border-radius:14px; padding:0;
        overflow:hidden; }
-  .import-box textarea { min-height:110px; background-color:#fff; }
   .secondary { background:#fff; color:var(--navy); border:1px solid var(--line-2); border-radius:10px;
        padding:9px 16px; cursor:pointer; margin-top:12px; font-weight:600; font-size:.86rem;
        box-shadow:var(--shadow-sm); transition:background .15s, color .15s, border-color .15s; }
@@ -83,14 +82,7 @@
   .autofilled { background-color:var(--ok-bg); border-color:#86c09b; }
 
   /* แท็บเลือกวิธีนำเข้า — แสดงทีละวิธี ไม่ให้หน้ายาวเกินจำเป็น */
-  .tabs { display:flex; gap:6px; padding:6px; background:#e9eef5; border-bottom:1px solid var(--line); }
-  .tab { flex:1; border:none; background:transparent; padding:10px 12px; cursor:pointer; border-radius:9px;
-       font-size:.88rem; font-weight:600; color:var(--ink-2);
-       transition:background .15s, color .15s, box-shadow .15s; }
-  .tab:hover { background:rgba(255,255,255,.65); color:var(--navy); }
-  .tab.on { background:#fff; color:var(--navy); box-shadow:var(--shadow-sm); }
-  .tab:focus-visible { outline:none; box-shadow:var(--ring); }
-  .tab-panel { display:none; padding:16px; } .tab-panel.on { display:block; }
+  .import-panel { padding:16px; }
 
   /* กล่องลากวางไฟล์ — คลิกหรือลากไฟล์มาวางก็ได้ */
   .drop { position:relative; display:flex; align-items:center; gap:14px; width:100%; text-align:left;
@@ -203,14 +195,9 @@
     <section class="panel">
     <h2><span class="step step-opt" aria-hidden="true">⇩</span>ก่อนเริ่ม: นำเข้าข้อมูลจากระบบ eThesis (ไม่บังคับ)</h2>
     <div class="import-box">
-      <div class="tabs" role="tablist">
-        <button type="button" class="tab on" id="tab-file" role="tab" aria-selected="true"
-                aria-controls="panel-file">📄 แนบไฟล์ PDF <span style="font-weight:400;opacity:.8">(แนะนำ)</span></button>
-        <button type="button" class="tab" id="tab-text" role="tab" aria-selected="false"
-                aria-controls="panel-text">📋 วางข้อความ</button>
-      </div>
-
-      <div class="tab-panel on" id="panel-file" role="tabpanel" aria-labelledby="tab-file">
+      {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสาร
+         เพื่ออ่านข้อมูลพอ" — เหลือทางเดียว ตัวอ่านเดียว (ethesis_import.py ฝั่งเซิร์ฟเวอร์) #}
+      <div class="import-panel" id="panel-file">
         <label class="drop" id="drop-ethesis">
           <span class="drop-ico">📄</span>
           <span>
@@ -220,14 +207,7 @@
           <input type="file" id="ethesis-pdf" accept=".pdf">
         </label>
         <button type="button" class="secondary" id="parse-ethesis-pdf">อ่านค่าและเติมแบบฟอร์ม</button>
-        <div class="drop-sub" style="margin-top:8px">✓ วิธีนี้อ่าน "รูปแบบเล่ม 1/2" ที่เป็นช่องติ๊กได้ด้วย</div>
-      </div>
-
-      <div class="tab-panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text">
-        <label for="ethesis-source" style="margin-top:0">คัดลอกรายละเอียดจากหน้า eThesis แล้ววางที่นี่</label>
-        <textarea id="ethesis-source" rows="5" placeholder="วางข้อความที่มี รหัสนักศึกษา, ชื่อ-สกุล, ชื่อหัวข้อภาษาไทย/อังกฤษ, ชื่อปริญญา และวันที่สอบผ่าน..."></textarea>
-        <button type="button" class="secondary" id="parse-ethesis">อ่านข้อความและเติมแบบฟอร์ม</button>
-        <div class="drop-sub" style="margin-top:8px">⚠️ วิธีนี้มักอ่าน "รูปแบบเล่ม" ไม่ได้ ต้องเลือกเอง</div>
+        <div class="drop-sub" style="margin-top:8px">✓ อ่าน "รูปแบบเล่ม 1/2" ที่เป็นช่องติ๊กในไฟล์ได้ด้วย</div>
       </div>
 
       <div style="padding:0 14px 14px">
@@ -356,239 +336,6 @@
 </div>
 
 <script>
-function detectLatestFormat(source, sourceHtml='') {
-  if (sourceHtml && typeof DOMParser !== 'undefined') {
-    const clipboardDocument = new DOMParser().parseFromString(sourceHtml, 'text/html');
-    const rows = Array.from(clipboardDocument.querySelectorAll('tr, [role="row"]'));
-    const latestRow = rows.find(row => /ล่าสุด/.test(row.textContent || ''));
-    if (latestRow) {
-      const selected = latestRow.querySelector('input:checked, input[checked], option:checked, option[selected]');
-      if (selected) {
-        const selectedId = selected.getAttribute('id') || '';
-        const label = selectedId
-          ? clipboardDocument.querySelector(`label[for="${CSS.escape(selectedId)}"]`)
-          : selected.closest('label');
-        const signal = [selected.getAttribute('value'), selectedId, selected.getAttribute('name'), label?.textContent]
-          .filter(Boolean).join(' ');
-        if (/รูปแบบ(?:ที่)?\s*1|format[_ -]?1|\b1\b/i.test(signal)) return '1';
-        if (/รูปแบบ(?:ที่)?\s*2|format[_ -]?2|\b2\b/i.test(signal)) return '2';
-      }
-    }
-  }
-
-  const normalized = source.replace(/\*\*/g, '').replace(/\u00a0/g, ' ');
-  const sectionPosition = normalized.indexOf('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
-  const formatSection = sectionPosition >= 0 ? normalized.slice(sectionPosition) : normalized;
-  const latestLine = formatSection.split(/\r?\n/).find(line => /ล่าสุด/.test(line)) || '';
-  const marked = latestLine.match(/(?:☑|✓|✔|●|◉|\[x\]|\(x\))\s*รูปแบบที่\s*([12])/i);
-  if (marked) return marked[1];
-  const choices = Array.from(latestLine.matchAll(/รูปแบบที่\s*([12])/g), match => match[1]);
-  return new Set(choices).size === 1 ? choices[0] : '';
-}
-
-function formatDegreeName(value) {
-  const minorWords = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
-  const normalized = value
-    .replace(/\s*\(\s*/g, ' (')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-  return normalized.replace(/[a-z]+/g, (word, offset, whole) => {
-    const startsSection = offset === 0 || whole[offset - 1] === '(';
-    if (!startsSection && minorWords.has(word)) return word;
-    return word.charAt(0).toUpperCase() + word.slice(1);
-  });
-}
-
-function formatDegreeAbbreviation(value) {
-  const normalized = value
-    .replace(/\s*\(\s*/g, ' (')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const match = normalized.match(/^(.+?)(?:\s*\((.+)\))?$/);
-  if (!match) return '';
-  const degreeName = match[1].trim().toUpperCase();
-  const field = (match[2] || '').trim().toUpperCase();
-  // ตารางเดียวกับ DEGREE_ABBR ใน ethesis_import.py ทุกตัว (มีเทสต์เทียบ) — ทางอัปโหลดไฟล์
-  // eThesis ใช้ตารางฝั่งเซิร์ฟเวอร์ ทางวางข้อความใช้ตารางนี้ ต้องได้ตัวย่อเดียวกัน
-  const abbreviations = {
-    'DOCTOR OF PHILOSOPHY': 'Ph.D.',
-    'DOCTOR OF NURSING SCIENCE': 'D.N.S.',
-    'DOCTOR OF PUBLIC ADMINISTRATION': 'D.P.A.',
-    'DOCTOR OF PUBLIC HEALTH': 'Dr. P.H.',
-    'MASTER OF CLINICAL TROPICAL MEDICINE': 'M.C.T.M.',
-    'MASTER OF ENGINEERING': 'M.Eng.',
-    'MASTER OF SCIENCE': 'M.Sc.',
-    'MASTER OF ARTS': 'M.A.',
-    'MASTER OF BUSINESS ADMINISTRATION': 'M.B.A.',
-    'MASTER OF PUBLIC ADMINISTRATION': 'M.P.A.',
-    'MASTER OF PUBLIC HEALTH': 'M.P.H.',
-    'MASTER OF NURSING SCIENCE': 'M.N.S.',
-    'MASTER OF EDUCATION': 'M.Ed.'
-  };
-  const abbreviation = abbreviations[degreeName];
-  if (!abbreviation) return '';
-  return field ? `${abbreviation} (${field})` : abbreviation;
-}
-
-// ชื่อปริญญาในฟอร์มเว้นวรรค 1 เคาะก่อนวงเล็บสาขาเสมอ (eThesis พิมพ์ติดกัน)
-function spacedDegree(value) {
-  return (value || '')
-    .replace(/\s*\(\s*/g, ' (')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// เดาตัวย่อชื่อปริญญาไทย เช่น "ปรัชญาดุษฎีบัณฑิต(อายุรศาสตร์เขตร้อน)" → "ปร.ด. (อายุรศาสตร์เขตร้อน)"
-function formatDegreeAbbreviationTh(value) {
-  const stems = {
-    'ปรัชญา':'ปร', 'วิทยาศาสตร':'วท', 'ศิลปศาสตร':'ศศ', 'วิศวกรรมศาสตร':'วศ',
-    'พยาบาลศาสตร':'พย', 'สาธารณสุขศาสตร':'ส', 'บริหารธุรกิจ':'บธ', 'ศึกษาศาสตร':'ศษ',
-    'รัฐประศาสนศาสตร':'รป', 'เภสัชศาสตร':'ภ', 'สังคมศาสตร':'สค', 'อักษรศาสตร':'อ',
-    'นิเทศศาสตร':'นศ', 'เทคโนโลยีสารสนเทศ':'ทส'
-  };
-  const v = (value || '').replace(/\s+/g, '');
-  const match = v.match(/^(.+?)(ดุษฎีบัณฑิต|มหาบัณฑิต)\(?(.*?)\)?$/);
-  if (!match) return '';
-  const abbr = stems[match[1]];
-  if (!abbr) return '';
-  const base = `${abbr}.${match[2] === 'ดุษฎีบัณฑิต' ? 'ด' : 'ม'}.`;
-  const field = match[3].trim();
-  return field ? `${base} (${field})` : base;
-}
-
-function formatExamDate(value, useEnglish) {
-  const months = {
-    'มกราคม':'January', 'กุมภาพันธ์':'February', 'มีนาคม':'March',
-    'เมษายน':'April', 'พฤษภาคม':'May', 'มิถุนายน':'June',
-    'กรกฎาคม':'July', 'สิงหาคม':'August', 'กันยายน':'September',
-    'ตุลาคม':'October', 'พฤศจิกายน':'November', 'ธันวาคม':'December'
-  };
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  const match = normalized.match(/^(\d{1,2})\s+([^\s]+)\s+(25\d{2}|20\d{2})$/);
-  if (!useEnglish || !match || !months[match[2]]) return normalized;
-  const year = Number(match[3]) > 2400 ? Number(match[3]) - 543 : Number(match[3]);
-  return `${Number(match[1])} ${months[match[2]]} ${year}`;
-}
-
-function parseEthesisText(source, sourceHtml='') {
-  const lines = source
-    .replace(/\r/g, '')
-    .replace(/\*\*/g, '')
-    .replace(/\u00a0/g, ' ')
-    .split('\n')
-    .map(line => line.replace(/[\t ]+/g, ' ').trim())
-    .filter(Boolean);
-
-  const findLine = (label) => {
-    const index = lines.findIndex(line => line === label || line.startsWith(label + ' '));
-    if (index < 0) return {value:'', index:-1};
-    const sameLine = lines[index].slice(label.length).replace(/^\s*[:：]?\s*/, '').trim();
-    return {value:sameLine || lines[index + 1] || '', index};
-  };
-  const nextLine = (index, offset=1) => index >= 0 ? (lines[index + offset] || '') : '';
-  const data = {};
-
-  // รหัสนักศึกษาอาจอยู่บรรทัดเดียวกับป้าย หรือบรรทัดถัดไป (เช่น "6537730 EGIT/D")
-  const idLine = findLine('รหัสนักศึกษา');
-  const studentId = [idLine.value, nextLine(idLine.index)].join(' ').match(/\b\d{7}\b/);
-  if (studentId) data.student_id = studentId[0];
-
-  // คำนำหน้านามภาษาไทยที่ต้องตัดออก รวมแบบย่อ เช่น น.ส. = นางสาว
-  const THAI_PREFIX = /^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|ว่าที่\s*(?:ร|พ)\.?[ตทอ]\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*/;
-  // นักศึกษาต่างชาติไม่มีชื่อไทย ช่องชื่อไทยของ eThesis จึงเป็นชื่ออังกฤษ — ดึงมาใส่ช่องชื่อไทยด้วย
-  // ไม่ปล่อยว่าง เพราะหลักสูตรไทย/ไทย-อังกฤษบังคับกรอก (เจ้าหน้าที่สั่ง ก.ย. 2569 กติกาเดียวกับ
-  // ethesis_import.student_names ฝั่งเซิร์ฟเวอร์)
-  const EN_PREFIX = /^(?:MR|MRS|MISS|MS|DR)\.?\s+/i;
-  const names = findLine('ชื่อ-สกุล');
-  if (names.value) {
-    if (/[ก-๙]/.test(names.value)) {
-      data.student_name_th = names.value.replace(THAI_PREFIX, '');
-    } else {
-      data.student_name_th = data.student_name = names.value.replace(EN_PREFIX, '');
-    }
-    const followingName = nextLine(names.index, names.value === lines[names.index + 1] ? 2 : 1);
-    if (followingName && /[A-Za-z]/.test(followingName) && !/[ก-๙]/.test(followingName)) {
-      data.student_name = followingName.replace(EN_PREFIX, '');
-    }
-  }
-  if (!data.student_name_th && data.student_name) data.student_name_th = data.student_name;
-
-  data.title_th = findLine('ชื่อหัวข้อภาษาไทย').value;
-  data.title_en = findLine('ชื่อหัวข้อภาษาอังกฤษ').value;
-
-  const course = findLine('หลักสูตร').value;
-  const writingLanguage = findLine('ภาษาที่เขียน').value;
-  if (/นานาชาติ/i.test(course)) data.program_language = 'international';
-  else if (/อังกฤษ|english/i.test(writingLanguage)) data.program_language = 'thai_english';
-  else if (/ไทย|thai/i.test(writingLanguage)) data.program_language = 'thai';
-
-  // ชื่อหลักสูตร (ตัดรหัสท้าย เช่น " [4801D02G]") — แสดงบนหัวรายงาน
-  // และชื่อคณะ — ใช้ตรวจช่องคณบดีคณะบนหน้ากรรมการสอบ
-  // (เดิมวิธี "วางข้อความ" ไม่ได้เก็บสองค่านี้ การตรวจชื่อคณะจึงไม่ทำงาน)
-  if (course) data.program = course.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
-  const facultyLine = findLine('คณะ').value;
-  if (facultyLine && !/^กรรมการ/.test(facultyLine)) data.faculty = facultyLine.trim();
-
-  const degree = findLine('ชื่อปริญญา');
-  if (degree.index >= 0) {
-    const candidates = [];
-    if (degree.value) candidates.push(degree.value);
-    for (let offset = 1; offset <= 2; offset += 1) {
-      const candidate = nextLine(degree.index, offset);
-      if (candidate && candidate !== degree.value) candidates.push(candidate);
-    }
-    const englishDegree = candidates.find(value => /[A-Za-z]/.test(value) && !/[ก-๙]/.test(value));
-    const thaiDegree = candidates.find(value => /[ก-๙]/.test(value));
-    // แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ, ลงนาม = Sentence case (ไทยคงเดิม),
-    // บทคัดย่อ = ตัวย่อ
-    if (englishDegree) {
-      data.degree_cover_en = spacedDegree(englishDegree);
-      data.degree_sig_en = formatDegreeName(englishDegree);
-      const abbrEn = formatDegreeAbbreviation(englishDegree);
-      if (abbrEn) data.degree_abbr_en = abbrEn;
-    }
-    if (thaiDegree) {
-      data.degree_cover_th = spacedDegree(thaiDegree);
-      data.degree_sig_th = spacedDegree(thaiDegree);
-      const abbrTh = formatDegreeAbbreviationTh(thaiDegree);
-      if (abbrTh) data.degree_abbr_th = abbrTh;
-    }
-  }
-
-  const examDateSource = findLine('วันที่สอบผ่าน').value;
-  data.exam_date = formatExamDate(examDateSource, data.program_language !== 'thai');
-  if (data.exam_date) {
-    const yearMatch = data.exam_date.match(/\b(25\d{2}|20\d{2})\b/);
-    if (yearMatch) {
-      const pageYear = Number(yearMatch[1]);
-      data.year = (data.program_language !== 'thai' && pageYear > 2400)
-        ? String(pageYear - 543) : String(pageYear);
-    }
-  }
-
-  const planValues = lines
-    .filter(line => line.startsWith('แผนการศึกษา '))
-    .map(line => line.slice('แผนการศึกษา'.length).trim());
-  if (planValues.some(value => value === 'วิทยานิพนธ์')) data.doc_type = 'THESIS';
-  else if (planValues.some(value => value === 'สารนิพนธ์')) data.doc_type = 'THEMATIC PAPER';
-  else if (planValues.some(value => value === 'การค้นคว้าอิสระ')) data.doc_type = 'INDEPENDENT STUDY';
-
-  data.format = detectLatestFormat(source, sourceHtml);
-
-  return Object.fromEntries(Object.entries(data).filter(([, value]) => value));
-}
-
-let ethSourceHtml = '';
-let ethSourcePlainText = '';
-document.getElementById('ethesis-source').addEventListener('paste', function(event){
-  ethSourceHtml = event.clipboardData?.getData('text/html') || '';
-  ethSourcePlainText = (event.clipboardData?.getData('text/plain') || '').trim();
-});
-
 const IMPORT_LABELS = {
   doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
   title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
@@ -600,7 +347,7 @@ const IMPORT_LABELS = {
   faculty:'คณะ', program:'ชื่อหลักสูตร'
 };
 
-// เติมค่าที่อ่านได้ลงในแบบฟอร์ม (ใช้ร่วมทั้งวิธีแนบไฟล์และวิธีวางข้อความ)
+// เติมค่าที่อ่านได้จากไฟล์ eThesis ลงในแบบฟอร์ม
 // รายชื่อกรรมการมาจากไฟล์ eThesis เท่านั้น — แสดงอย่างเดียว แก้ไม่ได้ (เป็นข้อมูลอนุมัติ)
 // เล่มภาษาอังกฤษ: ระบบถอดชื่อไทยเป็นอังกฤษด้วย AI ตอนตรวจ ไม่ให้เจ้าหน้าที่คีย์เอง
 function escapeHtml(text) {
@@ -675,19 +422,6 @@ function applyParsed(parsed) {
   return filled;
 }
 
-// ---- แท็บเลือกวิธีนำเข้า ----
-[['tab-file','panel-file'], ['tab-text','panel-text']].forEach(function(pair, idx, all){
-  document.getElementById(pair[0]).addEventListener('click', function(){
-    all.forEach(function(p){
-      const tab = document.getElementById(p[0]), panel = document.getElementById(p[1]);
-      const on = (p[0] === pair[0]);
-      tab.classList.toggle('on', on);
-      tab.setAttribute('aria-selected', on ? 'true' : 'false');
-      panel.classList.toggle('on', on);
-    });
-  });
-});
-
 // ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----
 function humanSize(bytes){
   return bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB'
@@ -739,24 +473,6 @@ async function withBusy(btn, label, fn){
   btn.disabled = true; btn.textContent = label;
   try { await fn(); } finally { btn.disabled = false; btn.textContent = original; }
 }
-
-document.getElementById('parse-ethesis').addEventListener('click', function(){
-  const source = document.getElementById('ethesis-source').value.trim();
-  if (!source) { setStatus('err', 'กรุณาวางข้อมูลจากหน้า eThesis ก่อน'); return; }
-  const matchingHtml = source === ethSourcePlainText ? ethSourceHtml : '';
-  const parsed = parseEthesisText(source, matchingHtml);
-  const hasFormatSection = source.includes('การกำหนดรูปแบบรูปเล่มอิเล็กทรอนิกส์');
-  const filled = applyParsed(parsed);
-  if (!filled.length) {
-    setStatus('err', 'ยังอ่านข้อมูลจากข้อความนี้ไม่ได้ กรุณาตรวจว่าคัดลอกส่วนรายละเอียดนักศึกษาและหัวข้อวิทยานิพนธ์มาครบ');
-    return;
-  }
-  const needFormat = hasFormatSection && !parsed.format;
-  setStatus(needFormat ? 'warn' : 'ok',
-    `เติมให้แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานก่อนตรวจเล่ม` +
-    (needFormat ? ' — ไม่พบเครื่องหมายเลือกในแถว “ล่าสุด” กรุณาเลือกรูปแบบเอง' : ''),
-    filled);
-});
 
 document.getElementById('parse-ethesis-pdf').addEventListener('click', function(){
   const btn = this;
@@ -818,8 +534,6 @@ function resetCheckForm() {
   document.getElementById('f').reset();
   clearImportedFields();
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
-  ethSourceHtml = '';
-  ethSourcePlainText = '';
   ['ethesis-pdf', 'book-pdf'].forEach(function(id){
     document.getElementById(id).dispatchEvent(new Event('change'));
   });

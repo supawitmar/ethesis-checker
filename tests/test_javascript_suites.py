@@ -35,17 +35,15 @@ class JavaScriptSuites(unittest.TestCase):
                       f"--- stdout ---\n{result.stdout}\n"
                       f"--- stderr ---\n{result.stderr}")
 
-    def test_ethesis_parser(self):
-        """ตัวอ่านข้อมูลจากไฟล์ eThesis ในหน้าอัปโหลด"""
-        self._run("test_ethesis_parser.js")
-
     def test_report_summary(self):
         """การแปลข้อความสรุปและการซ่อนหัวข้อตามผลตรวจในหน้ารายงาน"""
         self._run("test_report_summary.js")
 
     def test_every_js_suite_here_is_wired_up(self):
         """เพิ่มไฟล์เทสต์ JS ใหม่แล้วลืมผูก = เงียบไปอีกตัว เทสต์นี้กันไว้"""
-        wired = {"test_ethesis_parser.js", "test_report_summary.js"}
+        # test_ethesis_parser.js ถูกถอดพร้อมวิธี "วางข้อความ" (ก.ย. 2569) — ตัวอ่านข้อมูล eThesis
+        # เหลือตัวเดียวฝั่งเซิร์ฟเวอร์ (ethesis_import.py) มีเทสต์ใน test_ethesis_import.py
+        wired = {"test_report_summary.js"}
         found = {p.name for p in TESTS.glob("test_*.js")}
         self.assertEqual(found, wired,
                          "มีไฟล์เทสต์ JS ที่ยังไม่ได้ผูกเข้า pytest")

@@ -524,7 +524,7 @@ if __name__ == "__main__":
 class ImportingASecondStudentClearsTheFirst(unittest.TestCase):
     """/code-review (ก.ย. 2569): นำเข้าข้อมูลนักศึกษาคนที่สองแล้วรายชื่อกรรมการคนแรกค้าง
 
-    applyParsed เขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า วิธีวางข้อความไม่อ่านรายชื่อกรรมการเลย
+    applyParsed เขียนทับเฉพาะช่องที่ข้อมูลใหม่มีค่า ไฟล์ของคนที่สองที่ไม่มีรายชื่อกรรมการ
     ช่องซ่อน committees_json จึงค้างรายชื่อของคนแรก แล้วเล่มของคนที่สองถูกนับกรรมการ
     เทียบกับรายชื่อคนอื่น ได้ข้อแดง "รายชื่อไม่ครบ/เกิน" ที่โชว์ชื่อของอีกคน
     """
@@ -573,7 +573,7 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
     def _block(self):
         html = self.SOURCE.read_text(encoding="utf-8")
         start = html.index("const IMPORT_LABELS")
-        end = html.index("// ---- แท็บเลือกวิธีนำเข้า ----")
+        end = html.index("// ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----")
         return html[start:end]
 
     def _node_output(self):
@@ -615,7 +615,7 @@ console.log(JSON.stringify({first, second: read(), firstVisible, secondVisible: 
         self.assertIn("window.addEventListener('pageshow', resetCheckForm);", html)
         body = html.split("function resetCheckForm() {", 1)[1].split("\n}", 1)[0]
         for step in ("document.getElementById('f').reset();", "clearImportedFields();",
-                     "ethSourceHtml = '';", "document.getElementById('overlay').style.display = 'none';",
+                     "document.getElementById('overlay').style.display = 'none';",
                      "updateConditionalRequirements();"):
             self.assertIn(step, body)
 
@@ -699,36 +699,55 @@ class AForeignStudentsNameFillsTheThaiNameField(unittest.TestCase):
                                                "THANCHANOK SOPARDIT"])
         self.assertEqual((th, en), ("ธัญชนก โสภาคดิษฐ", "THANCHANOK SOPARDIT"))
 
-    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
-    def test_the_pasted_text_importer_does_the_same(self):
-        html = self.SOURCE.read_text(encoding="utf-8")
-        start = html.index("<script>") + len("<script>")
-        block = html[start:html.index("let ethSourceHtml")]
-        script = r"""
-const vm = require('vm');
-vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
-const out = {};
-for (const [key, text] of Object.entries({
-    foreign: "ชื่อ-สกุล\nMR. JOHN SMITH\nJOHN SMITH",
-    thai: "ชื่อ-สกุล\nนาย โฆษิต เที่ยงตรง\nKOSITH THEINGTRONG"})) {
-  const d = parseEthesisText(text, '');
-  out[key] = [d.student_name_th || '', d.student_name || ''];
-}
-console.log(JSON.stringify(out));
-"""
-        run = subprocess.run(["node", "-e", script], input=block, capture_output=True,
-                             text=True, encoding="utf-8", timeout=30)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        out = json.loads(run.stdout)
-        self.assertEqual(out["foreign"], ["JOHN SMITH", "JOHN SMITH"])
-        self.assertEqual(out["thai"], ["โฆษิต เที่ยงตรง", "KOSITH THEINGTRONG"])
-
     def test_an_empty_thai_name_is_still_refused(self):
         """ควบคุมเชิงลบ — กติกา "กรอกไม่ครบ ระบบไม่ตรวจ" ต้องยังอยู่"""
         from ethesis_rules import FRONT_MATTER_RULES
         for program in ("thai", "thai_english"):
             self.assertIn("student_name_th",
                           FRONT_MATTER_RULES["required_form_fields"][program], program)
+
+
+class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
+    """หน้าอัปโหลดนำเข้าข้อมูลได้ทางเดียว คือแนบไฟล์ eThesis PDF (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    "ระบบตรวจสอบ เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสารเพื่ออ่านข้อมูลพอ"
+    ของเดิมมีสองทาง และแต่ละทางมีตัวอ่านของตัวเอง (JS ในหน้าเว็บ กับ ethesis_import.py) ซึ่ง
+    หลุดจากกันจริงแล้ว — ตารางตัวย่อปริญญาของทางวางข้อความขาด D.N.S. / D.P.A. / Dr. P.H. / M.P.A.
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def test_the_paste_box_and_its_parser_are_gone(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for gone in ('id="ethesis-source"', 'id="parse-ethesis"', 'id="tab-text"',
+                     "parseEthesisText", "formatDegreeAbbreviation", "ethSourceHtml",
+                     "addEventListener('paste'", "วางข้อความ"):
+            self.assertNotIn(gone, html, gone)
+
+    def test_the_file_import_is_still_there(self):
+        """ควบคุมเชิงลบ — ทางแนบไฟล์ต้องยังครบ"""
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for kept in ('id="ethesis-pdf"', 'id="parse-ethesis-pdf"', "fetch('/parse-ethesis'",
+                     "function applyParsed(parsed)", "wireDrop('drop-ethesis'"):
+            self.assertIn(kept, html, kept)
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_page_script_still_runs(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        run = subprocess.run(["node", "-e", "new Function(require('fs').readFileSync(0, 'utf8'))"],
+                             input=script, capture_output=True, text=True, encoding="utf-8",
+                             timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_the_upload_page_still_renders(self):
+        client = TestClient(main.app)
+        client.post("/login", data={"password": "test-password", "next": "/"},
+                    follow_redirects=False)
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="parse-ethesis-pdf"', page.text)
+        self.assertNotIn('id="ethesis-source"', page.text)
 
 
 class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):

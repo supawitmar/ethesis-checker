@@ -55,29 +55,20 @@ class EnglishDegreeAbbreviation(unittest.TestCase):
         self.assertEqual(_degree_abbr("Master of Clinical Tropical Medicine"), "M.C.T.M.")
 
 
-class TheWebFormKnowsTheSameAbbreviations(unittest.TestCase):
-    """ทางวางข้อความ eThesis (templates/index.html) มีตารางตัวย่อของตัวเอง ต้องตรงกับฝั่ง python
+class TheAbbreviationTableLivesInOnePlace(unittest.TestCase):
+    """ตารางตัวย่อปริญญามีที่เดียว (ethesis_import.py) — หน้าเว็บไม่มีตารางของตัวเองแล้ว
 
-    เคยหลุดกันจริง (bug ก.ย. 2569): หน้าเว็บขาด D.N.S. / D.P.A. / Dr. P.H. / M.P.A. เล่ม
-    Dr. P.H. ที่วางข้อความจึงได้ช่องตัวย่อว่าง ส่วนที่อัปโหลดไฟล์ได้ครบ
+    เดิมทางวางข้อความในหน้าเว็บมีตารางซ้ำ และหลุดกันจริง (ขาด D.N.S. / D.P.A. / Dr. P.H. /
+    M.P.A.) เจ้าหน้าที่สั่งถอดทางวางข้อความออก (ก.ย. 2569) เหลือทางแนบไฟล์ที่ใช้ตารางนี้
     """
 
-    @staticmethod
-    def _js_table(name):
-        import re
+    def test_the_web_form_has_no_copy_of_the_table(self):
         from pathlib import Path
+        from ethesis_import import DEGREE_ABBR
         html = (Path(__file__).resolve().parents[1] / "templates" / "index.html"
                 ).read_text(encoding="utf-8")
-        body = re.search(r"const " + name + r" = \{(.*?)\};", html, re.S).group(1)
-        return dict(re.findall(r"'([^']+)'\s*:\s*'([^']*)'", body))
-
-    def test_english_abbreviations_match(self):
-        from ethesis_import import DEGREE_ABBR
-        self.assertEqual(self._js_table("abbreviations"), DEGREE_ABBR)
-
-    def test_thai_stems_match(self):
-        from ethesis_import import DEGREE_ABBR_TH_STEM
-        self.assertEqual(self._js_table("stems"), DEGREE_ABBR_TH_STEM)
+        for full_name in DEGREE_ABBR:
+            self.assertNotIn(f"'{full_name}'", html, full_name)
 
 
 class CommitteeParsingTests(unittest.TestCase):
