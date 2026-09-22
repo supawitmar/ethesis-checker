@@ -2121,6 +2121,90 @@ class DegreeAbbreviationsComeFromAFixedTable(unittest.TestCase):
             self.assertEqual(ethesis_import._degree_abbr_th(thai), abbr, thai)
 
 
+class AShortAbbreviationIsNotFoundInsideOtherLines(unittest.TestCase):
+    """M.C.T.M. (เจ้าหน้าที่พบในแบบฟอร์ม ก.ย. 2569) — ตัวย่อไม่มีสาขาในวงเล็บ norm แล้วเหลือ "MCTM"
+
+    สั้นพอจะโผล่ในบรรทัดอื่นบนหน้าบทคัดย่อได้โดยบังเอิญ: รหัสนักศึกษาคณะเวชศาสตร์เขตร้อน
+    ขึ้นต้นด้วย TM (เล่มจริง "6136017 TMTM/D") ถ้ารหัสหลักสูตรเป็น "TMCT/M" จะได้ "...TMCTM"
+    และคุณวุฒิกรรมการหลักสูตรนี้มี "M.C.T.M." ได้ ของเดิมข้ามบรรทัดที่ตรงพอดีแล้วยกบรรทัด
+    พวกนั้นมาอ้างว่า "มีข้อความเกิน" เล่มที่ถูกต้องได้แดง
+    """
+
+    WANT = "M.C.T.M."
+    HEAD = "SOMCHAI EXAMPLE 6700000 TMCT/M\n"
+    TAIL = "\nTHESIS ADVISORY COMMITTEE: A B, M.D., M.C.T.M."
+
+    def _page(self, printed):
+        return self.HEAD + printed + self.TAIL
+
+    def test_the_table_knows_it(self):
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF CLINICAL TROPICAL MEDICINE"),
+                         self.WANT)
+
+    def test_a_correct_line_has_no_extras(self):
+        page = self._page(self.WANT)
+        self.assertEqual(checker_module.degree_line_extras(page, self.WANT), "")
+        compared = compare_reference_text(page, self.WANT, "degree", degree_line=True)
+        self.assertEqual(compared["status"], "exact")
+
+    def test_extras_on_the_real_line_are_still_caught(self):
+        """ควบคุมเชิงลบ — กฎ "ห้ามมีคำเกิน" ต้องยังทำงาน และยกบรรทัดปริญญาจริงมาอ้าง"""
+        printed = "M.C.T.M. (CLINICAL TROPICAL MEDICINE)"
+        self.assertEqual(checker_module.degree_line_extras(self._page(printed), self.WANT),
+                         printed)
+
+    def test_a_wrong_degree_is_not_blamed_on_the_name_line(self):
+        """เล่มพิมพ์ผิดเป็น M.Sc. ต้องได้ข้อ "ชื่อปริญญาไม่ตรง" ไม่ใช่ให้ลบบรรทัดชื่อตัวเอง"""
+        page = self._page("M.Sc.")
+        self.assertEqual(checker_module.degree_line_extras(page, self.WANT), "")
+        compared = compare_reference_text(page, self.WANT, "degree", degree_line=True)
+        self.assertEqual(compared["status"], "mismatch")
+        self.assertEqual(compared["actual"], "M.Sc.")
+
+    # หน้าบทคัดย่อของเล่มจริง ก.ย. 2569 (6838776 TMCT/M) ชื่อนักศึกษาแทนด้วยชื่อสมมติ
+    REAL_PAGE = ("iv\nCOMMUNITY-ACQUIRED SEPSIS IN UDON THANI: A RETROSPECTIVE STUDY\n"
+                 "SOMCHAI EXAMPLE 6838776 TMCT/M\nMASTER OF CLINICAL TROPICAL MEDICINE\n"
+                 "INDEPENDENT STUDY ADVISORY COMMITTEE: A B, M.D., Ph.D., C D,\n"
+                 "M.D., Ph.D.\nABSTRACT\nBackground: ...")
+
+    def test_the_real_book_is_told_what_it_printed(self):
+        """เล่มจริงพิมพ์ชื่อเต็มแทนตัวย่อ — ต้องได้ "ในเล่มเขียนว่า MASTER OF ..." ต้องเป็น "M.C.T.M."
+
+        ของเดิม (บน Render): แดง "มีข้อความเกิน" ที่ยกบรรทัดชื่อ-รหัสนักศึกษามาอ้าง
+        ระหว่างแก้: เหลืองผ่าน "ต่างเฉพาะวรรคตอน" (ไปเจอ MCTM ในรหัส) และ "ไม่พบบรรทัด"
+        """
+        page = self.REAL_PAGE
+        self.assertEqual(checker_module.degree_line_extras(page, self.WANT), "")
+        self.assertFalse(checker_module.degree_differs_only_in_spacing(self.WANT, page))
+        compared = compare_reference_text(page, self.WANT, "degree", degree_line=True)
+        self.assertEqual(compared["status"], "mismatch")
+        self.assertEqual(compared["actual"], "MASTER OF CLINICAL TROPICAL MEDICINE")
+        self.assertTrue(checker_module._looks_like_degree_line(compared["actual"]))
+
+    def test_an_exact_line_wins_over_a_title_that_mentions_the_degree(self):
+        """บรรทัดปริญญาตรงพอดีแล้ว = ไม่มีคำเกิน แม้ชื่อเรื่องจะมีตัวย่อเดียวกันอยู่ด้วย"""
+        page = ("iv\nCAREER PATHS OF M.C.T.M. GRADUATES IN THAILAND\n"
+                "SOMCHAI EXAMPLE 6838776 TMXX/M\nM.C.T.M.\nTHESIS ADVISORY COMMITTEE: A B, M.D.")
+        self.assertEqual(checker_module.degree_line_extras(page, self.WANT), "")
+
+    def test_a_person_name_is_not_a_degree_line(self):
+        """ควบคุมเชิงลบ — กิ่ง "ไม่พบบรรทัดชื่อปริญญา" ต้องยังทำงานกับบรรทัดที่ไม่ใช่ปริญญา"""
+        self.assertFalse(checker_module._looks_like_degree_line("THESIS ADVISORY COMMITTEE"))
+        self.assertFalse(checker_module._looks_like_degree_line("SOMCHAI EXAMPLE"))
+
+    def test_the_independent_study_committee_zone_is_cut(self):
+        head = checker_module._degree_search_text(self.REAL_PAGE)
+        self.assertIn("MASTER OF CLINICAL TROPICAL MEDICINE", head)
+        self.assertNotIn("ADVISORY COMMITTEE", head)
+
+    def test_the_cover_rule_still_catches_a_program_suffix(self):
+        """ควบคุมเชิงลบ — เล่มจริงที่ทำให้เกิดกฎนี้ ต้องยังฟ้อง"""
+        self.assertEqual(
+            checker_module.degree_line_extras(
+                "X\nDOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)\nY", "DOCTOR OF PUBLIC HEALTH"),
+            "DOCTOR OF PUBLIC HEALTH (INTERNATIONAL PROGRAM)")
+
+
 class AbstractLocationSaysWhichLanguage(unittest.TestCase):
     """เล่มหลักสูตรไทยมีบทคัดย่อสองหน้า ตำแหน่งต้องบอกว่าหน้าไหน
 

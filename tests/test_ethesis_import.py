@@ -48,6 +48,37 @@ class EnglishDegreeAbbreviation(unittest.TestCase):
     def test_unknown_degree_is_left_blank_not_guessed(self):
         self.assertEqual(_degree_abbr("DOCTOR OF SOMETHING UNLISTED"), "")
 
+    def test_master_of_clinical_tropical_medicine(self):
+        """เจ้าหน้าที่พบในแบบฟอร์ม (ก.ย. 2569) ว่าย่อเป็น M.C.T.M. — เดาจากอักษรแรกได้ตรงก็จริง
+        แต่ระบบไม่เดา จึงต้องอยู่ในตาราง ไม่งั้นช่องฟอร์มว่างให้เจ้าหน้าที่กรอกเองทุกครั้ง"""
+        self.assertEqual(_degree_abbr("MASTER OF CLINICAL TROPICAL MEDICINE"), "M.C.T.M.")
+        self.assertEqual(_degree_abbr("Master of Clinical Tropical Medicine"), "M.C.T.M.")
+
+
+class TheWebFormKnowsTheSameAbbreviations(unittest.TestCase):
+    """ทางวางข้อความ eThesis (templates/index.html) มีตารางตัวย่อของตัวเอง ต้องตรงกับฝั่ง python
+
+    เคยหลุดกันจริง (bug ก.ย. 2569): หน้าเว็บขาด D.N.S. / D.P.A. / Dr. P.H. / M.P.A. เล่ม
+    Dr. P.H. ที่วางข้อความจึงได้ช่องตัวย่อว่าง ส่วนที่อัปโหลดไฟล์ได้ครบ
+    """
+
+    @staticmethod
+    def _js_table(name):
+        import re
+        from pathlib import Path
+        html = (Path(__file__).resolve().parents[1] / "templates" / "index.html"
+                ).read_text(encoding="utf-8")
+        body = re.search(r"const " + name + r" = \{(.*?)\};", html, re.S).group(1)
+        return dict(re.findall(r"'([^']+)'\s*:\s*'([^']*)'", body))
+
+    def test_english_abbreviations_match(self):
+        from ethesis_import import DEGREE_ABBR
+        self.assertEqual(self._js_table("abbreviations"), DEGREE_ABBR)
+
+    def test_thai_stems_match(self):
+        from ethesis_import import DEGREE_ABBR_TH_STEM
+        self.assertEqual(self._js_table("stems"), DEGREE_ABBR_TH_STEM)
+
 
 class CommitteeParsingTests(unittest.TestCase):
     """ดึงชื่อ-สกุลกรรมการจากหน้า eThesis (ตัดคำนำหน้าวิชาการ + บทบาทท้ายบรรทัด)"""

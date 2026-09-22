@@ -411,12 +411,19 @@ function formatDegreeAbbreviation(value) {
   if (!match) return '';
   const degreeName = match[1].trim().toUpperCase();
   const field = (match[2] || '').trim().toUpperCase();
+  // ตารางเดียวกับ DEGREE_ABBR ใน ethesis_import.py ทุกตัว (มีเทสต์เทียบ) — ทางอัปโหลดไฟล์
+  // eThesis ใช้ตารางฝั่งเซิร์ฟเวอร์ ทางวางข้อความใช้ตารางนี้ ต้องได้ตัวย่อเดียวกัน
   const abbreviations = {
     'DOCTOR OF PHILOSOPHY': 'Ph.D.',
+    'DOCTOR OF NURSING SCIENCE': 'D.N.S.',
+    'DOCTOR OF PUBLIC ADMINISTRATION': 'D.P.A.',
+    'DOCTOR OF PUBLIC HEALTH': 'Dr. P.H.',
+    'MASTER OF CLINICAL TROPICAL MEDICINE': 'M.C.T.M.',
     'MASTER OF ENGINEERING': 'M.Eng.',
     'MASTER OF SCIENCE': 'M.Sc.',
     'MASTER OF ARTS': 'M.A.',
     'MASTER OF BUSINESS ADMINISTRATION': 'M.B.A.',
+    'MASTER OF PUBLIC ADMINISTRATION': 'M.P.A.',
     'MASTER OF PUBLIC HEALTH': 'M.P.H.',
     'MASTER OF NURSING SCIENCE': 'M.N.S.',
     'MASTER OF EDUCATION': 'M.Ed.'

@@ -3626,7 +3626,9 @@ def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
 _DEGREE_SEARCH_STOP = re.compile(
     r'^[ \t]*(?:'
     r'[…]{3,}|\.{6,}'                                    # เส้นประสำหรับลงนาม
-    r'|(?:THESIS\s+|THEMATIC\s+PAPER\s+)?(?:ADVISORY|EXAMINATION)\s+COMMITTEE'
+    # INDEPENDENT STUDY ด้วย (เล่มจริง ก.ย. 2569 "INDEPENDENT STUDY ADVISORY COMMITTEE:") — ของเดิม
+    # รู้จักแค่ THESIS/THEMATIC PAPER โซนกรรมการของเล่มการค้นคว้าอิสระจึงไม่ถูกตัดทิ้ง
+    r'|(?:THESIS\s+|THEMATIC\s+PAPER\s+|INDEPENDENT\s+STUDY\s+)?(?:ADVISORY|EXAMINATION)\s+COMMITTEE'
     r'|คณะกรรมการที่ปรึกษา|คณะกรรมการสอบ'
     r')', re.I | re.M)
 
@@ -3640,6 +3642,12 @@ _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2
 # "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ถ้าไม่ตัดคำนี้ก่อน เล่มไทยที่ถูกต้อง
 # จะโดนฟ้องว่ามีข้อความเกินทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
 _DEGREE_LINE_TEMPLATE_PREFIXES = (norm("ปริญญา"),)
+
+
+def degree_line_search_text(page_text):
+    """ส่วนของหน้าที่บรรทัดชื่อปริญญาอยู่ได้: ก่อนโซนรายชื่อกรรมการ และไม่รวมบรรทัดชื่อ-รหัสนักศึกษา"""
+    return "\n".join(line for line in _degree_search_text(page_text).splitlines()
+                     if not _STUDENT_ID_SHAPE.search(line))
 
 
 def degree_line_extras(page_text, expected):
@@ -3662,18 +3670,28 @@ def degree_line_extras(page_text, expected):
     ใช้เฉพาะช่องที่ template วางชื่อปริญญาไว้ "บรรทัดของมันเอง" (หน้าปก และบรรทัด
     ชื่อย่อในบทคัดย่อ) — หน้าลงนามไม่ใช้ เพราะชื่อปริญญาอยู่กลางประโยค template
     ("for the degree of ...") ซึ่งมีคำอื่นล้อมรอบโดยชอบอยู่แล้ว
+
+    **มีบรรทัดที่ตรงพอดีอยู่แล้ว = ไม่มีคำเกิน** (ก.ย. 2569 ตอนเพิ่ม M.C.T.M.) — ตัวย่อที่ไม่มี
+    สาขาในวงเล็บสั้นมากหลัง norm() ("MCTM") จึงไปโผล่ในบรรทัดอื่นได้โดยบังเอิญ เช่นรหัส
+    นักศึกษา "6700000 TMCT/M" (norm แล้ว "...TMCTM") หรือคุณวุฒิกรรมการ "M.D., M.C.T.M."
+    ของเดิมข้ามบรรทัดที่ตรงพอดีแล้วคืนบรรทัดพวกนั้นแทน เล่มที่ถูกต้องจึงได้แดง "มีข้อความเกิน"
+    บรรทัดชื่อ-รหัสนักศึกษาไม่มีวันเป็นบรรทัดชื่อปริญญา จึงข้ามไปเลย และตัดโซนรายชื่อกรรมการ
+    ทิ้งก่อน (_degree_search_text ตัวเดียวกับที่ใช้หาบรรทัดปริญญา) ไม่งั้นเล่มที่พิมพ์ชื่อปริญญา
+    ผิดจะได้ข้อความสั่งให้ "ลบข้อความเกิน" ที่ยกบรรทัดชื่อตัวเองหรือบรรทัดกรรมการมาอ้าง
     """
     want = norm(expected)
     if not want:
         return ""
     hits = []
-    for line in (page_text or "").splitlines():
+    for line in degree_line_search_text(page_text).splitlines():
         nl = norm(line)
         for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
             if prefix and nl.startswith(prefix):
                 nl = nl[len(prefix):]
                 break
-        if want in nl and nl != want:
+        if nl == want:
+            return ""
+        if want in nl:
             hits.append(soft(line))
     return min(hits, key=len) if hits else ""
 
@@ -3684,10 +3702,18 @@ def _looks_like_degree_line(line):
     ใช้แยก "เล่มพิมพ์ชื่อปริญญาผิด" ออกจาก "เล่มไม่มีบรรทัดชื่อปริญญาเลย" ซึ่งวิธีแก้
     คนละอย่างกัน — ถ้าไม่แยก ระบบจะยกบรรทัดที่ใกล้เคียงที่สุดบนหน้ามาอ้างว่าเป็น
     ชื่อปริญญา (เคยได้บรรทัดชื่อ-รหัสนักศึกษา) แล้วเจ้าหน้าที่นึกว่าระบบอ่านเพี้ยน
+
+    ชื่อปริญญาแบบเต็มก็นับ (เล่มจริง ก.ย. 2569 พิมพ์ "MASTER OF CLINICAL TROPICAL MEDICINE"
+    ตรงบรรทัดที่ต้องเป็น "M.C.T.M.") — มีบรรทัดปริญญาอยู่ แค่เขียนผิดรูป ต้องยกมาบอกว่าเล่มเขียน
+    ว่าอะไร ไม่ใช่บอกว่า "ไม่พบบรรทัด" ซึ่งทำให้นักศึกษาไปเพิ่มบรรทัดใหม่ซ้อนอีกบรรทัด
     """
     text = soft(line)
     return bool(text) and bool(_ABS_DEGREE_HEAD.match(text)
-                               or _DEGREE_ABBR_TOKEN.search(text))
+                               or _DEGREE_ABBR_TOKEN.search(text)
+                               or _FULL_DEGREE_NAME.search(text))
+
+
+_FULL_DEGREE_NAME = re.compile(r'^\s*(?:MASTER|DOCTOR|BACHELOR)\s+OF\s+\S|มหาบัณฑิต|ดุษฎีบัณฑิต', re.I)
 
 
 def _degree_search_text(page_text):
@@ -3770,8 +3796,16 @@ def compare_values(actual, expected, rule_name):
 
 
 def compare_reference_text(page_text, expected, rule_name, degree_line=False):
-    """Find the relevant PDF line, then classify exact/case/typo/mismatch."""
+    """Find the relevant PDF line, then classify exact/case/typo/mismatch.
+
+    degree_line=True ค้นเฉพาะส่วนที่บรรทัดชื่อปริญญาอยู่ได้ (degree_line_search_text) — การค้น
+    ทั้งหน้าเอาทุกบรรทัดมาต่อกัน ตัวย่อสั้นอย่าง "M.C.T.M." (norm แล้ว "MCTM") จึงไปเจอใน
+    รหัสนักศึกษา "6700000 TMCT/M" หรือคุณวุฒิกรรมการ แล้วตอบว่า exact ทั้งที่เล่มพิมพ์ผิดเป็น
+    "M.Sc." (เจอตอนเพิ่ม M.C.T.M. ก.ย. 2569)
+    """
     rule = MATCH_RULES[rule_name]
+    if degree_line:
+        page_text = degree_line_search_text(page_text)
     if not rule['case_sensitive'] and norm(expected) in norm(page_text):
         return {'status': 'exact', 'actual': soft(expected), 'score': 1.0}
     matched, reason = exact_reference_status(page_text, expected)
@@ -3859,9 +3893,13 @@ def degree_differs_only_in_spacing(expected, page_text):
     ด้วย norm() ที่แปลงเป็นตัวใหญ่ทั้งหมด ชื่อปริญญาที่ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่
     ("MASTER OF SCIENCE" กับ "Master of Science") จึงตกกิ่งนี้ ได้สีเหลืองพร้อมคำอธิบาย
     ที่ผิด แล้วเล่มผ่านได้ — ตัวพิมพ์ผิดต้องเป็นแดงเหมือนเดิม (ดู mismatch_detail)
+
+    ค้นเฉพาะส่วนที่บรรทัดชื่อปริญญาอยู่ได้ (degree_line_search_text) — เล่มจริง ก.ย. 2569 พิมพ์
+    "MASTER OF CLINICAL TROPICAL MEDICINE" แทนตัวย่อ "M.C.T.M." แต่ค้นทั้งหน้าแล้วไปเจอ "MCTM"
+    ในรหัสนักศึกษา "6838776 TMCT/M" จึงตอบว่าต่างแค่วรรคตอน ได้สีเหลืองผ่านทั้งที่ผิดคนละคำ
     """
     want = _letters_keep_case(expected)
-    return bool(want) and want in _letters_keep_case(page_text)
+    return bool(want) and want in _letters_keep_case(degree_line_search_text(page_text))
 
 
 def mismatch_detail(label, compared, expected=''):
