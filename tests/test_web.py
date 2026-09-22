@@ -855,6 +855,24 @@ class TheReportPageKeepsItsNewLayout(unittest.TestCase):
         for kind in ("fail", "pass", "pending"):
             self.assertIn(f".result-card:has(.verdict-pill.{kind})", self.html)
 
+    def test_printing_does_not_push_whole_cards_to_a_new_page(self):
+        """เจ้าหน้าที่บันทึกรายงานเป็น PDF — การ์ดทั้งใบห้าม break-inside:avoid
+
+        ตอนออกแบบใหม่รอบแรกตั้งไว้ การ์ดที่ไม่พอดีหน้าถูกดันไปหน้าใหม่ทั้งใบ ทิ้งที่ว่างครึ่งหน้า
+        เล่ม M.C.T.M. จากเดิมพิมพ์ 5 หน้า (A4) กลายเป็น 7 หน้า กันไว้ได้แค่ก้อนเล็ก (ข้อ/แถว)
+        """
+        import re
+        css = re.sub(r"/\*.*?\*/", "", self.html.split("<style>", 1)[1].split("</style>", 1)[0], flags=re.S)
+        whole_cards = {".panel", ".copybox", ".zone-panel", ".cat-group", ".vf-group"}
+        for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            if re.search(r"break-inside\s*:\s*avoid", body):
+                names = {s.strip() for s in selectors.split(",")}
+                self.assertFalse(names & whole_cards, selectors.strip())
+        # หัวการ์ดไม่ค้างท้ายหน้าโดยไม่มีเนื้อหาตามมา
+        self.assertRegex(css, r"\.panel > h2\.sec[^{}]*\{[^{}]*break-after\s*:\s*avoid")
+        # ชุดบีบระยะตอนพิมพ์ต้องมาหลังชุดจอเล็ก — กระดาษ A4 หักขอบแล้วตกช่วง max-width:720px ได้
+        self.assertGreater(css.rindex("@media print"), css.index("@media (max-width:720px)"))
+
 
 class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
     """เปิดไฟล์รูปเล่มที่ตรวจได้จากหน้ารายงาน (เจ้าหน้าที่ขอ ก.ย. 2569)

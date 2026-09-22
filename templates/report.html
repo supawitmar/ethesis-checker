@@ -271,7 +271,11 @@
     .topbar, .actions, .cmt-btn, .note-editor, .langbtn, .logout-form, .book-open, .top-new { display:none !important; }
     .page { padding:0; max-width:none; }
     .panel, .copybox, .stat, .issue, .hc, .cat-group, .vf-group { box-shadow:none !important; }
-    .panel, .copybox { break-inside:avoid-page; }
+    /* การ์ดทั้งใบห้ามตั้ง break-inside:avoid — การ์ดที่ไม่พอดีหน้าจะถูกดันไปหน้าใหม่ทั้งใบ
+       ทิ้งที่ว่างครึ่งหน้า (รายงานเล่มเดียวกันเคยพิมพ์ 5 หน้า กลายเป็น 7 หน้า) ให้การ์ดขึ้นหน้าใหม่ได้
+       กันไว้แค่ก้อนเล็กที่อ่านรู้เรื่องเป็นหน่วยเดียว และไม่ให้หัวการ์ดค้างท้ายหน้าโดยไม่มีเนื้อหา */
+    .panel > h2.sec, .cat-sum, .vf-topic { break-after:avoid-page; }
+    .result-card, .issue, .hc, .vf-row { break-inside:avoid-page; }
     .panel > h2.sec, .copy-sum { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     .vf-arrow { display:none; }
     .vf-topic { cursor:default; }
@@ -294,6 +298,20 @@
     .stat { flex:1; min-width:0; }
     .vf-row { padding-left:18px; }
     .vf-loc { min-width:0; flex:1 1 100%; }
+  }
+  /* พิมพ์: ระยะห่างของการ์ดบนจอกินกระดาษ — บีบให้ใกล้รายงานแบบเก่า (วางหลังชุดจอเล็ก
+     เพราะความกว้างกระดาษ A4 หักขอบแล้วอาจตกช่วง max-width:720px) */
+  @media print {
+    .hero .sub { margin-top:2px; }
+    .panel { padding:12px 16px 14px; margin-top:10px; border-radius:10px; }
+    .panel > h2.sec { margin:-12px -16px 10px; padding:8px 16px; border-radius:10px 10px 0 0; font-size:.98rem; }
+    .stu { gap:8px 24px; }
+    .verdict-bar { margin-top:12px; padding-top:12px; }
+    .issue, .hc, .cat-group, .vf-group { margin-bottom:8px; }
+    .hc { padding:10px 14px; }
+    .vf-topic { padding:8px 14px; }
+    .vf-row { padding:4px 14px 4px 28px; }
+    .copybox { margin-top:10px; }
   }
 </style>
 </head>
