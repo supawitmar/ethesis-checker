@@ -847,11 +847,11 @@ class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
         for path in paths:
             main._remove_book(path)
 
-    def _approved_type(self, **fields):
+    def _approved_type(self, key="doc_type", **fields):
         seen = []
 
         def capture(path, approved, **kwargs):
-            seen.append(approved["doc_type"])
+            seen.append(approved.get(key))
             raise RuntimeError("stop")
 
         with mock.patch.object(main, "run_check", side_effect=capture):
@@ -870,6 +870,11 @@ class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
     def test_the_ethesis_type_wins_over_the_dropdown(self):
         self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY",
                                              ethesis_doc_type="THEMATIC PAPER"), "THEMATIC PAPER")
+
+    def test_the_type_chosen_on_the_form_goes_along_too(self):
+        """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" — ค่าที่เลือกห้ามหายไป"""
+        self.assertEqual(self._approved_type("doc_type_form", doc_type="INDEPENDENT STUDY",
+                                             ethesis_doc_type="THEMATIC PAPER"), "INDEPENDENT STUDY")
 
     def test_the_dropdown_is_used_when_the_file_gives_no_type(self):
         """ควบคุมเชิงบวก — ไม่มีค่าจากไฟล์ ช่องที่เลือกยังใช้งานได้ตามเดิม"""
@@ -927,7 +932,7 @@ console.log(JSON.stringify(out));
         # เปลี่ยนช่องให้ต่างจากไฟล์ — บอกว่าระบบยังเทียบกับประเภทตามไฟล์
         self.assertEqual(out["changed"][:2], ["THEMATIC PAPER", False])
         self.assertIn("สารนิพนธ์ (Thematic Paper)", out["changed"][2])
-        self.assertIn("จะถูกฟ้อง", out["changed"][2])
+        self.assertIn("ทั้งสองค่า", out["changed"][2])
         # เริ่มเล่มใหม่ — ค่าจากไฟล์เดิมต้องไม่ค้าง
         self.assertEqual(out["cleared"], ["", True, ""])
 

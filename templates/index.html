@@ -474,8 +474,9 @@ function clearImportedFields() {
 }
 
 // ประเภทเล่มที่อนุมัติยึดตามไฟล์ eThesis (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย") — เล่ม 6838776
-// ผ่านเรื่องนี้ไปเพราะช่องนี้ถูกเปลี่ยนให้ตรงกับเล่ม ตอนนี้เปลี่ยนแล้วเซิร์ฟเวอร์ก็ยังเทียบกับ
-// ค่าในไฟล์ จึงต้องบอกตรงช่องว่าเปลี่ยนไปไม่มีผล ไม่งั้นเจ้าหน้าที่จะงงว่าทำไมยังถูกฟ้อง
+// ผ่านเรื่องนี้ไปเพราะช่องนี้ถูกเปลี่ยนให้ตรงกับเล่ม ตอนนี้เซิร์ฟเวอร์เทียบเล่มกับทั้งค่าในไฟล์
+// และค่าที่เลือก ("ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง") จึงบอกตรงช่อง
+// ว่าสองค่านี้ต่างกัน เล่มจะไม่ตรงกับค่าใดค่าหนึ่งแน่นอน
 function updateDocTypeNote() {
   const eth = document.getElementById('ethesis-doc-type');
   const note = document.getElementById('doc-type-note');
@@ -486,7 +487,7 @@ function updateDocTypeNote() {
   if (!differs) { note.textContent = ''; return; }
   const option = Array.from(select.options).find(function(o){ return o.value === eth.value; });
   note.textContent = 'ไฟล์ eThesis ระบุประเภทเล่มเป็น ' + (option ? option.textContent : eth.value) +
-    ' ระบบจะตรวจเทียบกับประเภทนี้ ถ้าเล่มเขียนเป็นประเภทอื่นจะถูกฟ้อง';
+    ' ไม่ตรงกับที่เลือกไว้ ระบบจะเทียบเล่มกับทั้งสองค่า ถ้าเล่มไม่ตรงกับค่าใดจะถูกแจ้ง';
 }
 
 function applyParsed(parsed) {

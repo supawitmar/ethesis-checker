@@ -501,9 +501,11 @@ async def check(
 
     # ประเภทเล่มที่อนุมัติ = ค่าจากไฟล์ eThesis ก่อนช่องที่เลือกเอง (เจ้าหน้าที่สั่ง ก.ย. 2569)
     # เล่ม 6838776: eThesis อนุมัติเป็นสารนิพนธ์ เล่มเขียน INDEPENDENT STUDY แล้วช่องประเภทเล่ม
-    # ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงไม่ฟ้อง — "ให้ฟ้องด้วย" ช่องที่เลือกใช้เมื่อไฟล์ไม่ระบุประเภท
+    # ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงไม่ฟ้อง — "ให้ฟ้องด้วย"
+    # ค่าที่เลือกในแบบฟอร์มส่งไปด้วย เล่มต้องเทียบกับทั้งสองค่า ("ถ้าในแบบฟอร์มที่กรอก/ดึงมาจาก
+    # ระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง") ดู checker.doc_type_check
     approved = {
-        "doc_type": ethesis_doc_type or doc_type, "format": format,
+        "doc_type": ethesis_doc_type or doc_type, "doc_type_form": doc_type, "format": format,
         "program_language": program_language, **form_values,
     }
     if faculty.strip():

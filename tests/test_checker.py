@@ -5852,9 +5852,10 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
             self.assertEqual(read(line), [], line)
 
     def test_the_mctm_book_gets_one_item_that_lists_every_place(self):
-        rows, issue, cover_type = checker_module.doc_type_check(
+        rows, issues, cover_type = checker_module.doc_type_check(
             "THEMATIC PAPER", "international", self.SPOTS)
-        location, found, expected, fix = issue
+        self.assertEqual([i[0] for i in issues], ["RED"])
+        _zone, location, found, expected, fix = issues[0]
         self.assertEqual(location, "หน้าปก, หน้าลงนาม 1 (หน้า i), หน้าลงนาม 2 (หน้า ii) "
                                    "และ บทคัดย่ออังกฤษ (หน้า iv)")
         self.assertEqual(found, 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "INDEPENDENT STUDY"')
@@ -5881,9 +5882,9 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
         self.assertTrue(missing_type_text("THEMATIC PAPER"))
 
     def test_a_book_of_the_approved_type_passes(self):
-        rows, issue, cover_type = checker_module.doc_type_check(
+        rows, issues, cover_type = checker_module.doc_type_check(
             "INDEPENDENT STUDY", "international", self.SPOTS)
-        self.assertIsNone(issue)
+        self.assertEqual(issues, [])
         self.assertEqual([r[1] for r in rows], ["pass"] * 5)
         self.assertEqual(cover_type, "INDEPENDENT STUDY")
 
@@ -5891,25 +5892,25 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
         """ปกถูกแต่หน้าลงนามยังเขียนประเภทเก่า — ต้องบอกเฉพาะหน้าที่ผิด"""
         spots = [("หน้าปก", self.COVER.replace("AN INDEPENDENT STUDY", "A THEMATIC PAPER")),
                  ("หน้าลงนาม 1 (หน้า i)", self.SIG1)]
-        rows, issue, cover_type = checker_module.doc_type_check("THEMATIC PAPER", "international", spots)
-        self.assertEqual(issue[0], "หน้าลงนาม 1 (หน้า i)")
-        self.assertNotIn("หน้าปกต้องเป็น", issue[2])
+        rows, issues, cover_type = checker_module.doc_type_check("THEMATIC PAPER", "international", spots)
+        self.assertEqual(issues[0][1], "หน้าลงนาม 1 (หน้า i)")
+        self.assertNotIn("หน้าปกต้องเป็น", issues[0][3])
         self.assertEqual(cover_type, "THEMATIC PAPER")
         self.assertEqual([r[1] for r in rows], ["fail", "pass", "fail"])
 
     def test_a_thai_book_is_told_in_thai_words(self):
         spots = [("หน้าปก", "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"),
                  ("บทคัดย่อไทย (หน้า ง)", "คณะกรรมการที่ปรึกษาสารนิพนธ์: คนางค์ คันธมธุรพจน์")]
-        _rows, issue, _cover = checker_module.doc_type_check("THESIS", "thai", spots)
-        self.assertEqual(issue[1], 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "สารนิพนธ์"')
-        self.assertIn('ต้องแก้ทุกจุดเป็น "วิทยานิพนธ์"', issue[2])
-        self.assertIn('"วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"', issue[2])
+        _rows, issues, _cover = checker_module.doc_type_check("THESIS", "thai", spots)
+        self.assertEqual(issues[0][2], 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "สารนิพนธ์"')
+        self.assertIn('ต้องแก้ทุกจุดเป็น "วิทยานิพนธ์"', issues[0][3])
+        self.assertIn('"วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"', issues[0][3])
 
     def test_no_approved_type_means_nothing_to_compare(self):
-        self.assertEqual(checker_module.doc_type_check("", "international", self.SPOTS), ([], None, ""))
+        self.assertEqual(checker_module.doc_type_check("", "international", self.SPOTS), ([], [], ""))
 
     def _issue(self, rule_id="FORM.DOC_TYPE"):
-        _rows, (location, found, expected, fix), _cover = checker_module.doc_type_check(
+        _rows, [(_zone, location, found, expected, fix)], _cover = checker_module.doc_type_check(
             "THEMATIC PAPER", "international", self.SPOTS)
         return {"rule_id": rule_id, "part": "front_matter", "location": location,
                 "found": found, "expected": expected, "fix": fix}
@@ -5929,7 +5930,7 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
 
     def test_run_check_uses_it_and_the_old_item_is_gone(self):
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn("doc_type_check(approved_type, program_language, type_spots)", source)
+        self.assertIn('approved_type, program_language, type_spots, A.get("doc_type_form", ""))', source)
         self.assertIn('rep.add_verification("ประเภทเล่ม", where, status, detail)', source)
         self.assertIn("cover_required_items(cover_type, program_language)", source)
         self.assertIn('"FORM.DOC_TYPE")', source)
@@ -5937,13 +5938,119 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
         import ethesis_rules
         self.assertIn("FORM.DOC_TYPE", ethesis_rules.RULE_CATALOG)
 
+    def test_the_type_chosen_on_the_form_is_compared_too(self):
+        """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" (เจ้าหน้าที่ ก.ย. 2569)
+
+        เล่มตรงกับไฟล์ eThesis แต่ไม่ตรงกับที่เลือกในแบบฟอร์ม — ระบบไม่รู้ว่าค่าไหนถูก จึงเป็นสีส้ม
+        """
+        rows, issues, _cover = checker_module.doc_type_check(
+            "INDEPENDENT STUDY", "international", self.SPOTS, form_type="THEMATIC PAPER")
+        self.assertEqual([i[0] for i in issues], ["ORANGE"])
+        self.assertIn('ต้องแก้ทุกจุดเป็น "THEMATIC PAPER"', issues[0][3])
+        self.assertIn('ไฟล์ eThesis ระบุ "INDEPENDENT STUDY"', issues[0][4])
+        self.assertEqual(rows[1], ("ช่องประเภทเล่มในแบบฟอร์ม", "pending", '"THEMATIC PAPER"'))
+        self.assertEqual({r[1] for r in rows[2:]}, {"pending"})
+        # ควบคุมเชิงบวก — ไม่ส่งค่าจากแบบฟอร์ม เล่มนี้ผ่าน (ข้อส้มมาจากแบบฟอร์มจริง)
+        self.assertEqual(checker_module.doc_type_check(
+            "INDEPENDENT STUDY", "international", self.SPOTS)[1], [])
+
+    def test_the_book_off_both_values_gets_both_notices(self):
+        _rows, issues, _cover = checker_module.doc_type_check(
+            "THEMATIC PAPER", "international", self.SPOTS, form_type="THESIS")
+        self.assertEqual([i[0] for i in issues], ["RED", "ORANGE"])
+
+    def test_a_form_that_agrees_with_the_file_adds_nothing(self):
+        self.assertEqual(
+            checker_module.doc_type_check("THEMATIC PAPER", "international", self.SPOTS,
+                                          form_type="THEMATIC PAPER"),
+            checker_module.doc_type_check("THEMATIC PAPER", "international", self.SPOTS))
+
     def test_every_new_line_has_an_english_translation(self):
         report_html = (Path(checker_module.__file__).parent
                        / "templates" / "report.html").read_text(encoding="utf-8")
-        for phrase in ("^ประเภทเล่ม$", "^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า ",
+        for phrase in ("^ช่องประเภทเล่มในแบบฟอร์ม$", "^ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis",
+                       "^ประเภทเล่ม$", "^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า ",
                        "^ประเภทเล่มที่ได้รับอนุมัติคือ ", "โดยหน้าปกต้องเป็น",
                        "^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง"):
             self.assertIn(phrase, report_html, phrase)
+
+
+class EveryFormFieldThatTheBookPrintsIsCompared(unittest.TestCase):
+    """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" (เจ้าหน้าที่ ก.ย. 2569)
+
+    ตรวจทุกช่องในแบบฟอร์มกับเล่มจริงสามเล่ม (repo 1-3) โดยเปลี่ยนค่าให้ผิดทีละช่อง เจอสามจุดที่
+    ฟอร์มกับเล่มไม่ตรงแล้วระบบไม่แจ้งหรือแจ้งผิดเรื่อง เทสต์ชุดนี้ใช้ข้อความจริงจากเล่มเหล่านั้น
+    """
+
+    # repo 1 หน้าบทคัดย่อ: เล่มพิมพ์รหัสถูก ส่วนแบบฟอร์มกรอกผิดหลักแรก
+    ABSTRACT = "PIYAORN CHORNCHOEM 6136017 TMTM/D\nDOCTOR OF PHILOSOPHY (TROPICAL MEDICINE)"
+
+    def test_a_different_but_readable_id_is_a_mismatch_not_font_damage(self):
+        """เดิมได้การ์ดส้ม "ระบบอ่านรหัสไม่ออก เพราะฟอนต์" ซึ่งปิดข้อแดง "รหัสไม่ตรง" ไปด้วย"""
+        self.assertEqual(checker_module.unreadable_id_digits(
+            self.ABSTRACT, "7136017 TMTM/D", ("PIYAORN CHORNCHOEM",)), "")
+        # ควบคุมเชิงลบ — ตัวเลขที่ฟอนต์ทำเพี้ยนเป็นตัวอักษร ยังนับเป็นฟอนต์เพี้ยนตามเดิม
+        self.assertEqual(checker_module.unreadable_id_digits(
+            self.ABSTRACT.replace("6136017", "JKLMNOP"), "7136017 TMTM/D",
+            ("PIYAORN CHORNCHOEM",)), "JKLMNOP")
+
+    # repo 3 แถวล่างของหน้าลงนาม 1 ตามลำดับการอ่าน (signature_committee_slots) — พิมพ์
+    # "มหาบัณทิต" ฑ เป็น ท
+    THAI_CHAIR = ("ศาสตราจารย์ ฉัตรเฉลิม อิศรางกูร ณ อยุธยา, ปร.ด. (เทคนิคการแพทย์) คณบดี "
+                  "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ผู้ช่วยศาสตราจารย์ สุภาภรณ์ สงค์ประชา, "
+                  "ศษ.ด. (สิ่งแวดล้อมศึกษา) ประธานหลักสูตร ศิลปศาสตรมหาบัณทิต "
+                  "สาขาวิชาสังคมศาสตร์สิ่งแวดล้อม คณะสังคมศาสตร์และมนุษยศาสตร์ มหาวิทยาลัยมหิดล")
+
+    def _chair(self, bottom, degree_field, degree, english=False):
+        rep = Report()
+        _check_signature_institution(rep, "advisory", bottom, {degree_field: degree}, english)
+        return [i["found"] for i in rep.zones["ORANGE"]]
+
+    def test_the_degree_name_in_the_programme_chair_box_is_checked(self):
+        found = self._chair(self.THAI_CHAIR, "degree_cover_th", "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+        self.assertEqual(len(found), 1)
+        self.assertIn('สะกดชื่อปริญญาผิด เขียนว่า "ศิลปศาสตรมหาบัณทิต"', found[0])
+        # ควบคุมเชิงบวก — สะกดถูกแล้วไม่ฟ้อง
+        self.assertEqual(self._chair(self.THAI_CHAIR.replace("มหาบัณทิต", "มหาบัณฑิต"),
+                                     "degree_cover_th", "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"), [])
+
+    def test_english_programme_chair_boxes_of_the_real_books_pass(self):
+        """ช่องประธานหลักสูตรของเล่มอังกฤษทุกเล่มที่มี พิมพ์ "Doctor of Philosophy Program in ..." """
+        for bottom, degree in (
+                ("Ph.D. (Medical Technology) Dean Faculty of Graduate Studies, Mahidol University "
+                 "Program Director Doctor of Philosophy Program in Tropical Medicine (International "
+                 "Program) Faculty of Tropical Medicine Mahidol University",
+                 "DOCTOR OF PHILOSOPHY (TROPICAL MEDICINE)"),
+                ("Dean Faculty of Graduate Studies, Mahidol University Assoc. Prof. Supaporn Kiattisin, "
+                 "Ph.D. (Electrical and Computer Engineering) Program Director Master of Science "
+                 "Program in Information Technology Management Faculty of Engineering Mahidol University",
+                 "MASTER OF SCIENCE (INFORMATION TECHNOLOGY MANAGEMENT)"),
+                ("Ph.D. (Medical Technology) Dean Faculty of Graduate Studies, Mahidol University "
+                 "Program Director Master of Clinical Tropical Medicine Faculty of Tropical Medicine "
+                 "Mahidol University",
+                 "MASTER OF CLINICAL TROPICAL MEDICINE")):
+            self.assertEqual(self._chair(bottom, "degree_cover_en", degree, english=True), [], degree)
+
+    def test_a_missing_programme_line_is_one_item_not_two(self):
+        """ทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว ไม่ต้องเพิ่มข้อชื่อปริญญาจากช่องเดียวกัน"""
+        found = self._chair("บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร", "degree_cover_th",
+                            "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
+        self.assertEqual(len(found), 1)
+        self.assertIn("ชื่อสาขา", found[0])
+
+    def test_free_mode_still_compares_the_format(self):
+        """โหมด free ใช้รูปแบบตามที่เลือกตรวจต่อ เดิมจึงไม่เคยเทียบกับเล่ม — ต้องแจ้งเป็นสีส้ม"""
+        source = inspect.getsource(checker_module.run_check)
+        start = source.index('if chapters_mode == "free" and A.get("format")')
+        block = source[start:start + 900]
+        self.assertIn('resolve_option(body_ch, None, "strict")', block)
+        self.assertIn('rep.add("ORANGE", "body", "โครงบท"', block)
+        # ดูรูปแบบจากชื่อบทที่ 1 — เล่มที่หาบทที่ 1 ไม่เจอ ห้ามเดา
+        self.assertIn("any(c[0] == 1 for c in body_ch)", block)
+        # ควบคุม — resolve_option แบบ strict ดูจากเล่มจริง ไม่ใช่ค่าที่เลือก
+        opt2 = [(1, "SUMMARY", 0, "1", "")]
+        self.assertEqual(checker_module.resolve_option(opt2, {"format": "1"}, "free"), 1)
+        self.assertEqual(checker_module.resolve_option(opt2, None, "strict"), 2)
 
 
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):

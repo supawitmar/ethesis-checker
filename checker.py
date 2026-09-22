@@ -1378,9 +1378,21 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
             or approved.get("degree_cover_en", "")
         subject = _degree_subject(degree)
-        if subject and norm(subject) not in found_text:
+        subject_found = not subject or norm(subject) in found_text
+        if not subject_found:
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
+                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+        # ชื่อปริญญาหน้าวงเล็บก็พิมพ์อยู่ในช่องนี้ ("ศิลปศาสตรมหาบัณฑิต สาขาวิชา..." /
+        # "Doctor of Philosophy Program in ...") — เดิมเทียบแค่ชื่อสาขา เล่มจริง repo 3 พิมพ์
+        # "ศิลปศาสตรมหาบัณทิต" (ฑ เป็น ท) แล้วไม่มีใครเห็น ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569)
+        # วัดกับเล่มจริง 8 เล่ม: 7 เล่มพิมพ์ตรง อีกเล่มคือ repo 3 ที่สะกดผิดจริง
+        # เทียบเฉพาะเมื่อเจอชื่อสาขาแล้ว — ถ้าทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว
+        # ไม่ต้องได้สองข้อจากช่องเดียวกัน
+        degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
+        if subject_found and degree_name and norm(degree_name) not in found_text:
+            _institution_mismatch(
+                rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อปริญญา", degree_name,
                 bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
@@ -1737,6 +1749,12 @@ def unreadable_id_digits(page_text, student_id, names=()):
             if len(slot) != len(digits) or _THAI_CONSONANT.search(slot):
                 continue
             if _THAI_DIGITS_ONLY.fullmatch(slot):
+                continue
+            # เลขอารบิกที่อ่านได้ครบแต่คนละตัวกับข้อมูลอนุมัติ ไม่ใช่ฟอนต์เพี้ยน — คือรหัสไม่ตรง
+            # (เล่มพิมพ์ผิด หรือแบบฟอร์มกรอกผิด) ต้องฟ้องแดงตามปกติ ตรวจทุกช่องในแบบฟอร์ม
+            # (ก.ย. 2569): ใส่รหัสในแบบฟอร์มผิดหลักเดียว ได้การ์ดส้ม "ระบบอ่านรหัสไม่ออก
+            # เพราะฟอนต์" แทนที่จะบอกว่ารหัสไม่ตรง
+            if slot.isascii() and slot.isdigit():
                 continue
             if any(norm(slot) in name for name in known if name):
                 continue
@@ -2405,12 +2423,19 @@ def doc_types_printed(page_text):
     return found
 
 
-def doc_type_check(approved_type, program_language, spots):
-    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับที่ได้รับอนุมัติ
+def doc_type_check(approved_type, program_language, spots, form_type=""):
+    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับที่ได้รับอนุมัติ และกับที่เลือกในแบบฟอร์ม
 
     spots = [(ตำแหน่ง, ข้อความของหน้า), ...] ตามลำดับในเล่ม หน้าปกมาก่อน
-    คืน (แถวในตารางผลเทียบ, ข้อแดง (ตำแหน่ง, ที่พบ, ควรเป็น, ต้องแก้) หรือ None,
+    คืน (แถวในตารางผลเทียบ, [(สี, ตำแหน่ง, ที่พบ, ควรเป็น, ต้องแก้), ...],
          ประเภทที่ใช้เทียบข้อความบังคับบนหน้าปก)
+
+    approved_type = ค่าจากไฟล์ eThesis (ถ้าไฟล์ไม่ระบุ คือค่าที่เลือกในแบบฟอร์ม)
+    form_type     = ค่าที่เลือกในแบบฟอร์ม — เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้าในแบบฟอร์มที่กรอก/ดึงมา
+                    จากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" เล่มจึงเทียบกับทั้งสองค่า
+      ไม่ตรงกับไฟล์ eThesis               = แดง
+      ไม่ตรงกับที่เลือกในแบบฟอร์ม (ซึ่งต่างจาก
+      ไฟล์ eThesis)                       = ส้ม ระบบไม่รู้ว่าค่าไหนถูก เจ้าหน้าที่ตัดสินเอง
 
     จุดผิดหลายหน้ารวมเป็นข้อเดียว เพราะนักศึกษาแก้เรื่องเดียว (เปลี่ยนประเภทเล่ม) ส่วนตาราง
     ผลเทียบลงทุกจุดที่อ่านเจอ ทั้งตอนตรงและไม่ตรง จะได้แยก "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ" ออก
@@ -2420,34 +2445,53 @@ def doc_type_check(approved_type, program_language, spots):
     A THEMATIC PAPER" ทั้งที่ปกเขียน AN INDEPENDENT STUDY อยู่ นักศึกษาอ่านแล้วจะเติมซ้อน
     """
     if not approved_type:
-        return [], None, approved_type
+        return [], [], approved_type
+    form_type = form_type if form_type and form_type != approved_type else ""
     printed = [(spot, doc_types_printed(text)) for spot, text in spots]
-    wrong = [spot for spot, found in printed if any(t != approved_type for t, _ in found)]
-    cover_found = printed[0][1] if printed and printed[0][0] == "หน้าปก" else []
-    cover_wrong = [t for t, _ in cover_found if t != approved_type]
-    want = doc_type_name(approved_type, program_language)
+
+    def differs(want_type):
+        return [spot for spot, found in printed if any(t != want_type for t, _ in found)]
+
+    wrong = differs(approved_type)
+    off_form = differs(form_type) if form_type else []
     rows = []
     if any(found for _, found in printed):
-        rows.append(("ข้อมูลอนุมัติ", "fail" if wrong else "pass", f'"{want}"'))
+        rows.append(("ข้อมูลอนุมัติ", "fail" if wrong else "pass",
+                     f'"{doc_type_name(approved_type, program_language)}"'))
+        if form_type:
+            rows.append(("ช่องประเภทเล่มในแบบฟอร์ม", "pending" if off_form else "pass",
+                         f'"{doc_type_name(form_type, program_language)}"'))
         for spot, found in printed:
             if found:
                 words = dict.fromkeys(word for _, word in found)
-                rows.append((spot, "fail" if spot in wrong else "pass",
-                             ", ".join(f'"{word}"' for word in words)))
-    issue = None
-    if wrong:
-        names = dict.fromkeys(doc_type_name(t, program_language)
-                              for _, found in printed for t, _ in found if t != approved_type)
+                status = "fail" if spot in wrong else "pending" if spot in off_form else "pass"
+                rows.append((spot, status, ", ".join(f'"{word}"' for word in words)))
+
+    def item(zone, want_type, spots_off, fix):
+        want = doc_type_name(want_type, program_language)
+        names = dict.fromkeys(doc_type_name(t, program_language) for spot, found in printed
+                              if spot in spots_off for t, _ in found if t != want_type)
         must_be = f'ประเภทเล่มที่ได้รับอนุมัติคือ "{want}" ต้องแก้ทุกจุดเป็น "{want}"'
-        if cover_wrong:
-            cover_sentence = dict(cover_required_items(approved_type, program_language))["ข้อความประเภทงาน"]
+        if "หน้าปก" in spots_off:
+            cover_sentence = dict(cover_required_items(want_type, program_language))["ข้อความประเภทงาน"]
             must_be += f' โดยหน้าปกต้องเป็น "{cover_sentence}"'
-        issue = (_join_and(wrong),
-                 "ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "
-                 + " และ ".join(f'"{name}"' for name in names),
-                 must_be,
-                 "ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด")
-    return rows, issue, (cover_wrong[0] if cover_wrong else approved_type)
+        return (zone, _join_and(spots_off),
+                "ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "
+                + " และ ".join(f'"{name}"' for name in names),
+                must_be, fix)
+
+    issues = []
+    if wrong:
+        issues.append(item("RED", approved_type, wrong,
+                           "ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด"))
+    if off_form:
+        issues.append(item("ORANGE", form_type, off_form,
+                           "ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis "
+                           f'(ไฟล์ eThesis ระบุ "{doc_type_name(approved_type, program_language)}") '
+                           "ถ้าประเภทที่ถูกต้องคือค่าที่เลือกในแบบฟอร์ม ให้กดไม่ผ่านเพื่อแจ้งนักศึกษา"))
+    cover_wrong = [t for t, _ in (printed[0][1] if printed and printed[0][0] == "หน้าปก" else [])
+                   if t != approved_type]
+    return rows, issues, (cover_wrong[0] if cover_wrong else approved_type)
 
 
 def doc_type_name(doc_type, program_language):
@@ -5927,8 +5971,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         program_language = A.get("program_language", "")
 
         # ---- ประเภทเล่ม: ทุกจุดที่เล่มเขียนประเภทไว้ ต้องตรงกับที่ได้รับอนุมัติ ----
-        # ประเภทที่อนุมัติมาจากไฟล์ eThesis (main.py ยึดค่าจากไฟล์ก่อนช่องที่เลือกเอง) —
-        # เล่ม 6838776 ไม่ถูกฟ้องเรื่องนี้ เพราะช่องประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม
+        # ประเภทที่อนุมัติมาจากไฟล์ eThesis (main.py ยึดค่าจากไฟล์ก่อนช่องที่เลือกเอง) และเทียบกับ
+        # ค่าที่เลือกในแบบฟอร์มด้วย (doc_type_form) — เล่ม 6838776 ไม่ถูกฟ้องเรื่องนี้ เพราะช่อง
+        # ประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม
         approved_type = A.get("doc_type", "")
         type_spots = [("หน้าปก", cover_text)] + [
             (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx]) for k, idx in enumerate(sig_pages)
@@ -5936,11 +5981,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             (f"{abstract_page_label(idx, abs_en_pages, abs_th_pages)} ({page_ref(idx)})", pages[idx])
             for idx in sorted(i for i in (abs_th_idx, abs_en_idx) if i is not None)
         ]
-        type_rows, type_issue, cover_type = doc_type_check(approved_type, program_language, type_spots)
+        type_rows, type_issues, cover_type = doc_type_check(
+            approved_type, program_language, type_spots, A.get("doc_type_form", ""))
         for where, status, detail in type_rows:
             rep.add_verification("ประเภทเล่ม", where, status, detail)
-        if type_issue:
-            rep.add("RED", "front_matter", *type_issue, "FORM.DOC_TYPE")
+        for zone, *type_item in type_issues:
+            rep.add(zone, "front_matter", *type_item, "FORM.DOC_TYPE")
         missing_cover_items = [
             (label, expected_text)
             for label, expected_text in cover_required_items(cover_type, program_language)
@@ -5971,6 +6017,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f"ข้อมูลอนุมัติระบุรูปแบบ {A['format']}",
                     f"แก้เล่มให้เป็นรูปแบบ {A['format']} หรือแก้ข้อมูลอนุมัติให้เป็นรูปแบบ {option}",
                     "FORM.APPROVED_MATCH")
+        # โหมด free ใช้รูปแบบตามที่เลือกตรวจต่อ (resolve_option) จึงไม่เคยเทียบกับเล่มเลย
+        # ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569): เลือกรูปแบบผิดในโหมด free แล้วไม่มีอะไรฟ้อง
+        # ยังต้องแจ้ง แต่เป็นสีส้ม — โหมดนี้ไม่บังคับชื่อบท การดูรูปแบบจากชื่อบทที่ 1
+        # ("บทสรุป/SUMMARY" = รูปแบบ 2) จึงเชื่อได้น้อยกว่าโหมด strict
+        if chapters_mode == "free" and A.get("format") and any(c[0] == 1 for c in body_ch):
+            book_option = resolve_option(body_ch, None, "strict")
+            if str(book_option) != str(A["format"]):
+                rep.add("ORANGE", "body", "โครงบท", f"เล่มจัดบทตามรูปแบบ {book_option}",
+                        f"ข้อมูลอนุมัติระบุรูปแบบ {A['format']}",
+                        "โหมด free ระบบดูรูปแบบจากชื่อบทที่ 1 เท่านั้น เปิดเล่มดูว่าจัดบทตามรูปแบบใด "
+                        "ถ้าไม่ตรงกับข้อมูลอนุมัติให้กดไม่ผ่าน",
+                        "FORM.APPROVED_MATCH")
 
         thai_book = A.get("program_language") == "thai"
 
