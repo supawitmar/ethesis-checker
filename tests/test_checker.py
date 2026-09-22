@@ -2204,11 +2204,16 @@ class AShortAbbreviationIsNotFoundInsideOtherLines(unittest.TestCase):
             self.assertEqual(text, f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อ')
             self.assertNotIn("วงเล็บ", text)
 
-    def test_a_degree_with_a_subject_still_names_it(self):
-        """ควบคุมเชิงลบ — ตัวย่อที่มีสาขาในวงเล็บยังบอกเหมือนเดิม"""
+    def test_a_degree_with_a_subject_uses_the_same_wording(self):
+        """เจ้าหน้าที่ (ก.ย. 2569): "ถ้าเป็นชื่อปริญญาอื่นๆ ที่มีวงเล็บละ ก็ให้ใช้รูปแบบนี้"
+
+        ค่าในเครื่องหมายคำพูดยังแสดงสาขาในวงเล็บครบ — ตัดแค่คำอธิบายที่พูดซ้ำ
+        """
         for abbr in ("Ph.D. (TROPICAL MEDICINE)", "วศ.ม. (วิศวกรรมโยธา)"):
-            self.assertEqual(checker_module.degree_abbr_expected(abbr),
-                             f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ')
+            text = checker_module.degree_abbr_expected(abbr)
+            self.assertEqual(text, f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อ')
+            self.assertIn(f'"{abbr}"', text)
+            self.assertNotIn("สาขาในวงเล็บ", text)
 
     def test_the_check_uses_the_wording_helper(self):
         source = inspect.getsource(checker_module.run_check)
@@ -2222,8 +2227,10 @@ class AShortAbbreviationIsNotFoundInsideOtherLines(unittest.TestCase):
         self.assertEqual(plain, 'Must be "M.C.T.M.", in the form of the abbreviation')
         with_subject = i18n.tr_en(
             checker_module.degree_abbr_expected("Ph.D. (TROPICAL MEDICINE)"), pairs)
-        self.assertEqual(with_subject, 'Must be "Ph.D. (TROPICAL MEDICINE)", in the form of '
-                                       'the abbreviation with the subject in brackets')
+        self.assertEqual(with_subject,
+                         'Must be "Ph.D. (TROPICAL MEDICINE)", in the form of the abbreviation')
+        thai = i18n.tr_en(checker_module.degree_abbr_expected("วศ.ม. (วิศวกรรมโยธา)"), pairs)
+        self.assertEqual(thai, 'Must be "วศ.ม. (วิศวกรรมโยธา)", in the form of the abbreviation')
 
     def test_the_cover_rule_still_catches_a_program_suffix(self):
         """ควบคุมเชิงลบ — เล่มจริงที่ทำให้เกิดกฎนี้ ต้องยังฟ้อง"""
