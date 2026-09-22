@@ -783,6 +783,19 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         form_tag = self.html.split('<form id="f"', 1)[1].split(">", 1)[0]
         self.assertNotIn("novalidate", form_tag)
 
+    def test_reading_the_form_never_fires_invalid_events(self):
+        """checkValidity() ยิงเหตุการณ์ invalid ทุกช่องที่ว่าง ซึ่งตัวดัก invalid ถือเป็นการกดตรวจเล่ม
+
+        ของที่ commit ไปรอบแรกเรียก checkValidity() ในตัวนับความพร้อม ตัวดักจึงเรียกซ้ำวนไม่รู้จบ
+        วัดในเบราว์เซอร์ได้ราว 1,950 ครั้งต่อวินาทีตั้งแต่เปิดหน้า ข้อความ "ยังกรอกไม่ครบ" ขึ้นเอง
+        ทั้งที่ยังไม่ได้กด และหน้าจอถูกดึงกลับไปที่ช่องแรกที่ขาดตลอดเวลา
+        """
+        import re
+        code = re.sub(r"//[^\n]*", "", self.html.split("<script>", 1)[1])
+        self.assertNotIn(".checkValidity(", code)
+        self.assertNotIn(".reportValidity(", code)
+        self.assertIn("validity.valid", code)
+
     def test_the_bar_says_what_is_missing(self):
         self.assertIn('<p class="bar-msg" id="progress-msg" role="alert" hidden></p>', self.html)
         self.assertIn("addEventListener('invalid'", self.html)
@@ -809,6 +822,118 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         self.assertEqual(steps, ["sec-files", "sec-type", "sec-title", "sec-student"])
         for sec in steps:
             self.assertIn(f'id="{sec}"', self.html)
+
+
+class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
+    """ประเภทเล่มที่อนุมัติยึดตามไฟล์ eThesis ก่อนช่องที่เลือกเอง (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย")
+
+    เล่ม 6838776: eThesis อนุมัติเป็นสารนิพนธ์ เล่มเขียน INDEPENDENT STUDY แล้วช่องประเภทเล่ม
+    ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงเทียบเล่มกับค่าที่เพิ่งเปลี่ยน และไม่ฟ้องเรื่องนี้เลย
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = cls.SOURCE.read_text(encoding="utf-8")
+        cls.client = TestClient(main.app)
+        cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                        follow_redirects=False)
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            paths = [job.get("pdf_path") for job in main.JOBS.values()]
+            main.JOBS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def _approved_type(self, **fields):
+        seen = []
+
+        def capture(path, approved, **kwargs):
+            seen.append(approved["doc_type"])
+            raise RuntimeError("stop")
+
+        with mock.patch.object(main, "run_check", side_effect=capture):
+            response = self.client.post("/check", data={**FORM, **fields},
+                                        files={"pdf": ("b.pdf", make_pdf(), "application/pdf")})
+            if response.status_code != 200:
+                return response.status_code
+            job_id = response.json()["job_id"]
+            for _ in range(500):
+                job = main._get_job(job_id)
+                if job and job["done"]:
+                    break
+                time.sleep(0.01)
+        return seen[0]
+
+    def test_the_ethesis_type_wins_over_the_dropdown(self):
+        self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY",
+                                             ethesis_doc_type="THEMATIC PAPER"), "THEMATIC PAPER")
+
+    def test_the_dropdown_is_used_when_the_file_gives_no_type(self):
+        """ควบคุมเชิงบวก — ไม่มีค่าจากไฟล์ ช่องที่เลือกยังใช้งานได้ตามเดิม"""
+        self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY"), "INDEPENDENT STUDY")
+
+    def test_an_unknown_type_from_the_file_is_refused(self):
+        self.assertEqual(self._approved_type(ethesis_doc_type="DISSERTATION"), 400)
+
+    def test_the_page_sends_the_type_from_the_file(self):
+        self.assertIn('<input type="hidden" name="ethesis_doc_type" id="ethesis-doc-type">', self.html)
+        self.assertIn("'ethesis-doc-type'", self.html.split("const HIDDEN_IMPORT_FIELDS", 1)[1]
+                      .split("\n", 1)[0])
+
+    SCRIPT = r"""
+const vm = require('vm');
+const opts = [{value: '', defaultSelected: true, textContent: 'กรุณาเลือกประเภทเล่ม'},
+              {value: 'THESIS', textContent: 'วิทยานิพนธ์ (Thesis)'},
+              {value: 'THEMATIC PAPER', textContent: 'สารนิพนธ์ (Thematic Paper)'},
+              {value: 'INDEPENDENT STUDY', textContent: 'การค้นคว้าอิสระ (Independent Study)'}];
+const select = {tagName: 'SELECT', options: opts, selectedIndex: 0,
+  get value() { return opts[this.selectedIndex].value; },
+  set value(v) { const i = opts.findIndex(o => o.value === v); this.selectedIndex = i < 0 ? 0 : i; },
+  classList: {add() {}, remove() {}}, dispatchEvent() {}};
+const fields = {'ethesis-doc-type': {value: ''}, 'doc-type-note': {hidden: true, textContent: ''}};
+global.Event = class { constructor(type) { this.type = type; } };
+global.document = {
+  getElementById: id => fields[id] || null,
+  querySelectorAll: () => [],
+  querySelector: sel => (/name="doc_type"/.test(sel) ? select : null)
+};
+vm.runInThisContext(require('fs').readFileSync(0, 'utf8'));
+const note = () => [fields['ethesis-doc-type'].value, fields['doc-type-note'].hidden,
+                    fields['doc-type-note'].textContent];
+const out = {};
+applyParsed({doc_type: 'THEMATIC PAPER'});
+out.imported = note();
+select.value = 'INDEPENDENT STUDY';
+updateDocTypeNote();
+out.changed = note();
+clearImportedFields();
+out.cleared = note();
+console.log(JSON.stringify(out));
+"""
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_page_says_so_when_the_dropdown_differs_from_the_file(self):
+        start = self.html.index("const IMPORT_LABELS")
+        end = self.html.index("// ---- กล่องลากวางไฟล์ (คลิกก็ได้ ลากมาวางก็ได้) ----")
+        run = subprocess.run(["node", "-e", self.SCRIPT], input=self.html[start:end],
+                             capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout)
+        # นำเข้าแล้วช่องตรงกับไฟล์ — ไม่มีข้อความเตือน
+        self.assertEqual(out["imported"], ["THEMATIC PAPER", True, ""])
+        # เปลี่ยนช่องให้ต่างจากไฟล์ — บอกว่าระบบยังเทียบกับประเภทตามไฟล์
+        self.assertEqual(out["changed"][:2], ["THEMATIC PAPER", False])
+        self.assertIn("สารนิพนธ์ (Thematic Paper)", out["changed"][2])
+        self.assertIn("จะถูกฟ้อง", out["changed"][2])
+        # เริ่มเล่มใหม่ — ค่าจากไฟล์เดิมต้องไม่ค้าง
+        self.assertEqual(out["cleared"], ["", True, ""])
+
+    def test_the_dropdown_change_updates_the_note(self):
+        self.assertIn("document.querySelector('select[name=\"doc_type\"]')"
+                      ".addEventListener('change', updateDocTypeNote);", self.html)
 
 
 class TheReportPageKeepsItsNewLayout(unittest.TestCase):

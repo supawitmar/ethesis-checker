@@ -2363,6 +2363,99 @@ def _join_and(names):
     return " และ ".join([", ".join(names[:-1]), names[-1]])
 
 
+# ---------- ประเภทเล่มที่เล่มเขียนไว้ ต้องตรงกับที่ได้รับอนุมัติ ----------
+# เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังเล่ม 6838776 TMCT/M: eThesis อนุมัติเป็นสารนิพนธ์ แต่เล่มเขียน
+# INDEPENDENT STUDY ทั้งเล่ม "ให้ฟ้องด้วย"
+#
+# template วางคำระบุประเภทไว้ตายตัวสามที่ (วัดจากเล่มจริงครบ 8 เล่ม ทั้งสามประเภทและทั้งสองภาษา)
+#   หน้าปก       "A THESIS SUBMITTED ..." / "วิทยานิพนธ์นี้เป็นส่วนหนึ่ง ..."
+#   หน้าลงนาม    บรรทัด "Thesis" เดี่ยว ๆ และ "Thesis Advisory/Examination Committees"
+#                / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์" / "คณะกรรมการสอบวิทยานิพนธ์"
+#   บทคัดย่อ     "THESIS ADVISORY COMMITTEE:" / "คณะกรรมการที่ปรึกษาวิทยานิพนธ์:"
+# อ่านเฉพาะตำแหน่งเหล่านี้ ไม่ค้นคำทั้งหน้า — เนื้อความบทคัดย่อเขียน "this thesis" ได้ตามปกติ
+# และคำที่ไม่ใช่สามประเภทนี้ (เช่น DISSERTATION) ไม่ถูกนับเป็นประเภทใด
+DOC_TYPE_NAME_EN = {"THESIS": "THESIS", "THEMATIC PAPER": "THEMATIC PAPER",
+                    "INDEPENDENT STUDY": "INDEPENDENT STUDY"}
+DOC_TYPE_NAME_TH = {"THESIS": "วิทยานิพนธ์", "THEMATIC PAPER": "สารนิพนธ์",
+                    "INDEPENDENT STUDY": "การค้นคว้าอิสระ"}
+_DOC_TYPE_EN_WORD = r"(THESIS|THEMATIC\s+PAPER|INDEPENDENT\s+STUDY)"
+_DOC_TYPE_EN_SPOTS = tuple(re.compile(p, re.I) for p in (
+    rf"\bAN?\s+{_DOC_TYPE_EN_WORD}\s+SUBMITTED\b",
+    rf"^\s*(?:AN?\s+)?{_DOC_TYPE_EN_WORD}\s*$",
+    rf"\b{_DOC_TYPE_EN_WORD}\s+ENTITLED\b",
+    rf"\b{_DOC_TYPE_EN_WORD}\s+(?:ADVISORY|EXAMINATION)\s+COMMITTEES?\b",
+))
+_DOC_TYPE_TH_SPOTS = ("{}นี้เป็นส่วนหนึ่ง", "คณะกรรมการที่ปรึกษา{}", "คณะกรรมการสอบ{}")
+_DOC_TYPE_BY_EN = {norm(name): key for key, name in DOC_TYPE_NAME_EN.items()}
+
+
+def doc_types_printed(page_text):
+    """ประเภทเล่มที่หน้านี้เขียนไว้ตรงตำแหน่งของ template — [(ประเภท, คำที่พิมพ์), ...]"""
+    found = []
+    for line in (page_text or "").splitlines():
+        match = next((m for m in (p.search(line) for p in _DOC_TYPE_EN_SPOTS) if m), None)
+        if match:
+            found.append((_DOC_TYPE_BY_EN[norm(match.group(1))], soft(match.group(1))))
+            continue
+        nl = norm(line)
+        for key, name in DOC_TYPE_NAME_TH.items():
+            if nl == norm(name) or any(norm(spot.format(name)) in nl for spot in _DOC_TYPE_TH_SPOTS):
+                found.append((key, name))
+                break
+    return found
+
+
+def doc_type_check(approved_type, program_language, spots):
+    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับที่ได้รับอนุมัติ
+
+    spots = [(ตำแหน่ง, ข้อความของหน้า), ...] ตามลำดับในเล่ม หน้าปกมาก่อน
+    คืน (แถวในตารางผลเทียบ, ข้อแดง (ตำแหน่ง, ที่พบ, ควรเป็น, ต้องแก้) หรือ None,
+         ประเภทที่ใช้เทียบข้อความบังคับบนหน้าปก)
+
+    จุดผิดหลายหน้ารวมเป็นข้อเดียว เพราะนักศึกษาแก้เรื่องเดียว (เปลี่ยนประเภทเล่ม) ส่วนตาราง
+    ผลเทียบลงทุกจุดที่อ่านเจอ ทั้งตอนตรงและไม่ตรง จะได้แยก "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ" ออก
+
+    หน้าปกที่เขียนประเภทอื่น ถูกฟ้องในข้อนี้แล้ว ข้อความบังคับบนปกจึงเทียบกับประเภทที่ปกเขียนเอง
+    (ยังจับคำพิมพ์ผิดอื่นได้) — ถ้าเทียบกับประเภทที่อนุมัติ จะได้อีกข้อที่บอกว่าปก "ขาด
+    A THEMATIC PAPER" ทั้งที่ปกเขียน AN INDEPENDENT STUDY อยู่ นักศึกษาอ่านแล้วจะเติมซ้อน
+    """
+    if not approved_type:
+        return [], None, approved_type
+    printed = [(spot, doc_types_printed(text)) for spot, text in spots]
+    wrong = [spot for spot, found in printed if any(t != approved_type for t, _ in found)]
+    cover_found = printed[0][1] if printed and printed[0][0] == "หน้าปก" else []
+    cover_wrong = [t for t, _ in cover_found if t != approved_type]
+    want = doc_type_name(approved_type, program_language)
+    rows = []
+    if any(found for _, found in printed):
+        rows.append(("ข้อมูลอนุมัติ", "fail" if wrong else "pass", f'"{want}"'))
+        for spot, found in printed:
+            if found:
+                words = dict.fromkeys(word for _, word in found)
+                rows.append((spot, "fail" if spot in wrong else "pass",
+                             ", ".join(f'"{word}"' for word in words)))
+    issue = None
+    if wrong:
+        names = dict.fromkeys(doc_type_name(t, program_language)
+                              for _, found in printed for t, _ in found if t != approved_type)
+        must_be = f'ประเภทเล่มที่ได้รับอนุมัติคือ "{want}" ต้องแก้ทุกจุดเป็น "{want}"'
+        if cover_wrong:
+            cover_sentence = dict(cover_required_items(approved_type, program_language))["ข้อความประเภทงาน"]
+            must_be += f' โดยหน้าปกต้องเป็น "{cover_sentence}"'
+        issue = (_join_and(wrong),
+                 "ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "
+                 + " และ ".join(f'"{name}"' for name in names),
+                 must_be,
+                 "ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด")
+    return rows, issue, (cover_wrong[0] if cover_wrong else approved_type)
+
+
+def doc_type_name(doc_type, program_language):
+    """ชื่อประเภทเล่มตามภาษาของเล่ม — เล่มไทยเขียน "สารนิพนธ์" เล่มอังกฤษเขียน "THEMATIC PAPER" """
+    names = DOC_TYPE_NAME_TH if program_language == "thai" else DOC_TYPE_NAME_EN
+    return names.get(doc_type, doc_type)
+
+
 def _cover_language_markers(doc_type, language):
     return [norm(text) for _label, text in cover_required_items(doc_type, language) if text]
 
@@ -3350,7 +3443,10 @@ def _corrected_value(issue):
     #
     # เลขหน้าหน้าลงนามพิมพ์ประโยคเต็ม 'ต้องเป็นเลขหน้า "ก"' ตามแบบที่เจ้าหน้าที่เลือก (ก.ย. 2569
     # "เอาตามข้อ 2 ก็พอ") — ถ้าดึงค่าไป จะเหลือ 'ต้องแก้เป็น "ก"' ซึ่งไม่บอกว่าเป็นเลขหน้า
-    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL"):
+    #
+    # ประเภทเล่มผิดต้องแก้หลายหน้า ค่าท้ายประโยคคือข้อความบนหน้าปกอย่างเดียว ถ้าดึงไป
+    # สรุปจะบอกแค่ให้แก้ปก แล้วหน้าลงนามกับบทคัดย่อที่เขียนผิดอยู่ด้วยหายไปจากข้อความ
+    if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL", "FORM.DOC_TYPE"):
         return ""
     # บรรทัดที่เขียนถึงเจ้าหน้าที่ไม่ใช่ค่าที่ต้องแก้ ข้ามไปใช้ช่องถัดไป (ดู is_staff_only_line)
     raw = next((text for text in (summary_tidy(issue.get("expected")),
@@ -4823,6 +4919,10 @@ def classify(issue):
     # "เล่มทำผิดภาษา" ไม่ใช่ "ภาษาไม่ครบตามหลักสูตร" (ซึ่งแปลว่าเล่มขาดบทคัดย่ออีกภาษา)
     if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
         return "ภาษาของเล่ม"
+    # ตำแหน่งของข้อประเภทเล่มเป็นรายชื่อหน้า (หน้าปก หน้าลงนาม บทคัดย่อ) ถ้าปล่อยให้เดาจากคำ
+    # จะตกหมวด "โครงสร้างเล่ม" ทั้งที่เป็นเรื่องเล่มไม่ตรงกับข้อมูลอนุมัติ
+    if issue.get("rule_id") == "FORM.DOC_TYPE":
+        return "ไม่ตรงข้อมูลอนุมัติ"
     # ชื่อบทต้องมาก่อน "พิมพ์ผิดเล็กน้อย" — ไม่งั้นชื่อบทที่ต่างจากประกาศเพียงตัวเดียว
     # จะถูกจัดเป็นหมวด "สะกดผิด" ส่วนบทที่ต่างมากถูกจัดเป็น "ชื่อบทไม่ตรงประกาศ"
     # กลายเป็นปัญหาเดียวกันแต่โผล่คนละหมวด เจ้าหน้าที่เห็นเป็นสองเรื่อง (ซ้ำซ้อน)
@@ -5826,9 +5926,24 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         A = approved
         program_language = A.get("program_language", "")
 
+        # ---- ประเภทเล่ม: ทุกจุดที่เล่มเขียนประเภทไว้ ต้องตรงกับที่ได้รับอนุมัติ ----
+        # ประเภทที่อนุมัติมาจากไฟล์ eThesis (main.py ยึดค่าจากไฟล์ก่อนช่องที่เลือกเอง) —
+        # เล่ม 6838776 ไม่ถูกฟ้องเรื่องนี้ เพราะช่องประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม
+        approved_type = A.get("doc_type", "")
+        type_spots = [("หน้าปก", cover_text)] + [
+            (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx]) for k, idx in enumerate(sig_pages)
+        ] + [
+            (f"{abstract_page_label(idx, abs_en_pages, abs_th_pages)} ({page_ref(idx)})", pages[idx])
+            for idx in sorted(i for i in (abs_th_idx, abs_en_idx) if i is not None)
+        ]
+        type_rows, type_issue, cover_type = doc_type_check(approved_type, program_language, type_spots)
+        for where, status, detail in type_rows:
+            rep.add_verification("ประเภทเล่ม", where, status, detail)
+        if type_issue:
+            rep.add("RED", "front_matter", *type_issue, "FORM.DOC_TYPE")
         missing_cover_items = [
             (label, expected_text)
-            for label, expected_text in cover_required_items(A.get("doc_type", ""), program_language)
+            for label, expected_text in cover_required_items(cover_type, program_language)
             if expected_text and norm(expected_text) not in norm(cover_text)
         ]
         for label, expected_text in missing_cover_items:
@@ -5849,9 +5964,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "แก้ข้อความบนหน้าปกให้ตรง template ทางการทุกตัวอักษร",
                 "FRONT.COVER_REQUIRED",
             )
-        if A.get("doc_type") and doc_type and A["doc_type"] != doc_type:
-            rep.add("RED", "front_matter", "หน้าปก", f"เล่มเป็น {doc_type}",
-                    f"ข้อมูลอนุมัติ: {A['doc_type']}", "ตรวจว่าใช้ template ประเภทถูก", "FORM.APPROVED_MATCH")
         if chapters_mode == "strict" and A.get("format") and str(option) != str(A["format"]):
             # บอกให้ครบว่า "เล่มเป็นแบบไหน / ต้องเป็นแบบไหน / แก้ตรงไหนได้บ้าง"
             # ของเดิมบอกแค่สองค่าเทียบกัน คนอ่านไม่รู้ว่าต้องแก้ฝั่งไหน

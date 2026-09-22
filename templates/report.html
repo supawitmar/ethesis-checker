@@ -827,6 +827,12 @@ var TR = [
   // ต้องมาก่อนกฎเศษคำข้างล่าง ไม่งั้นจะได้ประโยคยาวมาวางในช่องตาราง
   [/^หัวบทในเนื้อหา$/g, 'Chapter headings'],
   [/^ภาษาที่เขียน$/g, 'Language of the document'],
+  // ประเภทเล่มต้องตรงกับที่ได้รับอนุมัติ (FORM.DOC_TYPE) — ค่าในเครื่องหมายคำพูดคงตามเล่ม
+  [/^ประเภทเล่ม$/g, 'Document type'],
+  [/^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า (.+)$/g, 'The document type does not match the approved one: the document says $1'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+") โดยหน้าปกต้องเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2; the cover must read $3'],
+  [/^ประเภทเล่มที่ได้รับอนุมัติคือ ("[^"]+") ต้องแก้ทุกจุดเป็น ("[^"]+")$/g, 'The approved document type is $1. Change every occurrence to $2'],
+  [/^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด$/g, 'Check that the document type in the eThesis file is correct; if it is, send the document back for the student to correct every occurrence'],
   [/^ข้อมูลอนุมัติ$/g, 'Approved data'],
   [/^ในไฟล์รูปเล่ม$/g, 'In the submitted file'],
   [/^ระบบอ่านภาษาจากไฟล์ไม่ได้$/g, 'The system could not read the language from the file'],

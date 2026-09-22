@@ -5801,6 +5801,151 @@ class TheLanguageOfTheDocumentShowsInTheVerificationTable(unittest.TestCase):
             self.assertIn(phrase, report_html, phrase)
 
 
+class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
+    """ประเภทเล่มที่เล่มเขียนไว้ต้องตรงกับที่ได้รับอนุมัติ (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย")
+
+    เล่ม 6838776 TMCT/M: eThesis อนุมัติเป็นสารนิพนธ์ แต่เล่มเขียน INDEPENDENT STUDY ทั้งหน้าปก
+    หน้าลงนามสองหน้า และบทคัดย่อ ช่องประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงไม่ฟ้องเลย
+    ถ้าไม่เปลี่ยนช่อง ได้แดงสองข้อซ้อนกัน และข้อหนึ่งบอกว่าปก "ขาด A THEMATIC PAPER"
+    """
+
+    # ข้อความจริงของเล่ม M.C.T.M. (เล่มทดสอบ.pdf) ตามที่ระบบอ่านได้ ตัดเหลือบรรทัดที่เกี่ยวข้อง
+    COVER = ("COMMUNITY-ACQUIRED SEPSIS IN UDON THANI:\nA RETROSPECTIVE STUDY\nKOTARO TASAKI\n"
+             "AN INDEPENDENT STUDY SUBMITTED IN PARTIAL FULFILLMENT\n"
+             "OF THE REQUIREMENTS FOR THE DEGREE OF\nMASTER OF CLINICAL TROPICAL MEDICINE\n"
+             "FACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\n2026\nCOPYRIGHT OF MAHIDOL UNIVERSITY")
+    SIG1 = ("i\nIndependent study\nentitled\nCOMMUNITY-ACQUIRED SEPSIS IN UDON THANI: A RETROSPECTIVE\n"
+            "STUDY\nwas submitted to the Faculty of Graduate Studies, Mahidol University\n"
+            "Independent study Advisory Committees\nMajor Advisor")
+    SIG2 = "ii\nIndependent study\nentitled\nIndependent study Examination Committees"
+    ABSTRACT = ("iv\nKOTARO TASAKI 6838776 TMCT/M\nMASTER OF CLINICAL TROPICAL MEDICINE\n"
+                "INDEPENDENT STUDY ADVISORY COMMITTEE: WIRONGRONG CHIERAKUL,\n"
+                "ABSTRACT\nThe primary objective of this study is to determine the proportion")
+    SPOTS = [("หน้าปก", COVER), ("หน้าลงนาม 1 (หน้า i)", SIG1),
+             ("หน้าลงนาม 2 (หน้า ii)", SIG2), ("บทคัดย่ออังกฤษ (หน้า iv)", ABSTRACT)]
+
+    def test_every_template_spot_is_read(self):
+        read = checker_module.doc_types_printed
+        self.assertEqual(read(self.COVER), [("INDEPENDENT STUDY", "INDEPENDENT STUDY")])
+        self.assertEqual([t for t, _ in read(self.SIG1)], ["INDEPENDENT STUDY"] * 2)
+        self.assertEqual([t for t, _ in read(self.SIG2)], ["INDEPENDENT STUDY"] * 2)
+        self.assertEqual(read(self.ABSTRACT), [("INDEPENDENT STUDY", "INDEPENDENT STUDY")])
+        # บรรทัดจริงของเล่มอื่น (repo 1-3, เล่มที่ 1-4) ทั้งสามประเภทและทั้งสองภาษา
+        for line, want in (("A THEMATIC PAPER SUBMITTED IN PARTIAL FULFILLMENT OF", "THEMATIC PAPER"),
+                           ("Thematic paper Examination Committees", "THEMATIC PAPER"),
+                           ("THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D., NITAYA", "THESIS"),
+                           ("Thesis", "THESIS"),
+                           ("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร", "THESIS"),
+                           ("คณะกรรมการที่ปรึกษาสารนิพนธ์: ยอด สุขะมงคล, ปร.ด.", "THEMATIC PAPER"),
+                           ("คณะกรรมการสอบวิทยานิพนธ์", "THESIS"),
+                           ("วิทยานิพนธ์", "THESIS")):
+            self.assertEqual([t for t, _ in read(line)], [want], line)
+
+    def test_words_outside_the_template_spots_do_not_count(self):
+        """เนื้อความเขียน "this thesis" ได้ตามปกติ และ DISSERTATION ไม่ใช่หนึ่งในสามประเภท"""
+        read = checker_module.doc_types_printed
+        for line in ("The objective of this thesis is to describe sepsis in Udon Thani.",
+                     "This independent study was conducted at Udon Thani Hospital.",
+                     "DISSERTATION ADVISORY COMMITTEE: SIRIPORN YAMNILL, Ph.D.",
+                     "วิทยานิพนธ์ฉบับนี้ศึกษาการจัดการภาครัฐ",
+                     "A THESIS ON SEPSIS IN RURAL THAILAND"):
+            self.assertEqual(read(line), [], line)
+
+    def test_the_mctm_book_gets_one_item_that_lists_every_place(self):
+        rows, issue, cover_type = checker_module.doc_type_check(
+            "THEMATIC PAPER", "international", self.SPOTS)
+        location, found, expected, fix = issue
+        self.assertEqual(location, "หน้าปก, หน้าลงนาม 1 (หน้า i), หน้าลงนาม 2 (หน้า ii) "
+                                   "และ บทคัดย่ออังกฤษ (หน้า iv)")
+        self.assertEqual(found, 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "INDEPENDENT STUDY"')
+        self.assertTrue(expected.startswith(
+            'ประเภทเล่มที่ได้รับอนุมัติคือ "THEMATIC PAPER" ต้องแก้ทุกจุดเป็น "THEMATIC PAPER"'))
+        self.assertIn('"A THEMATIC PAPER SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS '
+                      'FOR THE DEGREE OF"', expected)
+        self.assertEqual([r[1] for r in rows], ["fail"] * 5)
+        self.assertEqual(rows[0], ("ข้อมูลอนุมัติ", "fail", '"THEMATIC PAPER"'))
+        self.assertEqual(rows[2], ("หน้าลงนาม 1 (หน้า i)", "fail", '"Independent study"'))
+        self.assertEqual(cover_type, "INDEPENDENT STUDY")
+
+    def test_the_cover_wording_is_not_reported_a_second_time(self):
+        """ของเดิมได้ข้อที่สองบอกว่าปก 'ขาด "A THEMATIC PAPER"' ทั้งที่ปกเขียน AN INDEPENDENT STUDY"""
+        _rows, _issue, cover_type = checker_module.doc_type_check(
+            "THEMATIC PAPER", "international", self.SPOTS)
+
+        def missing_type_text(doc_type):
+            items = dict(checker_module.cover_required_items(doc_type, "international"))
+            return checker_module.norm(items["ข้อความประเภทงาน"]) not in checker_module.norm(self.COVER)
+
+        self.assertFalse(missing_type_text(cover_type))
+        # ควบคุมเชิงลบ — เทียบกับประเภทที่อนุมัติแทน ข้อซ้อนกลับมา
+        self.assertTrue(missing_type_text("THEMATIC PAPER"))
+
+    def test_a_book_of_the_approved_type_passes(self):
+        rows, issue, cover_type = checker_module.doc_type_check(
+            "INDEPENDENT STUDY", "international", self.SPOTS)
+        self.assertIsNone(issue)
+        self.assertEqual([r[1] for r in rows], ["pass"] * 5)
+        self.assertEqual(cover_type, "INDEPENDENT STUDY")
+
+    def test_one_wrong_page_is_still_caught(self):
+        """ปกถูกแต่หน้าลงนามยังเขียนประเภทเก่า — ต้องบอกเฉพาะหน้าที่ผิด"""
+        spots = [("หน้าปก", self.COVER.replace("AN INDEPENDENT STUDY", "A THEMATIC PAPER")),
+                 ("หน้าลงนาม 1 (หน้า i)", self.SIG1)]
+        rows, issue, cover_type = checker_module.doc_type_check("THEMATIC PAPER", "international", spots)
+        self.assertEqual(issue[0], "หน้าลงนาม 1 (หน้า i)")
+        self.assertNotIn("หน้าปกต้องเป็น", issue[2])
+        self.assertEqual(cover_type, "THEMATIC PAPER")
+        self.assertEqual([r[1] for r in rows], ["fail", "pass", "fail"])
+
+    def test_a_thai_book_is_told_in_thai_words(self):
+        spots = [("หน้าปก", "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"),
+                 ("บทคัดย่อไทย (หน้า ง)", "คณะกรรมการที่ปรึกษาสารนิพนธ์: คนางค์ คันธมธุรพจน์")]
+        _rows, issue, _cover = checker_module.doc_type_check("THESIS", "thai", spots)
+        self.assertEqual(issue[1], 'ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า "สารนิพนธ์"')
+        self.assertIn('ต้องแก้ทุกจุดเป็น "วิทยานิพนธ์"', issue[2])
+        self.assertIn('"วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"', issue[2])
+
+    def test_no_approved_type_means_nothing_to_compare(self):
+        self.assertEqual(checker_module.doc_type_check("", "international", self.SPOTS), ([], None, ""))
+
+    def _issue(self, rule_id="FORM.DOC_TYPE"):
+        _rows, (location, found, expected, fix), _cover = checker_module.doc_type_check(
+            "THEMATIC PAPER", "international", self.SPOTS)
+        return {"rule_id": rule_id, "part": "front_matter", "location": location,
+                "found": found, "expected": expected, "fix": fix}
+
+    def test_the_summary_keeps_the_whole_instruction(self):
+        """ค่าท้ายประโยคคือข้อความบนปกอย่างเดียว ถ้าดึงไป สรุปจะบอกแค่ให้แก้ปก"""
+        self.assertEqual(checker_module._corrected_value(self._issue()), "")
+        # ควบคุมเชิงลบ — รหัสกฎอื่นถูกดึงค่าท้ายประโยค
+        self.assertIn("A THEMATIC PAPER SUBMITTED",
+                      checker_module._corrected_value(self._issue("FORM.APPROVED_MATCH")))
+
+    def test_it_is_filed_under_the_cover_as_an_approved_data_mismatch(self):
+        self.assertEqual(checker_module.summary_section(self._issue()), "หน้าปก")
+        self.assertEqual(checker_module.classify(self._issue()), "ไม่ตรงข้อมูลอนุมัติ")
+        # ควบคุมเชิงลบ — ถ้าเดาจากคำ ตกหมวดโครงสร้างเล่ม
+        self.assertNotEqual(checker_module.classify(self._issue(None)), "ไม่ตรงข้อมูลอนุมัติ")
+
+    def test_run_check_uses_it_and_the_old_item_is_gone(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("doc_type_check(approved_type, program_language, type_spots)", source)
+        self.assertIn('rep.add_verification("ประเภทเล่ม", where, status, detail)', source)
+        self.assertIn("cover_required_items(cover_type, program_language)", source)
+        self.assertIn('"FORM.DOC_TYPE")', source)
+        self.assertNotIn('f"เล่มเป็น {doc_type}"', source)
+        import ethesis_rules
+        self.assertIn("FORM.DOC_TYPE", ethesis_rules.RULE_CATALOG)
+
+    def test_every_new_line_has_an_english_translation(self):
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in ("^ประเภทเล่ม$", "^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า ",
+                       "^ประเภทเล่มที่ได้รับอนุมัติคือ ", "โดยหน้าปกต้องเป็น",
+                       "^ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง"):
+            self.assertIn(phrase, report_html, phrase)
+
+
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
     """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
 

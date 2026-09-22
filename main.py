@@ -103,6 +103,7 @@ JOB_TTL = 12 * 3600
 # 56 KB เก็บ 40 เล่มก็ราว 2 MB ซึ่งถูกกว่าการทำให้ปุ่มบนรายงานที่เปิดค้างไว้ใช้ไม่ได้
 MAX_KEPT_JOBS = 40
 JOBS_LOCK = threading.Lock()
+DOC_TYPES = {"THESIS", "THEMATIC PAPER", "INDEPENDENT STUDY"}
 
 
 def _positive_env_int(name, default):
@@ -467,9 +468,10 @@ async def check(
     program: str = Form(""),
     committees_json: str = Form(""),
     chapters_mode: str = Form("strict"),
+    ethesis_doc_type: str = Form(""),
 ):
     _prune_jobs()
-    if doc_type not in {"THESIS", "THEMATIC PAPER", "INDEPENDENT STUDY"}:
+    if doc_type not in DOC_TYPES or (ethesis_doc_type and ethesis_doc_type not in DOC_TYPES):
         raise HTTPException(status_code=400, detail="ประเภทเล่มไม่ถูกต้อง")
     if format not in {"1", "2"}:
         raise HTTPException(status_code=400, detail="รูปแบบเล่มไม่ถูกต้อง")
@@ -497,9 +499,12 @@ async def check(
     if not JOB_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="มีงานตรวจเต็มจำนวน กรุณารอสักครู่แล้วลองใหม่")
 
+    # ประเภทเล่มที่อนุมัติ = ค่าจากไฟล์ eThesis ก่อนช่องที่เลือกเอง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+    # เล่ม 6838776: eThesis อนุมัติเป็นสารนิพนธ์ เล่มเขียน INDEPENDENT STUDY แล้วช่องประเภทเล่ม
+    # ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงไม่ฟ้อง — "ให้ฟ้องด้วย" ช่องที่เลือกใช้เมื่อไฟล์ไม่ระบุประเภท
     approved = {
-        "doc_type": doc_type, "format": format, "program_language": program_language,
-        **form_values,
+        "doc_type": ethesis_doc_type or doc_type, "format": format,
+        "program_language": program_language, **form_values,
     }
     if faculty.strip():
         approved["faculty"] = faculty.strip()

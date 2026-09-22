@@ -117,6 +117,9 @@
        border-radius:10px; background:#f3f6fa; border:1px solid var(--line); }
   .import-status.ok { background:var(--ok-bg); border-color:#cde8d6; color:#1f5a34; }
   .import-status.warn { background:var(--gold-soft); border-color:var(--gold-line); color:#6e5300; }
+  .type-note { margin:8px 0 0; padding:8px 12px; border-radius:10px; font-size:.8rem; line-height:1.5;
+       background:var(--gold-soft); border:1px solid var(--gold-line); color:#6e5300; }
+  .type-note[hidden] { display:none; }
   .import-status.err { background:#fdf0ef; border-color:#f3d3cf; color:#8c2f2f; }
   .filled-list { margin:6px 0 0; font-size:.78rem; opacity:.85; }
 
@@ -292,7 +295,8 @@
             <option value="THESIS">วิทยานิพนธ์ (Thesis)</option>
             <option value="THEMATIC PAPER">สารนิพนธ์ (Thematic Paper)</option>
             <option value="INDEPENDENT STUDY">การค้นคว้าอิสระ (Independent Study)</option>
-          </select></div>
+          </select>
+          <p class="type-note" id="doc-type-note" role="status" hidden></p></div>
         <div><label>รูปแบบ</label>
           <select name="format" required>
             <option value="" disabled selected>กรุณาเลือกรูปแบบ</option>
@@ -364,6 +368,8 @@
       <!-- ชื่อหลักสูตรจาก eThesis — ไม่ได้ใช้ตรวจ แต่แสดงบนหัวรายงานให้เจ้าหน้าที่อ้างอิง -->
       <input type="hidden" name="program" id="program-field">
       <input type="hidden" name="committees_json" id="committees-json">
+      <!-- ประเภทเล่มตามไฟล์ eThesis — เซิร์ฟเวอร์ใช้ค่านี้เป็นประเภทที่อนุมัติ ก่อนช่องที่เลือกเอง -->
+      <input type="hidden" name="ethesis_doc_type" id="ethesis-doc-type">
       <div id="committee-box" class="committee-box" style="display:none;">
         <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
           <span style="color:var(--ink-3);">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
@@ -444,7 +450,7 @@ function renderCommitteeSummary(committees) {
 // จึงค้างค่าของคนก่อน วัดกับเล่มจริง: เล่มหลักสูตรไทย-อังกฤษที่ชื่อเรื่องไทย/ชื่อไทย/ตัวย่อ
 // ปริญญาไทยของคนก่อนค้างอยู่ ได้ข้อแดงเพิ่มจาก 3 เป็น 6 ทั้งที่เล่มไม่ผิด ส่วนช่องซ่อน
 // (รายชื่อกรรมการ คณะ หลักสูตร) ค้างแล้วเล่มถูกนับกรรมการเทียบกับรายชื่อของคนอื่น
-const HIDDEN_IMPORT_FIELDS = ['committees-json', 'faculty-field', 'program-field'];
+const HIDDEN_IMPORT_FIELDS = ['committees-json', 'faculty-field', 'program-field', 'ethesis-doc-type'];
 function clearField(field) {
   if (field.tagName === 'SELECT') {
     const idx = Array.from(field.options).findIndex(o => o.defaultSelected);
@@ -464,11 +470,30 @@ function clearImportedFields() {
   });
   const oldCommittees = document.getElementById('committee-box');
   if (oldCommittees) oldCommittees.style.display = 'none';
+  updateDocTypeNote();
+}
+
+// ประเภทเล่มที่อนุมัติยึดตามไฟล์ eThesis (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย") — เล่ม 6838776
+// ผ่านเรื่องนี้ไปเพราะช่องนี้ถูกเปลี่ยนให้ตรงกับเล่ม ตอนนี้เปลี่ยนแล้วเซิร์ฟเวอร์ก็ยังเทียบกับ
+// ค่าในไฟล์ จึงต้องบอกตรงช่องว่าเปลี่ยนไปไม่มีผล ไม่งั้นเจ้าหน้าที่จะงงว่าทำไมยังถูกฟ้อง
+function updateDocTypeNote() {
+  const eth = document.getElementById('ethesis-doc-type');
+  const note = document.getElementById('doc-type-note');
+  const select = document.querySelector('select[name="doc_type"]');
+  if (!eth || !note || !select) return;
+  const differs = !!eth.value && select.value !== eth.value;
+  note.hidden = !differs;
+  if (!differs) { note.textContent = ''; return; }
+  const option = Array.from(select.options).find(function(o){ return o.value === eth.value; });
+  note.textContent = 'ไฟล์ eThesis ระบุประเภทเล่มเป็น ' + (option ? option.textContent : eth.value) +
+    ' ระบบจะตรวจเทียบกับประเภทนี้ ถ้าเล่มเขียนเป็นประเภทอื่นจะถูกฟ้อง';
 }
 
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
   clearImportedFields();
+  const ethType = document.getElementById('ethesis-doc-type');
+  if (ethType) ethType.value = parsed.doc_type || '';
   const filled = [];
   // committees เป็น object — เก็บเป็น JSON ลง hidden field + แสดงรายชื่อจากไฟล์ให้ตรวจทาน
   if (parsed.committees && (parsed.committees.advisory || parsed.committees.exam)) {
@@ -486,6 +511,7 @@ function applyParsed(parsed) {
     field.dispatchEvent(new Event('change', {bubbles:true}));
     filled.push(IMPORT_LABELS[name] || name);
   });
+  updateDocTypeNote();
   return filled;
 }
 
@@ -590,6 +616,7 @@ function updateConditionalRequirements() {
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
 updateConditionalRequirements();
+document.querySelector('select[name="doc_type"]').addEventListener('change', updateDocTypeNote);
 
 // ทุกครั้งที่เข้าหน้านี้ = เริ่มตรวจเล่มใหม่ ฟอร์มต้องว่างทั้งหมด (เจ้าหน้าที่สั่ง ก.ย. 2569
 // "ทุกครั้งที่จะตรวจ ต้องกดตรวจเล่มใหม่อยู่แล้ว ก็ล้างค่าตรงนั้นเลย")
@@ -670,13 +697,18 @@ document.getElementById('f').addEventListener('submit', async function(e){
 // ---- แผงความพร้อมก่อนตรวจ (หน้าออกแบบใหม่ ก.ย. 2569) ----
 // ขั้นไหนช่องบังคับครบแล้วขึ้นเครื่องหมายถูก — อ่านจาก required ที่เปลี่ยนตามหลักสูตร
 // (updateConditionalRequirements) จึงตรงกับที่เบราว์เซอร์จะเตือนตอนกดตรวจเล่มเสมอ
+//
+// อ่านด้วย validity.valid เท่านั้น ห้ามใช้ checkValidity() — checkValidity() ยิงเหตุการณ์
+// invalid ทุกช่องที่ยังว่าง ซึ่งตัวดัก invalid ข้างล่างถือว่าเป็นการกดตรวจเล่ม แล้วเรียก
+// checkValidity() ซ้ำ วนไม่รู้จบ (วัดได้ราว 1,950 ครั้งต่อวินาทีตั้งแต่เปิดหน้า) ข้อความ
+// "ยังกรอกไม่ครบ" ขึ้นเองทั้งที่ยังไม่ได้กด และหน้าจอถูกดึงกลับไปที่ช่องแรกที่ขาดตลอดเวลา
 function updateProgress() {
   const items = document.querySelectorAll('#progress li');
   let done = 0;
   items.forEach(function(li){
     const sec = document.getElementById(li.dataset.sec);
     const fields = sec ? Array.from(sec.querySelectorAll('input[required], select[required], textarea[required]')) : [];
-    const ok = fields.length > 0 && fields.every(function(f){ return f.checkValidity(); });
+    const ok = fields.length > 0 && fields.every(function(f){ return f.validity.valid; });
     li.classList.toggle('done', ok);
     if (ok) done += 1;
   });
@@ -695,7 +727,7 @@ window.addEventListener('pageshow', updateProgress);
 // ตอนนี้แถบล่างบอกชื่อขั้นที่ยังขาด ช่องที่ขาดทุกช่องขึ้นกรอบแดง และเลื่อนไปช่องแรกให้
 function missingFields() {
   return Array.from(document.getElementById('f').elements)
-    .filter(function(el){ return el.willValidate && !el.checkValidity(); });
+    .filter(function(el){ return el.willValidate && !el.validity.valid; });
 }
 function markMissing(fields, jump) {
   document.querySelectorAll('.missing').forEach(function(el){ el.classList.remove('missing'); });
