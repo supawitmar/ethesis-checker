@@ -750,6 +750,67 @@ class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
         self.assertNotIn('id="ethesis-source"', page.text)
 
 
+class AnIncompleteFormIsNeverChecked(unittest.TestCase):
+    """ไม่ครบ = ไม่ตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้าไม่ครบ ต้องไม่ตรวจนะ")
+
+    กันสามชั้น: เบราว์เซอร์ (required) · สคริปต์ก่อนส่ง (readyToCheck) · เซิร์ฟเวอร์ (/check ตอบ 400)
+    หน้าจอบอกในแถบล่างว่าขาดขั้นไหน ช่องที่ขาดขึ้นกรอบแดง และเลื่อนไปช่องแรกให้
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = cls.SOURCE.read_text(encoding="utf-8")
+        cls.client = TestClient(main.app)
+        cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                        follow_redirects=False)
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            paths = [job.get("pdf_path") for job in main.JOBS.values()]
+            main.JOBS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def test_the_script_checks_before_it_sends(self):
+        handler = self.html.split("document.getElementById('f').addEventListener('submit'", 1)[1]
+        guard = handler.index("if (!readyToCheck()) return;")
+        self.assertLess(guard, handler.index("fetch('/check'"))
+
+    def test_the_browser_still_enforces_required_fields(self):
+        """ควบคุมเชิงลบ — ห้ามปิดการตรวจ required ของเบราว์เซอร์ (ชั้นแรก)"""
+        form_tag = self.html.split('<form id="f"', 1)[1].split(">", 1)[0]
+        self.assertNotIn("novalidate", form_tag)
+
+    def test_the_bar_says_what_is_missing(self):
+        self.assertIn('<p class="bar-msg" id="progress-msg" role="alert" hidden></p>', self.html)
+        self.assertIn("addEventListener('invalid'", self.html)
+        self.assertIn("'ยังกรอกไม่ครบ: '", self.html)
+
+    def test_the_server_refuses_a_thai_book_without_thai_fields(self):
+        form = {**FORM, "program_language": "thai"}
+        response = self.client.post("/check", data=form,
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(response.status_code, 400)
+        detail = response.json()["detail"]
+        self.assertIn("กรุณากรอกข้อมูลอ้างอิงให้ครบก่อนตรวจ", detail)
+        self.assertEqual(main.JOBS, {})
+
+    def test_the_server_refuses_a_missing_book_file(self):
+        response = self.client.post("/check", data=FORM)
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertLess(response.status_code, 500)
+        self.assertEqual(main.JOBS, {})
+
+    def test_every_checklist_step_points_at_a_real_section(self):
+        import re
+        steps = re.findall(r'<li data-sec="([^"]+)">', self.html)
+        self.assertEqual(steps, ["sec-files", "sec-type", "sec-title", "sec-student"])
+        for sec in steps:
+            self.assertIn(f'id="{sec}"', self.html)
+
+
 class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
     """เปิดไฟล์รูปเล่มที่ตรวจได้จากหน้ารายงาน (เจ้าหน้าที่ขอ ก.ย. 2569)
 
