@@ -3696,6 +3696,18 @@ def degree_line_extras(page_text, expected):
     return min(hits, key=len) if hits else ""
 
 
+def degree_abbr_expected(abbr):
+    """บรรทัด "ควรเป็น" ของข้อชื่อปริญญาแบบย่อในบทคัดย่อ
+
+    บอก "และสาขาในวงเล็บ" เฉพาะตัวย่อที่มีวงเล็บจริง เจ้าหน้าที่ (ก.ย. 2569): "ตัวย่อปริญญา
+    บางอัน ไม่มีวงเล็บ ถ้าใส่ข้อความวงเล็บจะสับสนได้" — เล่มจริง M.C.T.M. ได้ "ต้องเป็น "M.C.T.M."
+    ตามรูปแบบชื่อย่อและสาขาในวงเล็บ" นักศึกษาจะไปหาสาขามาใส่วงเล็บเอง ทั้งที่ปริญญานี้ไม่มี
+    """
+    if "(" in (abbr or ""):
+        return f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ'
+    return f'ต้องเป็น "{abbr}" ตามรูปแบบชื่อย่อ'
+
+
 def _looks_like_degree_line(line):
     """บรรทัดนี้หน้าตาเป็น "ชื่อปริญญาแบบย่อ" หรือไม่
 
@@ -6365,7 +6377,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
                 rep.add("RED", "front_matter", box,
                         mismatch_detail("ชื่อปริญญาแบบย่อ", compared, abbr),
-                        f"ต้องเป็น \"{abbr}\" ตามรูปแบบชื่อย่อและสาขาในวงเล็บ",
+                        degree_abbr_expected(abbr),
                         "แก้ชื่อปริญญาแบบย่อให้ตรงข้อมูลอนุมัติ", "FORM.APPROVED_MATCH")
 
         _check_degree_abbr(soft(A.get("degree_abbr_en", "")), abs_en_idx, "บทคัดย่ออังกฤษ")

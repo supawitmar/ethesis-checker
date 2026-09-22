@@ -641,6 +641,8 @@ var TR = [
   [/หัวข้อในสารบัญต้องเป็น ("[^"]*")/g, 'The heading in the table of contents must be $1'],
   [/ต้องเป็นเลขหน้า ("[^"]*")/g, 'Must be page label $1'],
   [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อและสาขาในวงเล็บ/g, 'Must be $1, in the form of the abbreviation with the subject in brackets'],
+  // ตัวย่อที่ไม่มีวงเล็บ (เช่น M.C.T.M.) ไม่พูดถึงวงเล็บ — ต้องอยู่หลังกฎยาวข้างบน
+  [/ต้องเป็น ("[^"]*") ตามรูปแบบชื่อย่อ/g, 'Must be $1, in the form of the abbreviation'],
   // ---- กฎเต็มประโยค (ชั้น 1 ของ trEN) — ลำดับไม่มีผล ปลอดภัยจากกฎเศษคำ ----
   [/กิตติกรรมประกาศ \(หน้า (\S+)\)/g, 'Acknowledgements (page $1)'],
   [/บทคัดย่ออังกฤษ \(หน้า (\S+)\)/g, 'English abstract (page $1)'],
