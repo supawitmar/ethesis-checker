@@ -834,8 +834,13 @@ var TR = [
   [/^ภาษาที่เขียน$/g, 'Language of the document'],
   // ประเภทเล่มต้องตรงกับที่ได้รับอนุมัติ (FORM.DOC_TYPE) — ค่าในเครื่องหมายคำพูดคงตามเล่ม
   [/^ประเภทเล่ม$/g, 'Document type'],
-  [/^ช่องประเภทเล่มในแบบฟอร์ม$/g, 'Document type selected on the form'],
-  [/^ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis \(ไฟล์ eThesis ระบุ ("[^"]+")\) ถ้าประเภทที่ถูกต้องคือค่าที่เลือกในแบบฟอร์ม ให้กดไม่ผ่านเพื่อแจ้งนักศึกษา$/g, 'The document type selected on the form differs from the eThesis file (the eThesis file says $1). If the type selected on the form is the correct one, press Fail to notify the student'],
+  // หัวข้อรายชื่อกรรมการบนหน้าบทคัดย่อ ต้องตรง template
+  [/^ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้$/g, 'The advisory committee heading was not found on this page'],
+  [/หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า/g, 'The advisory committee heading reads'],
+  [/^แก้ข้อความหัวข้อให้ตรง template ทุกตัวอักษร$/g, 'Correct the heading to match the template exactly'],
+  [/^ไฟล์ eThesis$/g, 'eThesis file'],
+  [/^("[^"]+") — ระบบตรวจตามประเภทที่เจ้าหน้าที่เลือก$/g, '$1 — the check follows the document type selected by staff'],
+  [/^ตรวจว่าประเภทเล่มที่เลือกไว้ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด$/g, 'Check that the document type selected is correct; if it is, send the document back for the student to correct every occurrence'],
   // โหมด free เทียบรูปแบบเล่มกับแบบฟอร์มเป็นสีส้ม (ดูรูปแบบจากชื่อบทที่ 1)
   [/^โหมด free ระบบดูรูปแบบจากชื่อบทที่ 1 เท่านั้น เปิดเล่มดูว่าจัดบทตามรูปแบบใด ถ้าไม่ตรงกับข้อมูลอนุมัติให้กดไม่ผ่าน$/g, 'In free mode the system judges the format from the title of chapter 1 only. Open the document to see which format it follows; if it does not match the approved data, press Fail'],
   [/^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า (.+)$/g, 'The document type does not match the approved one: the document says $1'],

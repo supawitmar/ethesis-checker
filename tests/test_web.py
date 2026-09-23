@@ -824,11 +824,12 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
             self.assertIn(f'id="{sec}"', self.html)
 
 
-class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
-    """ประเภทเล่มที่อนุมัติยึดตามไฟล์ eThesis ก่อนช่องที่เลือกเอง (เจ้าหน้าที่สั่ง ก.ย. 2569 "ให้ฟ้องด้วย")
+class TheDocumentTypeFollowsWhatStaffSelected(unittest.TestCase):
+    """ระบบตรวจตามประเภทเล่มที่เจ้าหน้าที่เลือกในแบบฟอร์มเสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569)
 
-    เล่ม 6838776: eThesis อนุมัติเป็นสารนิพนธ์ เล่มเขียน INDEPENDENT STUDY แล้วช่องประเภทเล่ม
-    ถูกเปลี่ยนให้ตรงกับเล่ม ระบบจึงเทียบเล่มกับค่าที่เพิ่งเปลี่ยน และไม่ฟ้องเรื่องนี้เลย
+    "ถ้าข้อมูลที่อ่านมา แล้วเจ้าหน้าที่เปลี่ยนด้วยมือ ให้เชื่อเจ้าหน้าที่ และดำเนินการตรวจ" —
+    เล่ม 6237950 PHPH/M ไฟล์ eThesis อ่านได้ "วิทยานิพนธ์" แต่เจ้าหน้าที่แจ้งว่าเป็นสารนิพนธ์
+    ค่าจากไฟล์ใช้เติมฟอร์มเท่านั้น และติดไปกับผลตรวจเป็นข้อมูลประกอบเมื่อต่างจากที่เลือก
     """
 
     SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
@@ -867,14 +868,14 @@ class TheApprovedDocumentTypeComesFromTheEthesisFile(unittest.TestCase):
                 time.sleep(0.01)
         return seen[0]
 
-    def test_the_ethesis_type_wins_over_the_dropdown(self):
+    def test_the_selected_type_wins_over_the_file(self):
         self.assertEqual(self._approved_type(doc_type="INDEPENDENT STUDY",
-                                             ethesis_doc_type="THEMATIC PAPER"), "THEMATIC PAPER")
-
-    def test_the_type_chosen_on_the_form_goes_along_too(self):
-        """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" — ค่าที่เลือกห้ามหายไป"""
-        self.assertEqual(self._approved_type("doc_type_form", doc_type="INDEPENDENT STUDY",
                                              ethesis_doc_type="THEMATIC PAPER"), "INDEPENDENT STUDY")
+
+    def test_the_value_read_from_the_file_goes_along_as_context(self):
+        """ต่างจากที่เลือก = ขึ้นในตารางผลเทียบให้เจ้าหน้าที่เห็นว่าไฟล์เขียนอะไร"""
+        self.assertEqual(self._approved_type("doc_type_ethesis", doc_type="INDEPENDENT STUDY",
+                                             ethesis_doc_type="THEMATIC PAPER"), "THEMATIC PAPER")
 
     def test_the_dropdown_is_used_when_the_file_gives_no_type(self):
         """ควบคุมเชิงบวก — ไม่มีค่าจากไฟล์ ช่องที่เลือกยังใช้งานได้ตามเดิม"""
@@ -932,7 +933,7 @@ console.log(JSON.stringify(out));
         # เปลี่ยนช่องให้ต่างจากไฟล์ — บอกว่าระบบยังเทียบกับประเภทตามไฟล์
         self.assertEqual(out["changed"][:2], ["THEMATIC PAPER", False])
         self.assertIn("สารนิพนธ์ (Thematic Paper)", out["changed"][2])
-        self.assertIn("ทั้งสองค่า", out["changed"][2])
+        self.assertIn("ระบบจะตรวจเล่มตามประเภทที่เลือกไว้", out["changed"][2])
         # เริ่มเล่มใหม่ — ค่าจากไฟล์เดิมต้องไม่ค้าง
         self.assertEqual(out["cleared"], ["", True, ""])
 
