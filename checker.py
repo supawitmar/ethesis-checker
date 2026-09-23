@@ -2496,19 +2496,19 @@ def doc_types_printed(page_text):
     return found
 
 
-def doc_type_check(approved_type, program_language, spots, form_type=""):
-    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับที่ได้รับอนุมัติ และกับที่เลือกในแบบฟอร์ม
+def doc_type_check(approved_type, program_language, spots, ethesis_type=""):
+    """ประเภทเล่มที่แต่ละจุดเขียนไว้ เทียบกับประเภทที่เจ้าหน้าที่ระบุ
 
     spots = [(ตำแหน่ง, ข้อความของหน้า), ...] ตามลำดับในเล่ม หน้าปกมาก่อน
     คืน (แถวในตารางผลเทียบ, [(สี, ตำแหน่ง, ที่พบ, ควรเป็น, ต้องแก้), ...],
          ประเภทที่ใช้เทียบข้อความบังคับบนหน้าปก)
 
-    approved_type = ค่าจากไฟล์ eThesis (ถ้าไฟล์ไม่ระบุ คือค่าที่เลือกในแบบฟอร์ม)
-    form_type     = ค่าที่เลือกในแบบฟอร์ม — เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้าในแบบฟอร์มที่กรอก/ดึงมา
-                    จากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" เล่มจึงเทียบกับทั้งสองค่า
-      ไม่ตรงกับไฟล์ eThesis               = แดง
-      ไม่ตรงกับที่เลือกในแบบฟอร์ม (ซึ่งต่างจาก
-      ไฟล์ eThesis)                       = ส้ม ระบบไม่รู้ว่าค่าไหนถูก เจ้าหน้าที่ตัดสินเอง
+    approved_type = ค่าที่เจ้าหน้าที่เลือกในแบบฟอร์ม — เจ้าหน้าที่สั่ง (ก.ย. 2569) "ถ้าข้อมูลที่อ่านมา
+                    แล้วเจ้าหน้าที่เปลี่ยนด้วยมือ ให้เชื่อเจ้าหน้าที่ และดำเนินการตรวจ" เล่มไม่ตรงกับ
+                    ค่านี้ = แดง
+    ethesis_type  = ค่าที่อ่านได้จากไฟล์ eThesis ใช้เป็นข้อมูลประกอบเมื่อต่างจากที่เลือกเท่านั้น
+                    ไม่เอามาตัดสินเล่ม (เล่ม 6237950 PHPH/M: ไฟล์อ่านได้ "วิทยานิพนธ์"
+                    เจ้าหน้าที่แจ้งว่าเป็นสารนิพนธ์ ต้องตรวจตามแนวสารนิพนธ์)
 
     จุดผิดหลายหน้ารวมเป็นข้อเดียว เพราะนักศึกษาแก้เรื่องเดียว (เปลี่ยนประเภทเล่ม) ส่วนตาราง
     ผลเทียบลงทุกจุดที่อ่านเจอ ทั้งตอนตรงและไม่ตรง จะได้แยก "ตรวจแล้วผ่าน" กับ "ไม่ได้ตรวจ" ออก
@@ -2519,26 +2519,23 @@ def doc_type_check(approved_type, program_language, spots, form_type=""):
     """
     if not approved_type:
         return [], [], approved_type
-    form_type = form_type if form_type and form_type != approved_type else ""
+    ethesis_type = ethesis_type if ethesis_type and ethesis_type != approved_type else ""
     printed = [(spot, doc_types_printed(text)) for spot, text in spots]
-
-    def differs(want_type):
-        return [spot for spot, found in printed if any(t != want_type for t, _ in found)]
-
-    wrong = differs(approved_type)
-    off_form = differs(form_type) if form_type else []
+    wrong = [spot for spot, found in printed if any(t != approved_type for t, _ in found)]
     rows = []
     if any(found for _, found in printed):
         rows.append(("ข้อมูลอนุมัติ", "fail" if wrong else "pass",
                      f'"{doc_type_name(approved_type, program_language)}"'))
-        if form_type:
-            rows.append(("ช่องประเภทเล่มในแบบฟอร์ม", "pending" if off_form else "pass",
-                         f'"{doc_type_name(form_type, program_language)}"'))
+        if ethesis_type:
+            # ไฟล์ eThesis เขียนคนละอย่างกับที่เจ้าหน้าที่เลือก — ลงตารางให้เห็น แต่ไม่ตัดสิน
+            rows.append(("ไฟล์ eThesis", "skipped",
+                         f'"{doc_type_name(ethesis_type, program_language)}" '
+                         "— ระบบตรวจตามประเภทที่เจ้าหน้าที่เลือก"))
         for spot, found in printed:
             if found:
                 words = dict.fromkeys(word for _, word in found)
-                status = "fail" if spot in wrong else "pending" if spot in off_form else "pass"
-                rows.append((spot, status, ", ".join(f'"{word}"' for word in words)))
+                rows.append((spot, "fail" if spot in wrong else "pass",
+                             ", ".join(f'"{word}"' for word in words)))
 
     def item(zone, want_type, spots_off, fix):
         want = doc_type_name(want_type, program_language)
@@ -2567,12 +2564,7 @@ def doc_type_check(approved_type, program_language, spots, form_type=""):
     issues = []
     if wrong:
         issues.append(item("RED", approved_type, wrong,
-                           "ตรวจว่าประเภทเล่มในไฟล์ eThesis ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด"))
-    if off_form:
-        issues.append(item("ORANGE", form_type, off_form,
-                           "ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis "
-                           f'(ไฟล์ eThesis ระบุ "{doc_type_name(approved_type, program_language)}") '
-                           "ถ้าประเภทที่ถูกต้องคือค่าที่เลือกในแบบฟอร์ม ให้กดไม่ผ่านเพื่อแจ้งนักศึกษา"))
+                           "ตรวจว่าประเภทเล่มที่เลือกไว้ถูกต้อง ถ้าถูกต้องแล้วจึงส่งกลับให้นักศึกษาแก้ทุกจุด"))
     cover_wrong = [t for t, _ in (printed[0][1] if printed and printed[0][0] == "หน้าปก" else [])
                    if t != approved_type]
     return rows, issues, (cover_wrong[0] if cover_wrong else approved_type)
@@ -6055,9 +6047,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         program_language = A.get("program_language", "")
 
         # ---- ประเภทเล่ม: ทุกจุดที่เล่มเขียนประเภทไว้ ต้องตรงกับที่ได้รับอนุมัติ ----
-        # ประเภทที่อนุมัติมาจากไฟล์ eThesis (main.py ยึดค่าจากไฟล์ก่อนช่องที่เลือกเอง) และเทียบกับ
-        # ค่าที่เลือกในแบบฟอร์มด้วย (doc_type_form) — เล่ม 6838776 ไม่ถูกฟ้องเรื่องนี้ เพราะช่อง
-        # ประเภทเล่มถูกเปลี่ยนให้ตรงกับเล่ม
+        # ประเภทที่ใช้ตรวจคือค่าที่เจ้าหน้าที่เลือกในแบบฟอร์ม (main.py) ค่าที่อ่านได้จากไฟล์ eThesis
+        # เป็นข้อมูลประกอบเมื่อต่างกัน — "เจ้าหน้าที่เปลี่ยนด้วยมือ ให้เชื่อเจ้าหน้าที่" (ก.ย. 2569)
         approved_type = A.get("doc_type", "")
         type_spots = [("หน้าปก", cover_text)] + [
             (f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx]) for k, idx in enumerate(sig_pages)
@@ -6066,7 +6057,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             for idx in sorted(i for i in (abs_th_idx, abs_en_idx) if i is not None)
         ]
         type_rows, type_issues, cover_type = doc_type_check(
-            approved_type, program_language, type_spots, A.get("doc_type_form", ""))
+            approved_type, program_language, type_spots, A.get("doc_type_ethesis", ""))
         for where, status, detail in type_rows:
             rep.add_verification("ประเภทเล่ม", where, status, detail)
         for zone, *type_item in type_issues:

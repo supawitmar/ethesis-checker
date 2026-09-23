@@ -5965,7 +5965,8 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
 
     def test_run_check_uses_it_and_the_old_item_is_gone(self):
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn('approved_type, program_language, type_spots, A.get("doc_type_form", ""))', source)
+        self.assertIn('approved_type, program_language, type_spots, A.get("doc_type_ethesis", ""))',
+                      source)
         self.assertIn('rep.add_verification("ประเภทเล่ม", where, status, detail)', source)
         self.assertIn("cover_required_items(cover_type, program_language)", source)
         self.assertIn('"FORM.DOC_TYPE")', source)
@@ -5973,37 +5974,38 @@ class TheDocumentTypeMustMatchTheApprovedOne(unittest.TestCase):
         import ethesis_rules
         self.assertIn("FORM.DOC_TYPE", ethesis_rules.RULE_CATALOG)
 
-    def test_the_type_chosen_on_the_form_is_compared_too(self):
-        """"ถ้าในแบบฟอร์มที่กรอก/ดึงมาจากระบบ กับในเล่มไม่ตรงกันก็ต้องแจ้ง" (เจ้าหน้าที่ ก.ย. 2569)
+    def test_the_check_follows_the_type_staff_selected(self):
+        """"ถ้าข้อมูลที่อ่านมา แล้วเจ้าหน้าที่เปลี่ยนด้วยมือ ให้เชื่อเจ้าหน้าที่" (เจ้าหน้าที่ ก.ย. 2569)
 
-        เล่มตรงกับไฟล์ eThesis แต่ไม่ตรงกับที่เลือกในแบบฟอร์ม — ระบบไม่รู้ว่าค่าไหนถูก จึงเป็นสีส้ม
+        เล่ม 6237950 PHPH/M: ไฟล์ eThesis อ่านได้ "วิทยานิพนธ์" เจ้าหน้าที่แจ้งว่าเป็นสารนิพนธ์
+        ต้องตรวจตามแนวสารนิพนธ์ ค่าที่อ่านจากไฟล์เป็นข้อมูลประกอบเท่านั้น ไม่เอามาตัดสินเล่ม
         """
         rows, issues, _cover = checker_module.doc_type_check(
-            "INDEPENDENT STUDY", "international", self.SPOTS, form_type="THEMATIC PAPER")
-        self.assertEqual([i[0] for i in issues], ["ORANGE"])
-        self.assertIn('ต้องแก้ทุกจุดเป็น "THEMATIC PAPER"', issues[0][3])
-        self.assertIn('ไฟล์ eThesis ระบุ "INDEPENDENT STUDY"', issues[0][4])
-        self.assertEqual(rows[1], ("ช่องประเภทเล่มในแบบฟอร์ม", "pending", '"THEMATIC PAPER"'))
-        self.assertEqual({r[1] for r in rows[2:]}, {"pending"})
-        # ควบคุมเชิงบวก — ไม่ส่งค่าจากแบบฟอร์ม เล่มนี้ผ่าน (ข้อส้มมาจากแบบฟอร์มจริง)
-        self.assertEqual(checker_module.doc_type_check(
-            "INDEPENDENT STUDY", "international", self.SPOTS)[1], [])
+            "INDEPENDENT STUDY", "international", self.SPOTS, ethesis_type="THEMATIC PAPER")
+        # เล่มเขียน INDEPENDENT STUDY ตรงกับที่เจ้าหน้าที่เลือก = ผ่าน แม้ไฟล์จะเขียนคนละอย่าง
+        self.assertEqual(issues, [])
+        self.assertEqual(rows[0], ("ข้อมูลอนุมัติ", "pass", '"INDEPENDENT STUDY"'))
+        self.assertEqual(rows[1], ("ไฟล์ eThesis", "skipped",
+                                   '"THEMATIC PAPER" — ระบบตรวจตามประเภทที่เจ้าหน้าที่เลือก'))
+        self.assertEqual({r[1] for r in rows[2:]}, {"pass"})
 
-    def test_the_book_off_both_values_gets_both_notices(self):
+    def test_the_book_is_judged_against_the_selected_type(self):
+        """ควบคุมเชิงลบของข้อบน — เลือกคนละอย่างกับเล่ม ต้องได้แดงตามค่าที่เลือก"""
         _rows, issues, _cover = checker_module.doc_type_check(
-            "THEMATIC PAPER", "international", self.SPOTS, form_type="THESIS")
-        self.assertEqual([i[0] for i in issues], ["RED", "ORANGE"])
+            "THEMATIC PAPER", "international", self.SPOTS, ethesis_type="INDEPENDENT STUDY")
+        self.assertEqual([i[0] for i in issues], ["RED"])
+        self.assertIn('ต้องแก้ทุกจุดเป็น "THEMATIC PAPER"', issues[0][3])
 
-    def test_a_form_that_agrees_with_the_file_adds_nothing(self):
+    def test_a_file_that_agrees_with_the_selection_adds_no_row(self):
         self.assertEqual(
             checker_module.doc_type_check("THEMATIC PAPER", "international", self.SPOTS,
-                                          form_type="THEMATIC PAPER"),
+                                          ethesis_type="THEMATIC PAPER"),
             checker_module.doc_type_check("THEMATIC PAPER", "international", self.SPOTS))
 
     def test_every_new_line_has_an_english_translation(self):
         report_html = (Path(checker_module.__file__).parent
                        / "templates" / "report.html").read_text(encoding="utf-8")
-        for phrase in ("^ช่องประเภทเล่มในแบบฟอร์ม$", "^ประเภทเล่มที่เลือกในแบบฟอร์มไม่ตรงกับไฟล์ eThesis",
+        for phrase in ("^ไฟล์ eThesis$", "— ระบบตรวจตามประเภทที่เจ้าหน้าที่เลือก",
                        'หรือ ("[^"]+") ตามภาษาของหน้า$',
                        "^ประเภทเล่ม$", "^ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ เล่มเขียนว่า ",
                        "^ประเภทเล่มที่ได้รับอนุมัติคือ ", "โดยหน้าปกต้องเป็น",
