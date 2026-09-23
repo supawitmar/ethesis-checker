@@ -1990,8 +1990,71 @@ def abstract_committee_missing_degree_commas(block):
             if kind == "degree" and missing]
 
 
+def abstract_committee_heading(doc_type, english):
+    """หัวข้อรายชื่อกรรมการที่ปรึกษาบนหน้าบทคัดย่อ ตาม template ('' ถ้าไม่รู้ประเภทเล่ม)
+
+    เล่มอังกฤษ "THESIS ADVISORY COMMITTEE" · เล่มไทย "คณะกรรมการที่ปรึกษาวิทยานิพนธ์"
+    (วัดจากเล่มจริง 8 เล่ม ครบสามประเภทและทั้งสองภาษา)
+    """
+    if not doc_type:
+        return ""
+    if english:
+        return f"{DOC_TYPE_NAME_EN.get(doc_type, doc_type)} ADVISORY COMMITTEE"
+    return f"คณะกรรมการที่ปรึกษา{DOC_TYPE_NAME_TH.get(doc_type, doc_type)}"
+
+
+_ABS_HEADING_AS_PRINTED = (
+    re.compile(r"([^\s:]*คณะกรรมการที่ปรึกษา[^\s:]*)"),
+    re.compile(r"([A-Za-z][A-Za-z\s]*ADVISORY\s+COMMITTEE)", re.I),
+)
+
+
+def abstract_committee_heading_printed(page_text, english):
+    """หัวข้อรายชื่อกรรมการตามที่หน้านี้พิมพ์จริง ('' ถ้าไม่มีอะไรใกล้เคียง)
+
+    ยกมาทั้งท่อนจนจบคำ ไม่ใช่ตัดกรอบเท่าความยาวข้อความที่ถูกต้อง — เล่มที่พิมพ์ซ้ำคำ
+    ("คณะกรรมคณะกรรมการที่ปรึกษา") ถ้าตัดกรอบจะได้ "กรรมคณะกรรมการที่ปรึกษา พ"
+    ซึ่งขึ้นต้นกลางคำและมีตัวแรกของชื่อคนติดมา เจ้าหน้าที่อ่านแล้วไม่เห็นว่าซ้ำตรงไหน
+    """
+    pattern = _ABS_HEADING_AS_PRINTED[1 if english else 0]
+    for line in (page_text or "").splitlines():
+        match = pattern.search(line)
+        if match:
+            return soft(match.group(1))
+    return ""
+
+
+def _report_abstract_committee_heading(rep, page_text, doc_type, english, loc):
+    """หัวข้อรายชื่อกรรมการที่ปรึกษาต้องตรง template ทุกตัวอักษร
+
+    เล่มจริง 6237950 PHPH/M (ก.ย. 2569) พิมพ์ "คณะกรรมคณะกรรมการที่ปรึกษา" — "คณะกรรม"
+    ซ้ำ และขาดคำว่า "วิทยานิพนธ์" ท้ายข้อความ ระบบไม่ฟ้องเลยสักข้อ เพราะตัวจับหัวข้อ
+    (_ABS_COMMITTEE_HEADING) ยอมรับ "คณะกรรมการที่ปรึกษา" ตามด้วยอะไรก็ได้ และเมื่อหา
+    หัวข้อไม่เจอ (เล่มนี้ไม่มี ":" ด้วย) ก็ข้ามการตรวจทั้งก้อนเงียบ ๆ
+
+    หน้าที่เขียนประเภทเล่มอื่น (เช่น "คณะกรรมการที่ปรึกษาสารนิพนธ์" ในเล่มวิทยานิพนธ์)
+    มีข้อ FORM.DOC_TYPE ฟ้องอยู่แล้ว จึงไม่ฟ้องซ้ำที่นี่
+    """
+    want = abstract_committee_heading(doc_type, english)
+    if not want or norm(want) in norm(page_text) or doc_types_printed(page_text):
+        return
+    printed = abstract_committee_heading_printed(page_text, english) or _closest_run(page_text, want)
+    if printed:
+        # ไล่ความต่างทีละตัวเฉพาะตอนที่ต่างกันจุดเดียว ไม่งั้นได้ประโยคอย่าง
+        # 'มี "กรรม" เกินมา และ ต่างที่ " " ต้องเป็น "วิทยานิ" และ ขาด "นธ์"' ซึ่งอ่านไม่รู้เรื่อง
+        # กว่าการดูข้อความสองอันเทียบกันเอง (หลักการเดียวกับข้อรหัสนักศึกษา)
+        diff = describe_diff(printed, want)
+        found = f'หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า "{printed}"'
+        if diff and " และ " not in diff:
+            found += f" {diff}"
+    else:
+        found = "ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้"
+    rep.add("RED", "front_matter", loc, found, f'ต้องเป็น "{want}"',
+            "แก้ข้อความหัวข้อให้ตรง template ทุกตัวอักษร", "FRONT.ABSTRACT")
+
+
 def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, pages,
-                               page_ref):
+                               page_ref, doc_type=""):
     """ตรวจคณะกรรมการที่ปรึกษาบนหน้าบทคัดย่อ (รูปแบบ + จำนวน)
 
     รูปแบบต่อคน = 'ชื่อ นามสกุล, คุณวุฒิ' — ไม่มีสาขาในวงเล็บ, ไม่มีตำแหน่งวิชาการ
@@ -2007,6 +2070,12 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
         for ai in page_list:
             if ai >= len(pages):
                 continue
+            abs_label = "บทคัดย่ออังกฤษ" if heading_en else "บทคัดย่อไทย"
+            if ai == page_list[0]:
+                # หน้าแรกของบทคัดย่อภาษานั้นเท่านั้น — หน้าต่อ ("บทคัดย่อ (ต่อ)") ไม่มีหัวข้อ
+                _report_abstract_committee_heading(
+                    rep, pages[ai], doc_type, heading_en,
+                    f"{abs_label} ({page_ref(ai)})")
             parsed = abstract_committee_block(pages[ai])
             if not parsed:
                 continue
@@ -2014,7 +2083,6 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             names, degrees = split_abstract_committee(block)
             if not names:
                 continue
-            abs_label = "บทคัดย่ออังกฤษ" if heading_en else "บทคัดย่อไทย"
             loc = f"{abs_label} ({page_ref(ai)}) รายชื่อคณะกรรมการที่ปรึกษา"
 
             # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
@@ -6590,7 +6658,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
         # ของ template ล้วน จึงตรวจเสมอ ส่วนการนับจำนวนทำเมื่อมีข้อมูล eThesis
         _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,
-                                   pages, page_ref)
+                                   pages, page_ref, A.get("doc_type", ""))
 
         # ช่องคงที่/รายการที่ระบบยังตรวจไม่ได้ → ให้เจ้าหน้าที่ตรวจเอง
         if not checked_committee:

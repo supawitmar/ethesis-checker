@@ -6089,6 +6089,88 @@ class EveryFormFieldThatTheBookPrintsIsCompared(unittest.TestCase):
         self.assertEqual(checker_module.resolve_option(opt2, None, "strict"), 2)
 
 
+class TheAbstractCommitteeHeadingFollowsTheTemplate(unittest.TestCase):
+    """หัวข้อรายชื่อกรรมการที่ปรึกษาบนหน้าบทคัดย่อ ต้องตรง template ทุกตัวอักษร
+
+    เล่มจริง 6237950 PHPH/M (เจ้าหน้าที่ส่งภาพหน้าจอ ก.ย. 2569 "ระบบไม่จับข้อความ
+    คณะกรรมการที่ปรึกษาวิทยานิพนธ์") พิมพ์ "คณะกรรมคณะกรรมการที่ปรึกษา" — "คณะกรรม" ซ้ำ
+    และขาดคำว่า "วิทยานิพนธ์" ระบบไม่ฟ้องสักข้อ เพราะตัวจับหัวข้อยอมรับ "คณะกรรมการที่ปรึกษา"
+    ตามด้วยอะไรก็ได้ และเมื่อหาหัวข้อไม่เจอ (หน้านี้ไม่มี ":" ด้วย) ก็ข้ามการตรวจทั้งก้อนเงียบ ๆ
+    """
+
+    # ข้อความตามหน้าจอที่เจ้าหน้าที่ส่งมา
+    PAGE = ("ง\n"
+            "ศิริมา  ไทพิทักษ์ 6237950 PHPH/M\n"
+            "วท.ม (สาธารณสุขศาสตร์)\n"
+            "คณะกรรมคณะกรรมการที่ปรึกษา พร้อมลักษณ์  สรรพ่อค้า, วท.ด., ฉัตรภา  หัตถโกศล, ส.ด.\n"
+            "บทคัดย่อ")
+    OK = PAGE.replace("คณะกรรมคณะกรรมการที่ปรึกษา", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์:")
+
+    def _run(self, page, doc_type="THESIS", english=False):
+        rep = Report()
+        checker_module._report_abstract_committee_heading(
+            rep, page, doc_type, english, "บทคัดย่อไทย (หน้า ง)")
+        return [(i["found"], i["expected"]) for i in rep.zones["RED"]]
+
+    def test_the_template_wording_comes_from_the_document_type(self):
+        heading = checker_module.abstract_committee_heading
+        self.assertEqual(heading("THESIS", False), "คณะกรรมการที่ปรึกษาวิทยานิพนธ์")
+        self.assertEqual(heading("THEMATIC PAPER", False), "คณะกรรมการที่ปรึกษาสารนิพนธ์")
+        self.assertEqual(heading("THESIS", True), "THESIS ADVISORY COMMITTEE")
+        self.assertEqual(heading("INDEPENDENT STUDY", True), "INDEPENDENT STUDY ADVISORY COMMITTEE")
+        self.assertEqual(heading("", False), "")
+
+    def test_the_book_from_the_photo_is_reported(self):
+        found, expected = self._run(self.PAGE)[0]
+        self.assertEqual(found, 'หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า "คณะกรรมคณะกรรมการที่ปรึกษา"')
+        self.assertEqual(expected, 'ต้องเป็น "คณะกรรมการที่ปรึกษาวิทยานิพนธ์"')
+
+    def test_a_correct_heading_passes(self):
+        """ควบคุมเชิงบวก — เล่มที่พิมพ์ถูกต้องห้ามถูกฟ้อง"""
+        self.assertEqual(self._run(self.OK), [])
+        for heading in ("คณะกรรมการที่ปรึกษาวิทยานิพนธ์ : ศิริพร แย้มนิล, Ph.D.",   # เล่มที่ 4 เว้นวรรคหน้า :
+                        "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: คนางค์ คันธมธุรพจน์, PhD."):
+            self.assertEqual(self._run(self.PAGE.replace(
+                "คณะกรรมคณะกรรมการที่ปรึกษา พร้อมลักษณ์  สรรพ่อค้า, วท.ด., ฉัตรภา  หัตถโกศล, ส.ด.",
+                heading)), [], heading)
+
+    def test_a_missing_heading_says_so(self):
+        found, _expected = self._run(self.PAGE.replace("คณะกรรมคณะกรรมการที่ปรึกษา ", ""))[0]
+        self.assertEqual(found, "ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้")
+
+    def test_the_english_page_is_checked_too(self):
+        page = ("iv\nKOTARO TASAKI 6838776 TMCT/M\n"
+                "THESIS ADVISORY COMMITEE: WIRONGRONG CHIERAKUL, M.D., Ph.D.\nABSTRACT")
+        found, expected = self._run(page, english=True)[0]
+        self.assertIn('เขียนว่า "THESIS ADVISORY COMMITEE"', found)
+        self.assertIn('ต่างที่ "COMMITEE" ต้องเป็น "COMMITTEE"', found)
+        self.assertEqual(expected, 'ต้องเป็น "THESIS ADVISORY COMMITTEE"')
+
+    def test_a_heading_naming_another_document_type_is_left_to_the_type_rule(self):
+        """"คณะกรรมการที่ปรึกษาสารนิพนธ์" ในเล่มวิทยานิพนธ์ = ข้อ FORM.DOC_TYPE ไม่ฟ้องซ้ำที่นี่"""
+        page = self.PAGE.replace("คณะกรรมคณะกรรมการที่ปรึกษา", "คณะกรรมการที่ปรึกษาสารนิพนธ์:")
+        self.assertEqual(self._run(page), [])
+        self.assertEqual([t for t, _ in checker_module.doc_types_printed(page)], ["THEMATIC PAPER"])
+
+    def test_only_the_first_abstract_page_needs_the_heading(self):
+        """หน้าต่อของบทคัดย่อไม่มีหัวข้อเป็นปกติ — ต้องไม่ฟ้องหน้าที่สอง"""
+        source = inspect.getsource(checker_module._check_abstract_committees)
+        self.assertIn("if ai == page_list[0]:", source)
+        self.assertIn("_report_abstract_committee_heading(", source)
+
+    def test_run_check_passes_the_approved_document_type(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('pages, page_ref, A.get("doc_type", ""))', source)
+
+    def test_every_new_line_has_an_english_translation(self):
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in ("^ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้$",
+                       "หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า",
+                       "^แก้ข้อความหัวข้อให้ตรง template ทุกตัวอักษร$"):
+            self.assertIn(phrase, report_html, phrase)
+
+
 class TitleLanguageComesFromTheSystemDataOnly(unittest.TestCase):
     """ชื่อเรื่องสองภาษาต้องเอาจากข้อมูลระบบ (eThesis/บฑ.1) ไม่ใช่เดาจากหน้ากระดาษ
 
