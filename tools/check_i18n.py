@@ -37,6 +37,32 @@ THAI_PAGE_LETTERS = set("กขคงจฉชซฌญฎฏฐฑฒณดต�
 # ว่ารายงานอังกฤษต้องเรียกฟอร์มเดียวกันว่า GR.1 / GR.2 จึงต้องแปล ไม่ยกเว้นอีกต่อไป
 KEEP_THAI = set()
 
+# ข้อความในเครื่องหมายคำพูด = ค่าที่คัดมาจากเล่มหรือจากข้อมูลอนุมัติ (ชื่อเรื่อง ชื่อคน
+# หัวข้อที่เล่มพิมพ์) กดสลับเป็นอังกฤษแล้วต้องคงไว้ทั้งก้อน ห้ามแปลทับ
+_QUOTED = re.compile(r'"[^"]*"')
+
+
+def translation_problems(th, en):
+    """ข้อผิดของคำแปลหนึ่งข้อ — คืนรายการข้อความอธิบาย ('' = ไม่มีปัญหา)
+
+    สองอย่างที่ต้องดู
+      1. เหลือคำไทยนอกเครื่องหมายคำพูด = ยังไม่ได้แปล
+      2. ข้อความในเครื่องหมายคำพูดหายไปหรือถูกแปลทับ — trWhole() คงค่าที่จับได้ไว้
+         ตามเดิมเฉพาะเมื่อกลุ่มจับครอบเครื่องหมายคำพูดมาด้วย กฎที่เขียนว่า "(.+?)"
+         จึงส่งข้อความจากเล่มไปแปลต่อ เล่มจริง 6736605 NSCN/M ได้คำแปลว่า
+         multiple terms: "the reference list / บรรณานุกรม" ข้อ 1 มองไม่เห็นปัญหานี้
+         เพราะมันตัดข้อความในเครื่องหมายคำพูดทิ้งก่อนตรวจ
+    """
+    problems = []
+    left = [w for w in re.findall(r"[ก-๙]+", _QUOTED.sub("", en))
+            if w not in THAI_PAGE_LETTERS and w not in KEEP_THAI]
+    if left:
+        problems.append(f"ยังไม่แปล: {left}")
+    lost = [q for q in _QUOTED.findall(th) if q not in en]
+    if lost:
+        problems.append(f"ข้อความจากเล่มถูกแปลทับ: {lost}")
+    return problems
+
 
 # คำแปลเขียนได้ทั้ง '...' และ "..." (ใช้ "..." เมื่อในข้อความมี apostrophe)
 _TR_ENTRY = re.compile(
@@ -429,11 +455,9 @@ def main():
                 print(f"\n  ชื่อหมวดไม่มีใน CATMAP: {cat}")
         for th in messages:
             en = tr_en(th, pairs)
-            left = [w for w in re.findall(r"[ก-๙]+", re.sub(r'"[^"]*"', "", en))
-                    if w not in THAI_PAGE_LETTERS and w not in KEEP_THAI]
-            if left:
+            for problem in translation_problems(th, en):
                 bad += 1
-                print(f"\n  ยังไม่แปล: {left}\n  TH: {th}\n  EN: {en}")
+                print(f"\n  {problem}\n  TH: {th}\n  EN: {en}")
         print(f"\nUNTRANSLATED: {bad}")
         return 1 if bad else 0
 
@@ -451,11 +475,9 @@ def main():
     bad = 0
     for th in messages:
         en = tr_en(th, pairs)
-        left = [w for w in re.findall(r"[ก-๙]+", re.sub(r'"[^"]*"', "", en))
-                if w not in THAI_PAGE_LETTERS and w not in KEEP_THAI]
-        if left:
+        for problem in translation_problems(th, en):
             bad += 1
-            print(f"  ยังไม่แปล: {left}")
+            print(f"  {problem}")
         print(f"  TH: {th}")
         print(f"  EN: {en}\n")
     print(f"UNTRANSLATED: {bad}")

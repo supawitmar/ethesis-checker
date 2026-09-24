@@ -4385,26 +4385,32 @@ def _is_bold_font(fontname):
     return any(marker in font for marker in ('BOLD', 'BLACK', 'SEMIBOLD', 'DEMI'))
 
 
-# ชื่อฟอนต์ที่ไม่ได้บอกอะไรเลยว่าเป็นน้ำหนักไหน — โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์
-# ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ "ในหน้านั้น ๆ" ไม่ใช่ชื่อฟอนต์จริง
-# (เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา แต่ CIDFont+F1 บนหน้าเนื้อหาเป็น
-#  ตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์) จึงดูจากชื่อไม่ได้เลยว่าหนาหรือไม่
-_ANONYMOUS_FONT = re.compile(r'^(?:CIDFont\+)?F\d+$', re.I)
-
-
 def bold_is_undetectable(pdf_page):
     """หน้านี้บอก "ตัวหนา" จากชื่อฟอนต์ไม่ได้เลยหรือไม่
 
     ถ้าบอกไม่ได้ ห้ามสรุปว่า "ไม่เป็นตัวหนา" — เล่มจริงที่หัวข้อสารบัญหนาครบทุกหัวข้อ
     เคยถูกฟ้องว่า "หัวข้อหลักในสารบัญไม่เป็นตัวหนา 13 หัวข้อ" ด้วยเหตุนี้
+
+    **ไม่มีฟอนต์ไหนในหน้าที่ชื่อบอกว่าหนาเลย = บอกไม่ได้** เพราะยังมีอีกสองทางที่ทำให้
+    ข้อความหนาโดยไม่มีฟอนต์ตัวหนาในไฟล์
+      - ชื่อฟอนต์ย่อยแบบไม่มีความหมาย ("CIDFont+F1", "F2") ที่โปรแกรมแปลง PDF ตั้งไล่
+        ตามลำดับที่พบในหน้านั้น ๆ เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา แต่
+        CIDFont+F1 บนหน้าเนื้อหาเป็นตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์
+      - **ตัวหนาเทียม (faux bold)** — โปรแกรมทำเล่มวาดตัวอักษรเดิมซ้ำอีกรอบเป็นเส้นขอบ
+        (text render mode 2) แทนการใช้ฟอนต์ตัวหนา ในไฟล์จึงมีแต่ฟอนต์ธรรมดาชื่อเดียว
+        เล่มจริง 6736605 NSCN/M ทำแบบนี้ทั้งเล่ม (THSarabunNew ตัวเดียว หน้าสารบัญมีการ
+        วาดเส้นทับ 104 จุด) หัวข้อในเล่มหนาครบ แต่ระบบฟ้องว่า "ไม่เป็นตัวหนา 11 หัวข้อ"
+        เจ้าหน้าที่ต้องกดผ่านเอง — pdfplumber ไม่ได้ส่ง text render mode ออกมา จึงดูไม่ได้
+        ว่าจุดไหนวาดเส้นทับ เหลือทางเดียวคือไม่ฟันธง แล้วให้เจ้าหน้าที่ดูด้วยตา
+
+    วัดกับเล่มจริง 9 เล่ม: 8 เล่มมีฟอนต์ที่ชื่อบอกว่าหนาบนหน้าสารบัญ (ตรวจต่อตามปกติ)
+    มีเล่ม 6736605 เล่มเดียวที่ไม่มี ซึ่งเป็นเล่มที่ทำตัวหนาเทียม
     """
     names = {(c.get('fontname') or '') for c in (pdf_page.chars or [])
              if (c.get('text') or '').strip()}
     if not names:
         return False
-    if any(_is_bold_font(name) for name in names):
-        return False        # มีฟอนต์ที่บอกน้ำหนักในชื่อ = เทียบได้ตามปกติ
-    return all(_ANONYMOUS_FONT.match(name.split('+')[-1]) for name in names)
+    return not any(_is_bold_font(name) for name in names)
 
 
 def _font_lines(pdf_page, tolerance=2.5):
@@ -4877,6 +4883,19 @@ _REF_TERM_GROUPS = (
 )
 
 
+def toc_major_headings_sentence(program_language):
+    """ชื่อหัวข้อระดับหลักในสารบัญที่ต้องเป็นตัวหนา เขียนด้วยภาษาของเล่ม
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) "เล่มไทยควรใช้คำไทย" — เล่มไทยไม่มีหัวข้อชื่อ ACKNOWLEDGEMENTS
+    หรือ BIOGRAPHY อยู่จริง บรรทัด "ควรเป็น" ที่ยกชื่ออังกฤษมาจึงบอกไม่ได้ว่าต้องทำอะไร
+    """
+    if program_language == "thai":
+        return ("กิตติกรรมประกาศ, บทคัดย่อ, สารบัญตาราง/สารบัญรูปภาพ, ชื่อบท, "
+                "รายการอ้างอิง และ ประวัติผู้วิจัย ต้องเป็นตัวหนา")
+    return ("ACKNOWLEDGEMENTS, ABSTRACT, LIST OF ..., ชื่อบท, REFERENCE(S) และ BIOGRAPHY "
+            "ต้องเป็นตัวหนา")
+
+
 def reference_term_choice(program_language, printed=""):
     """สองคำที่เล่มนี้ต้องเลือกใช้คำใดคำหนึ่ง — เล่มไทย "รายการอ้างอิง"/"บรรณานุกรม"
     เล่มอังกฤษ REFERENCES/BIBLIOGRAPHY (เกณฑ์เดียวกับ expected_biography_heading)
@@ -5347,9 +5366,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     same_student, _checked, _found = (
         ethesis_matches_book(approved, pages)
         if approved and not skip_identity_check else (True, [], []))
+    # ภาษาของเล่มตามข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
+    # ถ้อยคำในรายงานต้องเป็นภาษาของเล่ม — เจ้าหน้าที่สั่ง (ก.ย. 2569) "เล่มไทยควรใช้คำไทย"
+    book_wording_language = (approved or {}).get("program_language", "") if same_student else ""
     # ชนิดเลขหน้าส่วนนำตามภาษาเล่ม (ก ข ค / i ii iii) — ใช้ทั้งกฎเลขหน้าและถ้อยคำปุ่มเจ้าหน้าที่
-    front_label_style = _expected_front_label_style(
-        (approved or {}).get("program_language", "") if same_student else "")
+    front_label_style = _expected_front_label_style(book_wording_language)
     # ---------- ภาษาของเล่มต้องตรงกับที่ได้รับอนุมัติ ----------
     # ต้องมาก่อน rep.add ตัวแรก เพราะเมื่อเล่มทำผิดภาษา กฎอื่นแทบทุกข้อจะฟ้องพร้อมกัน
     # หมด (ข้อความบังคับบนปก ประโยค template หน้าลงนาม ชนิดเลขหน้า ชื่อบททุกบท)
@@ -5707,7 +5728,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if all(bold_is_undetectable(_pl.pages[i]) for i in toc_scan_pages):
                     rep.add(UNCERTAIN_ZONE, "front_matter",
                             f"สารบัญ ({page_ref(toc_scan_pages[0])})",
-                            "ไฟล์นี้ไม่ได้เก็บชื่อฟอนต์ไว้ ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
+                            "ไฟล์นี้ไม่มีฟอนต์ที่บอกว่าเป็นตัวหนา ระบบจึงบอกไม่ได้ว่าหัวข้อเป็นตัวหนาหรือไม่",
                             "หัวข้อหลักในสารบัญต้องเป็นตัวหนา",
                             "ตรวจด้วยตา", "FORMAT.BOLD")
                     toc_scan_pages = []
@@ -5722,7 +5743,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         rep.add(
                             BOLD_FAILURE_ZONE, "front_matter", f"สารบัญ ({page_ref(toc_idx)})",
                             _nonbold_heading_text(nonbold),
-                            "ACKNOWLEDGEMENTS, ABSTRACT, LIST OF ..., ชื่อบท, REFERENCE(S) และ BIOGRAPHY ต้องเป็นตัวหนา",
+                            toc_major_headings_sentence(book_wording_language),
                             "ตั้งหัวข้อระดับหลักในสารบัญเป็นตัวหนา",
                             "FORMAT.BOLD",
                         )
@@ -5884,18 +5905,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 appendix_pages.append(i)
                 appendix_page = i if appendix_page is None else appendix_page
                 last_major = ("APP", i)
-    # ภาษาเล่มจากข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
-    ref_book_language = (approved or {}).get("program_language", "") if same_student else ""
     if ref_head:
         if ref_head[2] > 1 or '/' in ref_head[0]:
-            one, other = reference_term_choice(ref_book_language, ref_head[0])
+            one, other = reference_term_choice(book_wording_language, ref_head[0])
             rep.add("RED", "end_matter", page_ref(ref_head[1]),
                     f'หัวข้อในหน้านี้เลือกหลายคำ: "{ref_head[0]}"',
                     f"เลือกคำเดียว: {one} หรือ {other}", "ลบคำที่ไม่ใช้")
     else:
+        one, other = reference_term_choice(book_wording_language)
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
-                "ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ", "")
-    bio_want = expected_biography_heading(ref_book_language, bio_heading)
+                f"ต้องมีหัวข้อ {one} หรือ {other} เสมอ", "")
+    bio_want = expected_biography_heading(book_wording_language, bio_heading)
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
@@ -6783,7 +6803,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # (1) สารบัญต้องเลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY (ไม่ใช่ทั้งคู่)
                     toc_terms = reference_terms(entry["raw"])
                     if len(toc_terms) > 1 or '/' in entry["raw"]:
-                        one, other = reference_term_choice(ref_book_language, entry["raw"])
+                        one, other = reference_term_choice(book_wording_language, entry["raw"])
                         rep.add(
                             "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",
                             f'หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: "{_strip_toc_page_number(entry["raw"])}"',

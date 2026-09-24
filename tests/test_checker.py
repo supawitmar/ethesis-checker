@@ -3390,8 +3390,9 @@ class TheSignaturePageNumberFollowsTheBookLanguage(unittest.TestCase):
 
     def test_the_run_passes_the_book_language(self):
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn("front_label_style = _expected_front_label_style(\n"
-                      '        (approved or {}).get("program_language", "") if same_student else "")',
+        self.assertIn('book_wording_language = (approved or {}).get("program_language", "") '
+                      'if same_student else ""', source)
+        self.assertIn("front_label_style = _expected_front_label_style(book_wording_language)",
                       source)
         self.assertIn("rep, sig_pages, pages, page_ref, label_style=front_label_style)", source)
 
@@ -7371,15 +7372,35 @@ class TheWordsOfferedFollowTheBookLanguage(unittest.TestCase):
     def test_both_places_that_name_the_words_ask_the_book_language(self):
         """ควบคุมเชิงลบ — ถ้ามีที่ไหนยังฝังคำอังกฤษไว้ เล่มไทยจะได้ประโยคเดิมกลับมา"""
         source = Path(checker_module.__file__).read_text(encoding="utf-8")
-        self.assertEqual(source.count("reference_term_choice(ref_book_language"), 2)
+        self.assertEqual(source.count("reference_term_choice(book_wording_language"), 3)
         self.assertIn('f"เลือกคำเดียว: {one} หรือ {other}"', source)
         self.assertIn('f"ต้องเลือกใช้คำเดียว: {one} หรือ {other} อย่างใดอย่างหนึ่ง"', source)
+
+    def test_a_thai_book_is_told_the_thai_heading_names(self):
+        """"เล่มไทยควรใช้คำไทย" (เจ้าหน้าที่ ก.ย. 2569) — เล่มไทยไม่มีหัวข้อชื่อ
+        ACKNOWLEDGEMENTS หรือ BIOGRAPHY อยู่จริง บรรทัด "ควรเป็น" จึงต้องเป็นชื่อไทย
+        """
+        thai = checker_module.toc_major_headings_sentence("thai")
+        self.assertEqual(thai, "กิตติกรรมประกาศ, บทคัดย่อ, สารบัญตาราง/สารบัญรูปภาพ, "
+                               "ชื่อบท, รายการอ้างอิง และ ประวัติผู้วิจัย ต้องเป็นตัวหนา")
+        for language in ("international", "thai_english", ""):
+            self.assertIn("ACKNOWLEDGEMENTS",
+                          checker_module.toc_major_headings_sentence(language), language)
+
+    def test_a_missing_reference_page_names_the_words_in_the_book_language(self):
+        source = Path(checker_module.__file__).read_text(encoding="utf-8")
+        self.assertIn('f"ต้องมีหัวข้อ {one} หรือ {other} เสมอ"', source)
+        self.assertNotIn('"ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ"', source)
 
     def test_the_new_lines_have_english_translations(self):
         report_html = (Path(checker_module.__file__).parent
                        / "templates" / "report.html").read_text(encoding="utf-8")
         for phrase in ("เลือกคำเดียว: รายการอ้างอิง หรือ บรรณานุกรม",
-                       "ต้องเลือกใช้คำเดียว: รายการอ้างอิง หรือ บรรณานุกรม อย่างใดอย่างหนึ่ง"):
+                       "ต้องเลือกใช้คำเดียว: รายการอ้างอิง หรือ บรรณานุกรม อย่างใดอย่างหนึ่ง",
+                       "ต้องมีหัวข้อ รายการอ้างอิง หรือ บรรณานุกรม เสมอ",
+                       "ต้องมีหัวข้อ REFERENCES หรือ BIBLIOGRAPHY เสมอ",
+                       "กิตติกรรมประกาศ, บทคัดย่อ, สารบัญตาราง",
+                       "ไฟล์นี้ไม่มีฟอนต์ที่บอกว่าเป็นตัวหนา"):
             self.assertIn(phrase, report_html, phrase)
 
     def test_text_copied_from_the_book_is_never_translated(self):
@@ -7480,37 +7501,84 @@ class MissingCommaBetweenNameAndDegree(unittest.TestCase):
                          ["CHAKRIT SUVANJUMRAT", "WATCHARAPONG CHOOKAEW"])
 
 
-class BoldCannotBeJudgedWhenFontNamesAreAnonymous(unittest.TestCase):
-    """ไฟล์ที่ไม่ได้เก็บชื่อฟอนต์ไว้ ห้ามสรุปว่า "ไม่เป็นตัวหนา"
+class TextCopiedFromTheBookIsNeverTranslated(unittest.TestCase):
+    """ค่าที่คัดมาจากเล่มอยู่ในเครื่องหมายคำพูด กดสลับรายงานเป็นอังกฤษแล้วต้องคงไว้ทั้งก้อน
 
-    โปรแกรมแปลง PDF บางตัวตั้งชื่อฟอนต์ย่อยเป็น "CIDFont+F1", "F2" ไล่ตามลำดับที่พบ
-    ในหน้านั้น ๆ ไม่ใช่ชื่อฟอนต์จริง — เล่มจริงเจอ CIDFont+F1 บนหน้าสารบัญเป็นตัวหนา
-    แต่ CIDFont+F1 บนหน้าเนื้อหาเป็นตัวธรรมดา คือชื่อเดียวกันคนละฟอนต์
-    เล่มที่หัวข้อสารบัญหนาครบทุกหัวข้อจึงเคยถูกฟ้องว่า "ไม่เป็นตัวหนา 13 หัวข้อ"
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) "กดสลับรายงานเป็นอังกฤษแล้วข้อความจากเล่มถูกแปลทับ แก้ไข"
+    trWhole() คงค่าที่จับได้ไว้ตามเดิมเฉพาะเมื่อกลุ่มจับครอบเครื่องหมายคำพูดมาด้วย
+    กฎที่เขียนว่า "(.+?)" จึงส่งข้อความจากเล่มไปแปลต่อด้วยกฎเศษคำ เล่มไทย 6736605 NSCN/M
+    ได้ multiple terms: "the reference list / บรรณานุกรม" และหัวข้อประวัติที่ต้องแก้เป็น
+    "ประวัติผู้วิจัย" กลายเป็น Must be changed to "Biography" ซึ่งเป็นคำสั่งที่ผิด
+    """
+
+    @property
+    def report_html(self):
+        return (Path(checker_module.__file__).parent
+                / "templates" / "report.html").read_text(encoding="utf-8")
+
+    def test_no_rule_captures_inside_the_quotes(self):
+        """ควบคุมเชิงลบของทั้งชุด — คืนกฎข้อไหนกลับเป็น "(.+?)" แล้วข้อนี้ต้องตก"""
+        self.assertNotIn('"(.+?)"', self.report_html)
+
+    def test_the_real_rules_keep_the_value(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th in ('หัวบทเขียนว่า "รายการอ้างอิง"',
+                   'พบ "ประวัติผู้วิจัย"',
+                   'หัวข้อ "สารบัญตาราง"',
+                   'ต้องแก้เป็น "ประวัติผู้วิจัย"',
+                   'หัวข้อในหน้านี้เลือกหลายคำ: "รายการอ้างอิง / บรรณานุกรม"'):
+            en = i18n.tr_en(th, pairs)
+            for quoted in re.findall(r'"[^"]*"', th):
+                self.assertIn(quoted, en, f"{th} -> {en}")
+
+    def test_the_gate_catches_a_value_that_was_translated(self):
+        """ด่าน --corpus ต้องจับได้เองในอนาคต ไม่ใช่รอให้เจ้าหน้าที่มาบอก"""
+        import tools.check_i18n as i18n
+        self.assertTrue(i18n.translation_problems('พบ "ประวัติผู้วิจัย"', 'found "Biography"'))
+        self.assertEqual(
+            i18n.translation_problems('พบ "ประวัติผู้วิจัย"', 'found "ประวัติผู้วิจัย"'), [])
+        # คำไทยที่หลุดอยู่นอกเครื่องหมายคำพูด ยังต้องจับได้เหมือนเดิม
+        self.assertTrue(i18n.translation_problems("ไม่พบกิตติกรรมประกาศ", "ไม่พบ acknowledgements"))
+
+
+class BoldCannotBeJudgedWithoutABoldFontInTheFile(unittest.TestCase):
+    """ไม่มีฟอนต์ไหนในหน้าที่ชื่อบอกว่าหนา = ห้ามสรุปว่า "ไม่เป็นตัวหนา"
+
+    เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่าข้อ "หัวข้อหลักในสารบัญไม่เป็นตัวหนา 11 หัวข้อ"
+    ของเล่ม 6736605 NSCN/M ต้องกดผ่าน "เพราะว่าในเล่มมันเป็นตัวหนา" — เล่มนั้นทำตัวหนา
+    ด้วยการวาดตัวอักษรเดิมซ้ำเป็นเส้นขอบ (faux bold, text render mode 2) ทั้งไฟล์จึงมีแต่
+    ฟอนต์ THSarabunNew ธรรมดาชื่อเดียว (หน้าสารบัญมีการวาดเส้นทับ 104 จุด) pdfplumber
+    ไม่ได้ส่ง text render mode ออกมา ระบบจึงดูไม่ออกว่าหนา
+
+    อีกกรณีที่ดูจากชื่อไม่ได้เหมือนกันคือชื่อฟอนต์ย่อยแบบ "CIDFont+F1", "F2" ที่ตั้งไล่
+    ตามลำดับที่พบในหน้านั้น ๆ (เล่มจริงเคยถูกฟ้องว่า "ไม่เป็นตัวหนา 13 หัวข้อ")
     """
 
     class _Page:
         def __init__(self, fonts):
             self.chars = [{"text": "A", "fontname": f} for f in fonts]
 
+    def test_a_file_without_any_bold_font_is_undetectable(self):
+        """เล่ม 6736605: ทั้งหน้ามี THSarabunNew ชื่อเดียว แต่หัวข้อหนาจริงในเล่ม"""
+        self.assertTrue(bold_is_undetectable(self._Page(["BCDEEE+THSarabunNew"])))
+        self.assertTrue(bold_is_undetectable(self._Page(["TimesNewRomanPSMT"])))
+
     def test_anonymous_subset_names_mean_undetectable(self):
         page = self._Page(["CIDFont+F1", "CIDFont+F2", "CIDFont+F3"])
         self.assertTrue(bold_is_undetectable(page))
 
-    def test_real_font_names_stay_detectable(self):
+    def test_a_file_with_a_bold_font_stays_detectable(self):
+        """ควบคุมเชิงลบ — เล่มที่มีฟอนต์ตัวหนาจริง (8 ใน 9 เล่มทดสอบ) ยังตรวจตามปกติ"""
         for fonts in (
             ["TimesNewRomanPSMT", "TimesNewRomanPS-BoldMT"],
             ["BCDIEE+THSarabunNew", "BCDEEE+THSarabunNew-Bold"],
-            ["TimesNewRomanPSMT"],          # ไม่มีตัวหนาเลย แต่ชื่อบอกวงศ์ฟอนต์ = ตัดสินได้
+            ["CIDFont+F1", "ABCDEF+ArialBold"],
         ):
             self.assertFalse(bold_is_undetectable(self._Page(fonts)), fonts)
 
     def test_page_without_text_is_not_treated_as_undetectable(self):
         self.assertFalse(bold_is_undetectable(self._Page([])))
-
-    def test_anonymous_name_with_a_bold_marker_is_still_detectable(self):
-        page = self._Page(["CIDFont+F1", "ABCDEF+ArialBold"])
-        self.assertFalse(bold_is_undetectable(page))
 
 
 class StudentNameAndIdMustShareOneLine(unittest.TestCase):
