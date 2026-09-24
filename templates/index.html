@@ -149,17 +149,17 @@
   /* ---- แถบล่าง: ความพร้อมก่อนตรวจ + ปุ่มตรวจเล่ม (ปักล่างจอทุกขนาด) ----
      sticky ภายในฟอร์ม: ลอยอยู่ล่างจอระหว่างกรอก พอเลื่อนถึงท้ายฟอร์มก็วางต่อท้ายการ์ดสุดท้าย */
   .actionbar { position:sticky; bottom:16px; z-index:30; margin-top:18px; }
-  .action-card { display:flex; align-items:center; gap:18px; padding:12px 12px 12px 20px;
+  .action-card { display:flex; align-items:center; gap:12px; padding:12px 12px 12px 16px;
        background:rgba(255,255,255,.94); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
        border:1px solid var(--line); border-radius:18px;
        box-shadow:0 16px 40px -18px rgba(16,24,40,.35), 0 2px 6px rgba(16,24,40,.05); }
   .side-title { flex:none; display:flex; flex-direction:column; font-weight:700; color:var(--navy);
        font-size:.86rem; line-height:1.25; }
   .side-title span { font-size:.78rem; font-weight:600; color:var(--ink-3); }
-  .progress { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:6px 8px; flex:1; min-width:0; }
-  .progress li { position:relative; padding:6px 12px 6px 30px; border-radius:99px; font-size:.82rem;
+  .progress { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0; }
+  .progress li { position:relative; padding:6px 10px 6px 25px; border-radius:99px; font-size:.78rem;
        color:var(--ink-2); background:#f1f4f8; border:1px solid var(--line); white-space:nowrap; }
-  .progress li::before { content:""; position:absolute; left:8px; top:50%; margin-top:-8px; width:16px; height:16px;
+  .progress li::before { content:""; position:absolute; left:7px; top:50%; margin-top:-7px; width:14px; height:14px;
        border-radius:50%; border:2px solid var(--line-2); background:#fff; box-sizing:border-box; }
   .progress li { cursor:pointer; }
   .progress li:hover { border-color:#b9c5d4; }
@@ -173,9 +173,9 @@
   input.missing, select.missing, textarea.missing { border-color:#d0605a; background-color:#fffafa; }
   .drop.missing { border-color:#d0605a; background:#fff5f4; }
   .progress li.done::before { border-color:var(--ok); background:var(--ok)
-       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/10px no-repeat; }
+       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/9px no-repeat; }
   .primary { flex:none; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); color:#fff;
-       border:none; border-radius:12px; padding:13px 28px; font-size:1rem; font-weight:700; cursor:pointer;
+       border:none; border-radius:12px; padding:13px 24px; font-size:.96rem; font-weight:700; cursor:pointer;
        box-shadow:0 12px 24px -12px rgba(22,54,90,.7); transition:filter .15s, transform .05s, box-shadow .15s; }
   .primary:hover { filter:brightness(1.08); }
   .primary:active { transform:translateY(1px); }
@@ -199,7 +199,7 @@
 
   /* ---- จอเล็ก: แถบล่างเหลือตัวนับ + ปุ่ม ---- */
   @media (max-width:860px) {
-    .progress li { font-size:0; padding:0; width:16px; height:16px; border:0; background:none; }
+    .progress li { font-size:0; padding:0; width:14px; height:14px; border:0; background:none; }
     .progress li::before { left:0; }
     .progress { flex:none; gap:6px; }
     .action-card { gap:12px; }
@@ -283,6 +283,22 @@
         </div>
       </div>
       <p class="import-status" id="import-status" aria-live="polite">ข้อมูลนี้ใช้เติมแบบฟอร์มในหน้านี้เท่านั้น กรุณาตรวจทานทุกช่องก่อนตรวจเล่ม</p>
+      {# เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ย้ายมารวมกับขั้นที่ 1 แต่ลำดับในแผงความพร้อมคงเดิม
+         ชิป "วันดำเนินการ" จึงชี้ที่ id ของบล็อกนี้ ไม่ใช่ที่ <section> ของการ์ด
+         สองช่องนี้ใช้ตอนบันทึกลงชีท (วันที่เข้าคิวชี้ว่าแถวไหน วันที่ตรวจเขียนลงชีท)
+         required ทำให้ทั้งชิปและการกดตรวจเล่มบังคับเองทั้งคู่ #}
+      <div class="degree-block" id="sec-dates">
+        <p class="block-title">🗓 วันดำเนินการ</p>
+        <p class="hint">ใช้ตอนบันทึกผลลงชีทบันทึกการตรวจ — วันที่เข้าคิวชี้ว่าเป็นแถวไหน
+          (นักศึกษาคนเดียวส่งได้หลายรอบ) ส่วนวันที่ตรวจเติมลงชีทให้ตามที่กรอก
+          ไม่กรอกสองช่องนี้ ระบบจะไม่ตรวจ</p>
+        <div class="grid-2" style="margin-top:12px;">
+          <div><label>วันที่เข้าคิว</label>
+            <input type="date" name="queue_date" id="queue-date" required></div>
+          <div><label>วันที่ตรวจ</label>
+            <input type="date" name="checked_date" id="checked-date" required></div>
+        </div>
+      </div>
     </section>
 
     <section class="panel" id="sec-type">
@@ -375,23 +391,6 @@
           <span style="color:var(--ink-3);">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
           เล่มภาษาอังกฤษระบบจะถอดชื่อเป็นอังกฤษให้เองตอนตรวจ</span></div>
         <div id="committee-summary" class="committee-summary"></div>
-      </div>
-    </section>
-
-    {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "อยากให้หน้าแบบฟอร์ม วันที่เข้าคิว กับวันที่ตรวจให้กด
-       ตั้งแต่หน้าแบบฟอร์มข้อมูล และเพิ่มให้ checklist เลยว่า วันดำเนินการ ไม่กรอกสองช่องนี้
-       ไม่ตรวจ" — สองช่องนี้ใช้ตอนบันทึกลงชีท (วันที่เข้าคิวชี้ว่าแถวไหน วันที่ตรวจเขียนลงชีท)
-       required จึงทำให้ทั้งชิปในแผงความพร้อมและการกดตรวจเล่มบังคับเองทั้งคู่ #}
-    <section class="panel" id="sec-dates">
-      <div class="panel-head"><span class="step" aria-hidden="true">5</span>
-        <div><h2>วันดำเนินการ</h2>
-          <p class="hint">ใช้ตอนบันทึกผลลงชีทบันทึกการตรวจ — วันที่เข้าคิวชี้ว่าเป็นแถวไหน
-            (นักศึกษาคนเดียวส่งได้หลายรอบ) ส่วนวันที่ตรวจเติมลงชีทให้ตามที่กรอก</p></div></div>
-      <div class="grid-2">
-        <div><label>วันที่เข้าคิว</label>
-          <input type="date" name="queue_date" id="queue-date" required></div>
-        <div><label>วันที่ตรวจ</label>
-          <input type="date" name="checked_date" id="checked-date" required></div>
       </div>
     </section>
 
@@ -720,12 +719,26 @@ document.getElementById('f').addEventListener('submit', async function(e){
 // invalid ทุกช่องที่ยังว่าง ซึ่งตัวดัก invalid ข้างล่างถือว่าเป็นการกดตรวจเล่ม แล้วเรียก
 // checkValidity() ซ้ำ วนไม่รู้จบ (วัดได้ราว 1,950 ครั้งต่อวินาทีตั้งแต่เปิดหน้า) ข้อความ
 // "ยังกรอกไม่ครบ" ขึ้นเองทั้งที่ยังไม่ได้กด และหน้าจอถูกดึงกลับไปที่ช่องแรกที่ขาดตลอดเวลา
+//
+// ขั้น "วันดำเนินการ" อยู่ซ้อนอยู่ในการ์ดขั้นที่ 1 (เจ้าหน้าที่สั่งให้รวมการ์ด แต่ลำดับชิปคงเดิม)
+// ช่องหนึ่งช่องจึงต้องเป็นของ "ขั้นในสุด" ที่ครอบมันเท่านั้น ไม่งั้นชิปไฟล์เล่มจะรอวันที่ไปด้วย
+// และตอนขาดข้อมูลจะขึ้นแดงสองชิปทั้งที่ช่องที่ขาดอยู่ในขั้นเดียว
+function stepSelector() {
+  return Array.from(document.querySelectorAll('#progress li'))
+    .map(function(li){ return '#' + li.dataset.sec; }).join(', ');
+}
+function stepFields(sec) {
+  if (!sec) return [];
+  const own = stepSelector();
+  return Array.from(sec.querySelectorAll('input[required], select[required], textarea[required]'))
+    .filter(function(f){ return f.closest(own) === sec; });
+}
 function updateProgress() {
   const items = document.querySelectorAll('#progress li');
   let done = 0;
   items.forEach(function(li){
     const sec = document.getElementById(li.dataset.sec);
-    const fields = sec ? Array.from(sec.querySelectorAll('input[required], select[required], textarea[required]')) : [];
+    const fields = stepFields(sec);
     const ok = fields.length > 0 && fields.every(function(f){ return f.validity.valid; });
     li.classList.toggle('done', ok);
     if (ok) done += 1;
@@ -752,9 +765,10 @@ function markMissing(fields, jump) {
   const msg = document.getElementById('progress-msg');
   if (!fields.length) { msg.hidden = true; msg.textContent = ''; return; }
   const names = [];
+  const own = stepSelector();
   document.querySelectorAll('#progress li').forEach(function(li){
     const sec = document.getElementById(li.dataset.sec);
-    if (sec && fields.some(function(f){ return sec.contains(f); })) {
+    if (sec && fields.some(function(f){ return f.closest(own) === sec; })) {
       names.push(li.textContent.trim());
       li.classList.add('missing');
     }

@@ -229,12 +229,8 @@
   .vf-badge.skipped { background:#eef1f5; color:#586576; }
   .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
-  /* ---- ปุ่มบันทึกผลการตรวจ (อยู่ข้างปุ่มคัดลอก) ---- */
-  /* คนละสีกับปุ่มคัดลอก เพราะผลของสองปุ่มต่างกันมาก (อันหนึ่งคัดลอก อันหนึ่งเขียนลงชีท) */
-  .sheet-save { margin-left:0; background:linear-gradient(135deg,#1f6f4a 0%,#2e8f60 100%);
-       box-shadow:0 6px 14px -8px rgba(31,111,74,.8); }
   .sheet-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0 0; }
-  @media print { .sheet-save, .sheet-row { display:none; } }
+  @media print { .sheet-row { display:none; } }
 
   /* ---- ข้อความผลการบันทึกลงชีท ---- */
   .sheet-msg { margin:10px 0 0; padding:8px 12px; border-radius:var(--radius);
@@ -255,6 +251,13 @@
        box-shadow:0 6px 14px -8px rgba(22,54,90,.7); transition:filter .15s; }
   .copy-btn:hover { filter:brightness(1.08); }
   .copy-btn:focus-visible { outline:none; box-shadow:var(--ring); }
+  /* ---- ปุ่มบันทึกผลการตรวจ (อยู่ติดปุ่มคัดลอก) ---- */
+  /* ต้องอยู่หลังกฎของ .copy-btn และเจาะจงกว่า ไม่งั้นได้ margin-left:auto ติดมาด้วย
+     แล้วช่องว่างที่เหลือจะถูกแบ่งครึ่งใส่หน้าปุ่มทั้งสอง = ปุ่มแยกกันคนละมุม
+     สีคนละสีกับปุ่มคัดลอก เพราะผลของสองปุ่มต่างกันมาก (อันหนึ่งคัดลอก อันหนึ่งเขียนลงชีท) */
+  .copy-btn.sheet-save { margin-left:0; background:linear-gradient(135deg,#1f6f4a 0%,#2e8f60 100%);
+       box-shadow:0 6px 14px -8px rgba(31,111,74,.8); }
+  @media print { .sheet-save { display:none; } }
   .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee; padding:16px 20px;
        font:0.86rem/1.65 var(--font); resize:vertical; min-height:160px; background:#fbfdff; color:#22303f; white-space:pre; }
   .copy-text:focus { outline:none; background:#fff; }

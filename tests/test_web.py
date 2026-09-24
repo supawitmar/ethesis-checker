@@ -824,12 +824,33 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
 
         required ทำให้ทั้งชิป "วันดำเนินการ" และการกดตรวจเล่มบังคับเองทั้งคู่
         """
-        section = self.html.split('id="sec-dates"', 1)[1].split("</section>", 1)[0]
-        self.assertIn('name="queue_date"', section)
-        self.assertIn('name="checked_date"', section)
-        self.assertEqual(section.count('type="date"'), 2)
-        self.assertEqual(section.count(" required"), 2)
+        block = self.html.split('id="sec-dates"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('name="queue_date"', block)
+        self.assertIn('name="checked_date"', block)
+        self.assertEqual(block.count('type="date"'), 2)
+        self.assertEqual(block.count(" required"), 2)
         self.assertIn('<li data-sec="sec-dates">วันดำเนินการ</li>', self.html)
+
+    def test_the_working_dates_live_inside_the_first_card(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ย้ายเข้ามารวมกับหัวข้อที่ 1 แต่ลำดับใน checklist ยังคงเหมือนเดิม"
+
+        ชิปยังเป็นขั้นสุดท้าย แต่ช่องอยู่ในการ์ดใบแรก จึงต้องไม่มี <section> ของตัวเองแล้ว
+        """
+        card = self.html.split('id="sec-files"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('id="sec-dates"', card)
+        self.assertNotIn('class="panel" id="sec-dates"', self.html)
+        steps = self.html.split('<ol class="progress"', 1)[1].split("</ol>", 1)[0]
+        self.assertLess(steps.index('"sec-student"'), steps.index('"sec-dates"'))
+
+    def test_a_step_owns_only_its_own_fields(self):
+        """ขั้นที่ซ้อนอยู่ในการ์ดเดียวกันต้องไม่นับช่องของกันและกัน
+
+        ถ้านับรวม ชิป "ไฟล์เล่ม" จะเขียวก็ต่อเมื่อกรอกวันที่ด้วย และตอนขาดข้อมูล
+        จะขึ้นแดงสองชิปทั้งที่ช่องที่ขาดอยู่ในขั้นเดียว
+        """
+        code = self.html.split("function stepFields(sec)", 1)[1].split("}", 1)[0]
+        self.assertIn("f.closest(own) === sec", code)
+        self.assertNotIn("sec.contains(f)", self.html)
 
     def test_the_date_of_checking_starts_at_today(self):
         """ต้องคิดจากเวลาในเครื่อง — toISOString เป็น UTC ซึ่งตอนเช้าบ้านเรายังเป็นเมื่อวาน"""
@@ -1489,6 +1510,19 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertIn('id="sheet-btn"', head)
         self.assertIn("บันทึกผลการตรวจ", head)
         self.assertIn("⧉ คัดลอก", head)
+
+    def test_the_two_buttons_stay_side_by_side(self):
+        """เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่าปุ่ม "ห่างกันเกิน" — แยกกันคนละมุมของแถว
+
+        ปุ่มบันทึกใช้คลาส copy-btn ร่วมกับปุ่มคัดลอก จึงได้ margin-left:auto ติดมาด้วย
+        ช่องว่างที่เหลือในแถวถูกแบ่งครึ่งใส่หน้าปุ่มทั้งสอง กฎที่ล้างระยะนี้ต้องอยู่ "หลัง"
+        กฎของ copy-btn และเจาะจงกว่า ไม่งั้นไม่มีผล
+        """
+        css = (Path(__file__).resolve().parents[1] / "templates" / "report.html"
+               ).read_text(encoding="utf-8")
+        pushed = css.index(".copy-btn { margin-left:auto")
+        cleared = css.index(".copy-btn.sheet-save { margin-left:0")
+        self.assertLess(pushed, cleared)
 
     def test_a_report_without_a_summary_box_can_still_be_saved(self):
         """รายงานที่ไม่มีกล่องสรุป ปุ่มต้องมีที่อยู่ของตัวเอง ไม่ใช่หายไปทั้งปุ่ม
