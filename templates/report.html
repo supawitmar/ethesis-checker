@@ -1169,6 +1169,7 @@ var TR = [
   // เครื่องหมายคำพูดปิดข้างหน้า จะได้ไม่ไปแทน "และ" ที่เป็นคำเชื่อมในประโยคอื่น
   [/" และ /g, '" and '],
   // ข้อความสรุปที่คัดลอกส่งนักศึกษา: บรรทัดที่สองของแต่ละข้อ
+  [/^ต้องแก้เป็น ("[^"]+")$/g, 'Must be changed to $1'],
   [/ต้องแก้เป็น /g, 'Must be changed to '],
   // "ส่วนนำ" ยืนเดี่ยวเป็นหัวข้อกลุ่มและเป็นตำแหน่ง ต้องขึ้นต้นด้วยตัวใหญ่
   // (กฎเศษคำด้านล่างแปลเป็น 'the front matter' ไว้ใช้กลางประโยค)
@@ -1345,11 +1346,13 @@ var TR = [
   [/คุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการแต่ละคน/g, 'Qualification (Degree/Subject) under each committee name'],
   [/เทียบกับ บฑ\.1\/บฑ\.2 — ระบบตรวจเฉพาะชื่อ-สกุลและตำแหน่งการวาง/g, 'Compare against Forms GR.1/GR.2 — the system checks only names and placement'],
   [/เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY/g, 'Use one term only: REFERENCES or BIBLIOGRAPHY'],
+  [/เลือกคำเดียว: รายการอ้างอิง หรือ บรรณานุกรม/g, 'Use one term only: "รายการอ้างอิง" or "บรรณานุกรม"'],
   [/ลบคำที่ไม่ใช้ออกจากสารบัญ ให้เหลือคำเดียว/g, 'Remove the unused term from the TOC, leaving one'],
   [/ลบคำที่ไม่ใช้/g, 'Remove the unused term'],
-  [/หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: "(.+?)"/g, 'The reference heading in the TOC uses multiple terms: "$1"'],
-  [/หัวข้อในหน้านี้เลือกหลายคำ: "(.+?)"/g, 'The heading on this page uses multiple terms: "$1"'],
+  [/หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: ("[^"]+")/g, 'The reference heading in the TOC uses multiple terms: $1'],
+  [/หัวข้อในหน้านี้เลือกหลายคำ: ("[^"]+")/g, 'The heading on this page uses multiple terms: $1'],
   [/ต้องเลือกใช้คำเดียว: REFERENCES หรือ BIBLIOGRAPHY อย่างใดอย่างหนึ่ง/g, 'Choose one term only: REFERENCES or BIBLIOGRAPHY'],
+  [/ต้องเลือกใช้คำเดียว: รายการอ้างอิง หรือ บรรณานุกรม อย่างใดอย่างหนึ่ง/g, 'Choose one term only: "รายการอ้างอิง" or "บรรณานุกรม"'],
   [/สารบัญใช้คำ "(.+?)" แต่หน้าอ้างอิงจริงใช้ "(.+?)"/g, 'The TOC uses "$1" but the actual reference page uses "$2"'],
   [/คำในสารบัญต้องตรงกับหัวข้อในหน้าจริง คือ "(.+?)"/g, 'The TOC term must match the actual page heading: "$1"'],
   [/แก้คำในสารบัญให้เป็น "(.+?)"/g, 'Change the TOC term to "$1"'],

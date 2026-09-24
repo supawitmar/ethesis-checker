@@ -7302,6 +7302,100 @@ class ThaiDiffPointsAtWholeSyllables(unittest.TestCase):
         self.assertEqual(_graphemes("ABC"), ["A", "B", "C"])
 
 
+class SpacingAloneIsNeverPointedAt(unittest.TestCase):
+    """จุดที่ต่างกันแค่ช่องว่าง ไม่ต้องพูดถึง — เจ้าหน้าที่ลบทิ้งเองก่อนส่งให้นักศึกษา (ก.ย. 2569)
+
+    เล่มจริง 6736605 NSCN/M ชื่อเรื่องไทยถูกตัดเป็นสามบรรทัดบนหน้าปก การดึงข้อความจาก PDF
+    ต่อบรรทัดด้วยช่องว่าง จุดตัดบรรทัดทุกจุดจึงกลายเป็นจุดต่าง ระบบรายงานว่า 'มี " " เกินมา
+    และ มี " " เกินมา และ มี " " เกินมา และ ขาด "เขต"' ซึ่งอ่านไม่ออกว่าในคำพูดคืออะไร
+    เจ้าหน้าที่ลบส่วนช่องว่างทิ้งทั้งหมด เหลือ 'ขาด "เขต"' แล้วจึงส่งให้นักศึกษา
+    """
+
+    BOOK = ("ประสิทธิผลของโปรแกรมพัฒนาความรอบรู้ในการดูแลแบบประคับประคองที่บ้าน "
+            "ร่วมกับแอปพลิเคชันไลน์ ต่อผลลัพธ์การดูแลผู้ป่วยของญาติผู้ดูแล ในกรุงเทพมหานคร")
+    APPROVED = ("ประสิทธิผลของโปรแกรมพัฒนาความรอบรู้ในการดูแลแบบประคับประคองที่บ้าน"
+                "ร่วมกับแอปพลิเคชันไลน์ต่อผลลัพธ์การดูแลผู้ป่วยของญาติผู้ดูแลในเขตกรุงเทพมหานคร")
+
+    def test_only_the_real_difference_is_named(self):
+        self.assertEqual(describe_diff(self.BOOK, self.APPROVED), 'ขาด "เขต"')
+
+    def test_the_title_is_still_a_mismatch(self):
+        """ควบคุมเชิงบวก — เงียบเรื่องช่องว่าง ไม่ได้แปลว่าปล่อยชื่อเรื่องที่ขาดคำให้ผ่าน"""
+        self.assertNotEqual(compare_values(self.BOOK, self.APPROVED, "title")["status"],
+                            "exact")
+
+    def test_spacing_alone_was_never_a_difference_to_begin_with(self):
+        """ต่างแค่ช่องว่าง = ตรงกันอยู่แล้ว (norm ตัดช่องว่างทิ้ง) การเงียบจึงไม่ปิดจุดผิดข้อใด"""
+        spaced = self.APPROVED.replace("ที่บ้าน", "ที่บ้าน ")
+        self.assertEqual(compare_values(spaced, self.APPROVED, "title")["status"], "exact")
+        self.assertEqual(describe_diff(spaced, self.APPROVED), "")
+
+    def test_a_missing_word_next_to_a_space_is_still_named(self):
+        """ควบคุมเชิงลบ — ข้ามเฉพาะจุดที่เป็นช่องว่างล้วน ไม่ใช่ทุกจุดที่มีช่องว่างอยู่ใกล้ ๆ"""
+        self.assertEqual(describe_diff("นักกีฬา คนพิการ", "นักกีฬาคนพิการทางสายตา"),
+                         'ขาด "ทางสายตา"')
+        self.assertEqual(describe_diff("สนามกรีฑา สำหรับนักกีฬา", "สนามกีฬากรีฑาสำหรับนักกีฬา"),
+                         'ขาด "กีฬา"')
+        self.assertEqual(describe_diff("RESEARCH  METHODLOGY", "RESEARCH METHODOLOGY"),
+                         'ต่างที่ "METHODLOGY" ต้องเป็น "METHODOLOGY"')
+        # จุดต่างที่ "มีช่องว่างอยู่ข้างใน" ก็ยังต้องรายงาน (ขาดไปหลายคำติดกัน)
+        self.assertEqual(
+            describe_diff("A THESIS SUBMITTED IN PARTIAL FULFILLMENT",
+                          "A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS"),
+            'ขาด "OF THE REQUIREMENTS"')
+
+
+class TheWordsOfferedFollowTheBookLanguage(unittest.TestCase):
+    """คำที่สั่งให้ "เลือกคำเดียว" ต้องเป็นคำที่เล่มนั้นใช้ได้จริง (เจ้าหน้าที่ ก.ย. 2569)
+
+    เล่มจริง 6736605 NSCN/M เป็นเล่มไทย พิมพ์หัวข้อว่า "รายการอ้างอิง / บรรณานุกรม"
+    ระบบบอกให้ "เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY" เจ้าหน้าที่แก้เป็น
+    "รายการอ้างอิง หรือ บรรณานุกรม" ก่อนส่งให้นักศึกษา
+    """
+
+    def test_a_thai_book_is_offered_thai_words(self):
+        self.assertEqual(checker_module.reference_term_choice("thai"),
+                         ("รายการอ้างอิง", "บรรณานุกรม"))
+
+    def test_an_english_book_is_offered_english_words(self):
+        for language in ("international", "thai_english"):
+            self.assertEqual(checker_module.reference_term_choice(language),
+                             ("REFERENCES", "BIBLIOGRAPHY"), language)
+
+    def test_without_approved_data_the_printed_heading_decides(self):
+        self.assertEqual(checker_module.reference_term_choice("", "รายการอ้างอิง / บรรณานุกรม"),
+                         ("รายการอ้างอิง", "บรรณานุกรม"))
+        self.assertEqual(checker_module.reference_term_choice("", "REFERENCES/BIBLIOGRAPHY"),
+                         ("REFERENCES", "BIBLIOGRAPHY"))
+
+    def test_both_places_that_name_the_words_ask_the_book_language(self):
+        """ควบคุมเชิงลบ — ถ้ามีที่ไหนยังฝังคำอังกฤษไว้ เล่มไทยจะได้ประโยคเดิมกลับมา"""
+        source = Path(checker_module.__file__).read_text(encoding="utf-8")
+        self.assertEqual(source.count("reference_term_choice(ref_book_language"), 2)
+        self.assertIn('f"เลือกคำเดียว: {one} หรือ {other}"', source)
+        self.assertIn('f"ต้องเลือกใช้คำเดียว: {one} หรือ {other} อย่างใดอย่างหนึ่ง"', source)
+
+    def test_the_new_lines_have_english_translations(self):
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in ("เลือกคำเดียว: รายการอ้างอิง หรือ บรรณานุกรม",
+                       "ต้องเลือกใช้คำเดียว: รายการอ้างอิง หรือ บรรณานุกรม อย่างใดอย่างหนึ่ง"):
+            self.assertIn(phrase, report_html, phrase)
+
+    def test_text_copied_from_the_book_is_never_translated(self):
+        """คำแปลต้องคงข้อความในเครื่องหมายคำพูดไว้ทั้งก้อน (trWhole คืนค่าในคำพูดตามเดิม)
+
+        เล่มไทยเล่มนี้เคยได้คำแปลว่า multiple terms: "the reference list / บรรณานุกรม"
+        เพราะกลุ่มจับไม่ได้ครอบเครื่องหมายคำพูด ค่าที่จับได้จึงถูกส่งไปแปลต่อ
+        """
+        report_html = (Path(checker_module.__file__).parent
+                       / "templates" / "report.html").read_text(encoding="utf-8")
+        for phrase in ('[/หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: ("[^"]+")/g',
+                       '[/หัวข้อในหน้านี้เลือกหลายคำ: ("[^"]+")/g',
+                       '[/^ต้องแก้เป็น ("[^"]+")$/g'):
+            self.assertIn(phrase, report_html, phrase)
+
+
 class MissingCommaBetweenNameAndDegree(unittest.TestCase):
     """ลืมจุลภาคระหว่างชื่อกับคุณวุฒิของตัวเอง ต้องฟ้องว่าขาดจุลภาค ไม่ใช่ว่าชื่อพิมพ์เล็ก
 

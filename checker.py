@@ -4091,6 +4091,16 @@ def describe_diff(found, expected):
             if tag == 'equal':
                 continue
             got, want = join(a[i1:i2]), join(b[j1:j2])
+            # ต่างกันแค่ช่องว่าง = ไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
+            # ชื่อเรื่องไทยในเล่มถูกตัดขึ้นบรรทัดใหม่ 2-3 บรรทัด การดึงข้อความจาก PDF ต่อ
+            # บรรทัดด้วยช่องว่าง จุดตัดบรรทัดทุกจุดจึงกลายเป็น 'มี " " เกินมา' ที่มองไม่เห็น
+            # ว่าในเครื่องหมายคำพูดคืออะไร เล่มจริง 6736605 NSCN/M ได้ประโยคว่า 'มี " "
+            # เกินมา และ มี " " เกินมา และ มี " " เกินมา และ ขาด "เขต"' ซึ่งเจ้าหน้าที่ลบ
+            # ส่วนช่องว่างทิ้งทั้งหมดก่อนส่งให้นักศึกษา เหลือไว้แค่ 'ขาด "เขต"'
+            # ช่องว่างล้วนไม่เคยเป็นเหตุให้เกิดจุดผิดอยู่แล้ว เพราะ norm() ตัดช่องว่างทิ้ง
+            # ก่อนเทียบ (ต่างแค่ช่องว่าง = exact) จุดผิดที่เห็นจึงมาจากตัวอักษรที่ต่างกันจริง
+            if not got.strip() and not want.strip():
+                continue
             if not want:
                 parts.append(f'มี "{got}" เกินมา')
             elif not got:
@@ -4865,6 +4875,25 @@ _REF_TERM_GROUPS = (
     ("รายการอ้างอิง", (norm("รายการอ้างอิง"),)),
     ("บรรณานุกรม", (norm("บรรณานุกรม"),)),
 )
+
+
+def reference_term_choice(program_language, printed=""):
+    """สองคำที่เล่มนี้ต้องเลือกใช้คำใดคำหนึ่ง — เล่มไทย "รายการอ้างอิง"/"บรรณานุกรม"
+    เล่มอังกฤษ REFERENCES/BIBLIOGRAPHY (เกณฑ์เดียวกับ expected_biography_heading)
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) — เล่มจริง 6736605 NSCN/M เป็นเล่มไทย พิมพ์หัวข้อว่า
+    "รายการอ้างอิง / บรรณานุกรม" ระบบบอกให้ "เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY"
+    เจ้าหน้าที่แก้เป็น "รายการอ้างอิง หรือ บรรณานุกรม" ก่อนส่งให้นักศึกษา เพราะเล่มไทย
+    ใช้หัวข้อภาษาอังกฤษไม่ได้ คำที่สั่งให้เลือกต้องเป็นคำที่เล่มนั้นใช้ได้จริง
+    ไม่รู้ภาษาเล่ม (ไม่มีข้อมูลอนุมัติ หรือไฟล์ eThesis เป็นของคนอื่น) ยึดอักษรของหัวข้อที่พิมพ์
+    """
+    if program_language == "thai":
+        return "รายการอ้างอิง", "บรรณานุกรม"
+    if program_language in ("international", "thai_english"):
+        return "REFERENCES", "BIBLIOGRAPHY"
+    if re.search(r"[ก-๙]", printed or ""):
+        return "รายการอ้างอิง", "บรรณานุกรม"
+    return "REFERENCES", "BIBLIOGRAPHY"
 
 
 def reference_terms(heading):
@@ -5855,17 +5884,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 appendix_pages.append(i)
                 appendix_page = i if appendix_page is None else appendix_page
                 last_major = ("APP", i)
+    # ภาษาเล่มจากข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
+    ref_book_language = (approved or {}).get("program_language", "") if same_student else ""
     if ref_head:
         if ref_head[2] > 1 or '/' in ref_head[0]:
+            one, other = reference_term_choice(ref_book_language, ref_head[0])
             rep.add("RED", "end_matter", page_ref(ref_head[1]),
                     f'หัวข้อในหน้านี้เลือกหลายคำ: "{ref_head[0]}"',
-                    "เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY", "ลบคำที่ไม่ใช้")
+                    f"เลือกคำเดียว: {one} หรือ {other}", "ลบคำที่ไม่ใช้")
     else:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
                 "ต้องมี REFERENCES/BIBLIOGRAPHY เสมอ", "")
-    # ภาษาเล่มจากข้อมูลอนุมัติ ใช้ได้เฉพาะเมื่อไฟล์ eThesis เป็นของคนเดียวกับเล่ม
-    bio_want = expected_biography_heading(
-        (approved or {}).get("program_language", "") if same_student else "", bio_heading)
+    bio_want = expected_biography_heading(ref_book_language, bio_heading)
     if bio_page is None:
         rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
@@ -6753,10 +6783,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # (1) สารบัญต้องเลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY (ไม่ใช่ทั้งคู่)
                     toc_terms = reference_terms(entry["raw"])
                     if len(toc_terms) > 1 or '/' in entry["raw"]:
+                        one, other = reference_term_choice(ref_book_language, entry["raw"])
                         rep.add(
                             "RED", "front_matter", f"สารบัญ ({page_ref(entry['source_page_idx'])})",
                             f'หัวข้ออ้างอิงในสารบัญเลือกหลายคำ: "{_strip_toc_page_number(entry["raw"])}"',
-                            "ต้องเลือกใช้คำเดียว: REFERENCES หรือ BIBLIOGRAPHY อย่างใดอย่างหนึ่ง",
+                            f"ต้องเลือกใช้คำเดียว: {one} หรือ {other} อย่างใดอย่างหนึ่ง",
                             "ลบคำที่ไม่ใช้ออกจากสารบัญ ให้เหลือคำเดียว", "FRONT.TOC_CONTENT",
                         )
                     # (2) คำที่เลือกในสารบัญ ต้องตรงกับหัวข้อในหน้าอ้างอิงจริง
