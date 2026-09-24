@@ -229,13 +229,12 @@
   .vf-badge.skipped { background:#eef1f5; color:#586576; }
   .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
-  /* ---- กล่องบันทึกลงชีท (ใต้แถวปุ่มท้ายรายงาน) ---- */
-  .sheet-box { margin-top:12px; }
-  .sheet-fields { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; }
-  .sheet-fields label { font-size:.9rem; color:var(--ink-2); }
-  .sheet-fields input[type="date"] { padding:7px 10px; border:1px solid #cdd8e6;
-      border-radius:var(--radius); font:inherit; font-size:.9rem; background:#fff; }
-  @media print { .sheet-box { display:none; } }
+  /* ---- ปุ่มบันทึกผลการตรวจ (อยู่ข้างปุ่มคัดลอก) ---- */
+  /* คนละสีกับปุ่มคัดลอก เพราะผลของสองปุ่มต่างกันมาก (อันหนึ่งคัดลอก อันหนึ่งเขียนลงชีท) */
+  .sheet-save { margin-left:0; background:linear-gradient(135deg,#1f6f4a 0%,#2e8f60 100%);
+       box-shadow:0 6px 14px -8px rgba(31,111,74,.8); }
+  .sheet-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0 0; }
+  @media print { .sheet-save, .sheet-row { display:none; } }
 
   /* ---- ข้อความผลการบันทึกลงชีท ---- */
   .sheet-msg { margin:10px 0 0; padding:8px 12px; border-radius:var(--radius);
@@ -330,7 +329,9 @@
   }
 </style>
 </head>
-<body>
+{# รหัสงานอยู่บน <body> ไม่ใช่ในสคริปต์ — สคริปต์หลักต้องเป็นจาวาสคริปต์ล้วน
+   (เทสต์ tests/test_report_summary.js รันสคริปต์นี้ด้วย node ตรง ๆ) #}
+<body data-job="{{ job_id }}">
 <header class="topbar">
   <div class="topbar-in">
     <div class="brand-mark" aria-hidden="true">📋</div>
@@ -409,6 +410,12 @@
     <details class="copybox" open data-verdict="{{ report.verdict }}" data-job="{{ job_id }}">
       <summary class="copy-sum">📋 <span data-th="สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)" data-en="Summary of fixes (copyable)">สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)</span>
         <button type="button" class="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
+        {# เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ปุ่มบันทึกอยู่ข้างปุ่มคัดลอก — ยังไม่บังคับกด
+           อยู่ใน <summary> จึงต้องกัน event ไม่ให้ไปพับกล่องสรุป (ดู saveToSheet) #}
+        {% if sheet_enabled %}
+        <button type="button" class="copy-btn sheet-save" id="sheet-btn" onclick="saveToSheet(event, this)"
+                data-th="💾 บันทึกผลการตรวจ" data-en="💾 Save result">💾 บันทึกผลการตรวจ</button>
+        {% endif %}
       </summary>
       {# ใส่ข้อความไว้ตั้งแต่ฝั่งเซิร์ฟเวอร์ ไม่ปล่อยให้กล่องว่างรอ JS เติม —
          ถ้าสคริปต์พังเมื่อไหร่ (เคยเจอมาแล้วตอน TR มีช่องว่างในอาร์เรย์)
@@ -424,6 +431,14 @@
          จะได้ข้อความไม่ครบ จึงมีสำเนาสำหรับพิมพ์ที่เติมจากฝั่งเซิร์ฟเวอร์ไว้ตั้งแต่แรก #}
       <div class="copy-print" aria-hidden="true">{{ report.plain_summary }}</div>
     </details>
+    {% if sheet_enabled %}<p class="sheet-msg" id="sheet-msg" role="status" hidden></p>{% endif %}
+    {% elif sheet_enabled %}
+    {# เล่มที่ระบบไม่พบจุดผิดเลยไม่มีกล่องสรุป แต่ต้องบันทึกผล "เสร็จสิ้น" ลงชีทได้ #}
+    <div class="sheet-row">
+      <button type="button" class="btn ghost" id="sheet-btn" onclick="saveToSheet(event, this)"
+              data-th="💾 บันทึกผลการตรวจ" data-en="💾 Save result">💾 บันทึกผลการตรวจ</button>
+      <p class="sheet-msg" id="sheet-msg" role="status" hidden></p>
+    </div>
     {% endif %}
     {% if report.verification %}
     <section class="panel tone-blue">
@@ -620,26 +635,13 @@
       <a class="btn primary" href="/" data-th="← ตรวจเล่มใหม่" data-en="← Check another file">← ตรวจเล่มใหม่</a>
       <button class="btn ghost" onclick="window.print()" data-th="🖨 พิมพ์ / บันทึก PDF" data-en="🖨 Print / Save PDF">🖨 พิมพ์ / บันทึก PDF</button>
     </div>
-    {% if sheet_enabled %}
-    {# ปุ่มไม่บังคับกด — ไม่กดก็ใช้รายงานได้เหมือนเดิมทุกอย่าง
-       วันที่เข้าคิวใช้ชี้แถวในชีท (นักศึกษาคนเดียวส่งได้หลายรอบ) วันที่ตรวจเขียนลงชีทให้ #}
-    <div class="sheet-box">
-      <div class="sheet-fields">
-        <label for="sheet-queue" data-th="วันที่เข้าคิว" data-en="Queue date">วันที่เข้าคิว</label>
-        <input type="date" id="sheet-queue">
-        <label for="sheet-checked" data-th="วันที่ตรวจ" data-en="Checked on">วันที่ตรวจ</label>
-        <input type="date" id="sheet-checked">
-        <button class="btn ghost" id="sheet-btn" onclick="saveToSheet(this)"
-                data-th="💾 บันทึกลงชีท" data-en="💾 Save to sheet">💾 บันทึกลงชีท</button>
-      </div>
-      <p class="sheet-msg" id="sheet-msg" role="status" hidden></p>
-    </div>
-    {% endif %}
   </div>
 </main>
 
 <script>
 var LANG = 'th';
+// รหัสงานของหน้านี้ — ต้องไม่ผูกกับกล่องสรุป เพราะรายงานที่ไม่มีจุดผิดเลยไม่มีกล่องนั้น
+var JOB_ID = (document.body && document.body.dataset && document.body.dataset.job) || '';
 
 var CATMAP = {
   'สะกดผิด (typo)':'Typo / spelling', 'ขาดหาย/ไม่พบ':'Missing', 'ชื่อเรื่องไม่ตรง บฑ.1':'Title mismatch',
@@ -1907,20 +1909,11 @@ function undecidedIssues(){
       return !el.classList.contains('state-pass') && !el.classList.contains('state-fail');
     });
 }
-// วันที่วันนี้แบบ yyyy-mm-dd ตามเวลาในเครื่อง (toISOString เป็นเวลา UTC
-// ซึ่งก่อนเจ็ดโมงเช้าบ้านเราจะได้วันที่ของเมื่อวาน)
-function todayISO(){
-  var now = new Date();
-  var pad = function(n){ return (n < 10 ? '0' : '') + n; };
-  return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-}
-(function fillCheckedDate(){
-  var field = document.getElementById('sheet-checked');
-  if (field && !field.value) field.value = todayISO();
-})();
-function saveToSheet(btn){
-  var box = document.querySelector('.copybox');
-  var job = box && box.getAttribute('data-job');
+// วันดำเนินการกรอกไว้ตั้งแต่หน้าแบบฟอร์มแล้ว หน้านี้จึงไม่ถามซ้ำ
+// ปุ่มอยู่ใน <summary> ของกล่องสรุป ถ้าไม่กัน event ไว้ การกดจะไปพับกล่องด้วย
+function saveToSheet(ev, btn){
+  if (ev) ev.preventDefault();
+  var job = JOB_ID;
   if (!job) return;
   var left = undecidedIssues();
   if (left.length){
@@ -1938,9 +1931,7 @@ function saveToSheet(btn){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
-                          staff: collectStaff(), overwrite: SHEET_OVERWRITE,
-                          queue_date: (document.getElementById('sheet-queue') || {}).value || '',
-                          checked_date: (document.getElementById('sheet-checked') || {}).value || ''}),
+                          staff: collectStaff(), overwrite: SHEET_OVERWRITE}),
   }).then(function(r){
       if (r.status === 401) return {status: 401, data: {}};
       return r.json().then(function(data){ return {status: r.status, data: data}; },

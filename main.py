@@ -111,7 +111,7 @@ SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
 SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
 # Apps Script ที่ไม่ได้ถูกเรียกมานานต้องตื่นก่อน ครั้งแรกของวันจึงช้ากว่าปกติมาก
 SHEET_TIMEOUT = 25
-# ช่องวันที่บนหน้ารายงานเป็น <input type="date"> จึงส่งมาเป็น yyyy-mm-dd เสมอ
+# ช่องวันที่บนหน้าแบบฟอร์มเป็น <input type="date"> จึงส่งมาเป็น yyyy-mm-dd เสมอ
 # ค่าที่ผิดรูปแบบทิ้งไปเงียบ ๆ ดีกว่าส่งขยะไปให้ชีทตีความเอง (วันที่สลับ วัน/เดือน ได้)
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -497,6 +497,8 @@ async def check(
     committees_json: str = Form(""),
     chapters_mode: str = Form("strict"),
     ethesis_doc_type: str = Form(""),
+    queue_date: str = Form(""),
+    checked_date: str = Form(""),
 ):
     _prune_jobs()
     if doc_type not in DOC_TYPES or (ethesis_doc_type and ethesis_doc_type not in DOC_TYPES):
@@ -507,6 +509,12 @@ async def check(
         raise HTTPException(status_code=400, detail="ประเภทหลักสูตรไม่ถูกต้อง")
     if chapters_mode not in {"strict", "free"}:
         raise HTTPException(status_code=400, detail="โหมดตรวจชื่อบทไม่ถูกต้อง")
+    # วันดำเนินการ: เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าไม่กรอกสองช่องนี้ = ไม่ตรวจ
+    # ตรวจซ้ำฝั่งเซิร์ฟเวอร์ ไม่เชื่อ required ในหน้าเว็บอย่างเดียว
+    queue_date, checked_date = _iso_date(queue_date), _iso_date(checked_date)
+    if not queue_date or not checked_date:
+        raise HTTPException(status_code=400,
+                            detail="กรุณาระบุวันดำเนินการให้ครบ: วันที่เข้าคิว, วันที่ตรวจ")
 
     form_values = {
         "title_en": title_en.strip(), "title_th": title_th.strip(),
@@ -583,6 +591,8 @@ async def check(
             JOBS[job_id] = {
                 "stage": "รอเริ่มตรวจ...", "done": False, "error": None,
                 "report": None, "pdf_name": pdf.filename, "approved": approved,
+                # เก็บไว้กับงาน ไม่ปนกับข้อมูลอนุมัติที่ใช้ตัดสินเล่ม — ใช้ตอนบันทึกลงชีท
+                "queue_date": queue_date, "checked_date": checked_date,
                 "pdf_path": tmp_path, "ts": time.time(),
             }
         threading.Thread(
@@ -726,10 +736,11 @@ async def save_to_sheet(job_id: str, request: Request):
         answer = await asyncio.to_thread(_post_to_sheet, {
             "token": SHEET_WEBHOOK_TOKEN,
             "student_id": student_id,
+            # กรอกไว้ตั้งแต่หน้าแบบฟอร์มแล้ว (ขั้น "วันดำเนินการ") หน้ารายงานส่งมาไม่ได้
             # วันที่เข้าคิวใช้ชี้ว่าแถวไหน (นักศึกษาคนเดียวส่งได้หลายรอบในเดือนเดียวกัน)
             # ส่วนวันที่ตรวจเขียนลงชีทให้เลย ตามที่เจ้าหน้าที่กรอก
-            "queue_date": _iso_date(payload.get("queue_date")),
-            "checked_date": _iso_date(payload.get("checked_date")),
+            "queue_date": _iso_date(job.get("queue_date")),
+            "checked_date": _iso_date(job.get("checked_date")),
             "decision": row["decision"],
             "pass_or_not": row["pass_or_not"],
             "flags": row["flags"],

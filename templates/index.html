@@ -378,6 +378,23 @@
       </div>
     </section>
 
+    {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "อยากให้หน้าแบบฟอร์ม วันที่เข้าคิว กับวันที่ตรวจให้กด
+       ตั้งแต่หน้าแบบฟอร์มข้อมูล และเพิ่มให้ checklist เลยว่า วันดำเนินการ ไม่กรอกสองช่องนี้
+       ไม่ตรวจ" — สองช่องนี้ใช้ตอนบันทึกลงชีท (วันที่เข้าคิวชี้ว่าแถวไหน วันที่ตรวจเขียนลงชีท)
+       required จึงทำให้ทั้งชิปในแผงความพร้อมและการกดตรวจเล่มบังคับเองทั้งคู่ #}
+    <section class="panel" id="sec-dates">
+      <div class="panel-head"><span class="step" aria-hidden="true">5</span>
+        <div><h2>วันดำเนินการ</h2>
+          <p class="hint">ใช้ตอนบันทึกผลลงชีทบันทึกการตรวจ — วันที่เข้าคิวชี้ว่าเป็นแถวไหน
+            (นักศึกษาคนเดียวส่งได้หลายรอบ) ส่วนวันที่ตรวจเติมลงชีทให้ตามที่กรอก</p></div></div>
+      <div class="grid-2">
+        <div><label>วันที่เข้าคิว</label>
+          <input type="date" name="queue_date" id="queue-date" required></div>
+        <div><label>วันที่ตรวจ</label>
+          <input type="date" name="checked_date" id="checked-date" required></div>
+      </div>
+    </section>
+
     <div class="panel final-notes">
       <p>🔴 <b>ตรวจอย่างเข้ม:</b> ข้อมูลจากแบบฟอร์มต้องตรงทุกตำแหน่งที่กำหนดตั้งแต่หน้าปกถึงบทคัดย่อ หากผิด ขาด หรือสะกดต่างแม้เล็กน้อย ระบบจะแสดงเป็นสีแดง</p>
       <p>ℹ️ <b>หน้าลงนาม:</b> ระบบตรวจชื่อเรื่อง เลขหน้า (i/ii หรือ ก/ข) และจำนวนอาจารย์เทียบกับ บฑ.1 (หน้าแรก) / บฑ.2 (หน้าที่สอง) — ไม่เทียบชื่อ ระบบพิมพ์รายชื่อตามฟอร์มไว้ให้ทานเอง พร้อมคุณวุฒิใต้ชื่อ</p>
@@ -387,12 +404,13 @@
   <div class="actionbar" aria-label="ความพร้อมก่อนตรวจ">
     <p class="bar-msg" id="progress-msg" role="alert" hidden></p>
     <div class="action-card">
-      <div class="side-title">ความพร้อมก่อนตรวจ <span id="progress-count">0/4</span></div>
+      <div class="side-title">ความพร้อมก่อนตรวจ <span id="progress-count">0/5</span></div>
       <ol class="progress" id="progress">
         <li data-sec="sec-files">ไฟล์เล่ม</li>
         <li data-sec="sec-type">โหมดการตรวจ</li>
         <li data-sec="sec-title">ชื่อเรื่อง</li>
         <li data-sec="sec-student">นักศึกษาและปริญญา</li>
+        <li data-sec="sec-dates">วันดำเนินการ</li>
       </ol>
       <button type="submit" class="primary">🔍 ตรวจเล่ม</button>
     </div>
@@ -775,6 +793,18 @@ document.getElementById('f').addEventListener('drop', function(){
   }, 0);
 });
 window.addEventListener('pageshow', function(){ markMissing([], false); });
+// วันที่ตรวจ = วันนี้ตั้งแต่เปิดหน้า (เจ้าหน้าที่แก้เองได้ถ้าตรวจย้อนวัน)
+// คิดจากเวลาในเครื่อง ไม่ใช่ toISOString ซึ่งเป็นเวลา UTC — ก่อนเจ็ดโมงเช้าบ้านเรา
+// UTC ยังเป็นเมื่อวาน ถ้าใช้จะได้วันที่ผิดไปหนึ่งวันทุกเช้า
+(function fillCheckedDate(){
+  const field = document.getElementById('checked-date');
+  if (!field || field.value) return;
+  const now = new Date();
+  const pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  field.value = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  updateProgress();
+})();
+
 // กดชิปแล้วเลื่อนไปที่ขั้นนั้น
 document.querySelectorAll('#progress li').forEach(function(li){
   li.addEventListener('click', function(){

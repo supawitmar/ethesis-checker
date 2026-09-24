@@ -87,6 +87,9 @@ def main():
     form["program_language"] = real.get("program_language") or "thai_english"
     form["format"] = str(fields.get("format") or "1")
     form["chapters_mode"] = "strict"
+    # วันดำเนินการ: ไม่กรอก = ระบบไม่ตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+    form["queue_date"] = "2026-09-20"
+    form["checked_date"] = "2026-09-24"
 
     with open(BOOKS / f"{book}.pdf", "rb") as fh:
         started = client.post("/check", data=form,
@@ -161,6 +164,17 @@ def main():
     passed.append(check("บอกชื่อช่องที่ยังไม่ได้กรอก",
                         "ชื่อเรื่องภาษาอังกฤษ" in (refused.json().get("detail") or ""),
                         refused.json().get("detail")))
+
+    # วันดำเนินการว่าง = ไม่ตรวจ และต้องปฏิเสธก่อนสร้างงาน เหมือนช่องข้อมูลอนุมัติ
+    undated = {k: v for k, v in form.items() if k != "queue_date"}
+    with open(BOOKS / f"{book}.pdf", "rb") as fh:
+        refused_date = client.post("/check", data=undated,
+                                   files={"pdf": (f"{book}.pdf", fh, "application/pdf")})
+    passed.append(check("ไม่กรอกวันดำเนินการ ระบบไม่ให้ตรวจ",
+                        refused_date.status_code == 400, str(refused_date.status_code)))
+    passed.append(check("บอกว่าขาดวันดำเนินการ",
+                        "วันดำเนินการ" in (refused_date.json().get("detail") or ""),
+                        refused_date.json().get("detail")))
 
     gone = client.post("/summary/ไม่มีงานนี้", json={})
     passed.append(check("งานที่ไม่มีอยู่ต้องได้ 404 ไม่ใช่ 500",

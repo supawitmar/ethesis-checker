@@ -32,6 +32,8 @@ FORM = {
     "degree_abbr_en": "M.Eng.",
     "exam_date": "17 July 2026",
     "year": "2026",
+    "queue_date": "2026-09-20",
+    "checked_date": "2026-09-24",
 }
 
 
@@ -817,10 +819,53 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         self.assertLess(response.status_code, 500)
         self.assertEqual(main.JOBS, {})
 
+    def test_the_form_asks_for_the_working_dates(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ไม่กรอกสองช่องนี้ ไม่ตรวจ"
+
+        required ทำให้ทั้งชิป "วันดำเนินการ" และการกดตรวจเล่มบังคับเองทั้งคู่
+        """
+        section = self.html.split('id="sec-dates"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('name="queue_date"', section)
+        self.assertIn('name="checked_date"', section)
+        self.assertEqual(section.count('type="date"'), 2)
+        self.assertEqual(section.count(" required"), 2)
+        self.assertIn('<li data-sec="sec-dates">วันดำเนินการ</li>', self.html)
+
+    def test_the_date_of_checking_starts_at_today(self):
+        """ต้องคิดจากเวลาในเครื่อง — toISOString เป็น UTC ซึ่งตอนเช้าบ้านเรายังเป็นเมื่อวาน"""
+        code = self.html.split("function fillCheckedDate()", 1)[1].split("})();", 1)[0]
+        self.assertIn("now.getFullYear()", code)
+        self.assertNotIn("toISOString", code)
+
+    def test_the_server_refuses_a_book_without_the_working_dates(self):
+        form = {k: v for k, v in FORM.items() if k not in ("queue_date", "checked_date")}
+        response = self.client.post("/check", data=form,
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("วันดำเนินการ", response.json()["detail"])
+        self.assertEqual(main.JOBS, {})
+
+    def test_the_server_refuses_a_date_it_cannot_read(self):
+        """"3/9/2026" ตีความได้ทั้งวันที่ 3 กันยายน และวันที่ 9 มีนาคม — ห้ามเดา"""
+        form = {**FORM, "queue_date": "3/9/2026"}
+        response = self.client.post("/check", data=form,
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(main.JOBS, {})
+
+    def test_the_dates_ride_along_with_the_job(self):
+        response = self.client.post("/check", data=FORM,
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(response.status_code, 200)
+        job = main._get_job(response.json()["job_id"])
+        self.assertEqual(job["queue_date"], FORM["queue_date"])
+        self.assertEqual(job["checked_date"], FORM["checked_date"])
+
     def test_every_checklist_step_points_at_a_real_section(self):
         import re
         steps = re.findall(r'<li data-sec="([^"]+)">', self.html)
-        self.assertEqual(steps, ["sec-files", "sec-type", "sec-title", "sec-student"])
+        self.assertEqual(steps, ["sec-files", "sec-type", "sec-title", "sec-student",
+                                 "sec-dates"])
         for sec in steps:
             self.assertIn(f'id="{sec}"', self.html)
 
@@ -1260,7 +1305,7 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         with main.JOBS_LOCK:
             main.JOBS.clear()
 
-    def _seed(self, red=(), orange=()):
+    def _seed(self, red=(), orange=(), queue="2026-09-20", checked="2026-09-24"):
         import checker
         rep = checker.Report()
         for location, found, rule in red:
@@ -1272,6 +1317,8 @@ class SavingTheResultToTheSheet(unittest.TestCase):
                 "stage": "เสร็จ", "done": True, "error": None,
                 "report": checker.check_result(rep, {"front_label_style": "thai"}),
                 "pdf_name": "book.pdf", "approved": {"student_id": "6736605 NSCN/M"},
+                # กรอกไว้ตั้งแต่หน้าแบบฟอร์ม (ขั้น "วันดำเนินการ") ไม่ได้ถามซ้ำในหน้ารายงาน
+                "queue_date": queue, "checked_date": checked,
                 "ts": time.time(),
             }
         return "sheet"
@@ -1285,8 +1332,9 @@ class SavingTheResultToTheSheet(unittest.TestCase):
                 raise raises
             return answer or {"ok": True, "tab": "กย69", "row": 12}
 
-        job = self._seed(**{k: v for k, v in payload.items() if k in ("red", "orange")})
-        body = {k: v for k, v in payload.items() if k not in ("red", "orange")}
+        seeded = ("red", "orange", "queue", "checked")
+        job = self._seed(**{k: v for k, v in payload.items() if k in seeded})
+        body = {k: v for k, v in payload.items() if k not in seeded}
         with mock.patch.object(main, "SHEET_ENABLED", True), \
              mock.patch.object(main, "SHEET_WEBHOOK_URL", "https://example.test/exec"), \
              mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
@@ -1397,19 +1445,20 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertIn('id="sheet-btn"', on)
         self.assertNotIn('id="sheet-btn"', off)
 
-    def test_the_two_dates_go_with_the_row(self):
-        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ระบุวันที่เข้าคิวกับวันที่ตรวจด้วย
+    def test_the_two_dates_come_from_the_form_not_the_report_page(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้กรอกวันดำเนินการตั้งแต่หน้าแบบฟอร์ม
 
         วันที่เข้าคิวใช้ชี้ว่าแถวไหน (นักศึกษาคนเดียวส่งได้หลายรอบในเดือนเดียวกัน)
-        ส่วนวันที่ตรวจเขียนลงชีทให้เลยตามที่กรอก
+        ส่วนวันที่ตรวจเขียนลงชีทให้เลยตามที่กรอก — หน้ารายงานส่งค่าอื่นมาแทนไม่ได้
         """
-        _response, sent = self._save(queue_date="2026-09-20", checked_date="2026-09-24")
-        self.assertEqual(sent["queue_date"], "2026-09-20")
-        self.assertEqual(sent["checked_date"], "2026-09-24")
+        _response, sent = self._save(queue="2026-09-02", checked="2026-09-08",
+                                     queue_date="2026-01-01", checked_date="2026-01-01")
+        self.assertEqual(sent["queue_date"], "2026-09-02")
+        self.assertEqual(sent["checked_date"], "2026-09-08")
 
     def test_a_date_in_the_wrong_shape_is_dropped_not_forwarded(self):
         """ห้ามส่งขยะไปให้ชีทตีความเอง — "3/9/2026" ตีได้ทั้งวันที่ 3 และเดือนมีนาคม"""
-        _response, sent = self._save(queue_date="3/9/2026", checked_date="วันนี้")
+        _response, sent = self._save(queue="3/9/2026", checked="วันนี้")
         self.assertEqual(sent["queue_date"], "")
         self.assertEqual(sent["checked_date"], "")
 
@@ -1423,14 +1472,44 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(data["code"], "many_rows")
         self.assertEqual(data["queues"], ["2026-09-02", "2026-09-20"])
 
-    def test_the_report_page_asks_for_both_dates(self):
+    def test_the_report_page_does_not_ask_for_the_dates_again(self):
+        """กรอกไว้ตั้งแต่หน้าแบบฟอร์มแล้ว ถามซ้ำ = มีโอกาสได้วันที่คนละชุดกับที่ตั้งใจ"""
         job = self._seed()
         with mock.patch.object(main, "SHEET_ENABLED", True):
             html = self.client.get(f"/result/{job}").text
-        self.assertIn('id="sheet-queue"', html)
-        self.assertIn('id="sheet-checked"', html)
-        self.assertIn('data-th="วันที่เข้าคิว"', html)
-        self.assertIn('data-th="วันที่ตรวจ"', html)
+        self.assertNotIn('id="sheet-queue"', html)
+        self.assertNotIn('id="sheet-checked"', html)
+
+    def test_the_save_button_sits_next_to_the_copy_button(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ย้ายปุ่มขึ้นมาไว้ข้างปุ่มคัดลอก"""
+        job = self._seed(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        head = html.split('<summary class="copy-sum"', 1)[1].split("</summary>", 1)[0]
+        self.assertIn('id="sheet-btn"', head)
+        self.assertIn("บันทึกผลการตรวจ", head)
+        self.assertIn("⧉ คัดลอก", head)
+
+    def test_a_report_without_a_summary_box_can_still_be_saved(self):
+        """รายงานที่ไม่มีกล่องสรุป ปุ่มต้องมีที่อยู่ของตัวเอง ไม่ใช่หายไปทั้งปุ่ม
+
+        รหัสงานเคยอ่านจากกล่องสรุป กดปุ่มในรายงานที่ไม่มีกล่องนั้นจึงเงียบสนิท
+        """
+        with main.JOBS_LOCK:
+            main.JOBS["bare"] = {
+                "stage": "done", "done": True, "error": None,
+                "report": {"verdict": "ผ่าน",
+                           "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []},
+                           "info": [], "human_checklist": [], "not_checked": []},
+                "pdf_name": "book.pdf", "approved": {"student_id": "6736605 NSCN/M"},
+                "queue_date": "2026-09-20", "checked_date": "2026-09-24",
+                "ts": time.time(),
+            }
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get("/result/bare").text
+        self.assertNotIn('class="copybox"', html)
+        self.assertIn('id="sheet-btn"', html)
+        self.assertIn("var JOB_ID = ", html)          # รหัสงานไม่ได้ผูกกับกล่องสรุป
 
     def test_saving_needs_a_login(self):
         client = TestClient(main.app)
