@@ -43,11 +43,16 @@ class JavaScriptSuites(unittest.TestCase):
         """การนับความพร้อมก่อนตรวจ เมื่อขั้นหนึ่งซ้อนอยู่ในการ์ดของอีกขั้น"""
         self._run("test_form_progress.js")
 
+    def test_sheet_webhook(self):
+        """สคริปต์ที่ติดอยู่กับชีท — หาคอลัมน์จากหัวตาราง หาแถว และกันเขียนทับ"""
+        self._run("test_sheet_webhook.js")
+
     def test_every_js_suite_here_is_wired_up(self):
         """เพิ่มไฟล์เทสต์ JS ใหม่แล้วลืมผูก = เงียบไปอีกตัว เทสต์นี้กันไว้"""
         # test_ethesis_parser.js ถูกถอดพร้อมวิธี "วางข้อความ" (ก.ย. 2569) — ตัวอ่านข้อมูล eThesis
         # เหลือตัวเดียวฝั่งเซิร์ฟเวอร์ (ethesis_import.py) มีเทสต์ใน test_ethesis_import.py
-        wired = {"test_report_summary.js", "test_form_progress.js"}
+        wired = {"test_report_summary.js", "test_form_progress.js",
+                 "test_sheet_webhook.js"}
         found = {p.name for p in TESTS.glob("test_*.js")}
         self.assertEqual(found, wired,
                          "มีไฟล์เทสต์ JS ที่ยังไม่ได้ผูกเข้า pytest")

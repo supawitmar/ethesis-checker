@@ -1446,6 +1446,21 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         source = inspect.getsource(main._post_to_sheet)
         self.assertIn('"User-Agent": "ethesis-checker"', source)
 
+    def test_a_column_the_tab_does_not_have_is_reported(self):
+        """หัวตารางเขียนไม่เหมือนกันทุกแท็บ (ToC / LoC) ช่องที่ติ๊กไม่ลงต้องรู้ทันที
+
+        เดิมสคริปต์ข้ามช่องที่หาไม่เจอไปเงียบ ๆ เจ้าหน้าที่จึงเห็น "บันทึกแล้ว" ทั้งที่
+        ช่องสารบัญไม่ได้ติ๊ก แล้วไปเจอเอาตอนดูชีทย้อนหลัง
+        """
+        response, _sent = self._save(answer={"ok": True, "tab": "กย69", "row": 12,
+                                             "missing": ["LoC"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["missing"], ["LoC"])
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        self.assertIn("แท็บนี้ไม่มีช่อง ", html)      # หน้าเว็บมีถ้อยคำไว้บอก
+
     def test_a_url_of_the_wrong_shape_is_named_before_anything_is_sent(self):
         """เจ้าหน้าที่ตั้งค่าแล้วได้ "รหัส 404" (ก.ย. 2569) ซึ่งเดาไม่ออกว่าผิดตรงไหน
 

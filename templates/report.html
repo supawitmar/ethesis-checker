@@ -1947,8 +1947,14 @@ function saveToSheet(ev, btn){
         SHEET_OVERWRITE = false;
         var where = (data.tab ? (LANG === 'en' ? 'tab ' : 'แท็บ ') + data.tab + ' ' : '')
                   + (data.row ? (LANG === 'en' ? 'row ' : 'แถวที่ ') + data.row : '');
-        sheetSay('ok', (LANG === 'en' ? 'Saved to the sheet ' : 'บันทึกลงชีทแล้ว ')
-                       + where + ' — ' + data.decision);
+        // ช่องที่แท็บนั้นไม่มีหัวตาราง ติ๊กไม่ลง — ต้องรู้ทันที ไม่ใช่ไปเจอตอนดูชีทย้อนหลัง
+        var gone = (data.missing || []).join(', ');
+        var warn = gone ? (LANG === 'en'
+                            ? ' (no column for ' + gone + ' in this tab — tick it yourself)'
+                            : ' (แท็บนี้ไม่มีช่อง ' + gone + ' กรุณาติ๊กเอง)') : '';
+        sheetSay(gone ? 'err' : 'ok',
+                 (LANG === 'en' ? 'Saved to the sheet ' : 'บันทึกลงชีทแล้ว ')
+                 + where + ' — ' + data.decision + warn);
         return;
       }
       if (data.needs_overwrite){

@@ -796,6 +796,8 @@ async def save_to_sheet(job_id: str, request: Request):
                             if answer.get("needs_overwrite") else 400)
     return {"ok": True, "tab": str(answer.get("tab") or ""), "row": answer.get("row"),
             "queue": str(answer.get("queue") or ""),
+            # ช่องที่แท็บนั้นไม่มีหัวตาราง = ติ๊กไม่ลง ต้องบอก ไม่ใช่ปล่อยให้หายเงียบ ๆ
+            "missing": [str(name) for name in (answer.get("missing") or [])][:20],
             "decision": row["decision"], "flags": row["flags"], "note": row["note"]}
 
 

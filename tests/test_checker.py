@@ -8026,6 +8026,23 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         self.assertEqual(set(checker_module.SHEET_SECTION_COLUMN.values())
                          - set(checker_module.SHEET_COLUMNS), set())
 
+    def test_the_script_in_the_sheet_knows_the_same_columns(self):
+        """ชื่อช่องสองฝั่งต้องตรงกัน ไม่งั้นติ๊กหายเงียบ ๆ โดยไม่มีใครรู้
+
+        และหัวตารางจริงเขียนไม่เหมือนกันทุกแท็บ — แท็บเดือนล่าสุดใช้ "ToC" แท็บเก่าใช้
+        "LoC" (เจ้าหน้าที่ทักมา ก.ย. 2569) สคริปต์จึงต้องรับได้ทั้งสองแบบ
+        """
+        import re
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "tools" / "sheet_webhook.gs"
+                  ).read_text(encoding="utf-8")
+        block = source.split("var FLAG_COLUMNS = [", 1)[1].split("];", 1)[0]
+        keys = re.findall(r"key:\s*'([^']+)'", block)
+        self.assertEqual(tuple(keys), tuple(checker_module.SHEET_COLUMNS))
+        names = dict(zip(keys, re.findall(r"names:\s*\[([^\]]*)\]", block)))
+        for wanted in ("'LoC'", "'ToC'"):
+            self.assertIn(wanted, names["LoC"])
+
     def test_the_front_of_the_book_is_all_cover(self):
         """หน้าลงนาม กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover ตามที่เจ้าหน้าที่กำหนด"""
         for location in ("หน้าปก", "หน้าลงนาม 1 (หน้า ก)", "กิตติกรรมประกาศ (หน้า ค)",
