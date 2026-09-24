@@ -106,7 +106,12 @@ ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยื�
 # ปุ่ม "บันทึกลงชีท" บนหน้ารายงาน — ยิงไปที่ Apps Script ที่ติดอยู่กับชีทบันทึกการตรวจ
 # ไม่ตั้งสองค่านี้ = ปุ่มไม่ขึ้น และระบบทำงานเหมือนเดิมทุกอย่าง
 # ค่าทั้งสองเป็นความลับ ห้ามส่งกลับไปให้หน้าเว็บหรือเขียนลง log
-SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "").strip()
+def _clean_url(value):
+    """ค่าที่วางมาจากช่องตั้งค่ามักติดช่องว่าง เครื่องหมายคำพูด หรือ / ปิดท้ายมาด้วย"""
+    return str(value or "").strip().strip('"\'').rstrip("/")
+
+
+SHEET_WEBHOOK_URL = _clean_url(os.getenv("SHEET_WEBHOOK_URL", ""))
 SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
 SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
 # Apps Script ที่ไม่ได้ถูกเรียกมานานต้องตื่นก่อน ครั้งแรกของวันจึงช้ากว่าปกติมาก
@@ -670,6 +675,30 @@ def _post_to_sheet(payload):
                          "กรุณาตรวจการ deploy ของสคริปต์ในชีท"}
 
 
+def _sheet_url_problem(url=None):
+    """ค่า SHEET_WEBHOOK_URL ผิดรูปตั้งแต่แรกหรือไม่ (คืนข้อความบอกทางแก้ ไม่งั้นคืน "")
+
+    Web app URL ของ Apps Script หน้าตาเป็น
+        https://script.google.com/macros/s/<รหัส deployment>/exec
+    ค่าที่หยิบมาผิดช่องบ่อยที่สุดคือ "Deployment ID" (ไม่ใช่ลิงก์) ลิงก์หน้าแก้สคริปต์
+    และลิงก์ทดสอบที่ลงท้าย /dev ทั้งสามแบบยิงไปแล้วได้ 404 หรือหน้าล็อกอิน
+    ซึ่งอ่านแล้วเดาไม่ออกว่าตั้งค่าผิดตรงไหน — ห้ามใส่ค่าจริงลงในข้อความ
+    """
+    text = SHEET_WEBHOOK_URL if url is None else _clean_url(url)
+    if not text.lower().startswith("https://"):
+        return "ค่า SHEET_WEBHOOK_URL ต้องเป็นลิงก์ที่ขึ้นต้นด้วย https://"
+    if "/macros/s/" not in text:
+        return ("ค่า SHEET_WEBHOOK_URL ไม่ใช่ Web app URL ของ Apps Script — ต้องเป็น "
+                "https://script.google.com/macros/s/.../exec (คัดลอกจาก Deploy > "
+                "Manage deployments ช่อง Web app URL ไม่ใช่ช่อง Deployment ID)")
+    if text.endswith("/dev"):
+        return ("ค่า SHEET_WEBHOOK_URL เป็นลิงก์ทดสอบที่ลงท้าย /dev ซึ่งต้องล็อกอินก่อน "
+                "ให้ใช้ลิงก์ที่ลงท้าย /exec จาก Deploy > Manage deployments")
+    if not text.endswith("/exec"):
+        return "ค่า SHEET_WEBHOOK_URL ต้องลงท้ายด้วย /exec"
+    return ""
+
+
 def _sheet_failure(err):
     """แปลงข้อผิดพลาดตอนยิงไปหาชีทเป็น (ข้อความ, รหัส) ที่บอกได้ว่าต้องไปแก้ตรงไหน
 
@@ -685,8 +714,10 @@ def _sheet_failure(err):
             return (f"ชีทปฏิเสธคำขอ (รหัส {status}) — ตอน Deploy ต้องตั้ง Who has access "
                     "เป็น Anyone และใช้ URL ที่ลงท้าย /exec ไม่ใช่ /dev", "sheet_denied")
         if status == 404:
-            return (f"ไม่พบสคริปต์ตาม URL ที่ตั้งไว้ (รหัส {status}) — ตรวจว่า "
-                    "SHEET_WEBHOOK_URL เป็น Web app URL ที่ลงท้าย /exec", "sheet_not_found")
+            return (f"ไม่พบสคริปต์ตาม URL ที่ตั้งไว้ (รหัส {status}) — ลิงก์ถูกรูปแบบแล้ว "
+                    "แต่ Google ไม่รู้จัก มักเกิดจากลบ deployment ทิ้งหรือคัดลอกลิงก์ของ "
+                    "deployment เก่า ให้ไป Deploy > Manage deployments แล้วคัดลอก "
+                    "Web app URL อันปัจจุบันมาตั้งใหม่", "sheet_not_found")
         return (f"ชีทตอบกลับด้วยรหัส {status}" + tail, "sheet_http")
     if isinstance(err, TimeoutError) or isinstance(getattr(err, "reason", None), TimeoutError):
         return (f"ชีทไม่ตอบภายใน {SHEET_TIMEOUT} วินาที" + tail, "timeout")
@@ -707,6 +738,10 @@ async def save_to_sheet(job_id: str, request: Request):
     if not SHEET_ENABLED:
         return JSONResponse({"error": "ระบบยังไม่ได้ตั้งค่าการเชื่อมกับชีท",
                              "code": "not_configured"}, status_code=503)
+    # ค่าผิดรูปตั้งแต่แรก = ยิงไปกี่ครั้งก็ไม่ผ่าน บอกตั้งแต่ยังไม่ยิงจะได้ไม่เดาจากรหัส HTTP
+    url_problem = _sheet_url_problem()
+    if url_problem:
+        return JSONResponse({"error": url_problem, "code": "bad_url"}, status_code=503)
     job = _get_job(job_id)
     if not job or not job.get("report"):
         return JSONResponse({"error": "ไม่พบผลตรวจ (อาจหมดอายุ) กรุณาตรวจเล่มใหม่",

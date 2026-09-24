@@ -1357,7 +1357,8 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         job = self._seed(**{k: v for k, v in payload.items() if k in seeded})
         body = {k: v for k, v in payload.items() if k not in seeded}
         with mock.patch.object(main, "SHEET_ENABLED", True), \
-             mock.patch.object(main, "SHEET_WEBHOOK_URL", "https://example.test/exec"), \
+             mock.patch.object(main, "SHEET_WEBHOOK_URL",
+                               "https://script.google.com/macros/s/TEST-DEPLOY/exec"), \
              mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
              mock.patch.object(main, "_post_to_sheet", fake_post):
             response = self.client.post(f"/sheet/{job}", json=body)
@@ -1383,7 +1384,7 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         response, sent = self._save()
         self.assertEqual(sent["token"], "secret-token")
         self.assertNotIn("secret-token", response.text)
-        self.assertNotIn("example.test", response.text)
+        self.assertNotIn("TEST-DEPLOY", response.text)
 
     def test_pending_items_block_the_save(self):
         """เจ้าหน้าที่ต้องตัดสินข้อสีส้ม/เหลืองก่อน ไม่งั้นชีทได้ผลที่ยังไม่ใช่ข้อสรุป"""
@@ -1419,15 +1420,15 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         ไปเรื่อย ๆ ทั้งที่กดกี่ครั้งก็ไม่มีวันผ่าน
         """
         import urllib.error
-        err = urllib.error.HTTPError("https://example.test/exec", 403,
-                                     "Forbidden", {}, None)
+        err = urllib.error.HTTPError("https://script.google.com/macros/s/TEST-DEPLOY/exec",
+                                     403, "Forbidden", {}, None)
         response, _sent = self._save(raises=err)
         self.assertEqual(response.status_code, 502)
         data = response.json()
         self.assertEqual(data["code"], "sheet_denied")
         self.assertIn("Anyone", data["error"])
         self.assertIn("/exec", data["error"])
-        self.assertNotIn("example.test/exec", response.text)   # URL ต้องไม่หลุด
+        self.assertNotIn("TEST-DEPLOY", response.text)         # URL ต้องไม่หลุด
 
     def test_a_sheet_that_never_answers_is_called_a_timeout(self):
         response, _sent = self._save(raises=TimeoutError("timed out"))
@@ -1445,6 +1446,38 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         source = inspect.getsource(main._post_to_sheet)
         self.assertIn('"User-Agent": "ethesis-checker"', source)
 
+    def test_a_url_of_the_wrong_shape_is_named_before_anything_is_sent(self):
+        """เจ้าหน้าที่ตั้งค่าแล้วได้ "รหัส 404" (ก.ย. 2569) ซึ่งเดาไม่ออกว่าผิดตรงไหน
+
+        ค่าที่หยิบผิดช่องบ่อยที่สุดคือ Deployment ID ลิงก์หน้าแก้สคริปต์ และลิงก์ทดสอบ
+        /dev — ผิดรูปตั้งแต่แรกแบบนี้ ยิงไปกี่ครั้งก็ไม่ผ่าน จึงต้องบอกตั้งแต่ยังไม่ยิง
+        """
+        wrong = {
+            "AKfycbx123": "https://",
+            "https://script.google.com/home/projects/abc/edit": "Web app URL",
+            "https://script.google.com/macros/s/abc/dev": "/dev",
+        }
+        for url, wanted in wrong.items():
+            with self.subTest(url=url):
+                job = self._seed()
+                sent = {}
+                with mock.patch.object(main, "SHEET_ENABLED", True), \
+                     mock.patch.object(main, "SHEET_WEBHOOK_URL", main._clean_url(url)), \
+                     mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
+                     mock.patch.object(main, "_post_to_sheet", lambda body: sent.update(body)):
+                    response = self.client.post(f"/sheet/{job}", json={})
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.json()["code"], "bad_url")
+                self.assertIn(wanted, response.json()["error"])
+                self.assertEqual(sent, {})      # ไม่ยิงออกไปเลย
+
+    def test_a_good_url_is_left_alone(self):
+        """ค่าที่ติดช่องว่าง เครื่องหมายคำพูด หรือ / ปิดท้ายมา ต้องใช้งานได้ ไม่ใช่ปฏิเสธ"""
+        self.assertEqual(
+            main._clean_url(' "https://script.google.com/macros/s/abc/exec/" '),
+            "https://script.google.com/macros/s/abc/exec")
+        self.assertEqual(main._sheet_url_problem("https://script.google.com/macros/s/abc/exec"), "")
+
     def test_without_settings_the_endpoint_says_so(self):
         job = self._seed()
         with mock.patch.object(main, "SHEET_ENABLED", False):
@@ -1453,7 +1486,9 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(response.json()["code"], "not_configured")
 
     def test_an_expired_report_cannot_be_saved(self):
-        with mock.patch.object(main, "SHEET_ENABLED", True):
+        with mock.patch.object(main, "SHEET_ENABLED", True), \
+             mock.patch.object(main, "SHEET_WEBHOOK_URL",
+                               "https://script.google.com/macros/s/TEST-DEPLOY/exec"):
             response = self.client.post("/sheet/not-a-job", json={})
         self.assertEqual(response.status_code, 404)
 

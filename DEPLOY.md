@@ -53,7 +53,9 @@ pip install -r requirements.txt
 | ข้อความ | สาเหตุ | แก้ |
 |---|---|---|
 | ชีทปฏิเสธคำขอ (รหัส 401/403) | สิทธิ์ของ Web app ผิด หรือใช้ URL `/dev` | Deploy ใหม่ให้ Who has access = **Anyone** แล้วใช้ URL ที่ลงท้าย `/exec` |
-| ไม่พบสคริปต์ตาม URL (รหัส 404) | `SHEET_WEBHOOK_URL` ผิด หรือลบ deployment ทิ้ง | คัดลอก Web app URL มาใหม่ |
+| ค่า SHEET_WEBHOOK_URL ไม่ใช่ Web app URL … | หยิบผิดช่อง (Deployment ID / ลิงก์หน้าแก้สคริปต์) | คัดลอกช่อง **Web app URL** จาก Deploy > Manage deployments |
+| ค่า SHEET_WEBHOOK_URL เป็นลิงก์ทดสอบที่ลงท้าย /dev | ใช้ลิงก์ Test deployment | ใช้ลิงก์ที่ลงท้าย `/exec` |
+| ไม่พบสคริปต์ตาม URL (รหัส 404) | ลิงก์ถูกรูปแบบแต่ Google ไม่รู้จัก — ลบ deployment ทิ้ง หรือเป็นลิงก์ของ deployment เก่า | Deploy > Manage deployments แล้วคัดลอก Web app URL อันปัจจุบัน |
 | ชีทไม่ตอบภายใน 25 วินาที | สคริปต์ค้าง หรือชีทใหญ่มาก | กดใหม่อีกครั้ง ถ้ายังไม่หายให้ดู Executions ใน Apps Script |
 | ชีทตอบกลับมาในรูปแบบที่อ่านไม่ได้ | ได้หน้า HTML แทน JSON = deploy ผิดแบบ หรือสคริปต์พัง | Deploy เป็น **Web app** (ไม่ใช่ Add-on/API executable) แล้วดู Executions |
 | โทเค็นไม่ถูกต้อง | `SHEET_WEBHOOK_TOKEN` ไม่ตรงกับ `TOKEN` ในสคริปต์ | แก้ให้ตรงกันแล้ว Deploy เวอร์ชันใหม่ |
