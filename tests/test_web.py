@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import inspect
 import time
 import unittest
 from unittest import mock
@@ -1341,6 +1342,39 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         response, _sent = self._save(raises=urllib.error.URLError("timeout"))
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["code"], "network")
+
+    def test_a_refusal_from_the_sheet_names_the_setting_to_fix(self):
+        """สิทธิ์ของ Web app ผิด = เขียนไม่ได้ตลอดไป ต้องบอกว่าไปแก้ตรงไหน
+
+        ข้อความเดียวว่า "ติดต่อชีทไม่ได้" ทำให้เข้าใจผิดว่าเป็นเน็ตสะดุด แล้วกดใหม่
+        ไปเรื่อย ๆ ทั้งที่กดกี่ครั้งก็ไม่มีวันผ่าน
+        """
+        import urllib.error
+        err = urllib.error.HTTPError("https://example.test/exec", 403,
+                                     "Forbidden", {}, None)
+        response, _sent = self._save(raises=err)
+        self.assertEqual(response.status_code, 502)
+        data = response.json()
+        self.assertEqual(data["code"], "sheet_denied")
+        self.assertIn("Anyone", data["error"])
+        self.assertIn("/exec", data["error"])
+        self.assertNotIn("example.test/exec", response.text)   # URL ต้องไม่หลุด
+
+    def test_a_sheet_that_never_answers_is_called_a_timeout(self):
+        response, _sent = self._save(raises=TimeoutError("timed out"))
+        self.assertEqual(response.json()["code"], "timeout")
+        self.assertIn(str(main.SHEET_TIMEOUT), response.json()["error"])
+
+    def test_a_setting_that_is_not_a_link_says_so(self):
+        """urlopen โยน ValueError เมื่อค่าที่ตั้งไว้ไม่ใช่ลิงก์ (เช่นติดเครื่องหมายคำพูด)"""
+        response, _sent = self._save(raises=ValueError("unknown url type"))
+        self.assertEqual(response.json()["code"], "bad_url")
+        self.assertIn("https://", response.json()["error"])
+
+    def test_the_call_to_the_sheet_says_who_is_calling(self):
+        """ปลายทางของ Google ปฏิเสธคำขอที่ไม่มี User-Agent บางกรณี"""
+        source = inspect.getsource(main._post_to_sheet)
+        self.assertIn('"User-Agent": "ethesis-checker"', source)
 
     def test_without_settings_the_endpoint_says_so(self):
         job = self._seed()

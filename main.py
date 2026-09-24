@@ -109,7 +109,8 @@ ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยื�
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "").strip()
 SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
 SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
-SHEET_TIMEOUT = 15
+# Apps Script ที่ไม่ได้ถูกเรียกมานานต้องตื่นก่อน ครั้งแรกของวันจึงช้ากว่าปกติมาก
+SHEET_TIMEOUT = 25
 # ช่องวันที่บนหน้ารายงานเป็น <input type="date"> จึงส่งมาเป็น yyyy-mm-dd เสมอ
 # ค่าที่ผิดรูปแบบทิ้งไปเงียบ ๆ ดีกว่าส่งขยะไปให้ชีทตีความเอง (วันที่สลับ วัน/เดือน ได้)
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -645,7 +646,9 @@ def _post_to_sheet(payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         SHEET_WEBHOOK_URL, data=body,
-        headers={"Content-Type": "application/json; charset=utf-8"})
+        # ต้องบอกชื่อผู้เรียก — ปลายทางของ Google ปฏิเสธคำขอที่ไม่มี User-Agent บางกรณี
+        headers={"Content-Type": "application/json; charset=utf-8",
+                 "User-Agent": "ethesis-checker"})
     with urllib.request.urlopen(request, timeout=SHEET_TIMEOUT) as response:
         raw = response.read().decode("utf-8", "replace")
     try:
@@ -655,6 +658,33 @@ def _post_to_sheet(payload):
         return {"ok": False, "code": "bad_answer",
                 "error": "ชีทตอบกลับมาในรูปแบบที่อ่านไม่ได้ "
                          "กรุณาตรวจการ deploy ของสคริปต์ในชีท"}
+
+
+def _sheet_failure(err):
+    """แปลงข้อผิดพลาดตอนยิงไปหาชีทเป็น (ข้อความ, รหัส) ที่บอกได้ว่าต้องไปแก้ตรงไหน
+
+    เดิมทุกกรณีได้ข้อความเดียวกันว่า "ติดต่อชีทไม่ได้" ซึ่งแยกไม่ออกว่า deploy ผิดแบบ
+    ตั้ง URL ผิด หรือเน็ตมีปัญหา — คนละทางแก้กันทั้งนั้น
+
+    ห้ามใส่ URL หรือโทเค็นลงในข้อความ (ข้อความนี้ทั้งขึ้นหน้าจอและลง log)
+    """
+    tail = " ผลตรวจยังอยู่ กดบันทึกใหม่ได้"
+    if isinstance(err, urllib.error.HTTPError):
+        status = getattr(err, "code", 0)
+        if status in (401, 403):
+            return (f"ชีทปฏิเสธคำขอ (รหัส {status}) — ตอน Deploy ต้องตั้ง Who has access "
+                    "เป็น Anyone และใช้ URL ที่ลงท้าย /exec ไม่ใช่ /dev", "sheet_denied")
+        if status == 404:
+            return (f"ไม่พบสคริปต์ตาม URL ที่ตั้งไว้ (รหัส {status}) — ตรวจว่า "
+                    "SHEET_WEBHOOK_URL เป็น Web app URL ที่ลงท้าย /exec", "sheet_not_found")
+        return (f"ชีทตอบกลับด้วยรหัส {status}" + tail, "sheet_http")
+    if isinstance(err, TimeoutError) or isinstance(getattr(err, "reason", None), TimeoutError):
+        return (f"ชีทไม่ตอบภายใน {SHEET_TIMEOUT} วินาที" + tail, "timeout")
+    if isinstance(err, ValueError):
+        # urlopen โยน ValueError เมื่อ URL ไม่ใช่ลิงก์ (เช่นติดเครื่องหมายคำพูดมาด้วย)
+        return ("ค่า SHEET_WEBHOOK_URL ไม่ใช่ลิงก์ที่ถูกต้อง ต้องขึ้นต้นด้วย https:// "
+                "และลงท้ายด้วย /exec", "bad_url")
+    return ("ติดต่อชีทไม่ได้ (เครือข่ายมีปัญหา)" + tail, "network")
 
 
 @app.post("/sheet/{job_id}")
@@ -706,13 +736,11 @@ async def save_to_sheet(job_id: str, request: Request):
             "note": row["note"],
             "overwrite": bool(payload.get("overwrite")),
         })
-    except urllib.error.URLError:
-        return JSONResponse({"error": "ติดต่อชีทไม่ได้ (หมดเวลารอหรือเครือข่ายมีปัญหา) "
-                                      "ผลตรวจยังอยู่ กดบันทึกใหม่ได้",
-                             "code": "network"}, status_code=502)
-    except Exception:
-        return JSONResponse({"error": "บันทึกลงชีทไม่สำเร็จ ผลตรวจยังอยู่ กดบันทึกใหม่ได้",
-                             "code": "network"}, status_code=502)
+    except Exception as err:                      # noqa: BLE001 — ต้องไม่ล้มทั้งหน้า
+        message, code = _sheet_failure(err)
+        # ลง log ของเซิร์ฟเวอร์ด้วย เจ้าหน้าที่จะได้ส่งสาเหตุมาได้โดยไม่ต้องส่ง URL
+        print(f"[sheet] {code}: {type(err).__name__}", flush=True)
+        return JSONResponse({"error": message, "code": code}, status_code=502)
     if not answer.get("ok"):
         return JSONResponse({"error": str(answer.get("error") or "บันทึกลงชีทไม่สำเร็จ"),
                              "code": str(answer.get("code") or "sheet_error"),
