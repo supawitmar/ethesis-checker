@@ -8001,3 +8001,105 @@ class TheReferenceHeadingIsReportedOnThePageThatCarriesIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSheetRowFollowsTheReport(unittest.TestCase):
+    """ปุ่ม "บันทึกลงชีท" ต้องเขียนสิ่งเดียวกับที่รายงานบอก (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ชีท "บันทึกการตรวจ E-thesis" มีช่องผลการพิจารณา กับช่องติ๊กว่าผิดตรงไหนของเล่ม
+    (Cover, Abstract, LoC, Main Content, Reference, Appendix, Biography, Other)
+    การจับคู่ "ส่วนของเล่ม -> ช่องในชีท" เจ้าหน้าที่กำหนดเอง 24 ก.ย. 2569
+    """
+
+    def _report(self, red=(), orange=(), yellow=()):
+        rep = checker_module.Report()
+        for zone, items in (("RED", red), ("ORANGE", orange), ("YELLOW", yellow)):
+            for location, found, rule in items:
+                rep.add(zone, "front_matter", location, found, "ควรเป็น X", "", rule)
+        return checker_module.check_result(rep, {"front_label_style": "thai"})
+
+    def test_every_section_has_a_column(self):
+        """ควบคุมเชิงลบ — ส่วนใหม่ที่ลืมใส่ในตาราง จะตกไปกอง Other เงียบ ๆ"""
+        missing = (set(checker_module.SUMMARY_SECTION_ORDER)
+                   - set(checker_module.SHEET_SECTION_COLUMN))
+        self.assertEqual(missing, {"ส่วนท้ายเล่ม"})   # ส่วนท้ายเล่มแยกสามช่องเอง
+        self.assertEqual(set(checker_module.SHEET_SECTION_COLUMN.values())
+                         - set(checker_module.SHEET_COLUMNS), set())
+
+    def test_the_front_of_the_book_is_all_cover(self):
+        """หน้าลงนาม กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover ตามที่เจ้าหน้าที่กำหนด"""
+        for location in ("หน้าปก", "หน้าลงนาม 1 (หน้า ก)", "กิตติกรรมประกาศ (หน้า ค)",
+                         "ส่วนนำ"):
+            issue = {"location": location, "found": "x", "expected": "y"}
+            issue["section"] = checker_module.summary_section(issue)
+            self.assertEqual(checker_module.sheet_columns_of(issue), {"Cover"}, location)
+
+    def test_the_end_of_the_book_splits_into_three_columns(self):
+        cases = [
+            ("รายการอ้างอิง (หน้า 99)", "หัวข้อเขียนว่า X", "Reference"),
+            ("หน้า 99", 'หัวข้อในหน้านี้เลือกหลายคำ: "รายการอ้างอิง / บรรณานุกรม"', "Reference"),
+            ("ภาคผนวก (หน้า 113)", "x", "Appendix"),
+            ("ประวัติผู้วิจัย (หน้า 153)", "x", "Biography"),
+        ]
+        for location, found, column in cases:
+            issue = {"location": location, "found": found, "expected": "",
+                     "part": "end_matter"}
+            issue["section"] = checker_module.summary_section(issue)
+            self.assertEqual(issue["section"], "ส่วนท้ายเล่ม", location)
+            self.assertEqual(checker_module.sheet_columns_of(issue), {column}, location)
+
+    def test_one_issue_about_several_pages_ticks_every_column(self):
+        """เล่มจริง 6838776 — ข้อประเภทเล่มผิดทั้งปก หน้าลงนาม และบทคัดย่อในข้อเดียว"""
+        issue = {"location": "หน้าปก, หน้าลงนาม 1 (หน้า i), หน้าลงนาม 2 (หน้า ii) "
+                             "และ บทคัดย่ออังกฤษ (หน้า iv)",
+                 "found": "ประเภทเล่มไม่ตรงกับที่ได้รับอนุมัติ", "expected": ""}
+        issue["section"] = checker_module.summary_section(issue)
+        self.assertEqual(checker_module.sheet_columns_of(issue), {"Cover", "Abstract"})
+
+    def test_a_clean_book_is_recorded_as_finished(self):
+        row = checker_module.sheet_row(self._report())
+        self.assertEqual(row["decision"], "เสร็จสิ้น")
+        self.assertEqual(row["pass_or_not"], 0)
+        self.assertEqual(set(row["flags"].values()), {False})
+        self.assertEqual(row["note"], "")
+
+    def test_a_book_with_defects_ticks_only_those_columns(self):
+        report = self._report(red=[
+            ("หน้าปก", "ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", "FORM.APPROVED_MATCH"),
+            ("บทคัดย่อไทย (หน้า ง)", "ไม่พบรหัสนักศึกษาบนหน้านี้", "FORM.APPROVED_MATCH"),
+        ])
+        row = checker_module.sheet_row(report)
+        self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
+        self.assertEqual(row["pass_or_not"], 1)
+        ticked = {name for name, on in row["flags"].items() if on}
+        self.assertEqual(ticked, {"Cover", "Abstract"})
+
+    def test_the_language_rule_writes_the_note_in_the_other_column(self):
+        report = self._report(red=[("ทั้งเล่ม", "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ",
+                                    "FORM.BOOK_LANGUAGE")])
+        row = checker_module.sheet_row(report)
+        self.assertTrue(row["flags"]["Other"])
+        self.assertEqual(row["note"], "ภาษาที่เขียนไม่ตรง")
+
+    def test_an_orange_counts_only_after_staff_presses_fail(self):
+        """เจ้าหน้าที่สั่ง: ต้องตัดสินข้อสีส้ม/เหลืองก่อน ระบบไม่ตัดสินแทน"""
+        report = self._report(orange=[("สารบัญ (หน้า ซ)", "หัวข้อหลักไม่เป็นตัวหนา",
+                                       "FORMAT.BOLD")])
+        self.assertEqual(checker_module.sheet_row(report)["decision"], "เสร็จสิ้น")
+        judged = checker_module.sheet_row(report, failed=["ORANGE:0"])
+        self.assertEqual(judged["decision"], "ส่งกลับแก้ไข")
+        self.assertTrue(judged["flags"]["LoC"])
+
+    def test_a_staff_pressed_finding_ticks_its_own_column(self):
+        """"โครงสร้างหน้าลงนามผิด" เป็นจุดที่ระบบตรวจเองไม่ได้ แต่ต้องเข้าชีทเหมือนกัน"""
+        row = checker_module.sheet_row(self._report(), staff=["SIGNATURE_LAYOUT_WRONG"])
+        self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
+        self.assertTrue(row["flags"]["Cover"])
+
+    def test_the_pending_list_covers_orange_and_yellow(self):
+        report = self._report(orange=[("สารบัญ (หน้า ซ)", "a", "FORMAT.BOLD")],
+                              yellow=[("หน้า 40", "b", "PAGE.BLANK")])
+        self.assertEqual(len(checker_module.sheet_undecided(report)), 2)
+        self.assertEqual(len(checker_module.sheet_undecided(report, failed=["ORANGE:0"])), 1)
+        self.assertEqual(
+            checker_module.sheet_undecided(report, failed=["ORANGE:0"], passed=["YELLOW:0"]), [])

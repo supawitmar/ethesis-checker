@@ -18,13 +18,23 @@ import hmac
 import secrets
 from pathlib import Path
 
+import urllib.error
+import urllib.request
+
 import pdfplumber
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
-from checker import plain_summary, run_check, summary_verdict, zone_counts
+from checker import (
+    plain_summary,
+    run_check,
+    sheet_row,
+    sheet_undecided,
+    summary_verdict,
+    zone_counts,
+)
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 
@@ -91,6 +101,14 @@ COOKIE_SECURE = (os.getenv("COOKIE_SECURE", "").lower() in ("1", "true", "yes")
                  or bool(os.getenv("RENDER")))
 
 ZONE_LABEL = {"RED": "🔴 ไม่ผ่าน", "ORANGE": "🟠 รอยืนยัน", "YELLOW": "🟡 ข้อสังเกต"}
+
+# ปุ่ม "บันทึกลงชีท" บนหน้ารายงาน — ยิงไปที่ Apps Script ที่ติดอยู่กับชีทบันทึกการตรวจ
+# ไม่ตั้งสองค่านี้ = ปุ่มไม่ขึ้น และระบบทำงานเหมือนเดิมทุกอย่าง
+# ค่าทั้งสองเป็นความลับ ห้ามส่งกลับไปให้หน้าเว็บหรือเขียนลง log
+SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "").strip()
+SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
+SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
+SHEET_TIMEOUT = 15
 
 # in-memory job store — {job_id: {stage, done, error, report, pdf_name, ts}}
 JOBS = {}
@@ -239,7 +257,7 @@ def _safe_next(path):
 
 
 # ปลายทางที่หน้าเว็บเรียกด้วย fetch เท่านั้น (ไม่ใช่การเปิดหน้าเว็บตรง ๆ)
-JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/")
+JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/", "/sheet/")
 
 
 def _wants_json(request):
@@ -609,6 +627,89 @@ async def rebuild_summary(job_id: str, request: Request):
                                   staff=staff)}
 
 
+def _post_to_sheet(payload):
+    """ยิงข้อมูลหนึ่งแถวไปที่ Apps Script แล้วคืนคำตอบที่แปลงเป็น dict แล้ว
+
+    Apps Script ตอบกลับผ่าน redirect เสมอ (302 ไป script.googleusercontent.com)
+    urllib ตามให้เองอยู่แล้ว ข้อความผิดพลาดที่คืนไปหน้าเว็บต้องไม่มี URL หรือโทเค็น
+    """
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        SHEET_WEBHOOK_URL, data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"})
+    with urllib.request.urlopen(request, timeout=SHEET_TIMEOUT) as response:
+        raw = response.read().decode("utf-8", "replace")
+    try:
+        return json.loads(raw)
+    except ValueError:
+        # ชีทตอบเป็นหน้า HTML = ส่วนใหญ่คือ deploy ผิดแบบ หรือสิทธิ์ไม่ถึง
+        return {"ok": False, "code": "bad_answer",
+                "error": "ชีทตอบกลับมาในรูปแบบที่อ่านไม่ได้ "
+                         "กรุณาตรวจการ deploy ของสคริปต์ในชีท"}
+
+
+@app.post("/sheet/{job_id}")
+async def save_to_sheet(job_id: str, request: Request):
+    """บันทึกผลตรวจลงชีท "บันทึกการตรวจ E-thesis" (เจ้าหน้าที่กดเอง ไม่บังคับ)
+
+    เซิร์ฟเวอร์คิดค่าทุกช่องเอง หน้าเว็บส่งมาได้แค่คำตัดสินของเจ้าหน้าที่ (ชุดเดียวกับ
+    ที่ใช้สร้างข้อความสรุป) จะได้ไม่มีทางที่ชีทกับข้อความที่ส่งนักศึกษาจะขัดกันเอง
+    """
+    if not SHEET_ENABLED:
+        return JSONResponse({"error": "ระบบยังไม่ได้ตั้งค่าการเชื่อมกับชีท",
+                             "code": "not_configured"}, status_code=503)
+    job = _get_job(job_id)
+    if not job or not job.get("report"):
+        return JSONResponse({"error": "ไม่พบผลตรวจ (อาจหมดอายุ) กรุณาตรวจเล่มใหม่",
+                             "code": "gone"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    failed = [str(k) for k in (payload.get("failed") or [])][:200]
+    passed = [str(k) for k in (payload.get("passed") or [])][:200]
+    staff = [str(k) for k in (payload.get("staff") or [])][:50]
+    report = job["report"]
+
+    # เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ตัดสินข้อสีส้ม/เหลืองให้ครบก่อน แล้วค่อยกดปุ่มนี้
+    left = sheet_undecided(report, failed, passed)
+    if left:
+        return JSONResponse({"error": f"ยังมีข้อที่ยังไม่ได้ตัดสิน {len(left)} ข้อ "
+                                      "กรุณากดผ่านหรือไม่ผ่านให้ครบก่อนบันทึกลงชีท",
+                             "code": "undecided", "undecided": len(left)}, status_code=400)
+
+    student_id = str((job.get("approved") or {}).get("student_id") or "").strip()
+    if not student_id:
+        return JSONResponse({"error": "ไม่มีรหัสนักศึกษาในข้อมูลอนุมัติ จึงหาแถวในชีทไม่ได้",
+                             "code": "no_student_id"}, status_code=400)
+    row = sheet_row(report, failed, passed, staff)
+    try:
+        answer = await asyncio.to_thread(_post_to_sheet, {
+            "token": SHEET_WEBHOOK_TOKEN,
+            "student_id": student_id,
+            "decision": row["decision"],
+            "pass_or_not": row["pass_or_not"],
+            "flags": row["flags"],
+            "note": row["note"],
+            "overwrite": bool(payload.get("overwrite")),
+        })
+    except urllib.error.URLError:
+        return JSONResponse({"error": "ติดต่อชีทไม่ได้ (หมดเวลารอหรือเครือข่ายมีปัญหา) "
+                                      "ผลตรวจยังอยู่ กดบันทึกใหม่ได้",
+                             "code": "network"}, status_code=502)
+    except Exception:
+        return JSONResponse({"error": "บันทึกลงชีทไม่สำเร็จ ผลตรวจยังอยู่ กดบันทึกใหม่ได้",
+                             "code": "network"}, status_code=502)
+    if not answer.get("ok"):
+        return JSONResponse({"error": str(answer.get("error") or "บันทึกลงชีทไม่สำเร็จ"),
+                             "code": str(answer.get("code") or "sheet_error"),
+                             "needs_overwrite": bool(answer.get("needs_overwrite")),
+                             "current": str(answer.get("current") or "")}, status_code=409
+                            if answer.get("needs_overwrite") else 400)
+    return {"ok": True, "tab": str(answer.get("tab") or ""), "row": answer.get("row"),
+            "decision": row["decision"], "flags": row["flags"], "note": row["note"]}
+
+
 @app.get("/result/{job_id}", response_class=HTMLResponse)
 def result(request: Request, job_id: str):
     _prune_jobs()   # รายงานหมดอายุแล้วต้องไม่เปิดได้ แม้ตัวกวาดยังไม่ถึงรอบ
@@ -627,6 +728,7 @@ def result(request: Request, job_id: str):
         "report": job["report"], "zone_label": ZONE_LABEL, "job_id": job_id,
         "pdf_name": job["pdf_name"], "student": job.get("approved") or {},
         "has_book": _book_path(job) is not None,
+        "sheet_enabled": SHEET_ENABLED,
     })
 
 

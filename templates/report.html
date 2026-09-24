@@ -229,6 +229,13 @@
   .vf-badge.skipped { background:#eef1f5; color:#586576; }
   .vf-detail { color:var(--ink-3); font-size:.78rem; }
 
+  /* ---- ข้อความผลการบันทึกลงชีท (ใต้แถวปุ่มท้ายรายงาน) ---- */
+  .sheet-msg { margin:10px 0 0; padding:8px 12px; border-radius:var(--radius);
+               font-size:.92rem; border:1px solid #cdd8e6; background:#fff; color:var(--ink-2); }
+  .sheet-msg.ok { color:#1f5a34; background:var(--ok-bg); border-color:#cde8d6; }
+  .sheet-msg.err { color:#8c2f2f; background:#fdf0ef; border-color:#f0b9b3; }
+  @media print { .sheet-msg { display:none; } }
+
   /* ---- กล่องข้อความสรุป (คัดลอกได้) ---- */
   .copybox { background:#fff; border:1px solid #cdd8e6; border-radius:var(--radius); margin:16px 0 0; overflow:hidden;
        box-shadow:var(--shadow); }
@@ -604,7 +611,15 @@
     <div class="actions">
       <a class="btn primary" href="/" data-th="← ตรวจเล่มใหม่" data-en="← Check another file">← ตรวจเล่มใหม่</a>
       <button class="btn ghost" onclick="window.print()" data-th="🖨 พิมพ์ / บันทึก PDF" data-en="🖨 Print / Save PDF">🖨 พิมพ์ / บันทึก PDF</button>
+      {% if sheet_enabled %}
+      {# ปุ่มไม่บังคับกด — ไม่กดก็ใช้รายงานได้เหมือนเดิมทุกอย่าง #}
+      <button class="btn ghost" id="sheet-btn" onclick="saveToSheet(this)"
+              data-th="💾 บันทึกลงชีท" data-en="💾 Save to sheet">💾 บันทึกลงชีท</button>
+      {% endif %}
     </div>
+    {% if sheet_enabled %}
+    <p class="sheet-msg" id="sheet-msg" role="status" hidden></p>
+    {% endif %}
   </div>
 </main>
 
@@ -1845,6 +1860,88 @@ function scheduleSummaryRefresh(){
       showCopyError(COPY_ERROR[kind][LANG === 'en' ? 'en' : 'th']);
     });
   }, 600);
+}
+
+// ---- ปุ่มบันทึกผลลงชีท "บันทึกการตรวจ E-thesis" ----
+// เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ตัดสินข้อสีส้ม/เหลืองให้ครบก่อน แล้วค่อยกดปุ่มนี้
+// ค่าที่เขียนลงชีทเซิร์ฟเวอร์คิดเองทั้งหมด หน้าเว็บส่งไปแค่คำตัดสินของเจ้าหน้าที่
+var SHEET_OVERWRITE = false;
+var SHEET_TEXT = {
+  saving:   {th: 'กำลังบันทึกลงชีท…', en: 'Saving to the sheet…'},
+  network:  {th: 'ติดต่อชีทไม่ได้ ผลตรวจยังอยู่ครบ กดบันทึกใหม่ได้',
+             en: 'Could not reach the sheet. The report is intact; try again.'},
+  login:    {th: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกแท็บแล้วกดบันทึกอีกครั้ง',
+             en: 'Your session expired. Sign in again in another tab, then press save.'},
+  other:    {th: 'บันทึกลงชีทไม่สำเร็จ', en: 'Could not save to the sheet'},
+};
+function sheetSay(kind, text){
+  var box = document.getElementById('sheet-msg');
+  if (!box) return;
+  box.className = 'sheet-msg' + (kind ? ' ' + kind : '');
+  box.textContent = text || '';
+  box.hidden = !text;
+}
+function sheetWord(key){
+  var pair = SHEET_TEXT[key] || SHEET_TEXT.other;
+  return pair[LANG === 'en' ? 'en' : 'th'];
+}
+// ข้อสีส้ม/เหลืองที่ยังไม่ได้กดผ่านหรือไม่ผ่าน
+function undecidedIssues(){
+  return Array.from(document.querySelectorAll('.issue[data-zone="ORANGE"], .issue[data-zone="YELLOW"]'))
+    .filter(function(el){
+      return !el.classList.contains('state-pass') && !el.classList.contains('state-fail');
+    });
+}
+function saveToSheet(btn){
+  var box = document.querySelector('.copybox');
+  var job = box && box.getAttribute('data-job');
+  if (!job) return;
+  var left = undecidedIssues();
+  if (left.length){
+    sheetSay('err', LANG === 'en'
+      ? 'Decide the ' + left.length + ' pending item(s) first (Pass / Fail), then save.'
+      : 'ยังมีข้อที่ยังไม่ได้ตัดสิน ' + left.length + ' ข้อ กรุณากดผ่านหรือไม่ผ่านให้ครบก่อนบันทึก');
+    var card = left[0];
+    if (card.closest('details')) card.closest('details').open = true;
+    card.scrollIntoView({behavior: 'smooth', block: 'center'});
+    return;
+  }
+  btn.disabled = true;
+  sheetSay('', sheetWord('saving'));
+  fetch('/sheet/' + job, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
+                          staff: collectStaff(), overwrite: SHEET_OVERWRITE}),
+  }).then(function(r){
+      if (r.status === 401) return {status: 401, data: {}};
+      return r.json().then(function(data){ return {status: r.status, data: data}; },
+                           function(){ return {status: r.status, data: {}}; });
+    })
+    .then(function(answer){
+      var data = answer.data || {};
+      if (answer.status === 401){ sheetSay('err', sheetWord('login')); return; }
+      if (answer.status === 200 && data.ok){
+        SHEET_OVERWRITE = false;
+        var where = (data.tab ? (LANG === 'en' ? 'tab ' : 'แท็บ ') + data.tab + ' ' : '')
+                  + (data.row ? (LANG === 'en' ? 'row ' : 'แถวที่ ') + data.row : '');
+        sheetSay('ok', (LANG === 'en' ? 'Saved to the sheet ' : 'บันทึกลงชีทแล้ว ')
+                       + where + ' — ' + data.decision);
+        return;
+      }
+      if (data.needs_overwrite){
+        // ไม่เขียนทับสิ่งที่เจ้าหน้าที่กรอกไว้เอง จนกว่าจะกดยืนยันอีกครั้ง
+        SHEET_OVERWRITE = true;
+        sheetSay('err', (data.error || sheetWord('other'))
+                        + (LANG === 'en' ? ' — press save again to overwrite'
+                                         : ' กดบันทึกอีกครั้งเพื่อเขียนทับ'));
+        return;
+      }
+      SHEET_OVERWRITE = false;
+      sheetSay('err', data.error || sheetWord('other'));
+    })
+    .catch(function(){ sheetSay('err', sheetWord('network')); })
+    .finally(function(){ btn.disabled = false; });
 }
 
 function copySummary(ev, btn){

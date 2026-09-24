@@ -1238,3 +1238,132 @@ class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
             self.assertTrue(other.exists())
         finally:
             other.unlink(missing_ok=True)
+
+
+class SavingTheResultToTheSheet(unittest.TestCase):
+    """ปุ่ม "บันทึกลงชีท" — ไม่บังคับกด แต่กดแล้วต้องไปถึงชีทจริง (เจ้าหน้าที่สั่ง ก.ย. 2569)
+
+    ปลายทางจริงคือ Apps Script ที่ติดอยู่กับชีท เทสต์ชุดนี้แทนที่ตัวยิง webhook
+    ด้วยของปลอม เพื่อดูว่า "ส่งอะไรออกไป" และ "ตอบอะไรกลับหน้าเว็บ"
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        response = cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                                   follow_redirects=False)
+        if response.status_code != 303:
+            raise RuntimeError("Test login failed")
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            main.JOBS.clear()
+
+    def _seed(self, red=(), orange=()):
+        import checker
+        rep = checker.Report()
+        for location, found, rule in red:
+            rep.add("RED", "front_matter", location, found, "ควรเป็น X", "", rule)
+        for location, found, rule in orange:
+            rep.add("ORANGE", "front_matter", location, found, "ควรเป็น X", "", rule)
+        with main.JOBS_LOCK:
+            main.JOBS["sheet"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "thai"}),
+                "pdf_name": "book.pdf", "approved": {"student_id": "6736605 NSCN/M"},
+                "ts": time.time(),
+            }
+        return "sheet"
+
+    def _save(self, answer=None, raises=None, **payload):
+        sent = {}
+
+        def fake_post(body):
+            sent.update(body)
+            if raises:
+                raise raises
+            return answer or {"ok": True, "tab": "กย69", "row": 12}
+
+        job = self._seed(**{k: v for k, v in payload.items() if k in ("red", "orange")})
+        body = {k: v for k, v in payload.items() if k not in ("red", "orange")}
+        with mock.patch.object(main, "SHEET_ENABLED", True), \
+             mock.patch.object(main, "SHEET_WEBHOOK_URL", "https://example.test/exec"), \
+             mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
+             mock.patch.object(main, "_post_to_sheet", fake_post):
+            response = self.client.post(f"/sheet/{job}", json=body)
+        return response, sent
+
+    def test_a_clean_book_is_sent_as_finished(self):
+        response, sent = self._save()
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(sent["student_id"], "6736605 NSCN/M")
+        self.assertEqual(sent["decision"], "เสร็จสิ้น")
+        self.assertEqual(sent["pass_or_not"], 0)
+        self.assertEqual(set(sent["flags"].values()), {False})
+
+    def test_the_defects_decide_which_columns_are_ticked(self):
+        _response, sent = self._save(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        self.assertEqual(sent["decision"], "ส่งกลับแก้ไข")
+        self.assertEqual(sent["pass_or_not"], 1)
+        self.assertEqual({k for k, v in sent["flags"].items() if v}, {"Cover"})
+
+    def test_the_token_goes_to_the_sheet_but_never_back_to_the_browser(self):
+        response, sent = self._save()
+        self.assertEqual(sent["token"], "secret-token")
+        self.assertNotIn("secret-token", response.text)
+        self.assertNotIn("example.test", response.text)
+
+    def test_pending_items_block_the_save(self):
+        """เจ้าหน้าที่ต้องตัดสินข้อสีส้ม/เหลืองก่อน ไม่งั้นชีทได้ผลที่ยังไม่ใช่ข้อสรุป"""
+        response, sent = self._save(orange=[("สารบัญ (หน้า ซ)", "ไม่เป็นตัวหนา", "FORMAT.BOLD")])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "undecided")
+        self.assertEqual(sent, {})          # ไม่ยิงไปที่ชีทเลย
+
+    def test_a_judged_item_unblocks_the_save(self):
+        response, sent = self._save(orange=[("สารบัญ (หน้า ซ)", "ไม่เป็นตัวหนา", "FORMAT.BOLD")],
+                                    failed=["ORANGE:0"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(sent["decision"], "ส่งกลับแก้ไข")
+        self.assertTrue(sent["flags"]["LoC"])
+
+    def test_a_row_that_is_already_filled_asks_before_overwriting(self):
+        response, _sent = self._save(answer={"ok": False, "code": "already_filled",
+                                             "needs_overwrite": True, "current": "เสร็จสิ้น",
+                                             "error": "แถวที่ 12 กรอกไว้แล้ว"})
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(response.json()["needs_overwrite"])
+
+    def test_the_sheet_being_unreachable_is_reported_not_swallowed(self):
+        import urllib.error
+        response, _sent = self._save(raises=urllib.error.URLError("timeout"))
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["code"], "network")
+
+    def test_without_settings_the_endpoint_says_so(self):
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", False):
+            response = self.client.post(f"/sheet/{job}", json={})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "not_configured")
+
+    def test_an_expired_report_cannot_be_saved(self):
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            response = self.client.post("/sheet/not-a-job", json={})
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_button_only_shows_when_the_sheet_is_configured(self):
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            on = self.client.get(f"/result/{job}").text
+        with mock.patch.object(main, "SHEET_ENABLED", False):
+            off = self.client.get(f"/result/{job}").text
+        self.assertIn('id="sheet-btn"', on)
+        self.assertNotIn('id="sheet-btn"', off)
+
+    def test_saving_needs_a_login(self):
+        client = TestClient(main.app)
+        response = client.post("/sheet/sheet", json={})
+        self.assertEqual(response.status_code, 401)

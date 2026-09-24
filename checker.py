@@ -3826,6 +3826,105 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     return "\n".join(lines).strip()
 
 
+# ---------- บันทึกผลตรวจลงชีท "บันทึกการตรวจ E-thesis" ----------
+# เจ้าหน้าที่สั่ง (ก.ย. 2569) "ตรวจเล่มจากระบบแล้ว ต้องการบันทึก อยากให้ปุ่มนึงกดแล้ว
+# ไปเติมในชีทให้เลย ด้วยไม่ต้องทำไรอีก" — ชีทมีช่องติ๊กว่าผิดตรงไหนของเล่มอยู่แล้ว
+# ระบบจึงแปลง "ส่วนของเล่ม" ที่ใช้จัดกลุ่มข้อความสรุป ให้เป็นช่องของชีท
+SHEET_COLUMNS = ("Cover", "Abstract", "LoC", "Main Content",
+                 "Reference", "Appendix", "Biography", "Other")
+
+# เจ้าหน้าที่กำหนดการจับคู่นี้เอง (24 ก.ย. 2569) — ส่วนนำทั้งหมดรวมถึงหน้าลงนาม
+# กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover
+SHEET_SECTION_COLUMN = {
+    "ภาษาของเล่ม": "Other",
+    "หน้าปก": "Cover",
+    "หน้าลงนาม": "Cover",
+    "กิตติกรรมประกาศ": "Cover",
+    "บทคัดย่อ": "Abstract",
+    "สารบัญ": "LoC",
+    "ส่วนนำ": "Cover",
+    "เนื้อหา (บท)": "Main Content",
+    # "ส่วนท้ายเล่ม" แยกเป็นสามช่องด้วย _SHEET_END_COLUMNS ข้างล่าง
+    "อื่น ๆ": "Other",
+}
+
+# ส่วนท้ายเล่มมีสามช่องในชีท ต้องดูจากถ้อยคำของข้อนั้นว่าพูดถึงส่วนไหน — ดูตำแหน่ง
+# อย่างเดียวไม่พอ เพราะบางข้อระบุตำแหน่งเป็นเลขหน้าเฉย ๆ (เล่มจริง 6736605:
+# 'หน้า 99 — หัวข้อในหน้านี้เลือกหลายคำ: "รายการอ้างอิง / บรรณานุกรม"')
+_SHEET_END_COLUMNS = (
+    ("Reference", re.compile(r"อ้างอิง|บรรณานุกรม|REFERENCE|BIBLIOGRAPH", re.I)),
+    ("Appendix", re.compile(r"ภาคผนวก|APPENDIX|APPENDICES", re.I)),
+    ("Biography", re.compile(r"ประวัติ|BIOGRAPHY", re.I)),
+)
+
+# ข้อเดียวที่ผิดหลายหน้าพร้อมกันต้องติ๊กทุกช่องที่เกี่ยวข้อง ไม่ใช่เฉพาะส่วนแรก
+# (เล่มจริง 6838776 ข้อประเภทเล่มมีตำแหน่งว่า "หน้าปก, หน้าลงนาม 1, หน้าลงนาม 2
+#  และ บทคัดย่ออังกฤษ" ซึ่งต้องติ๊กทั้ง Cover และ Abstract)
+_SHEET_LOCATION_COLUMNS = (
+    (re.compile(r"หน้าปก"), "Cover"),
+    (re.compile(r"หน้าลงนาม|อาจารย์ที่ปรึกษา|กรรมการสอบ|ประธานหลักสูตร|คณบดี"), "Cover"),
+    (re.compile(r"บทคัดย่อ"), "Abstract"),
+    (re.compile(r"สารบัญ"), "LoC"),
+)
+
+
+def sheet_columns_of(issue):
+    """ช่องในชีทที่จุดผิดข้อนี้ต้องติ๊ก (ข้อเดียวติ๊กได้หลายช่อง)"""
+    section = summary_section(issue)
+    if section == "ส่วนท้ายเล่ม":
+        blob = " ".join(str(issue.get(key) or "")
+                        for key in ("location", "found", "expected"))
+        found = {column for column, pattern in _SHEET_END_COLUMNS if pattern.search(blob)}
+        return found or {"Other"}
+    columns = {SHEET_SECTION_COLUMN.get(section, "Other")}
+    location = issue.get("location") or ""
+    for pattern, column in _SHEET_LOCATION_COLUMNS:
+        if pattern.search(location):
+            columns.add(column)
+    return columns
+
+
+def sheet_undecided(report, failed=None, passed=None):
+    """ข้อสีส้ม/เหลืองที่เจ้าหน้าที่ยังไม่ได้กดผ่านหรือไม่ผ่าน
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) "ต้องตรวจสอบส่วนข้อสีส้ม ข้อสีเหลืองก่อน แล้วจึงค่อยกด
+    ปุ่มส่งข้อมูลนี้เข้า sheet" — ถ้ายังมีข้อค้าง ชีทจะได้ผลที่ยังไม่ใช่ข้อสรุป
+    """
+    failed, passed = set(failed or ()), set(passed or ())
+    left = []
+    for zone in ("ORANGE", "YELLOW"):
+        for index, issue in enumerate((report.get("issues_by_zone") or {}).get(zone) or []):
+            if issue.get("system_note"):
+                continue        # ปัญหาฝั่งเจ้าหน้าที่ ไม่ใช่จุดผิดของเล่ม
+            if f"{zone}:{index}" not in failed and f"{zone}:{index}" not in passed:
+                left.append(issue)
+    return left
+
+
+def sheet_row(report, failed=None, passed=None, staff=None):
+    """ค่าที่จะเขียนลงชีท — คิดจากรายการชุดเดียวกับข้อความสรุป จะได้ไม่ขัดกันเอง
+
+    คืน dict: decision (ช่องผลการพิจารณา), pass_or_not (1/0), flags (ช่องติ๊ก),
+    note (ข้อความสั้นของช่อง Other) และ verdict ที่ใช้ตัดสิน
+    """
+    items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
+    flags = {column: False for column in SHEET_COLUMNS}
+    note = ""
+    for issue in items:
+        for column in sheet_columns_of(issue):
+            flags[column] = True
+        # ช่อง Other ของชีทมีข้อความสั้นกำกับ เล่มผิดภาษาเจ้าหน้าที่เขียนว่าแบบนี้
+        if issue.get("rule_id") == "FORM.BOOK_LANGUAGE" and not note:
+            note = "ภาษาที่เขียนไม่ตรง"
+    return {
+        "decision": "ส่งกลับแก้ไข" if items else "เสร็จสิ้น",
+        "pass_or_not": 1 if items else 0,
+        "flags": flags,
+        "note": note,
+        "verdict": summary_verdict(report, failed, passed, staff),
+    }
+
+
 def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
     """เลขหน้าภาคผนวกในสารบัญชี้ไปหน้าเริ่มของภาคผนวก 'อีกชุด' ที่มีอยู่จริงในเล่ม
 
