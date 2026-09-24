@@ -3214,7 +3214,8 @@ STAFF_CHECKS = [
                          "\n"
                          "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
                          "จะใส่รายชื่อได้ฝั่ง ละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด"),
+                         "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด "
+                         "(ตัวอย่างเช่น Co-advisor, Member)"),
                 "text_en": ("Approval pages (Pages i - ii)"
                             "\n"
                             "please restructure the page and realign each committee "
@@ -3231,7 +3232,7 @@ STAFF_CHECKS = [
                             "match the default settings, which accommodate up to 6 "
                             "names per side; any remaining blank slots must be "
                             "changed to white font color and remove the position "
-                            "below the degree"),
+                            "below the degree (for example Co-advisor, Member)"),
             },
         ],
     },

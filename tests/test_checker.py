@@ -4828,7 +4828,8 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 # เจ้าหน้าที่อนุมัติถ้อยคำไทยท่อนนี้แล้ว (ก.ย. 2569) คู่กับฝั่งอังกฤษ
                 # "and remove the position below the degree" ที่เจ้าหน้าที่เขียนมาเอง
                 # ภายหลังเจ้าหน้าที่แก้เป็น "ตำแหน่งที่ได้รับอนุมัติ ... ออกทั้งหมด" (ก.ย. 2569)
-                "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด",
+                "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด "
+                "(ตัวอย่างเช่น Co-advisor, Member)",
             ],
             "LATE_FEE_NONE": [
                 "Line Offical Account ID @322wjrbo",
@@ -4953,6 +4954,9 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
         self.assertIn("and remove the position below the degree", choice["text_en"])
         self.assertIn("และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด", choice["text"])
+        # ตัวอย่างตำแหน่ง เจ้าหน้าที่สั่งเพิ่ม (ก.ย. 2569) ต้องมีทั้งสองภาษา
+        self.assertIn("(ตัวอย่างเช่น Co-advisor, Member)", choice["text"])
+        self.assertIn("(for example Co-advisor, Member)", choice["text_en"])
         for field in ("text", "text_en"):
             lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
             self.assertEqual(len(lines), 4, field)
