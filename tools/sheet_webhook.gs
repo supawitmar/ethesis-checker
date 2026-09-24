@@ -17,14 +17,16 @@
  *   6. เปิด URL นั้นในเบราว์เซอร์ครั้งเดียวเพื่อดูว่าตอบ {"ok":true,...} (doGet
  *      เป็นการอ่านอย่างเดียว ไม่เขียนอะไรลงชีท)
  *
- * สิ่งที่สคริปต์นี้แตะได้มีแค่ ช่องผลการพิจารณา และช่อง Pass or not ถึง Other
- * ของ "แถวเดียว" ที่หารหัสนักศึกษาเจอ — คอลัมน์อื่น แถวอื่น แท็บอื่น ไม่ถูกแตะ
+ * สิ่งที่สคริปต์นี้แตะได้มีแค่ ช่องวันที่ตรวจ ช่องผลการพิจารณา และช่อง Pass or not
+ * ถึง Other ของ "แถวเดียว" ที่หาเจอ — คอลัมน์อื่น แถวอื่น แท็บอื่น ไม่ถูกแตะ
  */
 
 var TOKEN = 'PUT-YOUR-SHARED-TOKEN-HERE';
 
 var HEADER_DECISION = 'ผลการพิจารณา';   // ช่อง H
 var HEADER_STUDENT = 'รหัส';            // ช่อง C
+var HEADER_QUEUE = 'Queue';             // ช่อง D — วันที่นักศึกษาเข้าคิว ใช้ระบุรอบ
+var HEADER_CHECKED = 'วันที่ตรวจ';       // ช่อง E
 var HEADER_PASS = 'Pass or not';        // ช่อง L
 var FLAG_HEADERS = ['Cover', 'Abstract', 'LoC', 'Main Content',
                     'Reference', 'Appendix', 'Biography', 'Other'];
@@ -39,6 +41,36 @@ function json_(obj) {
 function key_(value) {
   return String(value === null || value === undefined ? '' : value)
     .replace(/\s+/g, '').toUpperCase();
+}
+
+/**
+ * ทำวันที่ให้เป็น yyyy-mm-dd ก่อนเทียบ
+ *
+ * ช่องวันที่ในชีทเป็นได้ทั้งวันที่จริง (หลังแปลงจาก .xlsx) และข้อความ "31/8/2026"
+ * ถ้าเทียบเป็นข้อความดิบจะไม่มีวันตรงกัน
+ */
+function dateKey_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var text = String(value === null || value === undefined ? '' : value).trim();
+  if (!text) return '';
+  var iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return iso[1] + '-' + pad2_(iso[2]) + '-' + pad2_(iso[3]);
+  var dmy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);   // รูปแบบที่ชีทใช้อยู่
+  if (dmy) return dmy[3] + '-' + pad2_(dmy[2]) + '-' + pad2_(dmy[1]);
+  return text;
+}
+
+function pad2_(value) {
+  return ('0' + String(value)).slice(-2);
+}
+
+/** yyyy-mm-dd -> วันที่จริง (เขียนเป็นวันที่ ไม่ใช่ข้อความ ชีทจะได้จัดรูปแบบเองตามคอลัมน์) */
+function toDate_(iso) {
+  var m = String(iso || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
 /** แท็บที่ใช้ = แท็บซ้ายสุด (เดือนปัจจุบัน) */
@@ -70,16 +102,28 @@ function headerMap_(sheet) {
   return null;
 }
 
-/** แถวล่างสุดที่รหัสนักศึกษาตรงกัน (การตรวจรอบล่าสุดของคนนั้น) */
-function findRow_(sheet, column, headerRow, studentId) {
+/**
+ * แถวของนักศึกษาคนนี้
+ *
+ * นักศึกษาคนเดียวส่งเล่มได้หลายรอบ (เล่มใหม่ แล้วเล่มแก้ไข) ในเดือนเดียวกัน
+ * "วันที่เข้าคิว" จึงเป็นตัวชี้ว่าแถวไหน — เจ้าหน้าที่กรอกมาก็ใช้กรองเลย
+ * ถ้าไม่กรอกแล้วเจอหลายแถว ต้องไม่เดา (คืนรายการวันที่ให้เลือก)
+ */
+function findRows_(sheet, map, studentId, queueKey) {
   var last = sheet.getLastRow();
-  if (last <= headerRow) return 0;
-  var values = sheet.getRange(headerRow + 1, column, last - headerRow, 1).getValues();
+  var headerRow = map.__row__;
+  if (last <= headerRow) return [];
+  var width = Math.max(map[HEADER_STUDENT], map[HEADER_QUEUE] || 0);
+  var values = sheet.getRange(headerRow + 1, 1, last - headerRow, width).getValues();
   var want = key_(studentId);
-  for (var i = values.length - 1; i >= 0; i--) {
-    if (key_(values[i][0]) === want) return headerRow + 1 + i;
+  var found = [];
+  for (var i = 0; i < values.length; i++) {
+    if (key_(values[i][map[HEADER_STUDENT] - 1]) !== want) continue;
+    var queue = map[HEADER_QUEUE] ? dateKey_(values[i][map[HEADER_QUEUE] - 1]) : '';
+    if (queueKey && queue !== queueKey) continue;
+    found.push({row: headerRow + 1 + i, queue: queue});
   }
-  return 0;
+  return found;
 }
 
 function doGet() {
@@ -108,25 +152,41 @@ function doPost(e) {
       return json_({ok: false, code: 'bad_token', error: 'โทเค็นไม่ถูกต้อง'});
     }
     var sheet = currentSheet_();
+    var tab = sheet.getName();
     var map = headerMap_(sheet);
     if (!map) {
       return json_({ok: false, code: 'header_not_found',
-                    error: 'หาแถวหัวตารางในแท็บ "' + sheet.getName() + '" ไม่เจอ'});
+                    error: 'หาแถวหัวตารางในแท็บ "' + tab + '" ไม่เจอ'});
     }
-    var row = findRow_(sheet, map[HEADER_STUDENT], map.__row__, body.student_id);
-    if (!row) {
+    var queueKey = dateKey_(body.queue_date || '');
+    var found = findRows_(sheet, map, body.student_id, queueKey);
+    if (!found.length) {
       return json_({ok: false, code: 'row_not_found',
                     error: 'ไม่พบแถวของรหัส ' + body.student_id +
-                           ' ในแท็บ "' + sheet.getName() + '"'});
+                           (queueKey ? ' ที่เข้าคิววันที่ ' + queueKey : '') +
+                           ' ในแท็บ "' + tab + '"'});
     }
+    if (found.length > 1 && !queueKey) {
+      // ไม่เดาว่าแถวไหน — บอกวันที่เข้าคิวที่มีอยู่ให้เจ้าหน้าที่เลือก
+      var dates = found.map(function (item) { return item.queue || '(ไม่มีวันที่)'; });
+      return json_({ok: false, code: 'many_rows', tab: tab, queues: dates,
+                    error: 'รหัส ' + body.student_id + ' มี ' + found.length +
+                           ' แถวในแท็บ "' + tab + '" (เข้าคิว ' + dates.join(', ') +
+                           ') กรุณาระบุวันที่เข้าคิวให้ตรงแถวที่ต้องการ'});
+    }
+    var row = found[found.length - 1].row;
     var decisionCell = sheet.getRange(row, map[HEADER_DECISION]);
     var current = String(decisionCell.getValue() || '').trim();
     if (current && !body.overwrite) {
       return json_({ok: false, code: 'already_filled', needs_overwrite: true,
-                    current: current, tab: sheet.getName(), row: row,
+                    current: current, tab: tab, row: row,
                     error: 'แถวที่ ' + row + ' กรอกผลการพิจารณาไว้แล้วว่า "' + current + '"'});
     }
 
+    var checked = toDate_(body.checked_date);
+    if (checked && map[HEADER_CHECKED]) {
+      sheet.getRange(row, map[HEADER_CHECKED]).setValue(checked);
+    }
     decisionCell.setValue(body.decision);
     sheet.getRange(row, map[HEADER_PASS]).setValue(Number(body.pass_or_not) ? 1 : 0);
     var flags = body.flags || {};
@@ -137,11 +197,11 @@ function doPost(e) {
     }
     // ช่องข้อความสั้นอยู่ถัดจาก Other ไปหนึ่งช่อง เขียนเมื่อมีข้อความเท่านั้น
     // (ไม่มีข้อความแล้วไปล้างของเดิม = ลบสิ่งที่เจ้าหน้าที่พิมพ์ไว้เอง)
-    if (body.note && (FLAG_HEADERS[FLAG_HEADERS.length - 1] in map)) {
+    if (body.note && ('Other' in map)) {
       sheet.getRange(row, map['Other'] + 1).setValue(body.note);
     }
     SpreadsheetApp.flush();
-    return json_({ok: true, tab: sheet.getName(), row: row});
+    return json_({ok: true, tab: tab, row: row, queue: found[found.length - 1].queue});
   } catch (err) {
     return json_({ok: false, code: 'script_error', error: String(err)});
   } finally {

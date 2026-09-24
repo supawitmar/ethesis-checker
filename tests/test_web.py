@@ -1363,6 +1363,41 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertIn('id="sheet-btn"', on)
         self.assertNotIn('id="sheet-btn"', off)
 
+    def test_the_two_dates_go_with_the_row(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ระบุวันที่เข้าคิวกับวันที่ตรวจด้วย
+
+        วันที่เข้าคิวใช้ชี้ว่าแถวไหน (นักศึกษาคนเดียวส่งได้หลายรอบในเดือนเดียวกัน)
+        ส่วนวันที่ตรวจเขียนลงชีทให้เลยตามที่กรอก
+        """
+        _response, sent = self._save(queue_date="2026-09-20", checked_date="2026-09-24")
+        self.assertEqual(sent["queue_date"], "2026-09-20")
+        self.assertEqual(sent["checked_date"], "2026-09-24")
+
+    def test_a_date_in_the_wrong_shape_is_dropped_not_forwarded(self):
+        """ห้ามส่งขยะไปให้ชีทตีความเอง — "3/9/2026" ตีได้ทั้งวันที่ 3 และเดือนมีนาคม"""
+        _response, sent = self._save(queue_date="3/9/2026", checked_date="วันนี้")
+        self.assertEqual(sent["queue_date"], "")
+        self.assertEqual(sent["checked_date"], "")
+
+    def test_several_rows_of_one_student_ask_for_the_queue_date(self):
+        response, _sent = self._save(answer={
+            "ok": False, "code": "many_rows", "tab": "กย69",
+            "queues": ["2026-09-02", "2026-09-20"],
+            "error": "รหัส 6736605 NSCN/M มี 2 แถวในแท็บ กย69"})
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["code"], "many_rows")
+        self.assertEqual(data["queues"], ["2026-09-02", "2026-09-20"])
+
+    def test_the_report_page_asks_for_both_dates(self):
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        self.assertIn('id="sheet-queue"', html)
+        self.assertIn('id="sheet-checked"', html)
+        self.assertIn('data-th="วันที่เข้าคิว"', html)
+        self.assertIn('data-th="วันที่ตรวจ"', html)
+
     def test_saving_needs_a_login(self):
         client = TestClient(main.app)
         response = client.post("/sheet/sheet", json={})

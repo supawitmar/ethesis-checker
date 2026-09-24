@@ -18,6 +18,7 @@ import hmac
 import secrets
 from pathlib import Path
 
+import re
 import urllib.error
 import urllib.request
 
@@ -109,6 +110,14 @@ SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "").strip()
 SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
 SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
 SHEET_TIMEOUT = 15
+# ช่องวันที่บนหน้ารายงานเป็น <input type="date"> จึงส่งมาเป็น yyyy-mm-dd เสมอ
+# ค่าที่ผิดรูปแบบทิ้งไปเงียบ ๆ ดีกว่าส่งขยะไปให้ชีทตีความเอง (วันที่สลับ วัน/เดือน ได้)
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _iso_date(value):
+    text = str(value or "").strip()
+    return text if _ISO_DATE.match(text) else ""
 
 # in-memory job store — {job_id: {stage, done, error, report, pdf_name, ts}}
 JOBS = {}
@@ -687,6 +696,10 @@ async def save_to_sheet(job_id: str, request: Request):
         answer = await asyncio.to_thread(_post_to_sheet, {
             "token": SHEET_WEBHOOK_TOKEN,
             "student_id": student_id,
+            # วันที่เข้าคิวใช้ชี้ว่าแถวไหน (นักศึกษาคนเดียวส่งได้หลายรอบในเดือนเดียวกัน)
+            # ส่วนวันที่ตรวจเขียนลงชีทให้เลย ตามที่เจ้าหน้าที่กรอก
+            "queue_date": _iso_date(payload.get("queue_date")),
+            "checked_date": _iso_date(payload.get("checked_date")),
             "decision": row["decision"],
             "pass_or_not": row["pass_or_not"],
             "flags": row["flags"],
@@ -704,9 +717,11 @@ async def save_to_sheet(job_id: str, request: Request):
         return JSONResponse({"error": str(answer.get("error") or "บันทึกลงชีทไม่สำเร็จ"),
                              "code": str(answer.get("code") or "sheet_error"),
                              "needs_overwrite": bool(answer.get("needs_overwrite")),
+                             "queues": [str(q) for q in (answer.get("queues") or [])][:20],
                              "current": str(answer.get("current") or "")}, status_code=409
                             if answer.get("needs_overwrite") else 400)
     return {"ok": True, "tab": str(answer.get("tab") or ""), "row": answer.get("row"),
+            "queue": str(answer.get("queue") or ""),
             "decision": row["decision"], "flags": row["flags"], "note": row["note"]}
 
 
