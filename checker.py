@@ -3953,11 +3953,35 @@ _DEGREE_SEARCH_STOP = re.compile(
 _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2,}')
 
 
-# คำนำหน้าที่ template เขียนไว้เอง ไม่ใช่คำที่นักศึกษาเติมเกิน — หน้าปกเล่มไทยขึ้นบรรทัด
-# ว่า "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ส่วนข้อมูลอนุมัติเก็บไว้แค่
-# "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" ถ้าไม่ตัดคำนี้ก่อน เล่มไทยที่ถูกต้อง
-# จะโดนฟ้องว่ามีข้อความเกินทุกเล่ม (เจอตอนวัดกับเล่มทดสอบ 3)
-_DEGREE_LINE_TEMPLATE_PREFIXES = (norm("ปริญญา"),)
+# คำนำหน้าที่ template เขียนไว้เอง ไม่ใช่คำที่นักศึกษาเติมเกิน — ข้อมูลอนุมัติเก็บแต่
+# ชื่อปริญญา ("ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)") ส่วน template หน้าปกเล่มไทย
+# เขียนเป็นประโยคว่า "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา<ชื่อปริญญา>"
+# ถ้าไม่ตัดคำพวกนี้ก่อน เล่มที่ถูกต้องจะโดนฟ้องว่ามีข้อความเกิน — เล่มที่ประโยคขึ้นบรรทัดใหม่
+# พอดีก่อนคำว่า "ปริญญา" เคยรอดมาได้ แต่เล่มที่ไม่ขึ้นบรรทัดใหม่โดนเต็ม ๆ
+# (ที่มา: template ทางการ 2569 ส่วนนำ หน้าปก ทั้งเล่มไทยและเล่มอังกฤษ)
+_DEGREE_LINE_TEMPLATE_PREFIXES = tuple(norm(text).upper() for text in (
+    "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+    "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+    "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+    "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+    "ปริญญา",
+    "A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE DEGREE OF",
+    "FOR THE DEGREE OF",
+))
+
+
+def cover_degree_line_expected(expected, thai_book):
+    """ถ้อยคำ "บรรทัดนี้ต้องเป็น" ของชื่อปริญญาบนหน้าปก ตาม template ไม่ใช่ชื่อเปล่า ๆ
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569): "ต้องเป็น ปริญญาต่อด้วยชื่อปริญญาก็คือ
+    ปริญญาพยาบาลศาสตรมหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน) ภาษาอังกฤษก็คือ
+    the degree of ........."
+
+    ของเดิมบอกว่าบรรทัดนี้ต้องเป็นชื่อปริญญาเปล่า ๆ "ไม่มีคำอื่นนำหน้าหรือต่อท้าย"
+    ซึ่งขัดกับ template ที่เขียนคำว่า "ปริญญา" นำหน้าไว้เอง เจ้าหน้าที่ที่ทำตามข้อความนี้
+    จะสั่งให้นักศึกษาลบคำที่ template กำหนดไว้ออก
+    """
+    return f"ปริญญา{expected}" if thai_book else expected
 
 
 def degree_line_search_text(page_text):
@@ -4001,10 +4025,16 @@ def degree_line_extras(page_text, expected):
     hits = []
     for line in degree_line_search_text(page_text).splitlines():
         nl = norm(line)
-        for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
-            if prefix and nl.startswith(prefix):
-                nl = nl[len(prefix):]
-                break
+        # ตัดคำของ template ออกให้หมด ไม่ใช่ตัวเดียวแล้วหยุด — บรรทัดเดียวมีได้สองชั้น
+        # ("...ตามหลักสูตร" แล้วต่อด้วย "ปริญญา")
+        trimmed = True
+        while trimmed:
+            trimmed = False
+            for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
+                if prefix and nl.upper().startswith(prefix):
+                    nl = nl[len(prefix):]
+                    trimmed = True
+                    break
         if nl == want:
             return ""
         if want in nl:
@@ -6689,14 +6719,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             degree_spots = []
             if cover_degree:
                 # หน้าปกวางชื่อปริญญาไว้บรรทัดของมันเอง จึงตรวจคำเกินได้
-                degree_spots.append(("หน้าปก", cover_text, cover_degree, True))
+                degree_spots.append(("หน้าปก", cover_text, cover_degree, True,
+                                     cover_degree_line_expected(cover_degree, thai_book)))
             if sig_degree:
                 # หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template ("for the degree of ...")
                 # มีคำอื่นล้อมรอบโดยชอบ จึงตรวจคำเกินไม่ได้
                 degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx],
-                                     sig_degree, False)
+                                     sig_degree, False, sig_degree)
                                     for k, idx in enumerate(sig_pages))
-            for spot_name, spot_text, expected_degree, own_line in degree_spots:
+            for spot_name, spot_text, expected_degree, own_line, expected_line in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
                 extras = degree_line_extras(spot_text, expected_degree) if own_line else ""
                 if extras:
@@ -6704,10 +6735,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     # กิ่ง exact เพราะ exact ตอบแค่ว่า "มีข้อความนี้อยู่บนหน้า"
                     rep.add_verification("ชื่อปริญญา", spot_name, "fail",
                                          f"มีข้อความเกิน: {extras}")
+                    # ยกทั้งบรรทัดมาให้ดู แล้วบอกว่าบรรทัดนี้ต้องเป็นอะไรตาม template
+                    # (ของเดิมเรียกทั้งบรรทัดว่า "ข้อความเกิน" ทั้งที่ส่วนใหญ่ของบรรทัดถูกต้อง)
                     rep.add("RED", "front_matter", spot_name,
-                            f'บรรทัดชื่อปริญญามีข้อความเกิน: "{extras}"',
-                            f'บรรทัดนี้ต้องเป็น "{expected_degree}" เท่านั้น '
-                            "ไม่มีคำอื่นนำหน้าหรือต่อท้าย",
+                            f'บรรทัดชื่อปริญญาในเล่มเขียนว่า "{extras}"',
+                            f'บรรทัดนี้ต้องเป็น "{expected_line}" เท่านั้น '
+                            "ไม่มีคำอื่นต่อท้าย",
                             "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
                     continue
                 if compared['status'] == 'exact':

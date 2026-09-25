@@ -1299,6 +1299,42 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
             checker_module.degree_line_extras(
                 page, "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"), "")
 
+    def test_the_whole_template_sentence_is_not_extra(self):
+        """หน้าปกเล่มไทยที่ประโยค template ไม่ขึ้นบรรทัดใหม่ ต้องไม่โดนฟ้องว่ามีคำเกิน
+
+        template ทางการเขียนว่า "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร
+        ปริญญา<ชื่อปริญญา> (สาขาวิชา)" — เล่มที่ตัดบรรทัดพอดีก่อนคำว่า "ปริญญา" เคยรอด
+        ส่วนเล่มที่ไม่ตัดโดนฟ้องเต็ม ๆ ทั้งที่พิมพ์ตาม template ทั้งคู่
+        """
+        want = "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"
+        for line in ("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา" + want,
+                     "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา" + want,
+                     "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา" + want,
+                     "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญา" + want):
+            with self.subTest(line=line[:30]):
+                self.assertEqual(checker_module.degree_line_extras(line, want), "")
+
+    def test_the_english_template_sentence_is_not_extra(self):
+        """หน้าปกเล่มอังกฤษก็เขียนประโยคนำไว้เหมือนกัน"""
+        want = "MASTER OF NURSING SCIENCE"
+        line = ("A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS "
+                "FOR THE DEGREE OF " + want)
+        self.assertEqual(checker_module.degree_line_extras(line, want), "")
+
+    def test_the_expected_line_follows_the_template(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ต้องเป็น ปริญญาต่อด้วยชื่อปริญญา"
+
+        ของเดิมบอกว่าบรรทัดนี้ต้องเป็นชื่อปริญญาเปล่า ๆ "ไม่มีคำอื่นนำหน้า" ซึ่งขัดกับ
+        template ที่เขียนคำว่า "ปริญญา" ไว้เอง — เจ้าหน้าที่ที่ทำตามจะสั่งให้นักศึกษา
+        ลบคำที่ template กำหนดไว้ออก
+        """
+        want = "พยาบาลศาสตรมหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน)"
+        self.assertEqual(checker_module.cover_degree_line_expected(want, True),
+                         "ปริญญา" + want)
+        self.assertEqual(
+            checker_module.cover_degree_line_expected("MASTER OF NURSING SCIENCE", False),
+            "MASTER OF NURSING SCIENCE")
+
     def test_the_thai_prefix_does_not_hide_real_extras(self):
         """ควบคุมเชิงลบ — ยกเว้นแค่คำว่า "ปริญญา" ไม่ใช่ยกเว้นทั้งบรรทัด"""
         page = "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม) (ภาคพิเศษ)"
@@ -1316,7 +1352,7 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
             "extras = degree_line_extras(spot_text, expected_degree) if own_line",
             source)
         self.assertIn("extras = degree_line_extras(abstract_text, abbr)", source)
-        for marker in ('บรรทัดชื่อปริญญามีข้อความเกิน',
+        for marker in ('บรรทัดชื่อปริญญาในเล่มเขียนว่า',
                        'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน'):
             block = source.split(marker, 1)[0][-260:]
             self.assertIn('rep.add("RED", "front_matter"', block, marker)
@@ -1325,8 +1361,10 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
         """หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template จึงห้ามตรวจคำเกิน"""
         source = inspect.getsource(checker_module.run_check)
         block = source.split("degree_spots = []", 1)[1][:900]
-        self.assertIn('("หน้าปก", cover_text, cover_degree, True)', block)
+        self.assertIn('("หน้าปก", cover_text, cover_degree, True,', block)
         self.assertIn("sig_degree, False", block)
+        # บรรทัด "ต้องเป็น" ของหน้าปกต้องมาจากถ้อยคำของ template ไม่ใช่ชื่อปริญญาเปล่า ๆ
+        self.assertIn("cover_degree_line_expected(cover_degree, thai_book)", block)
 
 
 class ChapterHeadingsMustUseArabicNumerals(unittest.TestCase):
