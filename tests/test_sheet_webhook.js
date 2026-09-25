@@ -47,8 +47,11 @@ function fakeSheet(headers, rows) {
 }
 
 let tzSeen = [];
+let parseTz = [];
+let noParseDate = false;
 function run(sheet, body, token, storedToken, asGet) {
   tzSeen = [];
+  parseTz = [];
   const sandbox = {
     console,
     // โทเค็นที่เก็บใน Script properties ของโปรเจกต์ (undefined = ยังไม่เคยตั้ง)
@@ -79,6 +82,13 @@ function run(sheet, body, token, storedToken, asGet) {
         return [d.getFullYear(),
                 ('0' + (d.getMonth() + 1)).slice(-2),
                 ('0' + d.getDate()).slice(-2)].join('-');
+      },
+      // ของจริงแปลงข้อความเป็นเวลาจริงตามเขตเวลาที่ระบุ ตัวจำลองแค่จำว่าใช้เขตเวลาไหน
+      parseDate: (text, tz) => {
+        parseTz.push(tz);
+        if (noParseDate) throw new Error('parseDate ใช้ไม่ได้');
+        const m = String(text).match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):/);
+        return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]));
       },
     },
   };
@@ -173,6 +183,17 @@ check('เขียนวันที่ตรงกับที่กรอก'
 check('เขียนเดือนตรงกับที่กรอก', written.getMonth() + 1, 9);
 // เที่ยงวันเผื่อเขตเวลาต่างกันได้ ±11 ชั่วโมงโดยไม่ข้ามวัน (เที่ยงคืนข้ามทันที)
 check('เขียนเป็นเวลาเที่ยงวัน ไม่ใช่เที่ยงคืน', written.getHours(), 12);
+// สร้างวันที่ "ในเขตเวลาของสเปรดชีต" ตรง ๆ ไม่ใช่หวังว่าสองเขตเวลาจะห่างกันไม่เกินครึ่งวัน
+// (ของจริงห่างกันได้ถึง 25 ชั่วโมง: GMT-11 ถึง GMT+14)
+check('สร้างวันที่ด้วยเขตเวลาของสเปรดชีต', parseTz.join(','), 'Asia/Bangkok');
+
+// ---- ถ้าตัวแปลงวันที่ใช้ไม่ได้ ก็ยังต้องเขียนวันที่ถูกวัน ----
+noParseDate = true;
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { checked_date: '2026-09-25' }));
+noParseDate = false;
+check('ตัวแปลงพังก็ยังเขียนวันที่ถูก', sheet.wrote['วันที่ตรวจ'].getDate(), 25);
+check('ตัวแปลงพังก็ยังบันทึกสำเร็จ', out.ok, true);
 
 // ---- อ่านช่องวันที่จริงในชีท ต้องใช้เขตเวลาของสเปรดชีต ----
 // ถ้าใช้เขตเวลาของโปรเจกต์สคริปต์ (คนละค่า) วันที่ในชีทจะอ่านได้เป็นวันก่อนหน้า
