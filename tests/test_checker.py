@@ -1314,6 +1314,38 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
             with self.subTest(line=line[:30]):
                 self.assertEqual(checker_module.degree_line_extras(line, want), "")
 
+    def test_a_degree_split_across_lines_is_still_read(self):
+        """เจ้าหน้าที่ทัก (ก.ย. 2569): "อาจจะคนละบรรทัดนะ อยู่ที่แล้วแต่เล่ม"
+
+        ประโยคของ template ตัดบรรทัดไม่เหมือนกันทุกเล่ม บางเล่มตัดกลางชื่อปริญญา
+        หรือตัดก่อนวงเล็บสาขา ถ้าดูทีละบรรทัดอย่างเดียว เล่มพวกนั้นจะไม่มีบรรทัดไหน
+        "มีชื่อปริญญาอยู่" เลย — ทั้งเล่มที่ถูกและเล่มที่มีคำเกินจะเงียบเหมือนกันหมด
+        """
+        want = "พยาบาลศาสตรมหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน)"
+        head = "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร "
+        tail = NEWLINE + "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" + NEWLINE + "พ.ศ. 2569"
+        clean = {
+            "ตัดกลางชื่อปริญญา":
+                head + "ปริญญาพยาบาลศาสตร" + NEWLINE + "มหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน)",
+            "ตัดก่อนวงเล็บสาขา":
+                head + "ปริญญาพยาบาลศาสตรมหาบัณฑิต" + NEWLINE + "(การพยาบาลเวชปฏิบัติชุมชน)",
+        }
+        for name, body in clean.items():
+            with self.subTest(name):
+                self.assertEqual(checker_module.degree_line_extras(body + tail, want), "")
+
+    def test_extra_words_survive_a_line_break(self):
+        """ควบคุมเชิงลบของข้อบน — ตัดบรรทัดคนละแบบต้องไม่ทำให้คำเกินหลุด"""
+        want = "พยาบาลศาสตรมหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน)"
+        page = ("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญาพยาบาลศาสตรมหาบัณฑิต"
+                + NEWLINE + "(การพยาบาลเวชปฏิบัติชุมชน) (ภาคพิเศษ)"
+                + NEWLINE + "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
+        extras = checker_module.degree_line_extras(page, want)
+        self.assertIn("ภาคพิเศษ", extras)
+        # ต่อบรรทัดต้องคั่นด้วยช่องว่าง ไม่งั้นคำท้ายบรรทัดกับคำต้นบรรทัดถัดไปติดกัน
+        # แล้วเจ้าหน้าที่อ่านข้อความที่ระบบยกมาไม่ออก (norm() ไม่สนช่องว่าง แต่คนสน)
+        self.assertIn("มหาบัณฑิต (การพยาบาลเวชปฏิบัติชุมชน) (ภาคพิเศษ)", extras)
+
     def test_the_english_template_sentence_is_not_extra(self):
         """หน้าปกเล่มอังกฤษก็เขียนประโยคนำไว้เหมือนกัน"""
         want = "MASTER OF NURSING SCIENCE"

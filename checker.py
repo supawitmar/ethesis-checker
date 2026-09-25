@@ -3990,6 +3990,24 @@ def degree_line_search_text(page_text):
                      if not _STUDENT_ID_SHAPE.search(line))
 
 
+def _without_degree_template_words(nl):
+    """ตัดถ้อยคำของ template ที่นำหน้าชื่อปริญญาออกให้หมดทุกชั้น (รับค่าที่ norm แล้ว)
+
+    บรรทัดเดียวมีได้สองชั้น ("...ตามหลักสูตร" แล้วต่อด้วย "ปริญญา") ตัดชั้นเดียวแล้วหยุด
+    ไม่พอ — เล่มที่ไม่ขึ้นบรรทัดใหม่พอดีก่อนคำว่า "ปริญญา" จะโดนฟ้องว่ามีข้อความเกิน
+    ทั้งที่พิมพ์ตาม template
+    """
+    trimmed = True
+    while trimmed:
+        trimmed = False
+        for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
+            if prefix and nl.upper().startswith(prefix):
+                nl = nl[len(prefix):]
+                trimmed = True
+                break
+    return nl
+
+
 def degree_line_extras(page_text, expected):
     """ข้อความบนบรรทัดชื่อปริญญาที่ "เกิน" จากข้อมูลอนุมัติ — คืน "" ถ้าบรรทัดตรงพอดี
 
@@ -4022,23 +4040,24 @@ def degree_line_extras(page_text, expected):
     want = norm(expected)
     if not want:
         return ""
+    lines = degree_line_search_text(page_text).splitlines()
+    # ดูทีละบรรทัดก่อน ถ้าไม่เจอค่อยต่อบรรทัดที่ติดกันเข้าด้วยกัน — เจ้าหน้าที่ทัก
+    # (ก.ย. 2569) ว่า "อาจจะคนละบรรทัดนะ อยู่ที่แล้วแต่เล่ม" ประโยคของ template
+    # ตัดบรรทัดไม่เหมือนกันทุกเล่ม บางเล่มตัดกลางชื่อปริญญาหรือก่อนวงเล็บสาขา
+    # ถ้าดูทีละบรรทัดอย่างเดียว เล่มพวกนั้นจะไม่มีบรรทัดไหน "มีชื่อปริญญาอยู่" เลย
+    # แล้วคำเกิน ("(ภาคพิเศษ)") จะหลุดไปเงียบ ๆ
     hits = []
-    for line in degree_line_search_text(page_text).splitlines():
-        nl = norm(line)
-        # ตัดคำของ template ออกให้หมด ไม่ใช่ตัวเดียวแล้วหยุด — บรรทัดเดียวมีได้สองชั้น
-        # ("...ตามหลักสูตร" แล้วต่อด้วย "ปริญญา")
-        trimmed = True
-        while trimmed:
-            trimmed = False
-            for prefix in _DEGREE_LINE_TEMPLATE_PREFIXES:
-                if prefix and nl.upper().startswith(prefix):
-                    nl = nl[len(prefix):]
-                    trimmed = True
-                    break
-        if nl == want:
-            return ""
-        if want in nl:
-            hits.append(soft(line))
+    for size in (1, 2, 3):
+        for start in range(len(lines) - size + 1):
+            chunk = " ".join(lines[start:start + size])
+            nl = _without_degree_template_words(norm(chunk))
+            if nl == want:
+                return ""
+            if want in nl:
+                hits.append(soft(chunk))
+        # เจอในหน้าต่างขนาดนี้แล้ว ไม่ต้องขยายต่อ — ขยายไปก็ได้แต่ข้อความยาวขึ้นเปล่า ๆ
+        if hits:
+            break
     return min(hits, key=len) if hits else ""
 
 
