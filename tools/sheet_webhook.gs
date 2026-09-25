@@ -7,8 +7,12 @@
  * วิธีติดตั้ง (ทำครั้งเดียว)
  *   1. เปิดชีท > ส่วนขยาย (Extensions) > Apps Script
  *   2. ลบโค้ดเดิมทิ้ง แล้ววางไฟล์นี้ทั้งไฟล์
- *   3. แก้บรรทัด TOKEN ข้างล่างเป็นค่าสุ่มยาว ๆ ของตัวเอง (สร้างจาก
+ *   3. ตั้งโทเค็นลับ (ค่าสุ่มยาว ๆ สร้างจาก
  *      python -c "import secrets; print(secrets.token_urlsafe(32))")
+ *      วิธีที่แนะนำ: ไอคอนเฟือง (Project Settings) > Script properties >
+ *      Add script property > ชื่อ TOKEN ค่าคือโทเค็นของตัวเอง
+ *      ตั้งแบบนี้แล้ว "วางสคริปต์ใหม่ทับกี่ครั้งโทเค็นก็ไม่หาย"
+ *      (จะใส่ในบรรทัด TOKEN ข้างล่างแทนก็ได้ แต่จะหายทุกครั้งที่วางสคริปต์ใหม่)
  *   4. Deploy > New deployment > ประเภท Web app
  *        Execute as: Me       ·  Who has access: Anyone
  *      (Anyone = "ใครก็เรียกได้ถ้ารู้ URL" สคริปต์จึงตรวจ TOKEN เองอีกชั้น)
@@ -21,7 +25,23 @@
  * ถึง Other ของ "แถวเดียว" ที่หาเจอ — คอลัมน์อื่น แถวอื่น แท็บอื่น ไม่ถูกแตะ
  */
 
-var TOKEN = 'PUT-YOUR-SHARED-TOKEN-HERE';
+// ใส่ตรงนี้ก็ได้ แต่ค่าจะหายทุกครั้งที่วางสคริปต์ฉบับใหม่ทับ — ที่ปลอดภัยกว่าคือ
+// Project Settings > Script properties ชื่อ TOKEN (ดูวิธีติดตั้งข้อ 3)
+var TOKEN = '';
+
+/** โทเค็นที่ใช้จริง: เอาจาก Script properties ก่อน ไม่มีค่อยใช้ค่าในไฟล์ */
+function token_() {
+  var stored = '';
+  try {
+    stored = PropertiesService.getScriptProperties().getProperty('TOKEN') || '';
+  } catch (err) {
+    stored = '';
+  }
+  stored = String(stored).trim();
+  var inline = String(TOKEN || '').trim();
+  if (inline === 'PUT-YOUR-SHARED-TOKEN-HERE') inline = '';
+  return stored || inline;
+}
 
 var HEADER_DECISION = 'ผลการพิจารณา';   // ช่อง H
 var HEADER_STUDENT = 'รหัส';            // ช่อง C
@@ -159,11 +179,23 @@ function findRows_(sheet, map, studentId, queueKey) {
   return found;
 }
 
+/**
+ * เปิด URL นี้ในเบราว์เซอร์เพื่อดูว่าติดตั้งครบหรือยัง (อ่านอย่างเดียว ไม่เขียนอะไร)
+ *
+ * token_set บอกแค่ว่า "ตั้งโทเค็นไว้แล้วหรือยัง" ไม่ได้บอกค่า — ห้ามส่งค่าจริงออกไป
+ * เพราะหน้านี้ใครก็เปิดได้ถ้ารู้ URL
+ */
 function doGet() {
   var sheet = currentSheet_();
   var map = headerMap_(sheet);
-  return json_({ok: !!map, tab: sheet.getName(),
+  var missing = [];
+  for (var i = 0; map && i < FLAG_COLUMNS.length; i++) {
+    if (!col_(map, FLAG_COLUMNS[i].names)) missing.push(FLAG_COLUMNS[i].key);
+  }
+  return json_({ok: !!map && !!token_(), tab: sheet.getName(),
+                token_set: !!token_(),
                 header_row: map ? map.__row__ : 0,
+                missing_columns: missing,
                 rows: sheet.getLastRow()});
 }
 
@@ -181,8 +213,19 @@ function doPost(e) {
     } catch (err) {
       return json_({ok: false, code: 'bad_body', error: 'ข้อมูลที่ส่งมาอ่านไม่ได้'});
     }
-    if (!TOKEN || TOKEN === 'PUT-YOUR-SHARED-TOKEN-HERE' || body.token !== TOKEN) {
-      return json_({ok: false, code: 'bad_token', error: 'โทเค็นไม่ถูกต้อง'});
+    // แยกสองกรณีให้ชัด: ยังไม่ได้ตั้งโทเค็นในชีท กับตั้งแล้วแต่ไม่ตรงกับฝั่งระบบ
+    // ทางแก้คนละทางกัน และกรณีแรกเกิดทุกครั้งที่วางสคริปต์ใหม่โดยลืมตั้งโทเค็น
+    var secret = token_();
+    if (!secret) {
+      return json_({ok: false, code: 'no_token',
+                    error: 'ยังไม่ได้ตั้งโทเค็นในสคริปต์ของชีท — ไปที่ Project Settings > ' +
+                           'Script properties แล้วเพิ่มค่าชื่อ TOKEN ให้ตรงกับ ' +
+                           'SHEET_WEBHOOK_TOKEN ของระบบ แล้ว Deploy เวอร์ชันใหม่'});
+    }
+    if (String(body.token || '') !== secret) {
+      return json_({ok: false, code: 'bad_token',
+                    error: 'โทเค็นไม่ตรงกับที่ตั้งไว้ในชีท — ตรวจว่า SHEET_WEBHOOK_TOKEN ' +
+                           'ของระบบกับ TOKEN ในชีทเป็นค่าเดียวกัน แล้ว Deploy เวอร์ชันใหม่'});
     }
     var sheet = currentSheet_();
     var tab = sheet.getName();

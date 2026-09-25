@@ -46,9 +46,16 @@ function fakeSheet(headers, rows) {
   };
 }
 
-function run(sheet, body, token) {
+function run(sheet, body, token, storedToken, asGet) {
   const sandbox = {
     console,
+    // โทเค็นที่เก็บใน Script properties ของโปรเจกต์ (undefined = ยังไม่เคยตั้ง)
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (name) => (name === 'TOKEN' && storedToken !== undefined
+          ? storedToken : null),
+      }),
+    },
     ContentService: {
       MimeType: { JSON: 'json' },
       createTextOutput: (text) => ({ text, setMimeType: () => ({ text }) }),
@@ -65,9 +72,14 @@ function run(sheet, body, token) {
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'sheet_webhook.gs' });
   sandbox.TOKEN = token === undefined ? 'test-token' : token;
-  const answer = vm.runInContext('doPost(__e__)',
+  const answer = vm.runInContext(asGet ? 'doGet()' : 'doPost(__e__)',
     Object.assign(sandbox, { __e__: { postData: { contents: JSON.stringify(body) } } }));
   return JSON.parse(answer.text);
+}
+
+function runGet(sheet, token, storedToken) {
+  const answer = run(sheet, { token: '__ไม่ใช้__' }, token, storedToken, true);
+  return answer;
 }
 
 const HEADERS_NEW = ['ลำดับ', 'ชื่อ-สกุล', 'รหัส', 'Queue', 'วันที่ตรวจ', 'รูปแบบไฟล์เล่ม',
@@ -168,6 +180,41 @@ sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { token: 'wrong' }));
 check('โทเค็นผิดต้องไม่ผ่าน', out.code, 'bad_token');
 check('โทเค็นผิดต้องไม่เขียนอะไร', Object.keys(sheet.wrote).length, 0);
+
+// ---- โทเค็นเก็บใน Script properties ต้องใช้ได้ ----
+// วางสคริปต์ฉบับใหม่ทับ = บรรทัด TOKEN ในไฟล์กลับเป็นค่าว่างทุกครั้ง (เจอจริง ก.ย. 2569
+// เจ้าหน้าที่ได้ "โทเค็นไม่ถูกต้อง" หลังวางสคริปต์ใหม่) ค่าที่เก็บนอกไฟล์จึงต้องใช้ได้
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, SAVE, '', 'test-token');
+check('โทเค็นจาก Script properties ใช้ได้ทั้งที่ในไฟล์ว่าง', out.ok, true);
+
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, SAVE, 'ของเก่าในไฟล์', 'test-token');
+check('ค่าใน Script properties มาก่อนค่าในไฟล์', out.ok, true);
+
+// ---- ยังไม่ได้ตั้งโทเค็นเลย ต้องบอกคนละอย่างกับโทเค็นไม่ตรง ----
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, SAVE, '');
+check('ยังไม่ได้ตั้งโทเค็น', out.code, 'no_token');
+check('บอกว่าไปตั้งที่ไหน', /Script properties/.test(out.error || ''), true);
+check('ยังไม่ได้ตั้งโทเค็นต้องไม่เขียนอะไร', Object.keys(sheet.wrote).length, 0);
+
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, SAVE, 'PUT-YOUR-SHARED-TOKEN-HERE');
+check('ค่าตั้งต้นในไฟล์ไม่นับว่าตั้งแล้ว', out.code, 'no_token');
+
+// ---- หน้าตรวจสถานะ (doGet) ต้องบอกว่าตั้งโทเค็นหรือยัง แต่ห้ามบอกค่า ----
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+let status = runGet(sheet, '', 'test-token');
+check('บอกว่าตั้งโทเค็นแล้ว', status.token_set, true);
+check('พร้อมใช้งาน', status.ok, true);
+check('ไม่ส่งค่าโทเค็นออกมา', JSON.stringify(status).indexOf('test-token'), -1);
+status = runGet(sheet, '');
+check('ยังไม่ตั้งโทเค็นต้องบอกว่ายังไม่พร้อม', status.ok, false);
+check('บอกว่ายังไม่ได้ตั้งโทเค็น', status.token_set, false);
+status = runGet(fakeSheet(HEADERS_NEW.map((h) => (h === 'Biography' ? '' : h)), []),
+                'test-token');
+check('บอกชื่อช่องที่แท็บนี้ไม่มี', (status.missing_columns || []).join(','), 'Biography');
 
 if (failures) {
   console.error(`\nsheet_webhook.gs tests: ${failures} ข้อไม่ผ่าน`);
