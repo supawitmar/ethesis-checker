@@ -8113,6 +8113,22 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         for wanted in ("'LoC'", "'ToC'"):
             self.assertIn(wanted, names["LoC"])
 
+    def test_the_script_knows_the_header_the_sheet_really_uses(self):
+        """หัวตารางจริงของช่องรายละเอียดคือ "รายละเอียดที่ต้องแก้ไข"
+
+        เจ้าหน้าที่เพิ่มคอลัมน์ V แล้วส่งภาพหัวตารางมาให้ดู (ก.ย. 2569) — ถ้าชื่อในสคริปต์
+        หลุดจากชื่อจริงเมื่อไหร่ ข้อความจะเขียนไม่ลงโดยไม่มีอะไรฟ้องในเทสต์
+        """
+        import re
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "tools" / "sheet_webhook.gs"
+                  ).read_text(encoding="utf-8")
+        block = source.split("var HEADER_DETAILS = [", 1)[1].split("];", 1)[0]
+        names = re.findall(r"'([^']+)'", block)
+        self.assertIn("รายละเอียดที่ต้องแก้ไข", names)
+        # ชื่อที่แจ้งกลับหน้าเว็บตอนแท็บไม่มีช่องนี้ ต้องเป็นชื่อเดียวกับที่บอกให้ไปพิมพ์
+        self.assertIn("missing.push('รายละเอียดที่ต้องแก้ไข')", source)
+
     def test_passing_with_a_fine_is_its_own_decision(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) "กดผ่านแบบมีค่าปรับ ปรับช่อง H เป็นแจ้งค่าปรับ"
 
@@ -8233,7 +8249,7 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
     def test_only_a_book_sent_back_keeps_details(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) "บันทึกแค่เฉพาะเล่มที่ส่งกลับแก้ไข"
 
-        เล่มที่จบแล้วไม่มีอะไรให้แก้ ช่องที่ชื่อ "รายละเอียดที่ส่งให้แก้ไข" จึงต้องว่าง
+        เล่มที่จบแล้วไม่มีอะไรให้แก้ ช่องที่ชื่อ "รายละเอียดที่ต้องแก้ไข" จึงต้องว่าง
         ไม่ใช่เอาถ้อยคำปิดท้าย ("เสร็จสิ้นแล้ว ส่งหน้าลงนามภายใน 30 วัน") ไปกองไว้
         ว่างยังแปลว่า "ไม่ต้องแตะช่องนั้น" ของเดิมที่เจ้าหน้าที่พิมพ์เองจึงไม่ถูกล้าง
         """

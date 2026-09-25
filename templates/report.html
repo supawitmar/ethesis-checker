@@ -1982,7 +1982,7 @@ function saveToSheet(ev, btn){
         var where = (data.tab ? (LANG === 'en' ? 'tab ' : 'แท็บ ') + data.tab + ' ' : '')
                   + (data.row ? (LANG === 'en' ? 'row ' : 'แถวที่ ') + data.row : '');
         // ช่องที่แท็บนั้นไม่มีหัวตาราง เขียนลงไม่ได้ — ต้องรู้ทันที ไม่ใช่ไปเจอตอนดูชีทย้อนหลัง
-        // (ช่องติ๊ก หรือช่องรายละเอียดที่ส่งให้แก้ไข ซึ่งแท็บเดือนเก่ายังไม่มี)
+        // (ช่องติ๊ก หรือช่องรายละเอียดที่ต้องแก้ไข ซึ่งแท็บเดือนเก่ายังไม่มี)
         var gone = (data.missing || []).join(', ');
         var warn = gone ? (LANG === 'en'
                             ? ' (no column for ' + gone + ' in this tab — fill it in yourself)'

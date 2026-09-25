@@ -113,7 +113,7 @@ function runGet(sheet, token, storedToken) {
 const HEADERS_NEW = ['ลำดับ', 'ชื่อ-สกุล', 'รหัส', 'Queue', 'วันที่ตรวจ', 'รูปแบบไฟล์เล่ม',
                      'Template', 'ผลการพิจารณา', 'จำนวนวันที่ใช้ตรวจ', '', '', 'Pass or not',
                      'Cover', 'Abstract', 'ToC', 'Main Content', 'Reference', 'Appendix',
-                     'Biography', 'Other', '', 'รายละเอียดที่ส่งให้แก้ไข'];
+                     'Biography', 'Other', '', 'รายละเอียดที่ต้องแก้ไข'];
 const HEADERS_OLD = HEADERS_NEW.map((h) => (h === 'ToC' ? 'LoC' : h));
 
 function rowFor(id, queue) {
@@ -263,17 +263,17 @@ const DETAILS = ['ผลการตรวจ: ไม่ผ่าน', '', 'ก�
                  '1. หน้าปก ...'].join(String.fromCharCode(10));
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
-check('เขียนรายละเอียดลงช่องของมัน', sheet.wrote['รายละเอียดที่ส่งให้แก้ไข'], DETAILS);
+check('เขียนรายละเอียดลงช่องของมัน', sheet.wrote['รายละเอียดที่ต้องแก้ไข'], DETAILS);
 check('เขียนรายละเอียดแล้วยังสำเร็จ', out.ok, true);
 check('ไม่มีช่องไหนตกหล่น', (out.missing || []).join(','), '');
 // ข้อความยาวหลายบรรทัด ถ้าปล่อยให้ตัดข้อความ แถวจะสูงเป็นสิบบรรทัด ตารางอ่านไม่ได้
-check('ตั้งช่องให้ตัดส่วนเกิน', sheet.clipped['รายละเอียดที่ส่งให้แก้ไข'], 'CLIP');
+check('ตั้งช่องให้ตัดส่วนเกิน', sheet.clipped['รายละเอียดที่ต้องแก้ไข'], 'CLIP');
 check('ไม่ไปตั้งการตัดข้อความให้ช่องอื่น', Object.keys(sheet.clipped).length, 1);
 check('ไม่ไปเขียนทับช่อง Other', sheet.wrote.Other, false);
 
 // ---- หัวตารางพิมพ์ต่างกัน ก็ยังต้องหาเจอ ----
 sheet = fakeSheet(HEADERS_NEW.map(function (h) {
-  return h === 'รายละเอียดที่ส่งให้แก้ไข' ? 'รายละเอียด' : h;
+  return h === 'รายละเอียดที่ต้องแก้ไข' ? 'รายละเอียด' : h;
 }), [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
 check('หัวตารางชื่อ "รายละเอียด" ก็เขียนลง', sheet.wrote['รายละเอียด'], DETAILS);
@@ -283,7 +283,7 @@ check('หัวตารางชื่อ "รายละเอียด" ก
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { details: '', decision: 'เสร็จสิ้น', pass_or_not: 0 }));
 check('ไม่มีข้อความ = ไม่แตะช่องรายละเอียด',
-      Object.prototype.hasOwnProperty.call(sheet.wrote, 'รายละเอียดที่ส่งให้แก้ไข'), false);
+      Object.prototype.hasOwnProperty.call(sheet.wrote, 'รายละเอียดที่ต้องแก้ไข'), false);
 check('ไม่มีข้อความ = ไม่ตั้งรูปแบบช่องนั้น', Object.keys(sheet.clipped).length, 0);
 check('เล่มที่เสร็จสิ้นยังบันทึกได้ตามปกติ', out.ok, true);
 
@@ -293,14 +293,14 @@ sheet = fakeSheet(HEADERS_NEW.slice(0, HEADERS_NEW.length - 1),
                   [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
 check('แท็บที่ไม่มีช่องรายละเอียดต้องฟ้อง',
-      (out.missing || []).join(','), 'รายละเอียดที่ส่งให้แก้ไข');
+      (out.missing || []).join(','), 'รายละเอียดที่ต้องแก้ไข');
 check('แต่ช่องอื่นยังเขียนลงตามปกติ', sheet.wrote['ผลการพิจารณา'], 'ส่งกลับแก้ไข');
 
 // ---- ข้อความที่ขึ้นต้นด้วย = ต้องไม่กลายเป็นสูตร ----
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, Object.assign({}, SAVE, { details: '=SUM(A1:A9)' }));
 check('ข้อความขึ้นต้นด้วย = ต้องเก็บเป็นข้อความ',
-      sheet.wrote['รายละเอียดที่ส่งให้แก้ไข'], "'=SUM(A1:A9)");
+      sheet.wrote['รายละเอียดที่ต้องแก้ไข'], "'=SUM(A1:A9)");
 
 // ---- หน้าสถานะต้องบอกว่าแท็บนี้มีช่องรายละเอียดหรือยัง ----
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
