@@ -46,7 +46,9 @@ function fakeSheet(headers, rows) {
   };
 }
 
+let tzSeen = [];
 function run(sheet, body, token, storedToken, asGet) {
+  tzSeen = [];
   const sandbox = {
     console,
     // โทเค็นที่เก็บใน Script properties ของโปรเจกต์ (undefined = ยังไม่เคยตั้ง)
@@ -61,12 +63,23 @@ function run(sheet, body, token, storedToken, asGet) {
       createTextOutput: (text) => ({ text, setMimeType: () => ({ text }) }),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheets: () => [sheet] }), flush() {} },
-    Session: { getScriptTimeZone: () => 'Asia/Bangkok' },
+    // เขตเวลาของสเปรดชีตกับของโปรเจกต์สคริปต์ตั้งแยกกัน และมักไม่ตรงกัน
+    // (โปรเจกต์ใหม่ของ Apps Script ตั้งต้นเป็นเขตเวลาอเมริกา)
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => ({
+        getSheets: () => [sheet],
+        getSpreadsheetTimeZone: () => 'Asia/Bangkok',
+      }),
+      flush() {},
+    },
+    Session: { getScriptTimeZone: () => 'America/New_York' },
     Utilities: {
-      formatDate: (d) => [d.getFullYear(),
-                          ('0' + (d.getMonth() + 1)).slice(-2),
-                          ('0' + d.getDate()).slice(-2)].join('-'),
+      formatDate: (d, tz) => {
+        tzSeen.push(tz);
+        return [d.getFullYear(),
+                ('0' + (d.getMonth() + 1)).slice(-2),
+                ('0' + d.getDate()).slice(-2)].join('-');
+      },
     },
   };
   vm.createContext(sandbox);
@@ -149,6 +162,27 @@ check('เลือกแถวตามวันที่เข้าคิว'
 // instanceof ใช้ไม่ได้ข้ามแซนด์บ็อกซ์ (Date คนละตัว) จึงดูจากชนิดที่แท้จริงแทน
 check('วันที่ตรวจเขียนเป็นวันที่จริง ไม่ใช่ข้อความ',
       Object.prototype.toString.call(sheet.wrote['วันที่ตรวจ']), '[object Date]');
+
+// ---- วันที่ต้องไม่เลื่อนไปหนึ่งวันเพราะเขตเวลา ----
+// ของจริง (ก.ย. 2569): เจ้าหน้าที่กรอกวันที่ตรวจ 25/9/2026 แต่ชีทได้ 24/9/2026
+// ต้นเหตุคือเขียนเป็นเที่ยงคืนของเขตเวลาหนึ่ง แล้วชีทอ่านด้วยอีกเขตเวลาหนึ่ง
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { checked_date: '2026-09-25' }));
+const written = sheet.wrote['วันที่ตรวจ'];
+check('เขียนวันที่ตรงกับที่กรอก', written.getDate(), 25);
+check('เขียนเดือนตรงกับที่กรอก', written.getMonth() + 1, 9);
+// เที่ยงวันเผื่อเขตเวลาต่างกันได้ ±11 ชั่วโมงโดยไม่ข้ามวัน (เที่ยงคืนข้ามทันที)
+check('เขียนเป็นเวลาเที่ยงวัน ไม่ใช่เที่ยงคืน', written.getHours(), 12);
+
+// ---- อ่านช่องวันที่จริงในชีท ต้องใช้เขตเวลาของสเปรดชีต ----
+// ถ้าใช้เขตเวลาของโปรเจกต์สคริปต์ (คนละค่า) วันที่ในชีทจะอ่านได้เป็นวันก่อนหน้า
+// แล้วหาแถวตามวันที่เข้าคิวไม่เจอทั้งที่ข้อมูลถูก
+const realDate = rowFor('6736605 NSCN/M', new Date(2026, 8, 20, 12, 0, 0));
+sheet = fakeSheet(HEADERS_NEW, [realDate]);
+out = run(sheet, SAVE);
+check('หาแถวจากช่องวันที่จริงได้', out.ok, true);
+check('อ่านวันที่ด้วยเขตเวลาของสเปรดชีต', tzSeen.indexOf('Asia/Bangkok') >= 0, true);
+check('ไม่ใช้เขตเวลาของโปรเจกต์สคริปต์', tzSeen.indexOf('America/New_York'), -1);
 
 // ---- รหัสซ้ำแต่ไม่ได้ระบุวันที่เข้าคิว = ไม่เดา ----
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '2/9/2026'),

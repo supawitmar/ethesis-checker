@@ -84,9 +84,17 @@ function key_(value) {
  * ช่องวันที่ในชีทเป็นได้ทั้งวันที่จริง (หลังแปลงจาก .xlsx) และข้อความ "31/8/2026"
  * ถ้าเทียบเป็นข้อความดิบจะไม่มีวันตรงกัน
  */
+function isDate_(value) {
+  // instanceof ใช้ไม่ได้เสมอไป (ค่าที่มาจากคนละบริบทมี Date คนละตัว) จึงดูจากชนิดที่แท้จริง
+  return Object.prototype.toString.call(value) === '[object Date]';
+}
+
 function dateKey_(value) {
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (isDate_(value)) {
+    // ต้องอ่านด้วยเขตเวลา "ของสเปรดชีต" ไม่ใช่ของโปรเจกต์สคริปต์ — สองค่านี้ตั้งแยกกัน
+    // และโปรเจกต์ใหม่ของ Apps Script ตั้งต้นเป็นเขตเวลาอเมริกา ถ้าใช้ของสคริปต์
+    // ช่องวันที่จริงในชีทจะอ่านได้เป็นวันก่อนหน้า แล้วหาแถวตามวันที่เข้าคิวไม่เจอ
+    return Utilities.formatDate(value, sheetTimeZone_(), 'yyyy-MM-dd');
   }
   var text = String(value === null || value === undefined ? '' : value).trim();
   if (!text) return '';
@@ -101,11 +109,28 @@ function pad2_(value) {
   return ('0' + String(value)).slice(-2);
 }
 
-/** yyyy-mm-dd -> วันที่จริง (เขียนเป็นวันที่ ไม่ใช่ข้อความ ชีทจะได้จัดรูปแบบเองตามคอลัมน์) */
+/** เขตเวลาของสเปรดชีต (ไม่ใช่ของโปรเจกต์สคริปต์ ซึ่งตั้งแยกกันและมักไม่ตรงกัน) */
+function sheetTimeZone_() {
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone()
+           || Session.getScriptTimeZone();
+  } catch (err) {
+    return Session.getScriptTimeZone();
+  }
+}
+
+/**
+ * yyyy-mm-dd -> วันที่จริง (เขียนเป็นวันที่ ไม่ใช่ข้อความ ชีทจะได้จัดรูปแบบเองตามคอลัมน์)
+ *
+ * ตั้งเวลาไว้ "เที่ยงวัน" ไม่ใช่เที่ยงคืน — ค่าที่เขียนลงชีทเป็นเวลาจริงหนึ่งจุด ส่วนชีท
+ * แสดงผลตามเขตเวลาของสเปรดชีต ถ้าสองเขตเวลาต่างกัน เที่ยงคืนจะข้ามไปเป็นวันก่อนหน้า
+ * ได้ทันที (เจ้าหน้าที่กรอก 25/9/2026 แล้วชีทได้ 24/9/2026 — ก.ย. 2569)
+ * เที่ยงวันเผื่อไว้ทั้งสองทาง ±11 ชั่วโมง จึงไม่มีทางข้ามวัน
+ */
 function toDate_(iso) {
   var m = String(iso || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
 }
 
 /** แท็บที่ใช้ = แท็บซ้ายสุด (เดือนปัจจุบัน) */
@@ -196,6 +221,9 @@ function doGet() {
                 token_set: !!token_(),
                 header_row: map ? map.__row__ : 0,
                 missing_columns: missing,
+                // สองค่านี้ตั้งแยกกัน ถ้าไม่ตรงกันเคยทำให้วันที่เลื่อนไปหนึ่งวัน
+                sheet_timezone: sheetTimeZone_(),
+                script_timezone: Session.getScriptTimeZone(),
                 rows: sheet.getLastRow()});
 }
 
