@@ -8113,6 +8113,47 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         for wanted in ("'LoC'", "'ToC'"):
             self.assertIn(wanted, names["LoC"])
 
+    def test_passing_with_a_fine_is_its_own_decision(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "กดผ่านแบบมีค่าปรับ ปรับช่อง H เป็นแจ้งค่าปรับ"
+
+        รูปเล่มผ่านแล้วทั้งสองแบบ ต่างกันแค่ยังมีค่าปรับค้าง Pass or not จึงเป็น 0
+        เหมือนกัน — ค่าปรับเป็นเรื่องการชำระเงิน ไม่ใช่ความผิดของรูปเล่ม
+        """
+        report = self._report()
+        clean = checker_module.sheet_row(report, staff=["PASS_FEE_NONE"])
+        fined = checker_module.sheet_row(report, staff=["PASS_FEE_YES"])
+        self.assertEqual(clean["decision"], "เสร็จสิ้น")
+        self.assertEqual(fined["decision"], "แจ้งค่าปรับ")
+        self.assertEqual(fined["pass_or_not"], 0)
+        self.assertEqual(set(fined["flags"].values()), {False})
+
+    def test_a_book_to_fix_is_never_called_a_fine(self):
+        """ควบคุมเชิงลบ — เล่มที่ยังต้องแก้ ต้องได้ "ส่งกลับแก้ไข" ไม่ว่ากดค่าปรับอะไร"""
+        report = self._report(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        row = checker_module.sheet_row(report, staff=["PASS_FEE_YES"])
+        self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
+        self.assertEqual(row["pass_or_not"], 1)
+
+    def test_the_staff_questions_must_be_answered_first(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ต้องเคลียร์ สีส้ม สีเหลือง โครงสร้างหน้าลงนาม
+        และกดว่ามีค่าปรับหรือไม่ก่อนเสมอที่จะส่งข้อมูล"
+
+        ไม่กดปุ่มค่าปรับแล้วบันทึกได้ = ชีทได้ "เสร็จสิ้น" ทั้งที่อาจต้องเป็น "แจ้งค่าปรับ"
+        """
+        report = self._report()
+        pending = checker_module.sheet_staff_pending(report)
+        self.assertEqual([c["id"] for c in pending], ["SIGNATURE_LAYOUT", "PASS_FEE"])
+        left = checker_module.sheet_staff_pending(
+            report, staff=["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE"])
+        self.assertEqual(left, [])
+
+    def test_the_fine_question_follows_the_result(self):
+        """กดว่าโครงสร้างหน้าลงนามผิด = เล่มไม่ผ่าน คำถามค่าปรับต้องเปลี่ยนชุดตาม"""
+        report = self._report()
+        pending = checker_module.sheet_staff_pending(
+            report, staff=["SIGNATURE_LAYOUT_WRONG"])
+        self.assertEqual([c["id"] for c in pending], ["LATE_FEE"])
+
     def test_the_front_of_the_book_is_all_cover(self):
         """หน้าลงนาม กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover ตามที่เจ้าหน้าที่กำหนด"""
         for location in ("หน้าปก", "หน้าลงนาม 1 (หน้า ก)", "กิตติกรรมประกาศ (หน้า ค)",

@@ -3901,6 +3901,39 @@ def sheet_undecided(report, failed=None, passed=None):
     return left
 
 
+# ค่าที่เขียนได้ในช่อง "ผลการพิจารณา" ของชีท (เจ้าหน้าที่กำหนดถ้อยคำเอง ก.ย. 2569)
+# เล่มที่ผ่านแยกสองแบบตามปุ่มค่าปรับ — ผ่านเฉย ๆ กับผ่านแล้วต้องแจ้งค่าปรับ
+SHEET_DECISION_FIX = "ส่งกลับแก้ไข"
+SHEET_DECISION_DONE = "เสร็จสิ้น"
+SHEET_DECISION_FEE = "แจ้งค่าปรับ"
+# ปุ่มที่บอกว่าเล่มที่ผ่านมีค่าปรับ — id เดียวกับที่ใช้ต่อถ้อยคำปิดท้ายให้นักศึกษา
+SHEET_FEE_CHOICE = "PASS_FEE_YES"
+
+
+def sheet_staff_pending(report, failed=None, passed=None, staff=None):
+    """หัวข้อของเจ้าหน้าที่ที่ต้องกดก่อนบันทึกลงชีท แต่ยังไม่ได้กด
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569): "ต้องเคลียร์ สีส้ม สีเหลือง โครงสร้างหน้าลงนาม
+    และกดว่ามีค่าปรับหรือไม่ก่อนเสมอที่จะส่งข้อมูล"
+
+    ไม่กดปุ่มค่าปรับแล้วบันทึกได้ = ชีทได้ "เสร็จสิ้น" ทั้งที่อาจต้องเป็น "แจ้งค่าปรับ"
+    ซึ่งเป็นค่าที่ผิดแบบเงียบ ๆ ไม่มีอะไรบอกว่าตกหล่น
+
+    หัวข้อไหนต้องกดขึ้นกับผลตรวจ ณ ตอนนั้น (check_applies) — เล่มผ่านถามชุด PASS_FEE
+    เล่มยังไม่ผ่านถามชุด LATE_FEE ถ้าเจ้าหน้าที่กดโครงสร้างหน้าลงนามว่าผิด ผลตรวจ
+    เปลี่ยนเป็นไม่ผ่าน คำถามค่าปรับก็เปลี่ยนชุดตามไปเอง
+    """
+    verdict = summary_verdict(report, failed, passed, staff)
+    pressed = set(staff or ())
+    left = []
+    for check in staff_checks_for_book(report_label_style(report)):
+        if not check_applies(check, verdict):
+            continue
+        if not any(choice["id"] in pressed for choice in check["choices"]):
+            left.append(check)
+    return left
+
+
 def sheet_row(report, failed=None, passed=None, staff=None):
     """ค่าที่จะเขียนลงชีท — คิดจากรายการชุดเดียวกับข้อความสรุป จะได้ไม่ขัดกันเอง
 
@@ -3916,8 +3949,16 @@ def sheet_row(report, failed=None, passed=None, staff=None):
         # ช่อง Other ของชีทมีข้อความสั้นกำกับ เล่มผิดภาษาเจ้าหน้าที่เขียนว่าแบบนี้
         if issue.get("rule_id") == "FORM.BOOK_LANGUAGE" and not note:
             note = "ภาษาที่เขียนไม่ตรง"
+    if items:
+        decision = SHEET_DECISION_FIX
+    elif SHEET_FEE_CHOICE in set(staff or ()):
+        # เล่มผ่านแล้วแต่ยังมีค่าปรับค้าง — คนละช่องผลกับเล่มที่จบเรียบร้อย
+        # ส่วน Pass or not ยังเป็น 0 เพราะรูปเล่มผ่านแล้ว ค่าปรับเป็นเรื่องการชำระเงิน
+        decision = SHEET_DECISION_FEE
+    else:
+        decision = SHEET_DECISION_DONE
     return {
-        "decision": "ส่งกลับแก้ไข" if items else "เสร็จสิ้น",
+        "decision": decision,
         "pass_or_not": 1 if items else 0,
         "flags": flags,
         "note": note,

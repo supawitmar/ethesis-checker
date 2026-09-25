@@ -1907,6 +1907,14 @@ function sheetWord(key){
   var pair = SHEET_TEXT[key] || SHEET_TEXT.other;
   return pair[LANG === 'en' ? 'en' : 'th'];
 }
+// หัวข้อที่ระบบตรวจเองไม่ได้ (โครงสร้างหน้าลงนาม และค่าปรับ) ที่ยังไม่ได้กด
+// เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าต้องเคลียร์ให้ครบก่อนส่งข้อมูลเข้าชีทเสมอ
+// ไม่กดปุ่มค่าปรับแล้วบันทึกได้ = ชีทได้ "เสร็จสิ้น" ทั้งที่อาจต้องเป็น "แจ้งค่าปรับ"
+// (การ์ดที่ไม่เกี่ยวกับผลตรวจนี้ถูกซ่อนไว้แล้ว จึงนับเฉพาะการ์ดที่เห็นอยู่)
+function pendingStaffChecks(){
+  return Array.from(document.querySelectorAll('.sf:not([hidden])'))
+    .filter(function(card){ return !card.querySelector('.pf.on'); });
+}
 // ข้อสีส้ม/เหลืองที่ยังไม่ได้กดผ่านหรือไม่ผ่าน
 function undecidedIssues(){
   return Array.from(document.querySelectorAll('.issue[data-zone="ORANGE"], .issue[data-zone="YELLOW"]'))
@@ -1916,6 +1924,12 @@ function undecidedIssues(){
 }
 // วันดำเนินการกรอกไว้ตั้งแต่หน้าแบบฟอร์มแล้ว หน้านี้จึงไม่ถามซ้ำ
 // ปุ่มอยู่ใน <summary> ของกล่องสรุป ถ้าไม่กัน event ไว้ การกดจะไปพับกล่องด้วย
+// เลื่อนไปการ์ดที่ยังค้าง และเปิดกล่องที่พับอยู่ให้ด้วย ไม่งั้นเลื่อนไปแล้วไม่เห็นอะไร
+function goToCard(card){
+  if (!card) return;
+  if (card.closest('details')) card.closest('details').open = true;
+  card.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
 function saveToSheet(ev, btn){
   if (ev) ev.preventDefault();
   var job = JOB_ID;
@@ -1925,9 +1939,17 @@ function saveToSheet(ev, btn){
     sheetSay('err', LANG === 'en'
       ? 'Decide the ' + left.length + ' pending item(s) first (Pass / Fail), then save.'
       : 'ยังมีข้อที่ยังไม่ได้ตัดสิน ' + left.length + ' ข้อ กรุณากดผ่านหรือไม่ผ่านให้ครบก่อนบันทึก');
-    var card = left[0];
-    if (card.closest('details')) card.closest('details').open = true;
-    card.scrollIntoView({behavior: 'smooth', block: 'center'});
+    goToCard(left[0]);
+    return;
+  }
+  var waiting = pendingStaffChecks();
+  if (waiting.length){
+    sheetSay('err', LANG === 'en'
+      ? 'Answer the ' + waiting.length + ' staff question(s) first (approval-page layout '
+        + 'and the late fine), then save.'
+      : 'ยังไม่ได้เลือกหัวข้อของเจ้าหน้าที่ ' + waiting.length + ' หัวข้อ '
+        + '(โครงสร้างหน้าลงนาม และค่าปรับ) กรุณาเลือกให้ครบก่อนบันทึก');
+    goToCard(waiting[0]);
     return;
   }
   btn.disabled = true;

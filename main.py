@@ -32,6 +32,7 @@ from checker import (
     plain_summary,
     run_check,
     sheet_row,
+    sheet_staff_pending,
     sheet_undecided,
     summary_verdict,
     zone_counts,
@@ -761,6 +762,16 @@ async def save_to_sheet(job_id: str, request: Request):
         return JSONResponse({"error": f"ยังมีข้อที่ยังไม่ได้ตัดสิน {len(left)} ข้อ "
                                       "กรุณากดผ่านหรือไม่ผ่านให้ครบก่อนบันทึกลงชีท",
                              "code": "undecided", "undecided": len(left)}, status_code=400)
+    # หัวข้อที่ระบบตรวจเองไม่ได้ (โครงสร้างหน้าลงนาม และค่าปรับ) ต้องกดให้ครบเช่นกัน
+    # ไม่งั้นช่องผลการพิจารณาจะได้ "เสร็จสิ้น" ทั้งที่อาจต้องเป็น "แจ้งค่าปรับ"
+    pending = sheet_staff_pending(report, failed, passed, staff)
+    if pending:
+        names = ", ".join(str(check.get("item") or "") for check in pending)
+        return JSONResponse({"error": f"ยังไม่ได้เลือกหัวข้อของเจ้าหน้าที่: {names} "
+                                      "กรุณาเลือกให้ครบก่อนบันทึกลงชีท",
+                             "code": "staff_pending",
+                             "pending": [str(check.get("item") or "") for check in pending]},
+                            status_code=400)
 
     student_id = str((job.get("approved") or {}).get("student_id") or "").strip()
     if not student_id:

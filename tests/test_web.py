@@ -1356,6 +1356,9 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         seeded = ("red", "orange", "queue", "checked")
         job = self._seed(**{k: v for k, v in payload.items() if k in seeded})
         body = {k: v for k, v in payload.items() if k not in seeded}
+        # หัวข้อของเจ้าหน้าที่ต้องกดครบก่อนถึงจะบันทึกได้ (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        # เทสต์ที่ไม่ได้สนใจเรื่องนี้จึงกดค่าเริ่มต้นให้ครบไว้ก่อน
+        body.setdefault("staff", ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"])
         with mock.patch.object(main, "SHEET_ENABLED", True), \
              mock.patch.object(main, "SHEET_WEBHOOK_URL",
                                "https://script.google.com/macros/s/TEST-DEPLOY/exec"), \
@@ -1399,6 +1402,33 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(sent["decision"], "ส่งกลับแก้ไข")
         self.assertTrue(sent["flags"]["LoC"])
+
+    def test_the_staff_questions_block_the_save(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้กดโครงสร้างหน้าลงนามและค่าปรับก่อนเสมอ
+
+        เซิร์ฟเวอร์ต้องตรวจซ้ำอีกชั้น ไม่เชื่อหน้าเว็บอย่างเดียว
+        """
+        response, sent = self._save(staff=[])
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertEqual(data["code"], "staff_pending")
+        self.assertIn("โครงสร้างหน้าลงนาม", data["pending"])
+        self.assertEqual(sent, {})          # ไม่ยิงไปที่ชีทเลย
+
+    def test_a_fine_changes_what_is_written(self):
+        """กดผ่านแบบมีค่าปรับ ช่องผลการพิจารณาต้องเป็น "แจ้งค่าปรับ" """
+        _response, sent = self._save(staff=["SIGNATURE_LAYOUT_OK", "PASS_FEE_YES"])
+        self.assertEqual(sent["decision"], "แจ้งค่าปรับ")
+        self.assertEqual(sent["pass_or_not"], 0)
+
+    def test_the_page_blocks_before_sending_anything(self):
+        """หน้าเว็บต้องกันไว้ก่อนด้วย ไม่ใช่ปล่อยให้ยิงแล้วค่อยได้ข้อความผิดพลาดกลับมา"""
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        self.assertIn("function pendingStaffChecks()", html)
+        guard = html.split("function saveToSheet", 1)[1]
+        self.assertLess(guard.index("pendingStaffChecks()"), guard.index("fetch('/sheet/'"))
 
     def test_a_row_that_is_already_filled_asks_before_overwriting(self):
         response, _sent = self._save(answer={"ok": False, "code": "already_filled",
