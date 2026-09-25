@@ -62,6 +62,10 @@
   .stu .lb { font-size:.74rem; font-weight:600; color:var(--ink-3); letter-spacing:.01em; }
   .stu .vl { font-weight:600; color:var(--ink); overflow-wrap:anywhere; }
   .stu .pages { font-weight:400; color:var(--ink-3); margin-left:6px; }
+  /* วันดำเนินการ — อยู่แถวเดียวกับไฟล์ที่ตรวจ เจ้าหน้าที่จะได้เทียบกับแถวในชีทได้ทันที */
+  .stu .wdate { margin-left:10px; font-size:.8rem; font-weight:400; color:var(--ink-3);
+       white-space:nowrap; }
+  .stu .wdate b { font-weight:600; color:var(--ink-2); }
   .stu .book-open { display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:4px 12px;
        border-radius:99px; font-size:.8rem; font-weight:600; color:var(--navy); text-decoration:none; white-space:nowrap;
        background:var(--navy-soft); border:1px solid #d6e2f1; transition:background .15s, border-color .15s; }
@@ -383,7 +387,13 @@
           {# เปิดไฟล์ที่ตรวจในแท็บใหม่ (เจ้าหน้าที่ขอ ก.ย. 2569) ไว้เทียบกับรายการในรายงาน
              ไม่แสดงเมื่อไฟล์ถูกลบไปแล้ว (หมดอายุ / เกินงบดิสก์) — ดู /book ใน main.py #}
           {% if has_book %}<a class="book-open" href="/book/{{ job_id }}" target="_blank" rel="noopener"
-             data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file">📄 เปิดดูไฟล์รูปเล่ม</a>{% endif %}</div></div>
+             data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file">📄 เปิดดูไฟล์รูปเล่ม</a>{% endif %}
+          {# วันดำเนินการที่กรอกไว้ตอนสั่งตรวจ (เจ้าหน้าที่ขอ ก.ย. 2569 ให้อยู่ข้างปุ่มเปิดไฟล์)
+             งานเก่าที่ตรวจก่อนมีช่องนี้จะไม่มีค่า ก็ไม่ต้องขึ้นอะไร #}
+          {% if queue_date %}<span class="wdate"><span data-th="เข้าคิว" data-en="Queued">เข้าคิว</span>
+            <b>{{ queue_date }}</b></span>{% endif %}
+          {% if checked_date %}<span class="wdate"><span data-th="ตรวจเมื่อ" data-en="Checked">ตรวจเมื่อ</span>
+            <b>{{ checked_date }}</b></span>{% endif %}</div></div>
     </div>
 
   <div class="verdict-bar">

@@ -126,6 +126,19 @@ def _iso_date(value):
     text = str(value or "").strip()
     return text if _ISO_DATE.match(text) else ""
 
+
+def _date_label(value):
+    """yyyy-mm-dd -> dd/mm/yyyy สำหรับแสดงบนหัวรายงาน (ค่าว่างหรือผิดรูป = "")
+
+    เขียนแบบเดียวกับช่อง Queue ในชีทบันทึกการตรวจ (วัน/เดือน/ปี ค.ศ.) เจ้าหน้าที่
+    จะได้เทียบกับแถวในชีทได้ตรง ๆ ไม่ต้องแปลงในหัวเอง
+    """
+    iso = _iso_date(value)
+    if not iso:
+        return ""
+    year, month, day = iso.split("-")
+    return f"{day}/{month}/{year}"
+
 # in-memory job store — {job_id: {stage, done, error, report, pdf_name, ts}}
 JOBS = {}
 # ผลตรวจต้องอยู่ให้ครบวันทำงาน ไม่ใช่ครึ่งชั่วโมง — ปุ่ม "โครงสร้างหน้าลงนาม" กับ
@@ -829,6 +842,9 @@ def result(request: Request, job_id: str):
     return templates.TemplateResponse(request=request, name="report.html", context={
         "report": job["report"], "zone_label": ZONE_LABEL, "job_id": job_id,
         "pdf_name": job["pdf_name"], "student": job.get("approved") or {},
+        # วันดำเนินการที่เจ้าหน้าที่กรอกไว้ตอนสั่งตรวจ — แสดงบนหัวรายงานให้เทียบกับชีทได้
+        "queue_date": _date_label(job.get("queue_date")),
+        "checked_date": _date_label(job.get("checked_date")),
         "has_book": _book_path(job) is not None,
         "sheet_enabled": SHEET_ENABLED,
     })

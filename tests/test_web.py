@@ -1581,6 +1581,25 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertNotIn('id="sheet-queue"', html)
         self.assertNotIn('id="sheet-checked"', html)
 
+    def test_the_header_shows_the_working_dates(self):
+        """เจ้าหน้าที่ขอ (ก.ย. 2569) ให้แสดงวันที่เข้าคิวกับวันที่ตรวจข้างปุ่มเปิดไฟล์รูปเล่ม
+
+        เขียนเป็น วัน/เดือน/ปี ค.ศ. แบบเดียวกับช่อง Queue ในชีท จะได้เทียบแถวได้ตรง ๆ
+        """
+        job = self._seed(queue="2026-09-02", checked="2026-09-24")
+        html = self.client.get(f"/result/{job}").text
+        head = html.split('data-th="ไฟล์ที่ตรวจ"', 1)[1].split("</div></div>", 1)[0]
+        self.assertIn("02/09/2026", head)
+        self.assertIn("24/09/2026", head)
+        self.assertIn('data-th="เข้าคิว"', head)
+        self.assertIn('data-th="ตรวจเมื่อ"', head)
+
+    def test_an_old_report_without_dates_shows_none(self):
+        """ควบคุมเชิงลบ — งานที่ตรวจก่อนมีช่องนี้ต้องไม่ขึ้นป้ายเปล่า ๆ"""
+        job = self._seed(queue="", checked="")
+        html = self.client.get(f"/result/{job}").text
+        self.assertNotIn('data-th="เข้าคิว"', html)
+
     def test_the_save_button_sits_next_to_the_copy_button(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ย้ายปุ่มขึ้นมาไว้ข้างปุ่มคัดลอก"""
         job = self._seed(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
