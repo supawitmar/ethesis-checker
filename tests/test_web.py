@@ -1383,6 +1383,25 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(sent["pass_or_not"], 1)
         self.assertEqual({k for k, v in sent["flags"].items() if v}, {"Cover"})
 
+    def test_the_details_sent_are_the_text_the_student_gets(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เก็บรายละเอียดที่ส่งให้นักศึกษาแก้ไขลงชีทด้วย
+
+        ต้องเป็นข้อความชุดเดียวกับปุ่ม "คัดลอก" ไม่ใช่ข้อความที่คิดขึ้นใหม่อีกชุด
+        """
+        import checker
+        _response, sent = self._save(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง",
+                                           "FORM.APPROVED_MATCH")])
+        report = main.JOBS["sheet"]["report"]
+        self.assertEqual(sent["details"], checker.plain_summary(
+            report, [], [], ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"]))
+        self.assertIn("ชื่อเรื่องไม่ตรง", sent["details"])
+
+    def test_a_finished_book_sends_no_details(self):
+        """"บันทึกแค่เฉพาะเล่มที่ส่งกลับแก้ไข" — และว่างแปลว่าไม่ต้องแตะช่องนั้นในชีท"""
+        _response, sent = self._save()
+        self.assertEqual(sent["decision"], "เสร็จสิ้น")
+        self.assertEqual(sent["details"], "")
+
     def test_the_token_goes_to_the_sheet_but_never_back_to_the_browser(self):
         response, sent = self._save()
         self.assertEqual(sent["token"], "secret-token")

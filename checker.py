@@ -3938,7 +3938,8 @@ def sheet_row(report, failed=None, passed=None, staff=None):
     """ค่าที่จะเขียนลงชีท — คิดจากรายการชุดเดียวกับข้อความสรุป จะได้ไม่ขัดกันเอง
 
     คืน dict: decision (ช่องผลการพิจารณา), pass_or_not (1/0), flags (ช่องติ๊ก),
-    note (ข้อความสั้นของช่อง Other) และ verdict ที่ใช้ตัดสิน
+    note (ข้อความสั้นของช่อง Other), details (รายละเอียดที่ส่งให้แก้ไข)
+    และ verdict ที่ใช้ตัดสิน
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
     flags = {column: False for column in SHEET_COLUMNS}
@@ -3957,11 +3958,19 @@ def sheet_row(report, failed=None, passed=None, staff=None):
         decision = SHEET_DECISION_FEE
     else:
         decision = SHEET_DECISION_DONE
+    # รายละเอียดที่ต้องส่งให้นักศึกษาแก้ไข — ข้อความชุดเดียวกับปุ่ม "คัดลอก" เป๊ะ ๆ
+    # จะได้ไม่มีทางที่ชีทกับข้อความที่ส่งนักศึกษาจะเป็นคนละเรื่องกัน
+    # เขียนเฉพาะเล่มที่ "ส่งกลับแก้ไข" (เจ้าหน้าที่สั่ง ก.ย. 2569 "บันทึกแค่เฉพาะเล่ม
+    # ที่ส่งกลับแก้ไข") เล่มที่จบแล้วไม่มีอะไรให้แก้ ช่องนี้จึงต้องว่าง ไม่ใช่เอา
+    # ถ้อยคำปิดท้ายของเล่มที่ผ่านไปกองไว้ในช่องที่ชื่อว่า "รายละเอียดที่ส่งให้แก้ไข"
+    details = (plain_summary(report, failed, passed, staff)
+               if decision == SHEET_DECISION_FIX else "")
     return {
         "decision": decision,
         "pass_or_not": 1 if items else 0,
         "flags": flags,
         "note": note,
+        "details": details,
         "verdict": summary_verdict(report, failed, passed, staff),
     }
 

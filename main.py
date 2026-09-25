@@ -804,6 +804,9 @@ async def save_to_sheet(job_id: str, request: Request):
             "pass_or_not": row["pass_or_not"],
             "flags": row["flags"],
             "note": row["note"],
+            # รายละเอียดที่ส่งให้นักศึกษาแก้ไข — ว่างเมื่อเล่มไม่ได้ถูกส่งกลับแก้ไข
+            # และช่องว่างแปลว่า "ไม่ต้องเขียน" ไม่ใช่ "เขียนทับด้วยค่าว่าง"
+            "details": row["details"],
             "overwrite": bool(payload.get("overwrite")),
         })
     except Exception as err:                      # noqa: BLE001 — ต้องไม่ล้มทั้งหน้า

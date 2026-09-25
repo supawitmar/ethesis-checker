@@ -27,8 +27,9 @@ function fakeSheet(headers, rows) {
   const width = Math.max(...grid.map((r) => r.length));
   grid.forEach((r) => { while (r.length < width) r.push(''); });
   const wrote = {};
+  const clipped = {};
   return {
-    grid, wrote,
+    grid, wrote, clipped,
     getName: () => 'กย69',
     getLastRow: () => grid.length,
     getLastColumn: () => width,
@@ -40,6 +41,9 @@ function fakeSheet(headers, rows) {
         setValue: (v) => {
           grid[row - 1][col - 1] = v;
           wrote[headers[col - 1] || ('คอลัมน์ ' + col)] = v;
+        },
+        setWrapStrategy: (how) => {
+          clipped[headers[col - 1] || ('คอลัมน์ ' + col)] = how;
         },
       };
     },
@@ -74,6 +78,7 @@ function run(sheet, body, token, storedToken, asGet) {
         getSpreadsheetTimeZone: () => 'Asia/Bangkok',
       }),
       flush() {},
+      WrapStrategy: { CLIP: 'CLIP', WRAP: 'WRAP', OVERFLOW: 'OVERFLOW' },
     },
     Session: { getScriptTimeZone: () => 'America/New_York' },
     Utilities: {
@@ -108,7 +113,7 @@ function runGet(sheet, token, storedToken) {
 const HEADERS_NEW = ['ลำดับ', 'ชื่อ-สกุล', 'รหัส', 'Queue', 'วันที่ตรวจ', 'รูปแบบไฟล์เล่ม',
                      'Template', 'ผลการพิจารณา', 'จำนวนวันที่ใช้ตรวจ', '', '', 'Pass or not',
                      'Cover', 'Abstract', 'ToC', 'Main Content', 'Reference', 'Appendix',
-                     'Biography', 'Other', ''];
+                     'Biography', 'Other', '', 'รายละเอียดที่ส่งให้แก้ไข'];
 const HEADERS_OLD = HEADERS_NEW.map((h) => (h === 'ToC' ? 'LoC' : h));
 
 function rowFor(id, queue) {
@@ -250,6 +255,59 @@ check('โทเค็นจาก Script properties ใช้ได้ทั้
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, SAVE, 'ของเก่าในไฟล์', 'test-token');
 check('ค่าใน Script properties มาก่อนค่าในไฟล์', out.ok, true);
+
+// ---- รายละเอียดที่ส่งให้นักศึกษาแก้ไข ลงช่องของมันเอง ----
+// เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เก็บข้อความเต็มที่ส่งให้นักศึกษาไว้ในชีทด้วย
+// เพิ่มเป็นคอลัมน์ V ต่อท้ายตาราง — หาจากชื่อหัวตาราง ไม่ใช่ฝังตัวอักษรคอลัมน์ไว้
+const DETAILS = ['ผลการตรวจ: ไม่ผ่าน', '', 'กรุณาแก้ไขทั้งหมด 2 จุด ดังต่อไปนี้',
+                 '1. หน้าปก ...'].join(String.fromCharCode(10));
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
+check('เขียนรายละเอียดลงช่องของมัน', sheet.wrote['รายละเอียดที่ส่งให้แก้ไข'], DETAILS);
+check('เขียนรายละเอียดแล้วยังสำเร็จ', out.ok, true);
+check('ไม่มีช่องไหนตกหล่น', (out.missing || []).join(','), '');
+// ข้อความยาวหลายบรรทัด ถ้าปล่อยให้ตัดข้อความ แถวจะสูงเป็นสิบบรรทัด ตารางอ่านไม่ได้
+check('ตั้งช่องให้ตัดส่วนเกิน', sheet.clipped['รายละเอียดที่ส่งให้แก้ไข'], 'CLIP');
+check('ไม่ไปตั้งการตัดข้อความให้ช่องอื่น', Object.keys(sheet.clipped).length, 1);
+check('ไม่ไปเขียนทับช่อง Other', sheet.wrote.Other, false);
+
+// ---- หัวตารางพิมพ์ต่างกัน ก็ยังต้องหาเจอ ----
+sheet = fakeSheet(HEADERS_NEW.map(function (h) {
+  return h === 'รายละเอียดที่ส่งให้แก้ไข' ? 'รายละเอียด' : h;
+}), [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
+check('หัวตารางชื่อ "รายละเอียด" ก็เขียนลง', sheet.wrote['รายละเอียด'], DETAILS);
+
+// ---- เล่มที่ไม่ได้ส่งกลับแก้ไข ระบบส่งข้อความว่างมา ต้องไม่ไปล้างของเดิม ----
+// (เจ้าหน้าที่สั่ง "บันทึกแค่เฉพาะเล่มที่ส่งกลับแก้ไข")
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { details: '', decision: 'เสร็จสิ้น', pass_or_not: 0 }));
+check('ไม่มีข้อความ = ไม่แตะช่องรายละเอียด',
+      Object.prototype.hasOwnProperty.call(sheet.wrote, 'รายละเอียดที่ส่งให้แก้ไข'), false);
+check('ไม่มีข้อความ = ไม่ตั้งรูปแบบช่องนั้น', Object.keys(sheet.clipped).length, 0);
+check('เล่มที่เสร็จสิ้นยังบันทึกได้ตามปกติ', out.ok, true);
+
+// ---- แท็บที่ยังไม่ได้เพิ่มคอลัมน์นี้ ต้องบอก ไม่ใช่ทิ้งข้อความหายเงียบ ๆ ----
+// (แท็บเดือนเก่ากว่ามี 34 แท็บ ส่วนใหญ่ยังไม่มีช่องนี้)
+sheet = fakeSheet(HEADERS_NEW.slice(0, HEADERS_NEW.length - 1),
+                  [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
+check('แท็บที่ไม่มีช่องรายละเอียดต้องฟ้อง',
+      (out.missing || []).join(','), 'รายละเอียดที่ส่งให้แก้ไข');
+check('แต่ช่องอื่นยังเขียนลงตามปกติ', sheet.wrote['ผลการพิจารณา'], 'ส่งกลับแก้ไข');
+
+// ---- ข้อความที่ขึ้นต้นด้วย = ต้องไม่กลายเป็นสูตร ----
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+out = run(sheet, Object.assign({}, SAVE, { details: '=SUM(A1:A9)' }));
+check('ข้อความขึ้นต้นด้วย = ต้องเก็บเป็นข้อความ',
+      sheet.wrote['รายละเอียดที่ส่งให้แก้ไข'], "'=SUM(A1:A9)");
+
+// ---- หน้าสถานะต้องบอกว่าแท็บนี้มีช่องรายละเอียดหรือยัง ----
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+check('doGet บอกว่ามีช่องรายละเอียด', runGet(sheet).details_column, true);
+sheet = fakeSheet(HEADERS_NEW.slice(0, HEADERS_NEW.length - 1),
+                  [rowFor('6736605 NSCN/M', '20/9/2026')]);
+check('doGet บอกว่ายังไม่มีช่องรายละเอียด', runGet(sheet).details_column, false);
 
 // ---- ยังไม่ได้ตั้งโทเค็นเลย ต้องบอกคนละอย่างกับโทเค็นไม่ตรง ----
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);

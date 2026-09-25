@@ -8209,6 +8209,40 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         self.assertTrue(row["flags"]["Other"])
         self.assertEqual(row["note"], "ภาษาที่เขียนไม่ตรง")
 
+    def test_the_details_are_the_text_the_student_gets(self):
+        """ช่องรายละเอียดต้องเป็นข้อความชุดเดียวกับปุ่ม "คัดลอก" เป๊ะ ๆ
+
+        เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เก็บ "รายละเอียดที่ต้องส่งให้นักศึกษาแก้ไข" ลงชีทด้วย
+        ถ้าคิดข้อความขึ้นใหม่แยกอีกชุด ชีทกับอีเมลที่ส่งนักศึกษาจะเพี้ยนกันได้โดยไม่มีใครรู้
+        """
+        report = self._report(red=[
+            ("หน้าปก", "ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", "FORM.APPROVED_MATCH"),
+        ])
+        row = checker_module.sheet_row(report)
+        self.assertEqual(row["details"], checker_module.plain_summary(report))
+        self.assertIn("ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", row["details"])
+
+    def test_the_details_follow_what_the_staff_pressed(self):
+        """ข้อสีส้มที่เจ้าหน้าที่กด "ไม่ผ่าน" ต้องอยู่ในข้อความที่เก็บลงชีทด้วย"""
+        report = self._report(orange=[("สารบัญ (หน้า ซ)", "หัวข้อหลักไม่เป็นตัวหนา",
+                                       "FORMAT.BOLD")])
+        row = checker_module.sheet_row(report, failed=["ORANGE:0"])
+        self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
+        self.assertIn("หัวข้อหลักไม่เป็นตัวหนา", row["details"])
+
+    def test_only_a_book_sent_back_keeps_details(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "บันทึกแค่เฉพาะเล่มที่ส่งกลับแก้ไข"
+
+        เล่มที่จบแล้วไม่มีอะไรให้แก้ ช่องที่ชื่อ "รายละเอียดที่ส่งให้แก้ไข" จึงต้องว่าง
+        ไม่ใช่เอาถ้อยคำปิดท้าย ("เสร็จสิ้นแล้ว ส่งหน้าลงนามภายใน 30 วัน") ไปกองไว้
+        ว่างยังแปลว่า "ไม่ต้องแตะช่องนั้น" ของเดิมที่เจ้าหน้าที่พิมพ์เองจึงไม่ถูกล้าง
+        """
+        report = self._report()
+        for staff in (["PASS_FEE_NONE"], ["PASS_FEE_YES"]):
+            row = checker_module.sheet_row(report, staff=staff)
+            self.assertIn(row["decision"], ("เสร็จสิ้น", "แจ้งค่าปรับ"))
+            self.assertEqual(row["details"], "", staff)
+
     def test_an_orange_counts_only_after_staff_presses_fail(self):
         """เจ้าหน้าที่สั่ง: ต้องตัดสินข้อสีส้ม/เหลืองก่อน ระบบไม่ตัดสินแทน"""
         report = self._report(orange=[("สารบัญ (หน้า ซ)", "หัวข้อหลักไม่เป็นตัวหนา",
