@@ -1427,6 +1427,45 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(sent["decision"], "เสร็จสิ้น")
         self.assertEqual(sent["details"], "")
 
+    def test_an_out_of_date_script_in_the_sheet_is_reported(self):
+        """Apps Script ไม่อัปเดต URL เดิมให้เอง — ต้องบอกตอนกด ไม่ใช่ให้ไปเจอเอง
+
+        เจ้าหน้าที่เจอจริง (ก.ย. 2569): แก้เรื่องความสูงแถวแล้ว deploy แต่ชีทยังทำ
+        เหมือนเดิม เพราะ URL ที่ระบบเรียกยังรันโค้ดเก่า หน้าตาเหมือน "แก้ไม่ติด"
+        """
+        response, _sent = self._save(answer={"ok": True, "tab": "กย69", "row": 12,
+                                             "script_version": "2026-01-01.9"})
+        data = response.json()
+        self.assertTrue(data["stale_script"])
+        self.assertEqual(data["script_version"], "2026-01-01.9")
+        self.assertEqual(data["expected_script_version"], main.SHEET_SCRIPT_VERSION)
+
+    def test_a_matching_script_version_is_not_flagged(self):
+        """ควบคุมเชิงลบ — เวอร์ชันตรงกันต้องไม่ขึ้นคำเตือน"""
+        response, _sent = self._save(
+            answer={"ok": True, "tab": "กย69", "row": 12,
+                    "script_version": main.SHEET_SCRIPT_VERSION})
+        self.assertFalse(response.json()["stale_script"])
+
+    def test_an_old_script_that_says_nothing_is_not_guessed_at(self):
+        """สคริปต์เก่าที่ยังไม่มีเลขเวอร์ชัน ต้องไม่ถูกเดาว่าเก่าหรือใหม่"""
+        response, _sent = self._save(answer={"ok": True, "tab": "กย69", "row": 12})
+        self.assertFalse(response.json()["stale_script"])
+
+    def test_the_version_in_the_repo_is_read_from_the_script_itself(self):
+        """เลขที่เอามาเทียบต้องมาจากไฟล์ .gs ตัวจริง ไม่ใช่ค่าที่พิมพ์ซ้ำไว้อีกที่"""
+        from pathlib import Path
+        source = (Path(main.__file__).parent / "tools" / "sheet_webhook.gs"
+                  ).read_text(encoding="utf-8")
+        self.assertIn("var SCRIPT_VERSION = '" + main.SHEET_SCRIPT_VERSION + "'", source)
+
+    def test_the_page_shows_the_warning(self):
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        self.assertIn("data.stale_script", html)
+        self.assertIn("สคริปต์ในชีทยังเป็นเวอร์ชัน", html)
+
     def test_the_token_goes_to_the_sheet_but_never_back_to_the_browser(self):
         response, sent = self._save()
         self.assertEqual(sent["token"], "secret-token")

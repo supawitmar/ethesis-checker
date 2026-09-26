@@ -315,6 +315,17 @@ sheet = fakeSheet(HEADERS_NEW.slice(0, HEADERS_NEW.length - 1),
                   [rowFor('6736605 NSCN/M', '20/9/2026')]);
 check('doGet บอกว่ายังไม่มีช่องรายละเอียด', runGet(sheet).details_column, false);
 
+// ---- เลขเวอร์ชันของสคริปต์ต้องรายงานออกมา ----
+// Apps Script ไม่อัปเดต URL เดิมให้เอง กด Save เฉย ๆ URL เดิมยังรันโค้ดเก่า และการกด
+// "New deployment" ก็ได้ URL ใหม่ ทั้งสองแบบหน้าตาเหมือน "แก้แล้วแต่ไม่มีอะไรเปลี่ยน"
+// (เจ้าหน้าที่เจอจริง ก.ย. 2569) ต้องมีเลขให้เทียบได้ว่า URL นั้นรันโค้ดเวอร์ชันไหน
+const VERSION_IN_FILE = (source.match(/var SCRIPT_VERSION = '([^']+)'/) || [])[1];
+check('ไฟล์มีเลขเวอร์ชัน', /^\d{4}-\d{2}-\d{2}\.\d+$/.test(VERSION_IN_FILE || ''), true);
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+check('หน้าสถานะบอกเลขเวอร์ชัน', runGet(sheet).script_version, VERSION_IN_FILE);
+out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
+check('คำตอบตอนบันทึกสำเร็จก็บอกเลขเวอร์ชัน', out.script_version, VERSION_IN_FILE);
+
 // ---- ยังไม่ได้ตั้งโทเค็นเลย ต้องบอกคนละอย่างกับโทเค็นไม่ตรง ----
 sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
 out = run(sheet, SAVE, '');

@@ -117,6 +117,25 @@ SHEET_WEBHOOK_TOKEN = os.getenv("SHEET_WEBHOOK_TOKEN", "").strip()
 SHEET_ENABLED = bool(SHEET_WEBHOOK_URL and SHEET_WEBHOOK_TOKEN)
 # Apps Script ที่ไม่ได้ถูกเรียกมานานต้องตื่นก่อน ครั้งแรกของวันจึงช้ากว่าปกติมาก
 SHEET_TIMEOUT = 25
+
+
+def _sheet_script_version():
+    """เลขเวอร์ชันของสคริปต์ชีทที่อยู่ใน repo — เอาไว้เทียบกับที่ชีทตอบกลับมา
+
+    Apps Script ไม่อัปเดต URL เดิมให้เอง: กด Save เฉย ๆ URL เดิมยังรันโค้ดเก่า และการกด
+    "New deployment" ก็ได้ URL ใหม่ ส่วนระบบยังเรียก URL เดิม ทั้งสองกรณีหน้าตาเหมือน
+    "แก้แล้วแต่ไม่มีอะไรเปลี่ยน" (เจ้าหน้าที่เจอจริง ก.ย. 2569 ตอนแก้เรื่องความสูงแถว)
+    ระบบจึงเทียบให้เองตอนบันทึก แล้วเตือนบนหน้าจอ ไม่ต้องให้เปิด URL ดูเอง
+    """
+    try:
+        text = (BASE / "tools" / "sheet_webhook.gs").read_text(encoding="utf-8")
+    except Exception:                               # noqa: BLE001 — ไม่มีไฟล์ก็ไม่ต้องเตือน
+        return ""
+    found = re.search(r"var SCRIPT_VERSION = '([^']+)'", text)
+    return found.group(1) if found else ""
+
+
+SHEET_SCRIPT_VERSION = _sheet_script_version()
 # ช่องวันที่บนหน้าแบบฟอร์มเป็น <input type="date"> จึงส่งมาเป็น yyyy-mm-dd เสมอ
 # ค่าที่ผิดรูปแบบทิ้งไปเงียบ ๆ ดีกว่าส่งขยะไปให้ชีทตีความเอง (วันที่สลับ วัน/เดือน ได้)
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -821,8 +840,14 @@ async def save_to_sheet(job_id: str, request: Request):
                              "queues": [str(q) for q in (answer.get("queues") or [])][:20],
                              "current": str(answer.get("current") or "")}, status_code=409
                             if answer.get("needs_overwrite") else 400)
+    # สคริปต์ในชีทเป็นคนละเวอร์ชันกับที่ repo มี = ยังไม่ได้ deploy ตัวล่าสุด
+    # (หรือ deploy เป็น URL ใหม่แล้วลืมแก้ค่าในระบบ) ต้องบอกตอนที่กด ไม่ใช่ให้ไปเจอเอง
+    live = str(answer.get("script_version") or "")
+    stale = bool(live and SHEET_SCRIPT_VERSION and live != SHEET_SCRIPT_VERSION)
     return {"ok": True, "tab": str(answer.get("tab") or ""), "row": answer.get("row"),
             "queue": str(answer.get("queue") or ""),
+            "script_version": live, "expected_script_version": SHEET_SCRIPT_VERSION,
+            "stale_script": stale,
             # ช่องที่แท็บนั้นไม่มีหัวตาราง = ติ๊กไม่ลง ต้องบอก ไม่ใช่ปล่อยให้หายเงียบ ๆ
             "missing": [str(name) for name in (answer.get("missing") or [])][:20],
             "decision": row["decision"], "flags": row["flags"], "note": row["note"]}

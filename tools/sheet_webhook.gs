@@ -19,7 +19,10 @@
  *   5. คัดลอก Web app URL ไปตั้งเป็น SHEET_WEBHOOK_URL ในระบบ
  *      และเอา TOKEN ไปตั้งเป็น SHEET_WEBHOOK_TOKEN ให้ตรงกัน
  *   6. เปิด URL นั้นในเบราว์เซอร์ครั้งเดียวเพื่อดูว่าตอบ {"ok":true,...} (doGet
- *      เป็นการอ่านอย่างเดียว ไม่เขียนอะไรลงชีท)
+ *      เป็นการอ่านอย่างเดียว ไม่เขียนอะไรลงชีท) — ดูค่า script_version ด้วยว่าตรงกับ
+ *      SCRIPT_VERSION ของไฟล์ที่เพิ่งวาง ถ้าไม่ตรง แปลว่า URL นี้ยังรันโค้ดเก่า
+ *      ให้ไป Deploy > Manage deployments > ดินสอ > Version: New version (URL ไม่เปลี่ยน)
+ *      **อย่ากด New deployment** เพราะจะได้ URL ใหม่ ส่วนระบบยังเรียก URL เดิม
  *
  * สิ่งที่สคริปต์นี้แตะได้มีแค่ ช่องวันที่ตรวจ ช่องผลการพิจารณา ช่อง Pass or not ถึง Other
  * และช่อง "รายละเอียดที่ต้องแก้ไข" (ถ้ามี) ของ "แถวเดียว" ที่หาเจอ
@@ -31,6 +34,17 @@
  * สคริปต์ตั้งช่องนั้นเป็น "ตัดส่วนเกิน" (clip) และล็อกความสูงแถวให้เองทุกครั้งที่เขียน
  * แถวจึงไม่ยืดตามจำนวนบรรทัดของข้อความ (ดู DETAILS_ROW_HEIGHT)
  */
+
+/**
+ * เลขเวอร์ชันของไฟล์นี้ — **ต้องขยับทุกครั้งที่แก้ไฟล์นี้**
+ *
+ * มีไว้ตอบคำถามเดียว: "URL ที่ระบบเรียกอยู่ รันโค้ดเวอร์ชันไหน"
+ * Apps Script ไม่ได้อัปเดต URL เดิมให้อัตโนมัติ — กด Save เฉย ๆ URL เดิมยังรันโค้ดเก่า
+ * และการกด "New deployment" ก็ได้ URL ใหม่ ส่วน URL ที่ระบบตั้งไว้ยังชี้ของเก่าอยู่
+ * ทั้งสองกรณีหน้าตาเหมือน "แก้แล้วแต่ไม่มีอะไรเปลี่ยน" (เจ้าหน้าที่เจอจริง ก.ย. 2569
+ * ตอนแก้เรื่องความสูงแถว) เปิด Web app URL ในเบราว์เซอร์แล้วดูค่านี้ได้ทุกเมื่อ
+ */
+var SCRIPT_VERSION = '2026-09-27.1';
 
 // ใส่ตรงนี้ก็ได้ แต่ค่าจะหายทุกครั้งที่วางสคริปต์ฉบับใหม่ทับ — ที่ปลอดภัยกว่าคือ
 // Project Settings > Script properties ชื่อ TOKEN (ดูวิธีติดตั้งข้อ 3)
@@ -292,6 +306,7 @@ function doGet() {
     if (!col_(map, FLAG_COLUMNS[i].names)) missing.push(FLAG_COLUMNS[i].key);
   }
   return json_({ok: !!map && !!token_(), tab: sheet.getName(),
+                script_version: SCRIPT_VERSION,
                 token_set: !!token_(),
                 header_row: map ? map.__row__ : 0,
                 missing_columns: missing,
@@ -402,6 +417,7 @@ function doPost(e) {
     }
     SpreadsheetApp.flush();
     return json_({ok: true, tab: tab, row: row, missing: missing,
+                  script_version: SCRIPT_VERSION,
                   queue: found[found.length - 1].queue});
   } catch (err) {
     return json_({ok: false, code: 'script_error', error: String(err)});

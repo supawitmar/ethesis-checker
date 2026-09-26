@@ -2027,9 +2027,20 @@ function saveToSheet(ev, btn){
         var warn = gone ? (LANG === 'en'
                             ? ' (no column for ' + gone + ' in this tab — fill it in yourself)'
                             : ' (แท็บนี้ไม่มีช่อง ' + gone + ' กรุณากรอกเอง)') : '';
-        sheetSay(gone ? 'err' : 'ok',
+        // สคริปต์ในชีทเป็นคนละเวอร์ชันกับที่ระบบมี = ยังไม่ได้ deploy ตัวล่าสุด
+        // ของที่เพิ่งแก้จึงยังไม่มีผล ต้องบอกตอนนี้ ไม่ใช่ให้ไปเจอเองว่าไม่มีอะไรเปลี่ยน
+        var old = data.stale_script
+          ? (LANG === 'en'
+              ? ' (the sheet still runs script version ' + data.script_version
+                + '; this system has ' + data.expected_script_version
+                + ' — deploy a new version)'
+              : ' (สคริปต์ในชีทยังเป็นเวอร์ชัน ' + data.script_version
+                + ' ระบบมีเวอร์ชัน ' + data.expected_script_version
+                + ' กรุณา Deploy เวอร์ชันใหม่)')
+          : '';
+        sheetSay((gone || data.stale_script) ? 'err' : 'ok',
                  (LANG === 'en' ? 'Saved to the sheet ' : 'บันทึกลงชีทแล้ว ')
-                 + where + ' — ' + data.decision + warn);
+                 + where + ' — ' + data.decision + warn + old);
         return;
       }
       if (data.needs_overwrite){
