@@ -578,8 +578,9 @@ class ChapterCountMessageTests(unittest.TestCase):
     """จำนวนบทไม่ตรงประกาศ ต้องบอกว่า "ผิดยังไง" และบอกขั้นตอนขอยกเว้นด้วย
 
     เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังส่งผลตรวจเล่มจริง 6237391 EGCH/M ที่มี 5 บท:
-    ของเดิมเขียนแค่ "พบ 5 บท / ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท" ซึ่งถูกแต่
-    นักศึกษาต้องไปนับเอาเองว่าขาดบทไหน และไม่มีทางรู้ว่าขอคงโครงบทเดิมไว้ได้อย่างไร
+    ของเดิมเขียนแค่ "ทั้งเล่ม / พบ 5 บท / ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท"
+    ซึ่งถูกแต่นักศึกษาต้องไปนับเอาเองว่าขาดบทไหน ไม่รู้ว่าต้องไปแก้ตรงไหนของเล่ม
+    และไม่มีทางรู้ว่าขอคงโครงบทเดิมไว้ได้อย่างไร
     """
 
     def _row(self, found, canon=None, thai_book=False):
@@ -614,7 +615,14 @@ class ChapterCountMessageTests(unittest.TestCase):
     def test_a_book_with_too_many_chapters_names_none(self):
         """บทเกินไม่มี "บทที่ขาด" ให้บอก — บรรทัดที่พบบอกว่าเกินกี่บทอยู่แล้ว"""
         _found, expected = self._row(8)
-        self.assertEqual(expected, "ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท")
+        self.assertEqual(expected, "ตามประกาศ รูปแบบดั้งเดิมกำหนดให้มีครบ 6 บท")
+
+    def test_the_sentence_sent_to_students_carries_no_year(self):
+        """เจ้าหน้าที่แก้ถ้อยคำมาเอง (ก.ย. 2569) ให้อ้าง "ประกาศ" ลอย ๆ ไม่ต้องมีเลขปี"""
+        for found in (3, 5, 8):
+            _f, expected = self._row(found)
+            self.assertNotIn("2569", expected)
+            self.assertIn("ตามประกาศ", expected)
 
     def test_the_sentence_never_ends_with_the_chapter_name(self):
         """กันไม่ให้ข้อความสรุปเพี้ยนเป็น 'ต้องแก้เป็น "ชื่อบท"'
@@ -628,6 +636,19 @@ class ChapterCountMessageTests(unittest.TestCase):
             self.assertFalse(expected.rstrip().endswith('"'), expected)
             issue = {"expected": expected, "rule_id": "BODY.OPTION1"}
             self.assertEqual(checker_module._corrected_value(issue), "")
+
+    def test_it_says_both_places_must_be_fixed(self):
+        """เจ้าหน้าที่ทัก (ก.ย. 2569) ว่าควรบอกว่าผิดทั้งเนื้อหารายบทและสารบัญ
+
+        บทที่เพิ่มหรือตัดต้องตรงกันทั้งสองที่ แก้ที่เดียวแล้วเล่มขัดกันเองทันที
+        (แล้วจะไปโดนกฎ "ชื่อบทในสารบัญไม่ตรงกับเนื้อหา" ต่ออีกรอบ)
+        """
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("check_body_chapter_count", 1)[1].split("ชื่อบทตามประกาศ", 1)[0]
+        self.assertIn('where = "ทั้งเล่ม (สารบัญและเนื้อหา)"', block)
+        self.assertEqual(block.count('"ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา"'), 2)
+        # ทั้งสองรูปแบบต้องใช้ตำแหน่งเดียวกัน ไม่ใช่รูปแบบเดียวได้ของใหม่
+        self.assertEqual(block.count("rep.add(\"RED\", \"body\", where,"), 2)
 
     def test_the_student_is_told_how_to_ask_to_keep_the_structure(self):
         """ถ้อยคำของเจ้าหน้าที่ต้องติดไปกับข้อนั้นในข้อความที่ส่งนักศึกษา"""
@@ -663,6 +684,8 @@ class ChapterCountMessageTests(unittest.TestCase):
         lines = [self._row(5)[0], self._row(5)[1], self._row(3)[1], self._row(8)[1],
                  self._row(5, thai_book=True)[1]]
         lines += checker_module.CHAPTER_COUNT_NOTICE.split(chr(10))
+        lines += ["ทั้งเล่ม (สารบัญและเนื้อหา)",
+                  "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา"]
         for line in lines:
             problems = i18n.translation_problems(line, i18n.tr_en(line, pairs))
             self.assertEqual(problems, [], (line, problems))

@@ -5162,10 +5162,12 @@ def chapter_count_expected(found, canon, thai_book):
     ไปเขียนว่า 'ต้องแก้เป็น "..."' ซึ่งจะกลายเป็นสั่งให้เปลี่ยนชื่อบท ทั้งที่ปัญหาคือ
     "บทนั้นยังไม่มีในเล่ม" คนละเรื่องกัน จึงเอาประโยคจำนวนบทไว้ท้ายเสมอ
     """
-    tail = f"ประกาศ 2569 รูปแบบดั้งเดิมกำหนดให้มีครบ {len(canon)} บท"
+    # ไม่ใส่ปีของประกาศในประโยคนี้ (เจ้าหน้าที่แก้ถ้อยคำมาเอง ก.ย. 2569) — ข้อความ
+    # ที่ส่งนักศึกษาอ้าง "ประกาศ" ลอย ๆ พอ เลขปีเป็นเรื่องของเจ้าหน้าที่กับแหล่งอ้างอิง
+    tail = f"ตามประกาศ รูปแบบดั้งเดิมกำหนดให้มีครบ {len(canon)} บท"
     missing = list(range(found + 1, len(canon) + 1))
     if not missing:
-        return f"ประกาศ 2569: รูปแบบดั้งเดิมต้องมี {len(canon)} บท"
+        return tail
     if len(missing) == 1:
         title = canon[missing[0] - 1][0 if thai_book else 1]
         return f'เล่มนี้ยังไม่มีบทที่ {missing[0]} คือ "{title}" {tail}'
@@ -6024,16 +6026,21 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_chapter_count']:
         thai_book = book_wording_language == "thai"
+        # ตำแหน่งต้องบอกว่าไปแก้ที่ไหน (เจ้าหน้าที่ทัก ก.ย. 2569) — บทที่เพิ่มหรือตัด
+        # ต้องตรงกันทั้งในสารบัญและในเนื้อหา แก้ที่เดียวแล้วเล่มจะขัดกันเองทันที
+        # ของเดิมเขียนแค่ "ทั้งเล่ม" ซึ่งไม่ได้บอกอะไรเลยว่าต้องไปทำอะไรตรงไหน
+        where = "ทั้งเล่ม (สารบัญและเนื้อหา)"
         if option == 1 and len(body_ch) != 6:
-            rep.add("RED", "body", "ทั้งเล่ม",
+            rep.add("RED", "body", where,
                     chapter_count_found(len(body_ch), 6, 6),
                     chapter_count_expected(len(body_ch), CANONICAL_OPT1, thai_book),
-                    "ปรับโครงบทตามประกาศ", "BODY.OPTION1",
+                    "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1",
                     notice=CHAPTER_COUNT_NOTICE)
         if option == 2 and len(body_ch) not in (2, 3):
-            rep.add("RED", "body", "ทั้งเล่ม",
+            rep.add("RED", "body", where,
                     chapter_count_found(len(body_ch), 2, 3),
-                    "รูปแบบตีพิมพ์ต้องมี 2-3 บท", "", "BODY.OPTION2",
+                    "รูปแบบตีพิมพ์ต้องมี 2-3 บท",
+                    "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION2",
                     notice=CHAPTER_COUNT_NOTICE)
 
     # ---------- ชื่อบทเทียบประกาศ (สารบัญ + เนื้อหา รวมเป็นข้อเดียวต่อบท) ----------
