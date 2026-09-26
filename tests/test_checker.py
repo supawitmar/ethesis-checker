@@ -8683,7 +8683,7 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         self.assertEqual(row["note"], "ภาษาที่เขียนไม่ตรง")
 
     def test_the_details_are_the_text_the_student_gets(self):
-        """ช่องรายละเอียดต้องเป็นข้อความชุดเดียวกับปุ่ม "คัดลอก" เป๊ะ ๆ
+        """ช่องรายละเอียดต้องเป็นรายการจุดต้องแก้ชุดเดียวกับปุ่ม "คัดลอก" เป๊ะ ๆ
 
         เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้เก็บ "รายละเอียดที่ต้องส่งให้นักศึกษาแก้ไข" ลงชีทด้วย
         ถ้าคิดข้อความขึ้นใหม่แยกอีกชุด ชีทกับอีเมลที่ส่งนักศึกษาจะเพี้ยนกันได้โดยไม่มีใครรู้
@@ -8692,8 +8692,33 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
             ("หน้าปก", "ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", "FORM.APPROVED_MATCH"),
         ])
         row = checker_module.sheet_row(report)
-        self.assertEqual(row["details"], checker_module.plain_summary(report))
+        self.assertEqual(row["details"],
+                         checker_module.plain_summary(report, with_verdict=False,
+                                                      with_closing=False))
         self.assertIn("ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", row["details"])
+
+    def test_the_details_leave_out_the_verdict_line_and_the_fine(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ข้อความที่เอาไปใส่ ในช่อง v ไม่เอาข้อความค่าปรับ
+        กับ ผลการตรวจ: ไม่ผ่าน"
+
+        ช่องผลการพิจารณาในแถวเดียวกันบอกไปแล้วว่า "ส่งกลับแก้ไข" ส่วนย่อหน้าค่าปรับ
+        กับช่องทางติดต่อเป็นถ้อยคำของอีเมล ไม่ใช่จุดที่ต้องแก้ของเล่ม
+        ช่องนี้จึงเริ่มที่บรรทัด "กรุณาแก้ไขทั้งหมด N จุด" เลย
+        """
+        report = self._report(red=[
+            ("หน้าปก", "ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", "FORM.APPROVED_MATCH"),
+        ])
+        for staff in (["LATE_FEE_NONE"], ["LATE_FEE_YES"]):
+            details = checker_module.sheet_row(report, staff=staff)["details"]
+            self.assertTrue(details.startswith("กรุณาแก้ไขทั้งหมด 1 จุด"), staff)
+            self.assertNotIn("ผลการตรวจ", details)
+            self.assertNotIn("ค่าปรับ", details)
+            self.assertNotIn("Line Official Account", details)
+            self.assertIn("ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", details)
+        # ข้อความที่ส่งนักศึกษา (ปุ่ม "คัดลอก") ยังต้องมีครบเหมือนเดิม
+        full = checker_module.plain_summary(report, staff=["LATE_FEE_YES"])
+        self.assertTrue(full.startswith("ผลการตรวจ: ไม่ผ่าน"))
+        self.assertIn("ค่าปรับ", full)
 
     def test_the_details_follow_what_the_staff_pressed(self):
         """ข้อสีส้มที่เจ้าหน้าที่กด "ไม่ผ่าน" ต้องอยู่ในข้อความที่เก็บลงชีทด้วย"""

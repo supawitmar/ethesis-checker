@@ -3820,7 +3820,8 @@ def _summary_block(lines, items, number):
     return number
 
 
-def plain_summary(report, failed=None, passed=None, staff=None):
+def plain_summary(report, failed=None, passed=None, staff=None,
+                  with_verdict=True, with_closing=True):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
@@ -3828,6 +3829,10 @@ def plain_summary(report, failed=None, passed=None, staff=None):
       "กรุณาแก้ไขทั้งหมด N จุด"  = ข้อแดง + ข้อที่กดไม่ผ่าน   (เท่ากับกล่อง "ต้องแก้")
       "รอยืนยัน M จุด"           = ข้อส้มที่ยังไม่ได้กด         (เท่ากับกล่อง "รอยืนยัน")
     เลขข้อไล่ต่อกันข้ามสองกลุ่ม นักศึกษาอ้าง "ข้อ 3" ได้โดยไม่ซ้ำกัน
+
+    with_verdict / with_closing ปิดหัวเรื่อง "ผลการตรวจ: ..." และถ้อยคำปิดท้าย
+    (ค่าปรับ วิธีส่งกลับ ช่องทางติดต่อ) ไว้สำหรับช่องรายละเอียดในชีท ซึ่งต้องการ
+    เฉพาะ "จุดที่ต้องแก้" — ดู sheet_row()
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
     pending = _dedupe_issues(issues_pending(report, failed, passed))
@@ -3841,7 +3846,7 @@ def plain_summary(report, failed=None, passed=None, staff=None):
                for _check, choice in picked]
     # ถ้อยคำชุด "ผ่าน" ขึ้นต้นด้วย "การส่ง E-thesis ... เสร็จสิ้นแล้ว" อยู่แล้ว
     finished = any(check.get("applies_to") == "pass" for check, _choice in picked)
-    lines = [f"ผลการตรวจ: {verdict}"]
+    lines = [f"ผลการตรวจ: {verdict}"] if with_verdict else []
     if not items and not pending:
         # "ผลการตรวจ: ผ่าน" ตามด้วย "ไม่พบจุดที่ต้องแก้ไข" อ่านรวมกันว่า "จบแล้ว
         # ไม่ต้องทำอะไร" นักศึกษาหยุดอ่านตรงนั้น แล้วพลาดกำหนดส่งหน้าลงนามภายใน
@@ -3856,8 +3861,9 @@ def plain_summary(report, failed=None, passed=None, staff=None):
     if pending:
         lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
         number = _summary_block(lines, pending, number)
-    for text in closing:
-        lines.append("\n" + text.strip())
+    if with_closing:
+        for text in closing:
+            lines.append("\n" + text.strip())
     return "\n".join(lines).strip()
 
 
@@ -3968,8 +3974,9 @@ SHEET_FEE_CHOICE = "PASS_FEE_YES"
 def _sheet_row_fingerprint(report, failed, passed, staff):
     """ค่าที่ "เขียนลงชีทจริง" ของคำตอบชุดหนึ่ง — ไม่นับข้อความรายละเอียด
 
-    ข้อความรายละเอียดเปลี่ยนตามถ้อยคำปิดท้ายทุกปุ่มอยู่แล้ว ถ้านับด้วยจะกลายเป็นว่า
-    ทุกหัวข้อบังคับให้กด ซึ่งขัดกับสิ่งที่เจ้าหน้าที่สั่ง
+    ข้อความรายละเอียดขยับได้จากคำตอบที่เพิ่ม/ตัดจุดต้องแก้ในส่วนที่ติ๊กไว้อยู่แล้ว
+    ถ้านับด้วยจะกลายเป็นว่าหัวข้อพวกนั้นบังคับให้กด ซึ่งขัดกับสิ่งที่เจ้าหน้าที่สั่ง
+    (ให้บังคับแค่ข้อสีส้ม/เหลือง โครงสร้างหน้าลงนาม และค่าปรับของเล่มที่ผ่าน)
     """
     row = sheet_row(report, failed, passed, staff)
     return (row["decision"], row["pass_or_not"],
@@ -4054,12 +4061,17 @@ def sheet_row(report, failed=None, passed=None, staff=None):
         decision = SHEET_DECISION_FEE
     else:
         decision = SHEET_DECISION_DONE
-    # รายละเอียดที่ต้องส่งให้นักศึกษาแก้ไข — ข้อความชุดเดียวกับปุ่ม "คัดลอก" เป๊ะ ๆ
-    # จะได้ไม่มีทางที่ชีทกับข้อความที่ส่งนักศึกษาจะเป็นคนละเรื่องกัน
+    # รายละเอียดที่ต้องส่งให้นักศึกษาแก้ไข — รายการจุดที่ต้องแก้ชุดเดียวกับปุ่ม
+    # "คัดลอก" เป๊ะ ๆ จะได้ไม่มีทางที่ชีทกับข้อความที่ส่งนักศึกษาจะเป็นคนละเรื่องกัน
     # เขียนเฉพาะเล่มที่ "ส่งกลับแก้ไข" (เจ้าหน้าที่สั่ง ก.ย. 2569 "บันทึกแค่เฉพาะเล่ม
     # ที่ส่งกลับแก้ไข") เล่มที่จบแล้วไม่มีอะไรให้แก้ ช่องนี้จึงต้องว่าง ไม่ใช่เอา
     # ถ้อยคำปิดท้ายของเล่มที่ผ่านไปกองไว้ในช่องที่ชื่อว่า "รายละเอียดที่ต้องแก้ไข"
-    details = (plain_summary(report, failed, passed, staff)
+    # ตัดหัวเรื่อง "ผลการตรวจ: ไม่ผ่าน" กับย่อหน้าค่าปรับออก (เจ้าหน้าที่สั่ง ก.ย. 2569
+    # "ข้อความที่เอาไปใส่ ในช่อง v ไม่เอาข้อความค่าปรับ กับ ผลการตรวจ: ไม่ผ่าน")
+    # ช่องนี้อยู่แถวเดียวกับช่องผลการพิจารณาที่บอกไปแล้วว่าส่งกลับแก้ไข ส่วนค่าปรับ
+    # กับช่องทางติดต่อเป็นถ้อยคำของอีเมล ไม่ใช่ "จุดที่ต้องแก้" ของเล่ม
+    details = (plain_summary(report, failed, passed, staff,
+                             with_verdict=False, with_closing=False)
                if decision == SHEET_DECISION_FIX else "")
     return {
         "decision": decision,

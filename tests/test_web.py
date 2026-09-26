@@ -1418,8 +1418,12 @@ class SavingTheResultToTheSheet(unittest.TestCase):
                                            "FORM.APPROVED_MATCH")])
         report = main.JOBS["sheet"]["report"]
         self.assertEqual(sent["details"], checker.plain_summary(
-            report, [], [], ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"]))
+            report, [], [], ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"],
+            with_verdict=False, with_closing=False))
         self.assertIn("ชื่อเรื่องไม่ตรง", sent["details"])
+        # "ไม่เอาข้อความค่าปรับ กับ ผลการตรวจ: ไม่ผ่าน" (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        self.assertNotIn("ผลการตรวจ", sent["details"])
+        self.assertNotIn("ค่าปรับ", sent["details"])
 
     def test_a_finished_book_sends_no_details(self):
         """"บันทึกแค่เฉพาะเล่มที่ส่งกลับแก้ไข" — และว่างแปลว่าไม่ต้องแตะช่องนั้นในชีท"""
