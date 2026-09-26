@@ -661,6 +661,11 @@ class ChapterCountMessageTests(unittest.TestCase):
         self.assertIn("ส่งผ่านระบบ e-document", summary)
         self.assertIn("https://drive.google.com/drive/folders/", summary)
         self.assertIn("ระบุชื่อบทและจำนวนบทที่ประสงค์จะคงไว้", summary)
+        # บรรทัดนี้มีคำว่า "เจ้าหน้าที่" ซึ่งเป็นคำที่ใช้คัดบรรทัดของเจ้าหน้าที่ออกจาก
+        # ข้อความที่ส่งนักศึกษา — ถ้าเอาตัวกรองนั้นมาครอบ ถ้อยคำทั้งย่อหน้าจะหายไปเงียบ ๆ
+        self.assertIn("กรุณาติดต่อเจ้าหน้าที่หลักสูตร", summary)
+        self.assertTrue(checker_module.is_staff_only_line(
+            checker_module.CHAPTER_COUNT_NOTICE.split(chr(10))[0]))
         # ต้องไม่กลายเป็นคำสั่งให้เปลี่ยนชื่อบท
         self.assertNotIn("ต้องแก้เป็น", summary)
 
@@ -673,6 +678,45 @@ class ChapterCountMessageTests(unittest.TestCase):
         summary = checker_module.plain_summary(report)
         self.assertNotIn("e-document", summary)
         self.assertNotIn("drive.google.com", summary)
+
+    def test_the_sheet_row_ticks_toc_body_and_other(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ต้องติ้กที่ toc และเนื้อหาพร้อมทั้ง other ด้วย"
+
+        บทที่เพิ่มหรือตัดกระทบทั้งสารบัญและเนื้อหา ส่วน Other คือช่องที่สำนักงานใช้
+        ทำสถิติเรื่องที่ไม่ใช่ความผิดของส่วนใดส่วนหนึ่งของเล่ม
+        """
+        issue = {"location": "ทั้งเล่ม (สารบัญและเนื้อหา)",
+                 "found": checker_module.chapter_count_found(5, 6, 6),
+                 "expected": checker_module.chapter_count_expected(
+                     5, checker_module.CANONICAL_OPT1, False),
+                 "rule_id": "BODY.OPTION1"}
+        issue["section"] = checker_module.summary_section(issue)
+        self.assertEqual(checker_module.sheet_columns_of(issue),
+                         {"LoC", "Main Content", "Other"})
+
+    def test_a_chapter_title_issue_does_not_tick_other(self):
+        """ควบคุมเชิงลบ — แยกด้วยรหัสกฎไม่ได้ เพราะข้อชื่อบทใช้รหัสเดียวกัน"""
+        issue = {"location": "บทที่ 2 ในสารบัญ (หน้า vi) และในเนื้อหา (หน้า 6)",
+                 "found": 'ชื่อบทในเล่มเขียนว่า "LITERATURE REVIEWS"',
+                 "expected": 'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"',
+                 "rule_id": "BODY.OPTION1"}
+        issue["section"] = checker_module.summary_section(issue)
+        columns = checker_module.sheet_columns_of(issue)
+        self.assertNotIn("Other", columns)
+        self.assertIn("Main Content", columns)
+
+    def test_the_whole_row_ticks_the_three_columns(self):
+        """ตรวจถึงค่าที่ส่งเข้าชีทจริง ไม่ใช่แค่ฟังก์ชันแปลงช่อง"""
+        rep = checker_module.Report()
+        rep.add("RED", "body", "ทั้งเล่ม (สารบัญและเนื้อหา)", *self._row(5),
+                "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1",
+                notice=checker_module.CHAPTER_COUNT_NOTICE)
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        row = checker_module.sheet_row(report, staff=["SIGNATURE_LAYOUT_OK",
+                                                      "LATE_FEE_NONE"])
+        self.assertEqual({name for name, on in row["flags"].items() if on},
+                         {"LoC", "Main Content", "Other"})
+        self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
 
     def test_every_new_line_has_an_english_version(self):
         """ด่าน --corpus จับได้เฉพาะเมื่อเล่มทดสอบบังเอิญบทไม่ครบ จึงต้องตรึงไว้ตรงนี้
