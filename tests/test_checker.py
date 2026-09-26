@@ -4627,6 +4627,46 @@ class TwoColumnsOnTheSameRowStayOnOneLine(unittest.TestCase):
         lines = checker_module._group_into_lines(self._chars(rows))
         self.assertGreater(len(lines), 1)
 
+    @staticmethod
+    def _sized(rows):
+        """rows = (top, x0, size, text) — ใช้ทดสอบตัวห้อย/ตัวยกที่ฟอนต์เล็กกว่า"""
+        return [{"text": t, "top": top, "x0": x0, "x1": x0 + size * 0.6,
+                 "size": size, "upright": True} for top, x0, size, t in rows]
+
+    def test_a_subscript_stays_on_its_line(self):
+        """ตัวห้อยของสูตรเคมีต้องอยู่บรรทัดเดียวกับข้อความ ไม่ใช่แยกไปต่อท้ายบรรทัดถัดไป
+
+        เล่มจริง 6237391 EGCH/M (ก.ย. 2569) หน้าลงนามวาง CO2 ไว้แบบนี้
+            top=148.8 size=14  "BIOMETHANE ... VIA  METHANATION"   (เว้นช่องไว้ให้ CO2)
+            top=153.1 size=9   "CO2"
+        ถ้าแยกบรรทัด ระบบจะอ่านได้ "...VIA METHANATION" แล้วตามด้วย "CO2" คนละบรรทัด
+        แล้วฟ้องว่าขาด "CO2" และมี "CO2" เกินมาพร้อมกัน ทั้งที่เล่มพิมพ์ถูกต้อง
+        """
+        rows = [(148.8, 94.0, 14.0, "VIA"), (148.8, 390.0, 14.0, "METHANATION"),
+                (153.1, 370.0, 9.0, "CO2")]
+        lines = checker_module._group_into_lines(self._sized(rows))
+        self.assertEqual(len(lines), 1)
+        # เรียงตามพิกัด x ทำให้ CO2 กลับไปอยู่ในช่องว่างที่เว้นไว้ ไม่ใช่ต่อท้าย
+        self.assertEqual([c["text"] for c in sorted(lines[0], key=lambda c: c["x0"])],
+                         ["VIA", "CO2", "METHANATION"])
+
+    def test_only_a_smaller_font_gets_the_extra_room(self):
+        """ควบคุมเชิงลบ — อักขระขนาดเท่าบรรทัดที่ต่ำลง 4.3 pt ยังต้องเป็นคนละบรรทัด
+
+        ถ้าผ่อนให้ทุกขนาด การแยกบรรทัดปกติจะหลวมลงทั้งเล่ม
+        """
+        rows = [(148.8, 94.0, 14.0, "A"), (153.1, 370.0, 14.0, "B")]
+        lines = checker_module._group_into_lines(self._sized(rows))
+        self.assertEqual(len(lines), 2)
+
+    def test_a_small_font_on_the_next_line_still_splits(self):
+        """ควบคุมเชิงลบ — บรรทัดถัดไปที่ฟอนต์เล็กกว่า (เชิงอรรถ/คำอธิบายใต้ภาพ)
+        ห่างตามระยะบรรทัดจริง ต้องไม่ถูกดูดขึ้นไปรวมกับบรรทัดบน
+        """
+        rows = [(148.8, 94.0, 14.0, "A"), (162.0, 94.0, 9.0, "B")]
+        lines = checker_module._group_into_lines(self._sized(rows))
+        self.assertEqual(len(lines), 2)
+
     def test_the_student_slot_is_the_left_column(self):
         page = NEWLINE.join([
             "……………………………………… ………………………………………",

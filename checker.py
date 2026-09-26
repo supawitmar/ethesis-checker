@@ -104,6 +104,22 @@ def _page_text(page):
 # 13-18 pt ส่วนสองคอลัมน์ในแถวเดียวกันเยื้องกันไม่ถึง 2 pt ค่านี้จึงแยกสองอย่างได้ชัด
 _LINE_TOLERANCE = 3.0
 
+# ตัวห้อย/ตัวยก (เช่น เลข 2 ของ CO2) วางต่ำหรือสูงกว่าบรรทัดเกิน 3 pt และ **ฟอนต์เล็กลง**
+# ถ้าใช้ค่าเดียวกับบรรทัดปกติ มันจะกลายเป็นคนละบรรทัด แล้วถูกเรียงตามลำดับบนลงล่าง
+# ไปต่อท้ายบรรทัดถัดไป — เล่มจริง 6237391 EGCH/M (ก.ย. 2569) หน้าลงนามเป็นแบบนี้
+#
+#   top=148.8 size=14  "BIOMETHANE FUEL FROM BIOGAS VIA  METHANATION"   <- ช่องว่างที่ CO2 ควรอยู่
+#   top=153.1 size=9   "CO2"                                            <- ตัวห้อย ต่ำลง 4.3 pt
+#
+# ระบบจึงอ่านได้เป็น "...VIA METHANATION" แล้วตามด้วย "CO2" คนละบรรทัด ทำให้ฟ้องว่า
+# ขาด "CO2" และมี "CO2" เกินมาพร้อมกัน ทั้งที่เล่มพิมพ์ถูกต้อง (เจ้าหน้าที่แจ้ง
+# "มันก็คือ CO2 เหมือนกันนั่นแหละ")
+#
+# ผ่อนเฉพาะอักขระที่ฟอนต์เล็กกว่าบรรทัดอย่างชัดเจน จึงไม่กระทบการแยกบรรทัดปกติ
+# (บรรทัดจริงห่างกัน 13-18 pt ซึ่งเกินค่านี้อยู่มาก)
+_SUBSCRIPT_TOLERANCE = 7.0
+_SUBSCRIPT_SIZE_RATIO = 0.85
+
 
 def _group_into_lines(chars):
     """จัดอักขระเป็นบรรทัดด้วย "ระยะห่างจริง" ไม่ใช่ช่องตายตัว
@@ -123,12 +139,17 @@ def _group_into_lines(chars):
     เทียบระยะกับ "ตัวแรกของบรรทัด" ไม่ใช่ตัวก่อนหน้า เพื่อไม่ให้บรรทัดยาวไหลไปเรื่อย ๆ
     ทีละ 3 pt จนกลืนบรรทัดถัดไป
     """
-    lines, start = [], None
+    lines, start, start_size = [], None, 0.0
     for c in sorted(chars, key=lambda c: (float(c['top']), float(c['x0']))):
         top = float(c['top'])
-        if start is None or top - start > _LINE_TOLERANCE:
+        size = float(c.get('size') or 0)
+        # ตัวห้อย/ตัวยกของสูตรเคมี: ฟอนต์เล็กกว่าบรรทัดชัดเจน และเยื้องไม่เกินหนึ่งช่วงสั้น ๆ
+        subscript = (start is not None and start_size
+                     and size and size <= start_size * _SUBSCRIPT_SIZE_RATIO
+                     and top - start <= _SUBSCRIPT_TOLERANCE)
+        if start is None or (top - start > _LINE_TOLERANCE and not subscript):
             lines.append([])
-            start = top
+            start, start_size = top, size
         lines[-1].append(c)
     return lines
 
