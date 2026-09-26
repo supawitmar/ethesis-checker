@@ -3607,6 +3607,64 @@ class AbstractBoldTellsTheStudentTheRule(unittest.TestCase):
         self.assertIn("no bold text", i18n.tr_en(self.RULE, pairs))
 
 
+class ACaseOnlyTitleDifferenceSaysWhereItIs(unittest.TestCase):
+    """ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ ต้องบอกว่าคำไหน ไม่ใช่โชว์สองบรรทัดที่เหมือนกันเป๊ะ
+
+    เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่า "ตัวพิมพ์เล็กใหญ่ ถือว่าไม่ตรง" — ยังต้องฟ้อง
+    แต่เล่มจริง 6237391 EGCH/M ฟ้องแล้วอ่านไม่ออกว่าต่างตรงไหน เพราะ describe_diff
+    เทียบแบบตัวใหญ่หมดจึงไม่เห็นความต่าง ("NI-BASED" กับ "Ni-BASED" สัญลักษณ์ธาตุ)
+    """
+
+    BOOK = ("DEVELOPMENT OF NI-BASED CATALYST FOR PRODUCTION OF "
+            "BIOMETHANE FUEL FROM BIOGAS VIA CO2 METHANATION")
+    APPROVED = BOOK.replace("NI-", "Ni-")
+
+    def test_it_names_the_word_whose_case_differs(self):
+        compared = checker_module.compare_values(self.BOOK, self.APPROVED, "title")
+        self.assertEqual(compared["status"], "case")
+        detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.APPROVED)
+        self.assertIn('ต่างที่ตัวพิมพ์เล็ก-ใหญ่ "NI-BASED" ต้องเป็น "Ni-BASED"', detail)
+
+    def test_the_case_rule_itself_did_not_change(self):
+        """ควบคุมเชิงลบ — ยังถือว่าไม่ตรง ไม่ใช่ปล่อยผ่าน"""
+        self.assertTrue(checker_module.MATCH_RULES["title"]["case_sensitive"])
+        self.assertNotEqual(
+            checker_module.compare_values(self.BOOK, self.APPROVED, "title")["status"],
+            "exact")
+
+    def test_a_real_word_difference_still_wins(self):
+        """ข้อความที่ต่างกันจริงต้องใช้คำอธิบายเดิม ไม่ใช่ไปบอกว่าเป็นเรื่องตัวพิมพ์"""
+        book = self.APPROVED.replace("CO2", "CO")
+        detail = checker_module.title_mismatch_detail(
+            "ชื่อเรื่อง", checker_module.compare_values(book, self.APPROVED, "title"),
+            self.APPROVED)
+        self.assertNotIn("ตัวพิมพ์เล็ก-ใหญ่", detail)
+
+    def test_a_whole_title_in_another_case_is_not_listed_word_by_word(self):
+        """ทั้งชื่อเรื่องเขียนคนละแบบ ไล่ทีละคำไม่ช่วย ให้ดูข้อความที่ถูกต้องแทน"""
+        self.assertEqual(checker_module.describe_case_diff(
+            "Development Of A New System For Testing",
+            "DEVELOPMENT OF A NEW SYSTEM FOR TESTING"), "")
+
+    def test_the_english_report_reads_as_a_sentence(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        line = checker_module.describe_case_diff(self.BOOK, self.APPROVED)
+        en = i18n.tr_en(line, pairs)
+        self.assertEqual(i18n.translation_problems(line, en), [])
+        self.assertIn("the letter case differs", en)
+        # ต้องตรวจ "ทั้งประโยคของการ์ด" ด้วย ไม่ใช่เฉพาะท่อนที่อธิบายความต่าง —
+        # ท่อนเดี่ยวมีกฎเต็มประโยครองรับ ลำดับกฎจึงไม่มีผล แต่ประโยคเต็มต้องอาศัย
+        # การแทนที่ทีละท่อน ซึ่งกฎ "ต้องเป็น ..." ทั่วไปจะมากินท่อนหลังก่อนได้
+        detail = checker_module.title_mismatch_detail(
+            "ชื่อเรื่อง",
+            checker_module.compare_values(self.BOOK, self.APPROVED, "title"),
+            self.APPROVED)
+        whole = i18n.tr_en(detail, pairs)
+        self.assertIn("the letter case differs", whole)
+        self.assertNotIn("Must be", whole)   # กฎทั่วไปต้องไม่มากินท่อนหลังก่อน
+
+
 class NoStaffLineReachesTheStudent(unittest.TestCase):
     """ข้อความสรุปถึงนักศึกษาต้องไม่มีบรรทัดที่เขียนถึงเจ้าหน้าที่ (ก.ย. 2569)
 

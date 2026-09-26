@@ -4373,6 +4373,34 @@ def describe_diff(found, expected):
     return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
 
 
+def describe_case_diff(found, expected):
+    """ชี้คำที่ต่างกัน "แค่ตัวพิมพ์เล็ก-ใหญ่" — describe_diff มองไม่เห็นเพราะเทียบแบบตัวใหญ่หมด
+
+    เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าตัวพิมพ์เล็ก-ใหญ่ที่ต่างกันถือว่า "ไม่ตรง" ต้องฟ้อง
+    แต่ของเดิมฟ้องแล้วไม่บอกว่าต่างตรงไหน รายงานจึงขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะ
+    (เล่มจริง 6237391 EGCH/M: เล่มพิมพ์ "NI-BASED" ระบบมี "Ni-BASED" ซึ่งเป็นสัญลักษณ์
+    ธาตุ) เจ้าหน้าที่กับนักศึกษาต้องไล่สายตาทีละตัวอักษรเอง
+
+    คืน '' เมื่อจำนวนคำไม่เท่ากัน หรือไม่มีคำไหนต่างแค่ตัวพิมพ์ — ให้ describe_diff
+    ที่เรียกก่อนหน้าเป็นคนอธิบายแทน
+    """
+    got, want = soft(found).split(), soft(expected).split()
+    if len(got) != len(want):
+        return ''
+    pairs = [(a, b) for a, b in zip(got, want)
+             if a != b and a.casefold() == b.casefold()]
+    if not pairs:
+        return ''
+    # เกินสามคำแปลว่าทั้งประโยคเขียนคนละแบบ (เล่มใช้ Sentence case ทั้งชื่อเรื่อง)
+    # ไล่ทีละคำจะยาวจนไม่ช่วยอะไร ให้ดูข้อความที่ถูกต้องในบรรทัดถัดไปแทน
+    if len(pairs) > 3:
+        return ''
+    # คำนำหน้าเขียนครั้งเดียว แล้วไล่คู่ต่อกันด้วย " และ " เหมือน describe_diff
+    # (ซ้ำคำนำหน้าทุกคู่จะอ่านยากเมื่อต่างหลายคำ)
+    body = " และ ".join(f'"{a}" ต้องเป็น "{b}"' for a, b in pairs)
+    return f"ต่างที่ตัวพิมพ์เล็ก-ใหญ่ {body}"
+
+
 def _letters_keep_case(text):
     """ตัวอักษรและตัวเลขล้วน โดย "คงตัวพิมพ์เล็ก-ใหญ่ไว้" — norm() แปลงเป็นตัวใหญ่หมด"""
     text = _TH_MARKS.sub('', (text or '').replace('ำ', 'า'))
@@ -4611,6 +4639,10 @@ def title_mismatch_detail(label, compared, expected=''):
     detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
     if expected and compared['status'] in ('typo', 'case'):
         diff = describe_diff(compared['actual'], expected)
+        # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ describe_diff คืน '' (มันเทียบแบบตัวใหญ่หมด)
+        # ถ้าปล่อยไว้ รายงานจะขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะโดยไม่บอกว่าต่างตรงไหน
+        if not diff and compared['status'] == 'case':
+            diff = describe_case_diff(compared['actual'], expected)
         if diff:
             detail += f' {diff}'
     return detail
