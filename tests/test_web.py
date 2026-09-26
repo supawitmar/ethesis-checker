@@ -1466,6 +1466,26 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertIn("data.stale_script", html)
         self.assertIn("สคริปต์ในชีทยังเป็นเวอร์ชัน", html)
 
+    def test_the_script_version_is_bumped_whenever_the_script_changes(self):
+        """แก้ไฟล์ .gs แล้วต้องขยับเลขเวอร์ชันเสมอ ไม่งั้นตัวเตือนจะโกหกว่าตรงกัน
+
+        ตัวเตือนเวอร์ชันเชื่อถือได้ก็ต่อเมื่อเลขขยับทุกครั้งที่โค้ดเปลี่ยน ถ้าลืมขยับ
+        ชีทที่ยังรันโค้ดเก่าจะตอบเลขเดียวกับของใหม่ แล้วเจ้าหน้าที่เห็นว่า "deploy แล้ว
+        ไม่มีอะไรเปลี่ยน" โดยไม่มีอะไรฟ้อง (เจอจริง ก.ย. 2569 รอบ setRowHeight)
+
+        วิธีแก้เมื่อเทสต์นี้ตก: ขยับ var SCRIPT_VERSION แล้วรัน
+        python tools/sheet_webhook_lock.py --save
+        """
+        import tools.sheet_webhook_lock as lock
+        self.assertEqual(lock.problems(), [])
+
+    def test_the_lock_notices_an_edit_without_a_bump(self):
+        """ควบคุมเชิงลบ — แก้เนื้อไฟล์โดยไม่ขยับเลข ต้องถูกจับได้"""
+        import tools.sheet_webhook_lock as lock
+        with mock.patch.object(lock, "version_and_hash",
+                               lambda: (lock.saved()["version"], "0" * 64)):
+            self.assertTrue(lock.problems())
+
     def test_the_token_goes_to_the_sheet_but_never_back_to_the_browser(self):
         response, sent = self._save()
         self.assertEqual(sent["token"], "secret-token")

@@ -32,7 +32,10 @@ function fakeSheet(headers, rows) {
   return {
     grid, wrote, clipped, heights,
     getName: () => 'กย69',
-    setRowHeight: (row, px) => { heights.push([row, px]); },
+    // ของจริงมีสองเมธอด — setRowHeight ไม่ได้ปิด "ปรับสูงอัตโนมัติตามเนื้อหา"
+    // ตัวจำลองจึงแยกจดว่าเรียกตัวไหน เพื่อตรึงว่าโค้ดใช้ตัวที่บังคับได้จริง
+    setRowHeight: (row, px) => { heights.push(['auto', row, px]); },
+    setRowHeightsForced: (row, n, px) => { heights.push(['forced', row, n, px]); },
     getLastRow: () => grid.length,
     getLastColumn: () => width,
     getRange(row, col, nRows, nCols) {
@@ -272,7 +275,8 @@ check('ไม่มีช่องไหนตกหล่น', (out.missing || 
 check('ตั้งช่องให้ตัดส่วนเกิน', sheet.clipped['รายละเอียดที่ต้องแก้ไข'], 'CLIP');
 // ข้อความมีการขึ้นบรรทัดใหม่อยู่ข้างใน CLIP กันได้แค่ความกว้าง ไม่กันบรรทัดใหม่
 // แถวจึงยืดสูงตามจำนวนข้อ (เจ้าหน้าที่แจ้ง ก.ย. 2569) ต้องสั่งความสูงกลับทุกครั้ง
-check('ล็อกความสูงแถวไว้', JSON.stringify(sheet.heights), '[[4,21]]');
+// setRowHeight เฉย ๆ ไม่พอ ชีทจะดันแถวสูงกลับมาตามเนื้อหา (เจอจริง ก.ย. 2569)
+check('ล็อกความสูงแถวแบบบังคับ', JSON.stringify(sheet.heights), '[["forced",4,1,21]]');
 check('ไม่ไปตั้งการตัดข้อความให้ช่องอื่น', Object.keys(sheet.clipped).length, 1);
 check('ไม่ไปเขียนทับช่อง Other', sheet.wrote.Other, false);
 
@@ -314,6 +318,13 @@ check('doGet บอกว่ามีช่องรายละเอียด'
 sheet = fakeSheet(HEADERS_NEW.slice(0, HEADERS_NEW.length - 1),
                   [rowFor('6736605 NSCN/M', '20/9/2026')]);
 check('doGet บอกว่ายังไม่มีช่องรายละเอียด', runGet(sheet).details_column, false);
+
+// ---- ชีทรุ่นเก่าที่ไม่มี setRowHeightsForced ต้องยังบันทึกได้ ----
+sheet = fakeSheet(HEADERS_NEW, [rowFor('6736605 NSCN/M', '20/9/2026')]);
+delete sheet.setRowHeightsForced;
+out = run(sheet, Object.assign({}, SAVE, { details: DETAILS }));
+check('ไม่มีเมธอดบังคับ ก็ยังบันทึกสำเร็จ', out.ok, true);
+check('และตกไปใช้ของเดิมแทน', JSON.stringify(sheet.heights), '[["auto",4,21]]');
 
 // ---- เลขเวอร์ชันของสคริปต์ต้องรายงานออกมา ----
 // Apps Script ไม่อัปเดต URL เดิมให้เอง กด Save เฉย ๆ URL เดิมยังรันโค้ดเก่า และการกด

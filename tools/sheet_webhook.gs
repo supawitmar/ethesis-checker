@@ -44,7 +44,7 @@
  * ทั้งสองกรณีหน้าตาเหมือน "แก้แล้วแต่ไม่มีอะไรเปลี่ยน" (เจ้าหน้าที่เจอจริง ก.ย. 2569
  * ตอนแก้เรื่องความสูงแถว) เปิด Web app URL ในเบราว์เซอร์แล้วดูค่านี้ได้ทุกเมื่อ
  */
-var SCRIPT_VERSION = '2026-09-27.1';
+var SCRIPT_VERSION = '2026-09-27.2';
 
 // ใส่ตรงนี้ก็ได้ แต่ค่าจะหายทุกครั้งที่วางสคริปต์ฉบับใหม่ทับ — ที่ปลอดภัยกว่าคือ
 // Project Settings > Script properties ชื่อ TOKEN (ดูวิธีติดตั้งข้อ 3)
@@ -134,11 +134,25 @@ function clip_(range) {
   }
 }
 
-/** ล็อกความสูงแถวไม่ให้ยืดตามจำนวนบรรทัดในช่องรายละเอียด */
+/**
+ * ล็อกความสูงแถวไม่ให้ยืดตามจำนวนบรรทัดในช่องรายละเอียด
+ *
+ * ต้องใช้ setRowHeightsForced ไม่ใช่ setRowHeight — ตัวหลังตั้งความสูงก็จริง แต่ไม่ได้ปิด
+ * "ปรับสูงอัตโนมัติตามเนื้อหา" ของชีท พอเนื้อหามีหลายบรรทัด ชีทก็ดันแถวสูงกลับมาเหมือนเดิม
+ * (เจ้าหน้าที่แจ้งพร้อมภาพ ก.ย. 2569 ว่าแถวยังยืดหลัง deploy เวอร์ชันที่ใช้ setRowHeight)
+ * เอกสารของ Google เขียนไว้ตรง ๆ ว่า "By default, rows grow to fit cell contents.
+ * If you want to force rows to a specified height, use setRowHeightsForced"
+ */
 function keepRowHeight_(sheet, row) {
   try {
-    sheet.setRowHeight(row, DETAILS_ROW_HEIGHT);
+    sheet.setRowHeightsForced(row, 1, DETAILS_ROW_HEIGHT);
+    return;
   } catch (err) {
+    // ชีทรุ่นเก่าที่ยังไม่มีเมธอดนี้ — ใช้ของเดิมไปก่อน ดีกว่าไม่ทำอะไรเลย
+  }
+  try {
+    sheet.setRowHeight(row, DETAILS_ROW_HEIGHT);
+  } catch (err2) {
     // เป็นแค่การจัดรูปแบบ ไม่ควรทำให้การบันทึกล้มทั้งครั้ง
   }
 }
