@@ -3537,8 +3537,10 @@ class AbstractBoldTellsTheStudentTheRule(unittest.TestCase):
     ลอย ๆ โดยไม่มีบรรทัดบอกว่าต้องทำอะไร
     """
 
-    RULE = "หน้าบทคัดย่อต้องไม่มีข้อความตัวหนา ยกเว้นหัวข้อบทคัดย่อ"
-    STAFF = "เป็นข้อสังเกต เล่มยังผ่านได้ เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่"
+    # ถ้อยคำของเจ้าหน้าที่เอง (ก.ย. 2569) "หน้าบทคัดย่อต้องไม่มีข้อความตัวหนา แต่ให้เป็นข้อสังเกต"
+    RULE = "หน้าบทคัดย่อต้องไม่มีข้อความตัวหนา"
+    STAFF = ("เป็นข้อสังเกต เล่มยังผ่านได้ หัวข้อบทคัดย่อเป็นตัวหนาตาม template ได้ "
+             "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่")
 
     def _summary(self, **kw):
         rep = checker_module.Report()
@@ -3570,8 +3572,32 @@ class AbstractBoldTellsTheStudentTheRule(unittest.TestCase):
         """ถ้อยคำในเครื่องตรวจต้องตรงกับที่เทสต์ตรึงไว้ ไม่ใช่แค่ฟังก์ชันสรุปทำงานถูก"""
         source = inspect.getsource(checker_module.run_check)
         self.assertIn('"' + self.RULE + '"', source)
-        self.assertIn('"' + self.STAFF + '"', source)
+        # ถ้อยคำของเจ้าหน้าที่เขียนคร่อมสองบรรทัดในซอร์ส จึงเทียบทีละท่อน
+        self.assertIn("เป็นข้อสังเกต เล่มยังผ่านได้ หัวข้อบทคัดย่อเป็นตัวหนา", source)
+        self.assertIn("ตาม template ได้ เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่", source)
         self.assertNotIn('"แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้"', source)
+
+    def test_it_stays_a_yellow_observation(self):
+        """เจ้าหน้าที่สั่ง "แต่ให้เป็นข้อสังเกต" — ระดับของข้อต้องไม่เปลี่ยนเป็นต้องแก้"""
+        self.assertEqual(checker_module.ABSTRACT_BOLD_ZONE, "YELLOW")
+        rep = checker_module.Report()
+        rep.add(checker_module.ABSTRACT_BOLD_ZONE, "front_matter",
+                "บทคัดย่ออังกฤษ (หน้า iv)", 'มีข้อความตัวหนา: "X"',
+                self.RULE, self.STAFF, "FORMAT.ABSTRACT_BOLD")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        self.assertEqual(report["verdict"], "ผ่าน")
+
+    def test_the_heading_exemption_is_not_sent_to_the_student(self):
+        """หัวข้อบทคัดย่อไม่เคยถูกฟ้องอยู่แล้ว (_is_abstract_heading)
+
+        ถ้าเขียนข้อยกเว้นปนไว้ในบรรทัดที่ส่งนักศึกษา นักศึกษาอาจไปแก้หัวข้อที่ถูกอยู่แล้ว
+        ให้ผิด จึงเก็บไว้ในบรรทัดของเจ้าหน้าที่บนการ์ดแทน
+        """
+        self.assertTrue(checker_module._is_abstract_heading("ABSTRACT"))
+        self.assertTrue(checker_module._is_abstract_heading("บทคัดย่อ"))
+        self.assertNotIn("ยกเว้น", self.RULE)
+        self.assertIn("หัวข้อบทคัดย่อเป็นตัวหนา", self.STAFF)
+        self.assertNotIn("หัวข้อบทคัดย่อ", self._summary(failed=["YELLOW:0"]))
 
     def test_the_english_report_has_both_lines(self):
         import tools.check_i18n as i18n
