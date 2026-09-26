@@ -3527,6 +3527,60 @@ class AQualificationIsReadFromItsOwnCell(unittest.TestCase):
                          ['ไม่พบคุณวุฒิใต้ชื่อกรรมการ "Sutthichai Nakphook"'])
 
 
+class AbstractBoldTellsTheStudentTheRule(unittest.TestCase):
+    """ข้อตัวหนาในบทคัดย่อต้องบอกด้วยว่า "ต้องเป็นอะไร" ไม่ใช่บอกแค่ว่าพบอะไร
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังเห็นข้อความสรุปของเล่มจริง 6237391 EGCH/M:
+    *"แก้ไข สรุปนิดนึง โดยเพิ่มว่า ในหน้าบทคัดย่อต้องไม่มีตัวหนา"* — ของเดิมบรรทัด
+    "ควรเป็น" เขียนว่า "แจ้งเป็นข้อสังเกต ... แต่เล่มยังผ่านได้" ซึ่งเป็นบรรทัดที่เขียนถึง
+    เจ้าหน้าที่ จึงถูกตัวกรองตัดออกจากข้อความที่ส่งนักศึกษา เหลือแค่ "มีข้อความตัวหนา: ..."
+    ลอย ๆ โดยไม่มีบรรทัดบอกว่าต้องทำอะไร
+    """
+
+    RULE = "หน้าบทคัดย่อต้องไม่มีข้อความตัวหนา ยกเว้นหัวข้อบทคัดย่อ"
+    STAFF = "เป็นข้อสังเกต เล่มยังผ่านได้ เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่"
+
+    def _summary(self, **kw):
+        rep = checker_module.Report()
+        rep.add(checker_module.ABSTRACT_BOLD_ZONE, "front_matter",
+                "บทคัดย่ออังกฤษ (หน้า iv)",
+                'มีข้อความตัวหนา: "DEVELOPMENT OF NI-BASED CATALYST"',
+                self.RULE, self.STAFF, "FORMAT.ABSTRACT_BOLD")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        return checker_module.plain_summary(report, **kw)
+
+    def test_the_rule_is_in_the_message_sent_to_the_student(self):
+        """ข้อสีเหลืองเข้าข้อความสรุปเมื่อเจ้าหน้าที่กด "ไม่ผ่าน" ให้ข้อนั้น"""
+        self.assertIn(self.RULE, self._summary(failed=["YELLOW:0"]))
+
+    def test_an_unjudged_observation_still_stays_out(self):
+        """ยังไม่กด = เล่มผ่าน ข้อสังเกตไม่ถูกส่งไปหานักศึกษา (พฤติกรรมเดิม ไม่เปลี่ยน)"""
+        text = self._summary()
+        self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
+        self.assertNotIn(self.RULE, text)
+
+    def test_the_staff_line_never_reaches_the_student(self):
+        """ควบคุมเชิงลบ — บรรทัดที่บอกว่า "ผ่านได้" ยังต้องไม่หลุดไปหานักศึกษา"""
+        self.assertTrue(checker_module.is_staff_only_line(self.STAFF))
+        text = self._summary(failed=["YELLOW:0"])
+        self.assertNotIn("ผ่านได้", text)
+        self.assertNotIn("เจ้าหน้าที่", text)
+
+    def test_the_checker_emits_exactly_this_wording(self):
+        """ถ้อยคำในเครื่องตรวจต้องตรงกับที่เทสต์ตรึงไว้ ไม่ใช่แค่ฟังก์ชันสรุปทำงานถูก"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('"' + self.RULE + '"', source)
+        self.assertIn('"' + self.STAFF + '"', source)
+        self.assertNotIn('"แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้"', source)
+
+    def test_the_english_report_has_both_lines(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for line in (self.RULE, self.STAFF):
+            self.assertEqual(i18n.translation_problems(line, i18n.tr_en(line, pairs)), [])
+        self.assertIn("no bold text", i18n.tr_en(self.RULE, pairs))
+
+
 class NoStaffLineReachesTheStudent(unittest.TestCase):
     """ข้อความสรุปถึงนักศึกษาต้องไม่มีบรรทัดที่เขียนถึงเจ้าหน้าที่ (ก.ย. 2569)
 
@@ -3540,6 +3594,7 @@ class NoStaffLineReachesTheStudent(unittest.TestCase):
         "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
         "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "ตรวจด้วยตา",
         "แจ้งเป็นข้อสังเกตเรื่องตัวหนา แต่เล่มยังผ่านได้", "เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่",
+        "เป็นข้อสังเกต เล่มยังผ่านได้ เจ้าหน้าที่พิจารณาว่าต้องแก้หรือไม่",
         "เจ้าหน้าที่ตรวจสอบรูปแบบตัวหนาในบทคัดย่อ",
         "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
         "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้",
