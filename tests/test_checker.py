@@ -574,6 +574,110 @@ class ChapterScopeByFormatTests(unittest.TestCase):
         self.assertTrue(BODY_RULES["check_toc_chapter_presence"])
 
 
+class ChapterCountMessageTests(unittest.TestCase):
+    """จำนวนบทไม่ตรงประกาศ ต้องบอกว่า "ผิดยังไง" และบอกขั้นตอนขอยกเว้นด้วย
+
+    เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังส่งผลตรวจเล่มจริง 6237391 EGCH/M ที่มี 5 บท:
+    ของเดิมเขียนแค่ "พบ 5 บท / ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท" ซึ่งถูกแต่
+    นักศึกษาต้องไปนับเอาเองว่าขาดบทไหน และไม่มีทางรู้ว่าขอคงโครงบทเดิมไว้ได้อย่างไร
+    """
+
+    def _row(self, found, canon=None, thai_book=False):
+        canon = canon or checker_module.CANONICAL_OPT1
+        return (checker_module.chapter_count_found(found, len(canon), len(canon)),
+                checker_module.chapter_count_expected(found, canon, thai_book))
+
+    def test_it_says_how_many_chapters_are_short(self):
+        found, _expected = self._row(5)
+        self.assertEqual(found, "พบ 5 บท น้อยกว่าที่ประกาศกำหนด 1 บท")
+
+    def test_it_says_how_many_chapters_are_extra(self):
+        found, _expected = self._row(8)
+        self.assertEqual(found, "พบ 8 บท มากกว่าที่ประกาศกำหนด 2 บท")
+
+    def test_it_names_the_chapter_that_is_missing(self):
+        """เล่มจริงของเดือน ก.ย. 2569 มี 5 บท จึงขาดบทที่ 6 ตามประกาศ"""
+        _found, expected = self._row(5)
+        self.assertIn("ยังไม่มีบทที่ 6", expected)
+        self.assertIn('"CONCLUSION AND RECOMMENDATIONS"', expected)
+
+    def test_the_missing_chapter_is_named_in_the_language_of_the_book(self):
+        """เล่มไทยต้องได้ชื่อบทไทย ไม่ใช่ชื่ออังกฤษที่ไม่มีอยู่ในเล่ม"""
+        _found, expected = self._row(5, thai_book=True)
+        self.assertIn('"บทสรุปและข้อเสนอแนะ"', expected)
+
+    def test_several_missing_chapters_are_given_as_a_range(self):
+        """ขาดหลายบทไม่ไล่ชื่อทีละบท — ไล่ชื่อแล้วประโยคยาวจนอ่านไม่ไหว"""
+        _found, expected = self._row(3)
+        self.assertIn("ยังไม่มีบทที่ 4-6", expected)
+
+    def test_a_book_with_too_many_chapters_names_none(self):
+        """บทเกินไม่มี "บทที่ขาด" ให้บอก — บรรทัดที่พบบอกว่าเกินกี่บทอยู่แล้ว"""
+        _found, expected = self._row(8)
+        self.assertEqual(expected, "ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท")
+
+    def test_the_sentence_never_ends_with_the_chapter_name(self):
+        """กันไม่ให้ข้อความสรุปเพี้ยนเป็น 'ต้องแก้เป็น "ชื่อบท"'
+
+        ข้อความสรุปดึง "ค่าในเครื่องหมายคำพูดท้ายประโยค" มาเขียนว่าต้องแก้เป็นค่านั้น
+        ถ้าประโยคนี้ลงท้ายด้วยชื่อบท นักศึกษาจะอ่านได้ว่า "ให้เปลี่ยนชื่อบท" ทั้งที่
+        ปัญหาคือ "บทนั้นยังไม่มีในเล่ม" คนละเรื่องกัน
+        """
+        for found in (3, 5):
+            _f, expected = self._row(found)
+            self.assertFalse(expected.rstrip().endswith('"'), expected)
+            issue = {"expected": expected, "rule_id": "BODY.OPTION1"}
+            self.assertEqual(checker_module._corrected_value(issue), "")
+
+    def test_the_student_is_told_how_to_ask_to_keep_the_structure(self):
+        """ถ้อยคำของเจ้าหน้าที่ต้องติดไปกับข้อนั้นในข้อความที่ส่งนักศึกษา"""
+        rep = checker_module.Report()
+        rep.add("RED", "body", "ทั้งเล่ม", *self._row(5), "ปรับโครงบทตามประกาศ",
+                "BODY.OPTION1", notice=checker_module.CHAPTER_COUNT_NOTICE)
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        summary = checker_module.plain_summary(report)
+        self.assertIn("ยังไม่มีบทที่ 6", summary)
+        self.assertIn("ส่งผ่านระบบ e-document", summary)
+        self.assertIn("https://drive.google.com/drive/folders/", summary)
+        self.assertIn("ระบุชื่อบทและจำนวนบทที่ประสงค์จะคงไว้", summary)
+        # ต้องไม่กลายเป็นคำสั่งให้เปลี่ยนชื่อบท
+        self.assertNotIn("ต้องแก้เป็น", summary)
+
+    def test_the_notice_never_leaks_into_other_items(self):
+        """ควบคุมเชิงลบ — ข้อที่ไม่ได้ส่ง notice ต้องไม่มีบรรทัดพวกนี้ติดไปด้วย"""
+        rep = checker_module.Report()
+        rep.add("RED", "body", "บทที่ 2", 'ชื่อบทในเล่มเขียนว่า "LITERATURE REVIEWS"',
+                'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"', "", "BODY.OPTION1")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        summary = checker_module.plain_summary(report)
+        self.assertNotIn("e-document", summary)
+        self.assertNotIn("drive.google.com", summary)
+
+    def test_every_new_line_has_an_english_version(self):
+        """ด่าน --corpus จับได้เฉพาะเมื่อเล่มทดสอบบังเอิญบทไม่ครบ จึงต้องตรึงไว้ตรงนี้
+
+        เล่มทดสอบทั้งสามเล่มมีบทครบ ข้อความชุดนี้จึงไม่เคยถูกเรียกในด่านนั้นเลย
+        """
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        lines = [self._row(5)[0], self._row(5)[1], self._row(3)[1], self._row(8)[1],
+                 self._row(5, thai_book=True)[1]]
+        lines += checker_module.CHAPTER_COUNT_NOTICE.split(chr(10))
+        for line in lines:
+            problems = i18n.translation_problems(line, i18n.tr_en(line, pairs))
+            self.assertEqual(problems, [], (line, problems))
+        # ลิงก์ต้องไม่ถูกตัวแปลแตะ ไม่งั้นนักศึกษากดไปผิดที่
+        link = [x for x in checker_module.CHAPTER_COUNT_NOTICE.split(chr(10))
+                if x.startswith("http")][0]
+        self.assertEqual(i18n.tr_en(link, pairs), link)
+
+    def test_the_published_format_gets_the_same_notice(self):
+        """รูปแบบตีพิมพ์ก็เป็น "จำนวนบทไม่เป็นไปตามประกาศ" เหมือนกัน"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("check_body_chapter_count", 1)[1].split("ชื่อบทตามประกาศ", 1)[0]
+        self.assertEqual(block.count("notice=CHAPTER_COUNT_NOTICE"), 2)
+
+
 class SignatureTemplateSentenceTests(unittest.TestCase):
     """หน้าลงนามต้องมีประโยคตายตัวของ template ไม่ใช่แค่ชื่อปริญญาถูก
 

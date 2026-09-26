@@ -3666,6 +3666,10 @@ def _summary_sentence(issue, skip_location=False):
              if text and not is_staff_only_line(text)), "")
         if directive:
             lines.append(directive)
+    # ขั้นตอนที่นักศึกษาต้องไปทำต่อนอกเล่ม (เช่นยื่นขออนุมัติโครงบทที่ต่างจากประกาศ)
+    # ต้องติดไปกับข้อนั้นเสมอ ไม่ใช่อยู่แต่บนการ์ดที่เจ้าหน้าที่เห็นคนเดียว
+    lines += [line.strip() for line in (issue.get("notice") or "").split("\n")
+              if line.strip()]
     kept = [line for line in lines if line]
     return f"\n{SUMMARY_INDENT}".join(kept)
 
@@ -5124,6 +5128,50 @@ def reference_terms(heading):
     return [label for label, keys in _REF_TERM_GROUPS if any(k in nl for k in keys)]
 N_APPENDIX = ['APPENDIX', 'APPENDICES', norm('ภาคผนวก')]
 
+# ขั้นตอนที่นักศึกษาต้องทำ ถ้าอยากคงโครงบทที่ไม่เป็นไปตามประกาศไว้ (เจ้าหน้าที่กำหนด
+# ถ้อยคำเอง ก.ย. 2569) — ไม่ใช่ "วิธีแก้เล่ม" แต่เป็นเรื่องที่ต้องไปยื่นขออนุมัติต่างหาก
+# จึงเขียนเป็น notice ต่อท้ายข้อ ไม่ใช่ fix (ซึ่งเป็นคำแนะนำสั้น ๆ บนการ์ด)
+CHAPTER_COUNT_NOTICE = "\n".join([
+    "หากประสงค์จะคงเนื้อหาที่ไม่เป็นไปตามประกาศ กรุณากรอกแบบฟอร์มตามลิงก์ด้านล่าง "
+    "แล้วส่งผ่านระบบ e-document มาเพื่อประกอบการพิจารณาโดยด่วน",
+    "https://drive.google.com/drive/folders/1oa3oB6WfJlElB8s5QyEWsp9d2H_m7jqy",
+    "ทั้งนี้ให้ชี้แจงเหตุผลและความจำเป็น พร้อมระบุชื่อบทและจำนวนบทที่ประสงค์จะคงไว้ในเอกสารด้วย",
+])
+
+
+def chapter_count_found(found, low, high):
+    """บรรทัด "พบกี่บท" ที่บอกด้วยว่าต่างจากประกาศกี่บท
+
+    ของเดิมเขียนแค่ "พบ 5 บท" แล้วให้ไปอ่านบรรทัดถัดไปเอง เจ้าหน้าที่สั่ง (ก.ย. 2569)
+    ให้บอกให้ชัดว่า "มันผิดยังไง" — ขาดไปกี่บท หรือเกินมากี่บท
+    """
+    if found < low:
+        return f"พบ {found} บท น้อยกว่าที่ประกาศกำหนด {low - found} บท"
+    if found > high:
+        return f"พบ {found} บท มากกว่าที่ประกาศกำหนด {found - high} บท"
+    return f"พบ {found} บท"
+
+
+def chapter_count_expected(found, canon, thai_book):
+    """บอกว่าบทที่ยังไม่มีคือบทไหน (ชื่อตามประกาศ) ไม่ใช่บอกแค่จำนวนที่ต้องมี
+
+    บทที่ขาดคือบทท้าย ๆ เสมอ เพราะการเทียบชื่อบทยึด "ลำดับที่" เป็นหลัก (บทที่ 1 ของ
+    เล่มเทียบกับบทที่ 1 ของประกาศ) เล่มที่มี 5 บทจึงขาดบทที่ 6 ไม่ใช่ขาดบทกลาง ๆ
+    ชื่อบทใส่ในเครื่องหมายคำพูด เพราะเป็นถ้อยคำตามประกาศ ฉบับอังกฤษต้องคงไว้ทั้งก้อน
+    และต้อง **ไม่ลงท้ายประโยคด้วยชื่อในเครื่องหมายคำพูด** — ข้อความสรุปดึงค่าท้ายประโยค
+    ไปเขียนว่า 'ต้องแก้เป็น "..."' ซึ่งจะกลายเป็นสั่งให้เปลี่ยนชื่อบท ทั้งที่ปัญหาคือ
+    "บทนั้นยังไม่มีในเล่ม" คนละเรื่องกัน จึงเอาประโยคจำนวนบทไว้ท้ายเสมอ
+    """
+    tail = f"ประกาศ 2569 รูปแบบดั้งเดิมกำหนดให้มีครบ {len(canon)} บท"
+    missing = list(range(found + 1, len(canon) + 1))
+    if not missing:
+        return f"ประกาศ 2569: รูปแบบดั้งเดิมต้องมี {len(canon)} บท"
+    if len(missing) == 1:
+        title = canon[missing[0] - 1][0 if thai_book else 1]
+        return f'เล่มนี้ยังไม่มีบทที่ {missing[0]} คือ "{title}" {tail}'
+    return f"เล่มนี้ยังไม่มีบทที่ {missing[0]}-{missing[-1]} {tail}"
+
+
 CANONICAL_OPT1 = CANONICAL_OPTION_1
 CANONICAL_OPT2 = CANONICAL_OPTION_2
 
@@ -5364,7 +5412,7 @@ class Report:
                                 "detail": soft(detail)})
 
     def add(self, zone, part, loc, found, expected, fix="", rule_id=None,
-            system_note=False):
+            system_note=False, notice=""):
         """system_note=True = ข้อจำกัดของระบบ ไม่ใช่จุดที่นักศึกษาแก้ได้
 
         ยังแสดงในรายงานฝั่งเจ้าหน้าที่ตามปกติ แต่ไม่นับเป็น "จุดที่ต้องแก้" ในข้อความ
@@ -5381,6 +5429,10 @@ class Report:
             "found": found,
             "expected": expected,
             "fix": fix,
+            # ข้อความที่ต้องส่งถึง "นักศึกษา" ต่อท้ายข้อนั้น (คนละอย่างกับ fix ซึ่งเป็น
+            # คำแนะนำสั้น ๆ บนการ์ด) — เช่นขั้นตอนขออนุมัติที่ต้องทำนอกเล่ม
+            # ใส่ได้หลายบรรทัด แต่ละบรรทัดถูกแปลเป็นอังกฤษแยกกัน
+            "notice": notice,
             "system_note": system_note,
             **rule_reference(rule_id),
         })
@@ -5971,12 +6023,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 toc_list_typos.append((toc_page_idx, visible, expected, compared))
 
     if chapters_mode == "strict" and body_ch and BODY_RULES['check_body_chapter_count']:
+        thai_book = book_wording_language == "thai"
         if option == 1 and len(body_ch) != 6:
-            rep.add("RED", "body", "ทั้งเล่ม", f"พบ {len(body_ch)} บท",
-                    "ประกาศ 2569: รูปแบบดั้งเดิมต้องมี 6 บท", "ปรับโครงบทตามประกาศ", "BODY.OPTION1")
+            rep.add("RED", "body", "ทั้งเล่ม",
+                    chapter_count_found(len(body_ch), 6, 6),
+                    chapter_count_expected(len(body_ch), CANONICAL_OPT1, thai_book),
+                    "ปรับโครงบทตามประกาศ", "BODY.OPTION1",
+                    notice=CHAPTER_COUNT_NOTICE)
         if option == 2 and len(body_ch) not in (2, 3):
-            rep.add("RED", "body", "ทั้งเล่ม", f"พบ {len(body_ch)} บท",
-                    "รูปแบบตีพิมพ์ต้องมี 2-3 บท", "", "BODY.OPTION2")
+            rep.add("RED", "body", "ทั้งเล่ม",
+                    chapter_count_found(len(body_ch), 2, 3),
+                    "รูปแบบตีพิมพ์ต้องมี 2-3 บท", "", "BODY.OPTION2",
+                    notice=CHAPTER_COUNT_NOTICE)
 
     # ---------- ชื่อบทเทียบประกาศ (สารบัญ + เนื้อหา รวมเป็นข้อเดียวต่อบท) ----------
     #

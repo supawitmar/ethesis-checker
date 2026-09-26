@@ -384,6 +384,10 @@ def collect_corpus(folder):
                     # จึงเก็บแยก แล้วตรวจว่ามีคีย์ใน CATMAP ครบไหม
                     texts += [issue.get(f) or "" for f in
                               ("location", "found", "expected", "fix")]
+                    # "notice" (ขั้นตอนที่นักศึกษาต้องไปทำต่อ) แสดงทีละบรรทัด
+                    # แต่ละบรรทัดจึงต้องมีคำแปลเต็มบรรทัดของตัวเอง
+                    texts += [line for line in (issue.get("notice") or "").split("\n")
+                              if line.strip()]
                     # "category" (ป้ายบนการ์ด) และ "section" (ชื่อกลุ่มการ์ด)
                     # ไม่ได้แปลผ่าน TR แต่ใช้ CATMAP (เทียบทั้งสตริง)
                     cats.add(issue.get("category") or "")

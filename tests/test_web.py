@@ -147,6 +147,31 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
             self.assertEqual(body["plain"].split(chr(10))[0],
                              "ผลการตรวจ: " + body["verdict"], staff)
 
+    def test_the_card_shows_the_steps_the_student_must_take_outside_the_book(self):
+        """ขั้นตอนขอคงโครงบท (notice) ต้องขึ้นบนการ์ดด้วย แยกทีละบรรทัด
+
+        ที่ต้องแยกบรรทัด เพราะตัวแปลอังกฤษเทียบ "ทั้งบรรทัด" กับกฎ ถ้ายัดหลายบรรทัด
+        ไว้ในก้อนเดียว จะไม่มีกฎไหนตรงทั้งก้อน แล้วตกไปใช้การแทนที่แบบเศษคำซึ่งเพี้ยน
+        """
+        import checker
+        rep = checker.Report()
+        rep.add("RED", "body", "ทั้งเล่ม",
+                checker.chapter_count_found(5, 6, 6),
+                checker.chapter_count_expected(5, checker.CANONICAL_OPT1, False),
+                "ปรับโครงบทตามประกาศ", "BODY.OPTION1",
+                notice=checker.CHAPTER_COUNT_NOTICE)
+        with main.JOBS_LOCK:
+            main.JOBS["notice"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "roman"}),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        html = self.client.get("/result/notice").text
+        self.assertIn("ต้องดำเนินการเพิ่มเติม:", html)
+        for line in checker.CHAPTER_COUNT_NOTICE.split(chr(10)):
+            self.assertIn('<div class="tr-dyn">' + line + "</div>", html)
+        self.assertIn("ยังไม่มีบทที่ 6", html)
+
     def test_the_report_page_marks_which_verdict_each_topic_needs(self):
         """หน้ารายงานซ่อนหัวข้อจาก data-applies ถ้า attribute นี้ไม่ถูกฝังมา
         สคริปต์จะปล่อยผ่านทุกหัวข้อ แล้วหัวข้อค่าปรับสองอันจะโชว์พร้อมกัน
