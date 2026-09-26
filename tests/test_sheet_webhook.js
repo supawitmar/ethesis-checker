@@ -28,9 +28,11 @@ function fakeSheet(headers, rows) {
   grid.forEach((r) => { while (r.length < width) r.push(''); });
   const wrote = {};
   const clipped = {};
+  const heights = [];
   return {
-    grid, wrote, clipped,
+    grid, wrote, clipped, heights,
     getName: () => 'กย69',
+    setRowHeight: (row, px) => { heights.push([row, px]); },
     getLastRow: () => grid.length,
     getLastColumn: () => width,
     getRange(row, col, nRows, nCols) {
@@ -268,6 +270,9 @@ check('เขียนรายละเอียดแล้วยังสำ�
 check('ไม่มีช่องไหนตกหล่น', (out.missing || []).join(','), '');
 // ข้อความยาวหลายบรรทัด ถ้าปล่อยให้ตัดข้อความ แถวจะสูงเป็นสิบบรรทัด ตารางอ่านไม่ได้
 check('ตั้งช่องให้ตัดส่วนเกิน', sheet.clipped['รายละเอียดที่ต้องแก้ไข'], 'CLIP');
+// ข้อความมีการขึ้นบรรทัดใหม่อยู่ข้างใน CLIP กันได้แค่ความกว้าง ไม่กันบรรทัดใหม่
+// แถวจึงยืดสูงตามจำนวนข้อ (เจ้าหน้าที่แจ้ง ก.ย. 2569) ต้องสั่งความสูงกลับทุกครั้ง
+check('ล็อกความสูงแถวไว้', JSON.stringify(sheet.heights), '[[4,21]]');
 check('ไม่ไปตั้งการตัดข้อความให้ช่องอื่น', Object.keys(sheet.clipped).length, 1);
 check('ไม่ไปเขียนทับช่อง Other', sheet.wrote.Other, false);
 
@@ -285,6 +290,7 @@ out = run(sheet, Object.assign({}, SAVE, { details: '', decision: 'เสร็�
 check('ไม่มีข้อความ = ไม่แตะช่องรายละเอียด',
       Object.prototype.hasOwnProperty.call(sheet.wrote, 'รายละเอียดที่ต้องแก้ไข'), false);
 check('ไม่มีข้อความ = ไม่ตั้งรูปแบบช่องนั้น', Object.keys(sheet.clipped).length, 0);
+check('ไม่มีข้อความ = ไม่ไปยุ่งกับความสูงแถว', sheet.heights.length, 0);
 check('เล่มที่เสร็จสิ้นยังบันทึกได้ตามปกติ', out.ok, true);
 
 // ---- แท็บที่ยังไม่ได้เพิ่มคอลัมน์นี้ ต้องบอก ไม่ใช่ทิ้งข้อความหายเงียบ ๆ ----
