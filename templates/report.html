@@ -577,7 +577,10 @@
         data-en="✍️ Decisions only staff can make — pressing adds the wording to the summary">✍️ สิ่งที่เจ้าหน้าที่ต้องตัดสินเอง กดแล้วเพิ่มเข้าข้อความสรุปทันที</span>
       <span class="count"><b>{{ report.staff_findings | length }}</b> <span data-th="รายการ" data-en="items">รายการ</span></span></h2>
     {% for sf in report.staff_findings %}
-    <div class="hc sf" data-staff="{{ sf.id }}" data-applies="{{ sf.applies_to or '' }}">
+    {# data-blocks = หัวข้อนี้ต้องกดก่อนจึงจะบันทึกลงชีทได้ไหม — ค่ามาจากฝั่งเซิร์ฟเวอร์
+       ชุดเดียวกับที่ตรวจซ้ำตอนบันทึก ไม่ใช่ให้หน้านี้ไล่ชื่อหัวข้อเอง #}
+    <div class="hc sf" data-staff="{{ sf.id }}" data-applies="{{ sf.applies_to or '' }}"
+         data-blocks="{% if sf.blocks_save %}1{% else %}0{% endif %}">
       <div class="row1">
         <div style="flex:1; min-width:220px;">
           <div class="t" data-th="{{ sf.item }}" data-en="{{ sf.item_en }}">{{ sf.item }}</div>
@@ -1962,7 +1965,10 @@ function sheetWord(key){
 // ไม่กดปุ่มค่าปรับแล้วบันทึกได้ = ชีทได้ "เสร็จสิ้น" ทั้งที่อาจต้องเป็น "แจ้งค่าปรับ"
 // (การ์ดที่ไม่เกี่ยวกับผลตรวจนี้ถูกซ่อนไว้แล้ว จึงนับเฉพาะการ์ดที่เห็นอยู่)
 function pendingStaffChecks(){
-  return Array.from(document.querySelectorAll('.sf:not([hidden])'))
+  // เฉพาะหัวข้อที่กันไม่ให้บันทึก (data-blocks) — เจ้าหน้าที่สั่ง ก.ย. 2569 ว่าเล่มที่
+  // ไม่ผ่านไม่ต้องกดค่าปรับก็บันทึกได้ เพราะคำตอบไม่เปลี่ยนค่าที่เขียนลงชีท
+  // ส่วนเล่มที่ผ่านยังต้องกด (ช่องผลเปลี่ยนระหว่าง "เสร็จสิ้น" กับ "แจ้งค่าปรับ")
+  return Array.from(document.querySelectorAll('.sf:not([hidden])[data-blocks="1"]'))
     .filter(function(card){ return !card.querySelector('.pf.on'); });
 }
 // ข้อสีส้ม/เหลืองที่ยังไม่ได้กดผ่านหรือไม่ผ่าน

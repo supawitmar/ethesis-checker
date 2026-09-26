@@ -3186,6 +3186,10 @@ STAFF_CHECKS = [
                   "in the table, the frames, the font, and the leftover slots that "
                   "must be filled with white text.",
         "rule_id": "FRONT.SIGNATURE_LAYOUT",
+        # ต้องตอบเสมอก่อนบันทึกลงชีท แม้คำตอบจะไม่เปลี่ยนค่าที่เขียน (เจ้าหน้าที่สั่ง
+        # ก.ย. 2569 "ต้องเช็คสีเหลืองสีส้มให้หมด + โครงสร้างหน้าลงนามจึงจะกดได้")
+        # เป็นการยืนยันว่าเจ้าหน้าที่ตรวจหน้านี้ด้วยตาแล้ว ไม่ใช่แค่ค่าที่ลงชีท
+        "must_answer": True,
         "placement": "section",
         # ถ้อยคำบอกตำแหน่งไว้ในประโยคแรกอยู่แล้ว จึงไม่พิมพ์บรรทัดตำแหน่งซ้ำ
         # ชื่อนี้ใช้จัดกลุ่มในข้อความสรุปเท่านั้น
@@ -3961,6 +3965,38 @@ SHEET_DECISION_FEE = "แจ้งค่าปรับ"
 SHEET_FEE_CHOICE = "PASS_FEE_YES"
 
 
+def _sheet_row_fingerprint(report, failed, passed, staff):
+    """ค่าที่ "เขียนลงชีทจริง" ของคำตอบชุดหนึ่ง — ไม่นับข้อความรายละเอียด
+
+    ข้อความรายละเอียดเปลี่ยนตามถ้อยคำปิดท้ายทุกปุ่มอยู่แล้ว ถ้านับด้วยจะกลายเป็นว่า
+    ทุกหัวข้อบังคับให้กด ซึ่งขัดกับสิ่งที่เจ้าหน้าที่สั่ง
+    """
+    row = sheet_row(report, failed, passed, staff)
+    return (row["decision"], row["pass_or_not"],
+            tuple(sorted(row["flags"].items())), row["note"])
+
+
+def staff_choice_changes_sheet_row(report, check, failed=None, passed=None, staff=None):
+    """คำตอบของหัวข้อนี้เปลี่ยนค่าที่เขียนลงชีทไหม
+
+    ใช้แทนการไล่ชื่อหัวข้อในโค้ด — หัวข้อใหม่ที่เพิ่มทีหลังจะได้คำตอบถูกเองโดยไม่ต้อง
+    กลับมาแก้ตรงนี้ เช่น ปุ่มค่าปรับของเล่มที่ผ่าน (เปลี่ยนช่องผลการพิจารณาเป็น
+    "แจ้งค่าปรับ") บังคับให้กด ส่วนปุ่มค่าปรับของเล่มที่ไม่ผ่าน (ช่องผลยังเป็น
+    "ส่งกลับแก้ไข" เหมือนกันทั้งสองคำตอบ) ไม่บังคับ
+    """
+    base = set(staff or ())
+    seen = {_sheet_row_fingerprint(report, failed, passed,
+                                   sorted(base | {choice["id"]}))
+            for choice in check["choices"]}
+    return len(seen) > 1
+
+
+def staff_check_blocks_save(report, check, failed=None, passed=None, staff=None):
+    """หัวข้อนี้ต้องกดก่อนจึงจะบันทึกลงชีทได้ไหม"""
+    return bool(check.get("must_answer")) or staff_choice_changes_sheet_row(
+        report, check, failed, passed, staff)
+
+
 def sheet_staff_pending(report, failed=None, passed=None, staff=None):
     """หัวข้อของเจ้าหน้าที่ที่ต้องกดก่อนบันทึกลงชีท แต่ยังไม่ได้กด
 
@@ -3980,8 +4016,13 @@ def sheet_staff_pending(report, failed=None, passed=None, staff=None):
     for check in staff_checks_for_book(report_label_style(report)):
         if not check_applies(check, verdict):
             continue
-        if not any(choice["id"] in pressed for choice in check["choices"]):
-            left.append(check)
+        if any(choice["id"] in pressed for choice in check["choices"]):
+            continue
+        # เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าไม่ต้องกดค่าปรับก็บันทึกได้ ยกเว้นเล่มที่ผ่าน
+        # (เล่มผ่านต้องกด เพราะช่องผลการพิจารณาเปลี่ยนระหว่าง "เสร็จสิ้น" กับ "แจ้งค่าปรับ")
+        if not staff_check_blocks_save(report, check, failed, passed, staff):
+            continue
+        left.append(check)
     return left
 
 
@@ -5614,6 +5655,10 @@ def check_result(rep, context=None, not_checked=NOT_CHECKED):
         "staff_findings": staff_checks_for_book((context or {}).get("front_label_style")),
     }
     result["plain_summary"] = plain_summary(result)
+    # หน้าเว็บกันไว้ก่อนยิงด้วยค่านี้ ต้องมาจากฝั่งเซิร์ฟเวอร์ชุดเดียวกับที่ตรวจซ้ำตอนบันทึก
+    # ไม่ใช่ให้หน้าเว็บไล่ชื่อหัวข้อเอง (สองฝั่งจะหลุดจากกันเมื่อกฎเปลี่ยน)
+    for check in result["staff_findings"]:
+        check["blocks_save"] = staff_check_blocks_save(result, check)
     return result
 
 

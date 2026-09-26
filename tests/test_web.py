@@ -1498,6 +1498,39 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertIn("โครงสร้างหน้าลงนาม", data["pending"])
         self.assertEqual(sent, {})          # ไม่ยิงไปที่ชีทเลย
 
+    def test_a_failing_book_saves_without_the_fine_answer(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าเล่มที่ไม่ผ่านไม่ต้องกดค่าปรับก็บันทึกได้"""
+        response, sent = self._save(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง",
+                                          "FORM.APPROVED_MATCH")],
+                                    staff=["SIGNATURE_LAYOUT_OK"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(sent["decision"], "ส่งกลับแก้ไข")
+
+    def test_a_passing_book_still_blocks_without_the_fine_answer(self):
+        """ควบคุมเชิงลบ — เล่มผ่านยังต้องกด เพราะช่องผลเปลี่ยนตามปุ่มค่าปรับ"""
+        response, sent = self._save(staff=["SIGNATURE_LAYOUT_OK"])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "staff_pending")
+        self.assertEqual(sent, {})
+
+    def test_the_signature_layout_still_blocks_a_failing_book(self):
+        """ควบคุมเชิงลบ — โครงสร้างหน้าลงนามยังต้องกดเสมอ"""
+        response, sent = self._save(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง",
+                                          "FORM.APPROVED_MATCH")],
+                                    staff=[])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("โครงสร้างหน้าลงนาม", response.json()["pending"])
+        self.assertEqual(sent, {})
+
+    def test_the_page_gate_uses_the_server_flag(self):
+        """หน้าเว็บต้องกรองด้วย data-blocks ของเซิร์ฟเวอร์ ไม่ใช่ไล่ชื่อหัวข้อเอง"""
+        job = self._seed()
+        with mock.patch.object(main, "SHEET_ENABLED", True):
+            html = self.client.get(f"/result/{job}").text
+        self.assertIn('.sf:not([hidden])[data-blocks="1"]', html)
+        self.assertIn('data-blocks="1"', html)
+        self.assertIn('data-blocks="0"', html)
+
     def test_a_fine_changes_what_is_written(self):
         """กดผ่านแบบมีค่าปรับ ช่องผลการพิจารณาต้องเป็น "แจ้งค่าปรับ" """
         _response, sent = self._save(staff=["SIGNATURE_LAYOUT_OK", "PASS_FEE_YES"])

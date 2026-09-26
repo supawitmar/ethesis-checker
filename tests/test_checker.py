@@ -5678,8 +5678,16 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             self.assertIn(check["rule_id"], ethesis_rules.RULE_CATALOG, check["id"])
 
     def test_the_report_carries_the_registry_to_the_page(self):
+        """ถ้อยคำทุกตัวต้องมาจากทะเบียน บวกค่าที่คิดจากผลตรวจของเล่มนั้น
+
+        "blocks_save" ไม่ได้อยู่ในทะเบียน เพราะขึ้นกับเล่ม (เล่มผ่านต้องกดค่าปรับ
+        เล่มไม่ผ่านไม่ต้อง) จึงเทียบส่วนที่เหลือกับทะเบียนแล้วตรวจค่านี้แยก
+        """
         result = checker_module.check_result(Report())
-        self.assertEqual(result["staff_findings"], list(checker_module.STAFF_CHECKS))
+        stripped = [{k: v for k, v in check.items() if k != "blocks_save"}
+                    for check in result["staff_findings"]]
+        self.assertEqual(stripped, list(checker_module.STAFF_CHECKS))
+        self.assertTrue(all("blocks_save" in c for c in result["staff_findings"]))
 
 
 class TheReportSaysWhichFileItChecked(unittest.TestCase):
@@ -8556,12 +8564,68 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
             report, staff=["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE"])
         self.assertEqual(left, [])
 
-    def test_the_fine_question_follows_the_result(self):
-        """กดว่าโครงสร้างหน้าลงนามผิด = เล่มไม่ผ่าน คำถามค่าปรับต้องเปลี่ยนชุดตาม"""
+    def test_a_failing_book_can_be_saved_without_the_fine_answer(self):
+        """เจ้าหน้าที่สั่ง (ก.ย. 2569) "สามารถบันทึกข้อมูลได้ แม้กระทั่งไม่ได้กดเรื่อง
+        ค่าปรับ (ยกเว้นว่าผ่าน) ต้องเช็คสีเหลืองสีส้มให้หมด + โครงสร้างหน้าลงนาม
+        จึงจะกดได้"
+
+        เล่มที่ไม่ผ่านกดค่าปรับแบบไหนก็ได้ค่าลงชีทชุดเดิม (ช่องผล "ส่งกลับแก้ไข"
+        ช่องติ๊กเท่าเดิม) การบังคับให้กดจึงไม่ได้ทำให้ข้อมูลในชีทถูกขึ้น
+        """
+        report = self._report(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        self.assertEqual([c["id"] for c in checker_module.sheet_staff_pending(report)],
+                         ["SIGNATURE_LAYOUT"])
+        left = checker_module.sheet_staff_pending(report, staff=["SIGNATURE_LAYOUT_OK"])
+        self.assertEqual(left, [])
+
+    def test_a_passing_book_still_needs_the_fine_answer(self):
+        """ควบคุมเชิงลบ — เล่มผ่าน ช่องผลเปลี่ยนตามปุ่มค่าปรับ จึงยังต้องกด"""
         report = self._report()
+        left = checker_module.sheet_staff_pending(report, staff=["SIGNATURE_LAYOUT_OK"])
+        self.assertEqual([c["id"] for c in left], ["PASS_FEE"])
+
+    def test_the_signature_layout_is_always_required(self):
+        """แม้คำตอบจะไม่เปลี่ยนค่าที่ลงชีท ก็ยังต้องกด เพราะเป็นการยืนยันว่าตรวจด้วยตาแล้ว
+
+        เล่มที่ช่อง Cover ถูกติ๊กอยู่แล้วจากข้ออื่น การกด "โครงสร้างผิด" ไม่เปลี่ยน
+        ค่าที่เขียนลงชีทเลย ถ้าตัดสินจากค่าที่ลงชีทอย่างเดียว หัวข้อนี้จะหลุด
+        """
+        report = self._report(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        check = next(c for c in checker_module.staff_checks_for_book("roman")
+                     if c["id"] == "SIGNATURE_LAYOUT")
+        self.assertFalse(checker_module.staff_choice_changes_sheet_row(report, check))
+        self.assertTrue(checker_module.staff_check_blocks_save(report, check))
+        self.assertTrue(check["must_answer"])
+
+    def test_the_page_is_told_which_questions_block_saving(self):
+        """หน้าเว็บกันไว้ก่อนยิงด้วยค่าจากฝั่งเซิร์ฟเวอร์ ไม่ใช่ไล่ชื่อหัวข้อเอง"""
+        passing = checker_module.check_result(checker_module.Report(),
+                                              {"front_label_style": "roman"})
+        self.assertEqual({c["id"]: c["blocks_save"] for c in passing["staff_findings"]},
+                         {"SIGNATURE_LAYOUT": True, "LATE_FEE": False, "PASS_FEE": True})
+        rep = checker_module.Report()
+        rep.add("RED", "front_matter", "หน้าปก", "ชื่อเรื่องไม่ตรง", "x", "",
+                "FORM.APPROVED_MATCH")
+        failing = checker_module.check_result(rep, {"front_label_style": "roman"})
+        self.assertEqual({c["id"]: c["blocks_save"] for c in failing["staff_findings"]},
+                         {"SIGNATURE_LAYOUT": True, "LATE_FEE": False, "PASS_FEE": False})
+
+    def test_the_fine_question_follows_the_result(self):
+        """กดว่าโครงสร้างหน้าลงนามผิด = เล่มไม่ผ่าน คำถามค่าปรับต้องเปลี่ยนชุดตาม
+
+        และเล่มที่ไม่ผ่าน "ไม่ต้องกดค่าปรับก็บันทึกได้" (เจ้าหน้าที่สั่ง ก.ย. 2569)
+        คำถามที่โผล่บนหน้าจอจึงเป็นชุด LATE_FEE แต่ไม่ได้กันไม่ให้บันทึก
+        """
+        report = self._report()
+        verdict = checker_module.summary_verdict(
+            report, staff=["SIGNATURE_LAYOUT_WRONG"])
+        self.assertEqual(verdict, "ไม่ผ่าน")
+        shown = [c["id"] for c in checker_module.staff_checks_for_book("roman")
+                 if checker_module.check_applies(c, verdict)]
+        self.assertEqual(shown, ["SIGNATURE_LAYOUT", "LATE_FEE"])
         pending = checker_module.sheet_staff_pending(
             report, staff=["SIGNATURE_LAYOUT_WRONG"])
-        self.assertEqual([c["id"] for c in pending], ["LATE_FEE"])
+        self.assertEqual([c["id"] for c in pending], [])
 
     def test_the_front_of_the_book_is_all_cover(self):
         """หน้าลงนาม กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover ตามที่เจ้าหน้าที่กำหนด"""
