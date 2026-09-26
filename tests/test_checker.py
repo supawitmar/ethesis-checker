@@ -718,6 +718,49 @@ class ChapterCountMessageTests(unittest.TestCase):
                          {"LoC", "Main Content", "Other"})
         self.assertEqual(row["decision"], "ส่งกลับแก้ไข")
 
+    def test_the_other_column_says_what_it_is_about(self):
+        """ช่องข้อความถัดจาก Other ต้องบอกว่าติ๊ก Other ไว้เพราะเรื่องอะไร
+
+        เจ้าหน้าที่สั่ง (ก.ย. 2569) หลังเห็นว่าช่องนั้นยังว่าง — Other ที่ติ๊กลอย ๆ
+        ไม่บอกอะไรเลยตอนย้อนมาดูสถิติทีหลัง
+        """
+        rep = checker_module.Report()
+        rep.add("RED", "body", "ทั้งเล่ม (สารบัญและเนื้อหา)", *self._row(5),
+                "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        row = checker_module.sheet_row(report, staff=["SIGNATURE_LAYOUT_OK",
+                                                      "LATE_FEE_NONE"])
+        self.assertTrue(row["flags"]["Other"])
+        self.assertEqual(row["note"], "จำนวนบทไม่ตรงประกาศ")
+
+    def test_a_chapter_title_issue_writes_no_note(self):
+        """ควบคุมเชิงลบ — ข้อชื่อบทไม่ได้ติ๊ก Other จึงต้องไม่เขียนข้อความนั้น
+
+        ช่องว่างแปลว่า "ไม่ต้องแตะช่องนั้น" ของเดิมที่เจ้าหน้าที่พิมพ์เองจึงไม่ถูกล้าง
+        """
+        rep = checker_module.Report()
+        rep.add("RED", "body", "บทที่ 2 ในสารบัญ (หน้า vi) และในเนื้อหา (หน้า 6)",
+                'ชื่อบทในเล่มเขียนว่า "LITERATURE REVIEWS"',
+                'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"', "", "BODY.OPTION1")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        row = checker_module.sheet_row(report, staff=["SIGNATURE_LAYOUT_OK",
+                                                      "LATE_FEE_NONE"])
+        self.assertFalse(row["flags"]["Other"])
+        self.assertEqual(row["note"], "")
+
+    def test_two_reasons_for_other_are_both_written(self):
+        """เล่มเดียวติ๊ก Other ได้จากสองเรื่อง ต้องไม่ทิ้งเรื่องที่สองเงียบ ๆ"""
+        rep = checker_module.Report()
+        rep.add("RED", "front_matter", "ทั้งเล่ม",
+                "ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ", "ต้องเป็นภาษาอังกฤษ",
+                "", "FORM.BOOK_LANGUAGE")
+        rep.add("RED", "body", "ทั้งเล่ม (สารบัญและเนื้อหา)", *self._row(5),
+                "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        row = checker_module.sheet_row(report, staff=["SIGNATURE_LAYOUT_OK",
+                                                      "LATE_FEE_NONE"])
+        self.assertEqual(row["note"], "ภาษาที่เขียนไม่ตรง / จำนวนบทไม่ตรงประกาศ")
+
     def test_every_new_line_has_an_english_version(self):
         """ด่าน --corpus จับได้เฉพาะเมื่อเล่มทดสอบบังเอิญบทไม่ครบ จึงต้องตรึงไว้ตรงนี้
 

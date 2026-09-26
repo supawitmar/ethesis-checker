@@ -3928,6 +3928,11 @@ def sheet_undecided(report, failed=None, passed=None):
 
 # ค่าที่เขียนได้ในช่อง "ผลการพิจารณา" ของชีท (เจ้าหน้าที่กำหนดถ้อยคำเอง ก.ย. 2569)
 # เล่มที่ผ่านแยกสองแบบตามปุ่มค่าปรับ — ผ่านเฉย ๆ กับผ่านแล้วต้องแจ้งค่าปรับ
+# ข้อความสั้นในช่องถัดจาก Other — บอกว่า "Other" ที่ติ๊กไว้คือเรื่องอะไร
+# (เจ้าหน้าที่กำหนดถ้อยคำเอง: เล่มผิดภาษา ก.ย. 2569 · จำนวนบท ก.ย. 2569)
+SHEET_NOTE_LANGUAGE = "ภาษาที่เขียนไม่ตรง"
+SHEET_NOTE_CHAPTER_COUNT = "จำนวนบทไม่ตรงประกาศ"
+
 SHEET_DECISION_FIX = "ส่งกลับแก้ไข"
 SHEET_DECISION_DONE = "เสร็จสิ้น"
 SHEET_DECISION_FEE = "แจ้งค่าปรับ"
@@ -3968,13 +3973,17 @@ def sheet_row(report, failed=None, passed=None, staff=None):
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
     flags = {column: False for column in SHEET_COLUMNS}
-    note = ""
+    # ช่อง Other ของชีทมีข้อความสั้นกำกับ — เล่มเดียวติ๊ก Other ได้จากหลายเรื่อง
+    # (ผิดภาษา + จำนวนบท) จึงเก็บเป็นรายการแล้วต่อกัน ไม่ใช่เอาเรื่องแรกแล้วทิ้งที่เหลือ
+    notes = []
     for issue in items:
         for column in sheet_columns_of(issue):
             flags[column] = True
-        # ช่อง Other ของชีทมีข้อความสั้นกำกับ เล่มผิดภาษาเจ้าหน้าที่เขียนว่าแบบนี้
-        if issue.get("rule_id") == "FORM.BOOK_LANGUAGE" and not note:
-            note = "ภาษาที่เขียนไม่ตรง"
+        if issue.get("rule_id") == "FORM.BOOK_LANGUAGE":
+            notes.append(SHEET_NOTE_LANGUAGE)
+        elif is_chapter_count_issue(issue):
+            notes.append(SHEET_NOTE_CHAPTER_COUNT)
+    note = " / ".join(dict.fromkeys(notes))        # ตัดของซ้ำ เรียงตามที่เจอในเล่ม
     if items:
         decision = SHEET_DECISION_FIX
     elif SHEET_FEE_CHOICE in set(staff or ()):
