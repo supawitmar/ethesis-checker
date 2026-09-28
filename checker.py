@@ -4117,14 +4117,39 @@ _DEGREE_ABBR_TOKEN = re.compile(r'(?:[A-Za-z]{1,4}\.){2,}|(?:[ก-๙]{1,4}\.){2
 # ถ้าไม่ตัดคำพวกนี้ก่อน เล่มที่ถูกต้องจะโดนฟ้องว่ามีข้อความเกิน — เล่มที่ประโยคขึ้นบรรทัดใหม่
 # พอดีก่อนคำว่า "ปริญญา" เคยรอดมาได้ แต่เล่มที่ไม่ขึ้นบรรทัดใหม่โดนเต็ม ๆ
 # (ที่มา: template ทางการ 2569 ส่วนนำ หน้าปก ทั้งเล่มไทยและเล่มอังกฤษ)
+# ประโยคอังกฤษของ template ตัดบรรทัดตรงไหนก็ได้ แล้วแต่ความยาวของชื่อปริญญา บรรทัด
+# ชื่อปริญญาจึงขึ้นต้นด้วย "หางประโยค" ท่อนใดก็ได้ ไม่ใช่แค่ "FOR THE DEGREE OF" ที่เคยดักไว้
+# เล่มจริงของเจ้าหน้าที่ (ก.ย. 2569, 6738473 SISG/M) ตัดบรรทัดเป็น
+#     A THESIS SUBMITTED IN PARTIAL FULFILLMENT
+#     OF THE REQUIREMENTS FOR
+#     THE DEGREE OF MASTER OF SCIENCE
+#     (SURGICAL RESEARCH)
+# เล่มนี้พิมพ์ถูกตาม template ทุกคำ แต่โดนฟ้องว่าบรรทัดชื่อปริญญามีคำเกิน
+# ("THE DEGREE OF") เพราะหางท่อนนี้ไม่มีในรายการ
+_DEGREE_SENTENCE_EN = ("SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS "
+                       "FOR THE DEGREE OF")
+_DEGREE_SENTENCE_OPENERS = ("A THESIS", "A THEMATIC PAPER", "AN INDEPENDENT STUDY")
+
+
+def _sentence_tails(sentence):
+    """ทุกหางของประโยค (ตัดจากหัวทีละคำ) รวมท่อนคำเดียวท้ายสุด
+
+    ท่อนคำเดียวคือ "OF" (เล่มที่ตัดบรรทัดคาระหว่าง "THE DEGREE" กับ "OF") ตัดทิ้งได้
+    โดยไม่กลบความผิด เพราะหลังตัดแล้วยังต้องเท่ากับชื่อปริญญาทั้งท่อน คำเกินท้ายบรรทัด
+    จึงยังโผล่อยู่ดี
+    """
+    words = sentence.split()
+    return [" ".join(words[start:]) for start in range(len(words))]
+
+
 _DEGREE_LINE_TEMPLATE_PREFIXES = tuple(norm(text).upper() for text in (
     "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
     "สารนิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
     "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
     "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
     "ปริญญา",
-    "A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE DEGREE OF",
-    "FOR THE DEGREE OF",
+    *_DEGREE_SENTENCE_OPENERS,
+    *_sentence_tails(_DEGREE_SENTENCE_EN),
 ))
 
 

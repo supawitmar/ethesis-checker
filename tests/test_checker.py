@@ -1567,6 +1567,37 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
                 "FOR THE DEGREE OF " + want)
         self.assertEqual(checker_module.degree_line_extras(line, want), "")
 
+    def test_the_english_sentence_may_break_at_any_word(self):
+        """เล่มจริงของเจ้าหน้าที่ (ก.ย. 2569, 6738473 SISG/M) ตัดบรรทัดกลางประโยคนำ
+
+            A THESIS SUBMITTED IN PARTIAL FULFILLMENT
+            OF THE REQUIREMENTS FOR
+            THE DEGREE OF MASTER OF SCIENCE
+            (SURGICAL RESEARCH)
+
+        เล่มนี้พิมพ์ถูกตาม template ทุกคำ แต่ได้แดงว่าบรรทัดชื่อปริญญามีคำเกิน
+        "THE DEGREE OF" เพราะรายการคำนำหน้ารู้จักหางประโยคแค่ท่อน "FOR THE DEGREE OF"
+        ประโยคนี้ตัดบรรทัดตรงไหนก็ได้ แล้วแต่ความยาวชื่อปริญญา จึงต้องยอมทุกท่อน
+        """
+        want = "MASTER OF SCIENCE (SURGICAL RESEARCH)"
+        words = ("A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS "
+                 "FOR THE DEGREE OF " + want).split(" ")
+        for cut in range(2, len(words)):
+            page = (" ".join(words[:cut]) + NEWLINE + " ".join(words[cut:])
+                    + NEWLINE + "FACULTY OF GRADUATE STUDIES")
+            with self.subTest(cut=" ".join(words[cut:cut + 3])):
+                self.assertEqual(checker_module.degree_line_extras(page, want), "")
+
+    def test_a_broken_sentence_still_shows_real_extra_words(self):
+        """ควบคุมเชิงลบของข้อบน — ยอมหางประโยคของ template ไม่ใช่ยอมทุกอย่าง"""
+        want = "MASTER OF SCIENCE (SURGICAL RESEARCH)"
+        page = ("A THESIS SUBMITTED IN PARTIAL FULFILLMENT" + NEWLINE
+                + "OF THE REQUIREMENTS FOR" + NEWLINE
+                + "THE DEGREE OF MASTER OF SCIENCE" + NEWLINE
+                + "(SURGICAL RESEARCH) (INTERNATIONAL PROGRAM)")
+        self.assertIn("INTERNATIONAL PROGRAM",
+                      checker_module.degree_line_extras(page, want))
+
     def test_the_expected_line_follows_the_template(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) "ต้องเป็น ปริญญาต่อด้วยชื่อปริญญา"
 
