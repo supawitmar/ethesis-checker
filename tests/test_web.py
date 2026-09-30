@@ -1520,6 +1520,50 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(sent["decision"], "เสร็จสิ้น")
         self.assertEqual(sent["details"], "")
 
+    def test_an_english_report_saves_the_english_details(self):
+        """เจ้าหน้าที่เจอจริง (ก.ย. 2569): หน้าจอเป็นอังกฤษ แต่ชีทได้ภาษาไทย
+
+        คำแปลทำที่หน้าเว็บ หน้าเว็บจึงแนบฉบับที่แปลแล้วมา และชีทต้องได้ฉบับนั้น
+        """
+        english = ("Please fix all 1 item(s) as follows\n\nCover page\n"
+                   "1. The thesis title does not match the approved data")
+        _response, sent = self._save(
+            red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")],
+            lang="en", details_en=english)
+        self.assertEqual(sent["decision"], "ส่งกลับแก้ไข")
+        self.assertEqual(sent["details"], english)
+
+    def test_english_details_that_do_not_match_the_defects_are_not_trusted(self):
+        """จำนวนข้อไม่เท่ากับที่เซิร์ฟเวอร์คิดเอง = ใช้ฉบับไทย ชีทต้องไม่ขัดกับผลตรวจ"""
+        import checker
+        red = [("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")]
+        staff = ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"]
+        for english in ("Please fix all 2 item(s)\n\nCover page\n1. One\n2. Two",
+                        "Nothing to fix", "", "x" * 50000):
+            _response, sent = self._save(red=red, lang="en", details_en=english)
+            thai = checker.sheet_row(main.JOBS["sheet"]["report"], [], [], staff)["details"]
+            self.assertTrue(thai)
+            self.assertEqual(sent["details"], thai, english[:30])
+        # ไม่ได้บอกว่าเป็นหน้าอังกฤษ ก็ไม่รับข้อความจากหน้าเว็บ
+        _response, sent = self._save(red=red, details_en="Cover page\n1. One")
+        self.assertIn("ชื่อเรื่องไม่ตรง", sent["details"])
+
+    def test_a_finished_book_stays_empty_even_with_english_text(self):
+        _response, sent = self._save(lang="en", details_en="Cover page\n1. One")
+        self.assertEqual(sent["decision"], "เสร็จสิ้น")
+        self.assertEqual(sent["details"], "")
+
+    def test_the_summary_endpoint_hands_out_the_text_for_the_sheet(self):
+        """หน้าอังกฤษขอข้อความชุดของชีทจากที่นี่ไปแปล ต้องเป็นชุดเดียวกับที่จะบันทึก"""
+        import checker
+        job = self._seed(red=[("หน้าปก", "ชื่อเรื่องไม่ตรง", "FORM.APPROVED_MATCH")])
+        staff = ["SIGNATURE_LAYOUT_OK", "LATE_FEE_NONE"]
+        data = self.client.post(f"/summary/{job}", json={"staff": staff}).json()
+        self.assertEqual(data["details"], checker.sheet_row(
+            main.JOBS[job]["report"], [], [], staff)["details"])
+        self.assertNotIn("ผลการตรวจ", data["details"])
+        self.assertIn("ผลการตรวจ", data["plain"])
+
     def test_an_out_of_date_script_in_the_sheet_is_reported(self):
         """Apps Script ไม่อัปเดต URL เดิมให้เอง — ต้องบอกตอนกด ไม่ใช่ให้ไปเจอเอง
 

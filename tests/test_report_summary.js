@@ -194,8 +194,56 @@ function load(cards, summaryText) {
         failEn.indexOf('has been completed') === -1, true);
 }
 
-if (failures) {
-  console.error(`\nreport.html summary tests: ${failures} ข้อไม่ผ่าน`);
-  process.exit(1);
+// ---- ช่องรายละเอียดในชีทต้องเป็นภาษาเดียวกับที่หน้ารายงานเปิดอยู่ ----
+// เจ้าหน้าที่เจอจริง (ก.ย. 2569): หน้าจอเป็นอังกฤษ กดบันทึกแล้วชีทได้ภาษาไทย
+async function sheetLanguage() {
+  const details = 'กรุณาแก้ไขทั้งหมด 1 จุด ดังต่อไปนี้\n\nหน้าลงนาม\n1. '
+    + REGISTRY[0].choices[0].text.split('\n').join('\n   ');
+  const { sandbox } = load([], 'ผลการตรวจ: ไม่ผ่าน\n\n' + details);
+  const asked = [];
+  sandbox.fetch = (url, options) => {
+    asked.push([url, JSON.parse(options.body)]);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ details }) });
+  };
+
+  const thai = { failed: ['ORANGE:0'], passed: [], staff: ['X'], overwrite: false };
+  await sandbox.sheetDetailsInPageLanguage('job1', thai);
+  check('หน้าไทย: ไม่ขอข้อความมาแปล', asked.length, 0);
+  check('หน้าไทย: ไม่แนบฉบับอังกฤษ', 'details_en' in thai, false);
+
+  sandbox.LANG = 'en';
+  const english = { failed: ['ORANGE:0'], passed: [], staff: ['X'], overwrite: false };
+  await sandbox.sheetDetailsInPageLanguage('job1', english);
+  check('หน้าอังกฤษ: ขอข้อความชุดของชีท', asked[0][0], '/summary/job1');
+  check('หน้าอังกฤษ: ส่งคำตัดสินชุดเดียวกับที่จะบันทึก',
+        JSON.stringify(asked[0][1]),
+        JSON.stringify({ failed: ['ORANGE:0'], passed: [], staff: ['X'] }));
+  check('หน้าอังกฤษ: บอกภาษา', english.lang, 'en');
+  check('หน้าอังกฤษ: แนบฉบับที่แปลด้วย trSummary', english.details_en,
+        sandbox.trSummary(details));
+  check('หน้าอังกฤษ: ไม่เหลืออักษรไทย', /[฀-๿]/.test(english.details_en), false);
+  check('หน้าอังกฤษ: เลขข้อยังอยู่ครบ',
+        (english.details_en.match(/^\d+\. /gm) || []).length, 1);
+
+  // เล่มที่ไม่ได้ส่งกลับแก้ไข เซิร์ฟเวอร์ให้ข้อความว่าง = ไม่มีอะไรให้แปล
+  sandbox.fetch = () => Promise.resolve(
+    { ok: true, json: () => Promise.resolve({ details: '' }) });
+  const finished = { failed: [], passed: [], staff: [], overwrite: false };
+  await sandbox.sheetDetailsInPageLanguage('job1', finished);
+  check('เล่มเสร็จสิ้น: ไม่แนบฉบับอังกฤษ', 'details_en' in finished, false);
+
+  // ขอข้อความไม่สำเร็จต้องไม่ไปต่อ (ไม่งั้นชีทได้ภาษาไทยไปเงียบ ๆ)
+  sandbox.fetch = () => Promise.resolve({ ok: false, status: 401 });
+  let refused = '';
+  await sandbox.sheetDetailsInPageLanguage('job1', { failed: [], passed: [], staff: [] })
+    .catch((err) => { refused = err.message; });
+  check('ขอข้อความไม่สำเร็จ: หยุด ไม่บันทึกต่อ', refused, '401');
 }
-console.log('report.html summary tests passed');
+
+sheetLanguage().then(() => {
+  if (failures) {
+    console.error(`\nreport.html summary tests: ${failures} ข้อไม่ผ่าน`);
+    process.exit(1);
+  }
+  console.log('report.html summary tests passed');
+}, (err) => { console.error(err); process.exit(1); });

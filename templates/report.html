@@ -2000,6 +2000,27 @@ function goToCard(card){
   if (card.closest('details')) card.closest('details').open = true;
   card.scrollIntoView({behavior: 'smooth', block: 'center'});
 }
+// หน้ารายงานเปิดเป็นภาษาอังกฤษ = ข้อความที่เจ้าหน้าที่คัดลอกส่งนักศึกษาเป็นฉบับอังกฤษ
+// ช่องรายละเอียดในชีทต้องเป็นฉบับเดียวกัน (เจ้าหน้าที่เจอ ก.ย. 2569: หน้าจอเป็นอังกฤษ
+// แต่ชีทได้ภาษาไทย) คำแปลมีอยู่ที่หน้านี้ที่เดียว จึงขอข้อความชุดของชีทจากเซิร์ฟเวอร์
+// มาแปลด้วย trSummary ตัวเดียวกับกล่องคัดลอก แล้วแนบไปกับคำขอบันทึก
+// ขอข้อความไม่สำเร็จ = ไม่บันทึก ไม่ใช่ปล่อยให้ชีทได้ภาษาไทยไปเงียบ ๆ
+function sheetDetailsInPageLanguage(job, body){
+  if (LANG !== 'en') return Promise.resolve(body);
+  return fetch('/summary/' + job, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({failed: body.failed, passed: body.passed, staff: body.staff}),
+  }).then(function(r){
+    return r.ok ? r.json() : Promise.reject(new Error(r.status));
+  }).then(function(data){
+    if (typeof data.details === 'string' && data.details){
+      body.lang = 'en';
+      body.details_en = trSummary(data.details);
+    }
+    return body;
+  });
+}
 function saveToSheet(ev, btn){
   if (ev) ev.preventDefault();
   var job = JOB_ID;
@@ -2024,11 +2045,14 @@ function saveToSheet(ev, btn){
   }
   btn.disabled = true;
   sheetSay('', sheetWord('saving'));
-  fetch('/sheet/' + job, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
-                          staff: collectStaff(), overwrite: SHEET_OVERWRITE}),
+  var body = {failed: collectFailed(), passed: collectPassed(),
+              staff: collectStaff(), overwrite: SHEET_OVERWRITE};
+  sheetDetailsInPageLanguage(job, body).then(function(){
+    return fetch('/sheet/' + job, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
   }).then(function(r){
       if (r.status === 401) return {status: 401, data: {}};
       return r.json().then(function(data){ return {status: r.status, data: data}; },
@@ -2074,7 +2098,10 @@ function saveToSheet(ev, btn){
       SHEET_OVERWRITE = false;
       sheetSay('err', data.error || sheetWord('other'));
     })
-    .catch(function(){ sheetSay('err', sheetWord('network')); })
+    .catch(function(err){
+      // 401 ตรงนี้มาจากการขอข้อความชุดของชีท (sheetDetailsInPageLanguage)
+      sheetSay('err', sheetWord(err && err.message === '401' ? 'login' : 'network'));
+    })
     .finally(function(){ btn.disabled = false; });
 }
 

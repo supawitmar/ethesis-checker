@@ -679,6 +679,9 @@ async def rebuild_summary(job_id: str, request: Request):
     # คิดฝั่งเซิร์ฟเวอร์ที่เดียวกับข้อความสรุป ไม่ให้หน้าเว็บนับเอง (นับคนละทางเมื่อไหร่
     # เจ้าหน้าที่จะเห็นตัวเลขที่ขัดกับข้อความสรุปโดยไม่มีอะไรบอกว่าอันไหนถูก)
     return {"plain": plain_summary(report, failed, passed, staff),
+            # ข้อความชุดที่จะลงช่องรายละเอียดในชีท (ไม่มีหัวเรื่องกับค่าปรับ) — หน้ารายงาน
+            # ที่เปิดเป็นภาษาอังกฤษเอาไปแปลแล้วส่งกลับมาตอนกดบันทึก (ดู _sheet_details)
+            "details": sheet_row(report, failed, passed, staff)["details"],
             "verdict": summary_verdict(report, failed=failed, passed=passed,
                                        staff=staff),
             "counts": zone_counts(report, failed=failed, passed=passed,
@@ -761,12 +764,39 @@ def _sheet_failure(err):
     return ("ติดต่อชีทไม่ได้ (เครือข่ายมีปัญหา)" + tail, "network")
 
 
+SHEET_DETAILS_MAX = 45000          # ช่องของ Google Sheets รับได้ 50,000 ตัวอักษร
+_NUMBERED_LINE = re.compile(r"(?m)^\d+\. ")
+
+
+def _sheet_details(thai, payload):
+    """ข้อความที่จะลงช่องรายละเอียดในชีท ตามภาษาที่หน้ารายงานเปิดอยู่ตอนกดบันทึก
+
+    เจ้าหน้าที่เจอจริง (ก.ย. 2569): เปิดรายงานเป็นภาษาอังกฤษ คัดลอกข้อความอังกฤษ
+    ส่งนักศึกษา แต่ช่องในชีทได้ภาษาไทย — คำแปลอังกฤษทำที่หน้าเว็บ (ตาราง TR ใน
+    report.html) เซิร์ฟเวอร์มีแต่ฉบับไทย จึงต้องให้หน้าเว็บส่งฉบับที่แปลแล้วมาด้วย
+
+    ยังยึดหลักเดิมว่าชีทกับข้อความที่ส่งนักศึกษาต้องไม่ขัดกัน: รับฉบับอังกฤษต่อเมื่อ
+    เล่มถูกส่งกลับแก้ไขจริง (ฉบับไทยไม่ว่าง) และจำนวนข้อเท่ากับฉบับไทยที่เซิร์ฟเวอร์คิดเอง
+    ไม่ตรงเมื่อไหร่ใช้ฉบับไทย ไม่ใช่เขียนข้อความที่ตรวจสอบไม่ได้ลงชีท
+    """
+    if not thai or str(payload.get("lang") or "") != "en":
+        return thai
+    english = str(payload.get("details_en") or "").strip()
+    if not english or len(english) > SHEET_DETAILS_MAX:
+        return thai
+    if len(_NUMBERED_LINE.findall(english)) != len(_NUMBERED_LINE.findall(thai)):
+        return thai
+    return english
+
+
 @app.post("/sheet/{job_id}")
 async def save_to_sheet(job_id: str, request: Request):
     """บันทึกผลตรวจลงชีท "บันทึกการตรวจ E-thesis" (เจ้าหน้าที่กดเอง ไม่บังคับ)
 
     เซิร์ฟเวอร์คิดค่าทุกช่องเอง หน้าเว็บส่งมาได้แค่คำตัดสินของเจ้าหน้าที่ (ชุดเดียวกับ
     ที่ใช้สร้างข้อความสรุป) จะได้ไม่มีทางที่ชีทกับข้อความที่ส่งนักศึกษาจะขัดกันเอง
+    ยกเว้นอย่างเดียวคือคำแปลอังกฤษของช่องรายละเอียด ซึ่งทำได้ที่หน้าเว็บเท่านั้น
+    (ดู _sheet_details)
     """
     if not SHEET_ENABLED:
         return JSONResponse({"error": "ระบบยังไม่ได้ตั้งค่าการเชื่อมกับชีท",
@@ -825,7 +855,8 @@ async def save_to_sheet(job_id: str, request: Request):
             "note": row["note"],
             # รายละเอียดที่ส่งให้นักศึกษาแก้ไข — ว่างเมื่อเล่มไม่ได้ถูกส่งกลับแก้ไข
             # และช่องว่างแปลว่า "ไม่ต้องเขียน" ไม่ใช่ "เขียนทับด้วยค่าว่าง"
-            "details": row["details"],
+            # ภาษาเดียวกับที่หน้ารายงานเปิดอยู่ (เจ้าหน้าที่คัดลอกฉบับนั้นส่งนักศึกษา)
+            "details": _sheet_details(row["details"], payload),
             "overwrite": bool(payload.get("overwrite")),
         })
     except Exception as err:                      # noqa: BLE001 — ต้องไม่ล้มทั้งหน้า
