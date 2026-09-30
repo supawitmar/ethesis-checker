@@ -13,8 +13,10 @@
   :root { --navy:#16365a; --navy-2:#23548a; --navy-3:#2f6db3; --navy-soft:#eef3fa;
           --gold:#c9a227; --gold-soft:#fcf7e6; --gold-line:#efe1b0;
           --bg:#f4f6fa; --surface:#ffffff; --line:#e4e9f0; --line-2:#d5dde8;
-          --ink:#16212e; --ink-2:#465567; --ink-3:#7a8797;
-          --ok:#1e8449; --ok-bg:#eaf7ef; --ok-line:#9fd1b1;
+          /* ข้อความตัวเล็กต้องได้ความต่างสี 4.5:1 (เกณฑ์ WCAG AA) — ink-3 เดิมได้ 3.2-3.7
+             ใช้กับข้อความรองทั้งหน้า จึงเข้มขึ้นที่ค่าเดียวแล้วครบทุกจุด */
+          --ink:#16212e; --ink-2:#465567; --ink-3:#5f6d7e;
+          --ok:#1a7a43; --ok-bg:#eaf7ef; --ok-line:#9fd1b1;
           --ring:0 0 0 3px rgba(47,109,179,.22);
           --shadow-sm:0 1px 2px rgba(16,24,40,.05);
           --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px -12px rgba(16,24,40,.14);
@@ -52,7 +54,7 @@
   .main { display:flex; flex-direction:column; gap:16px; min-width:0; }
 
   /* ---- การ์ดแต่ละขั้น ---- */
-  .panel { scroll-margin-top:84px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
        box-shadow:var(--shadow); padding:22px 24px 24px; }
   .panel-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
   .panel-head h2 { margin:0; font-size:1.05rem; font-weight:700; color:var(--navy); line-height:1.4; }
@@ -74,6 +76,17 @@
   input::placeholder, textarea::placeholder { color:#a9b3bf; }
   input:hover, select:hover, textarea:hover { border-color:#b9c5d4; }
   input:focus, select:focus, textarea:focus { outline:none; border-color:var(--navy-3); box-shadow:var(--ring); }
+  /* แถบหัวหน้า (ปักบน) กับแถบปุ่มตรวจเล่ม (ปักล่าง) บังช่องที่เพิ่งโฟกัสด้วยปุ่ม Tab —
+     เบราว์เซอร์เลื่อนช่องเข้าจอแค่พอดีขอบ ซึ่งก็คือใต้แถบพอดี (วัดที่จอ 1336x771 โฟกัสทีละช่อง
+     ไล่ลงและไล่ขึ้น โดนบัง 8 จาก 19 ช่อง) ระยะเผื่อจึงตั้งที่ตัวเลื่อน (html) ที่เดียว ไม่ตั้งที่ตัวช่อง เพราะ textarea
+     เบราว์เซอร์เลื่อนเฉพาะเคอร์เซอร์ให้พ้นขอบ ไม่สนระยะเผื่อของตัวช่อง (ชื่อเรื่องสองช่องยังโดนบัง)
+     ด้านบน 84px ย้ายมาจาก .panel ซึ่งมีเฉพาะการ์ด — บล็อก "วันดำเนินการ" เป็น div ซ้อนในการ์ด
+     ขั้นที่ 1 จึงไม่ได้ระยะนี้ กดชิปแล้วหัวบล็อกไปอยู่ที่ 0px ใต้แถบหัวหน้า
+     ด้านล่างอ่านความสูงจริงของแถบมาใส่ใน --bar-space (สคริปต์ trackBarSpace) เพราะแถบสูง
+     77px ที่จอกว้าง แต่ 127px ที่จอโทรศัพท์ (ชิปขึ้นสองแถว) ค่าตายตัวจึงพอแค่บางจอ
+     120px ในวงเล็บคือค่าสำรองตอนสคริปต์ไม่ทำงาน */
+  html { scroll-padding-top:84px; scroll-padding-bottom:var(--bar-space, 120px); }
+  .date-echo { margin:6px 2px 0; min-height:1.4em; font-size:.82rem; color:var(--ink-2); }
   select { appearance:none; -webkit-appearance:none; cursor:pointer; padding-right:36px;
        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%237a8797' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
   textarea { resize:vertical; line-height:1.5; }
@@ -293,10 +306,12 @@
           (นักศึกษาคนเดียวส่งได้หลายรอบ) ส่วนวันที่ตรวจเติมลงชีทให้ตามที่กรอก
           ไม่กรอกสองช่องนี้ ระบบจะไม่ตรวจ</p>
         <div class="grid-2" style="margin-top:12px;">
-          <div><label>วันที่เข้าคิว</label>
-            <input type="date" name="queue_date" id="queue-date" required></div>
-          <div><label>วันที่ตรวจ</label>
-            <input type="date" name="checked_date" id="checked-date" required></div>
+          <div><label for="queue-date">วันที่เข้าคิว</label>
+            <input type="date" name="queue_date" id="queue-date" required aria-describedby="queue-date-th">
+            <p class="date-echo" id="queue-date-th" aria-live="polite"></p></div>
+          <div><label for="checked-date">วันที่ตรวจ</label>
+            <input type="date" name="checked_date" id="checked-date" required aria-describedby="checked-date-th">
+            <p class="date-echo" id="checked-date-th" aria-live="polite"></p></div>
         </div>
       </div>
     </section>
@@ -305,31 +320,31 @@
       <div class="panel-head"><span class="step" aria-hidden="true">2</span>
         <div><h2>ประเภทและรูปแบบเล่ม</h2></div></div>
       <div class="grid-2">
-        <div><label>ประเภทเล่ม</label>
-          <select name="doc_type" required>
+        <div><label for="doc-type">ประเภทเล่ม</label>
+          <select name="doc_type" id="doc-type" required>
             <option value="" disabled selected>กรุณาเลือกประเภทเล่ม</option>
             <option value="THESIS">วิทยานิพนธ์ (Thesis)</option>
             <option value="THEMATIC PAPER">สารนิพนธ์ (Thematic Paper)</option>
             <option value="INDEPENDENT STUDY">การค้นคว้าอิสระ (Independent Study)</option>
           </select>
           <p class="type-note" id="doc-type-note" role="status" hidden></p></div>
-        <div><label>รูปแบบ</label>
-          <select name="format" required>
+        <div><label for="book-format">รูปแบบ</label>
+          <select name="format" id="book-format" required>
             <option value="" disabled selected>กรุณาเลือกรูปแบบ</option>
             <option value="1">รูปแบบ 1 — ดั้งเดิม</option>
             <option value="2">รูปแบบ 2 — จากผลงานตีพิมพ์</option>
           </select></div>
       </div>
       <div class="grid-2">
-        <div><label>หลักสูตร</label>
+        <div><label for="program-language">หลักสูตร</label>
           <select name="program_language" id="program-language" required>
             <option value="" disabled selected>กรุณาเลือกหลักสูตร</option>
             <option value="international">นานาชาติ (EN เท่านั้น)</option>
             <option value="thai">ไทย — เล่มไทย</option>
             <option value="thai_english">ไทย — เล่มอังกฤษ</option>
           </select></div>
-        <div><label>โหมดตรวจชื่อบท</label>
-          <select name="chapters_mode" required>
+        <div><label for="chapters-mode">โหมดตรวจชื่อบท</label>
+          <select name="chapters_mode" id="chapters-mode" required>
             <option value="" disabled selected>กรุณาเลือกโหมดตรวจ</option>
             <option value="strict">strict (บังคับชื่อบทตามประกาศ)</option>
             <option value="free">free (ไม่บังคับชื่อบท)</option>
@@ -340,10 +355,10 @@
     <section class="panel" id="sec-title">
       <div class="panel-head"><span class="step" aria-hidden="true">3</span>
         <div><h2>ชื่อเรื่อง (ตาม บฑ.1)</h2></div></div>
-      <label style="margin-top:0">ชื่อเรื่องภาษาอังกฤษ</label>
-      <textarea name="title_en" rows="2" placeholder="THESIS TITLE ..." required></textarea>
-      <label>ชื่อเรื่องภาษาไทย <span class="tag">จำเป็นสำหรับหลักสูตรไทย</span></label>
-      <textarea name="title_th" rows="2" placeholder="หัวข้อภาษาไทย ..."></textarea>
+      <label for="title-en" style="margin-top:0">ชื่อเรื่องภาษาอังกฤษ</label>
+      <textarea name="title_en" id="title-en" rows="2" placeholder="THESIS TITLE ..." required></textarea>
+      <label for="title-th">ชื่อเรื่องภาษาไทย <span class="tag">จำเป็นสำหรับหลักสูตรไทย</span></label>
+      <textarea name="title_th" id="title-th" rows="2" placeholder="หัวข้อภาษาไทย ..."></textarea>
     </section>
 
     <section class="panel" id="sec-student">
@@ -351,9 +366,9 @@
         <div><h2>นักศึกษาและปริญญา</h2>
           <p class="hint">ช่องที่ระบบเติมจาก eThesis (สีเขียว) แก้ไขได้ทุกช่อง กรุณาตรวจทานก่อนตรวจเล่ม</p></div></div>
       <div class="grid-3">
-        <div><label>รหัสนักศึกษา</label><input name="student_id" placeholder="6xxxxxx" required></div>
-        <div><label>ชื่อ-นามสกุล (อังกฤษ)</label><input name="student_name" placeholder="FIRSTNAME LASTNAME" required></div>
-        <div><label>ชื่อ-นามสกุล (ไทย) <span class="tag">หลักสูตรไทย</span></label><input name="student_name_th" placeholder="ชื่อ นามสกุล (ต่างชาติใช้ชื่ออังกฤษ)"></div>
+        <div><label for="student-id">รหัสนักศึกษา</label><input name="student_id" id="student-id" placeholder="6xxxxxx" required></div>
+        <div><label for="student-name">ชื่อ-นามสกุล (อังกฤษ)</label><input name="student_name" id="student-name" placeholder="FIRSTNAME LASTNAME" required></div>
+        <div><label for="student-name-th">ชื่อ-นามสกุล (ไทย) <span class="tag">หลักสูตรไทย</span></label><input name="student_name_th" id="student-name-th" placeholder="ชื่อ นามสกุล (ต่างชาติใช้ชื่ออังกฤษ)"></div>
       </div>
 
       <div class="degree-block">
@@ -375,8 +390,8 @@
 
       <div class="degree-block">
         <div class="grid-2">
-          <div><label>วันที่สอบผ่าน</label><input name="exam_date" placeholder="29 June 2026 / 29 มิถุนายน 2569" required></div>
-          <div><label>ปีบนหน้าปก</label><input name="year" placeholder="2026 / 2569" required></div>
+          <div><label for="exam-date">วันที่สอบผ่าน</label><input name="exam_date" id="exam-date" placeholder="29 June 2026 / 29 มิถุนายน 2569" required></div>
+          <div><label for="cover-year">ปีบนหน้าปก</label><input name="year" id="cover-year" placeholder="2026 / 2569" required></div>
         </div>
       </div>
 
@@ -810,13 +825,67 @@ window.addEventListener('pageshow', function(){ markMissing([], false); });
 // วันที่ตรวจ = วันนี้ตั้งแต่เปิดหน้า (เจ้าหน้าที่แก้เองได้ถ้าตรวจย้อนวัน)
 // คิดจากเวลาในเครื่อง ไม่ใช่ toISOString ซึ่งเป็นเวลา UTC — ก่อนเจ็ดโมงเช้าบ้านเรา
 // UTC ยังเป็นเมื่อวาน ถ้าใช้จะได้วันที่ผิดไปหนึ่งวันทุกเช้า
-(function fillCheckedDate(){
+const fillCheckedDate = function fillCheckedDate(){
   const field = document.getElementById('checked-date');
   if (!field || field.value) return;
   const now = new Date();
   const pad = function(n){ return (n < 10 ? '0' : '') + n; };
   field.value = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
   updateProgress();
+};
+fillCheckedDate();
+// pageshow เกิดหลัง load และ resetCheckForm (ลงทะเบียนไว้ข้างบน) ล้างทั้งฟอร์มทุกครั้งที่เข้าหน้านี้
+// รวมช่องวันที่ตรวจที่เพิ่งเติมไว้ด้วย — วัดในเบราว์เซอร์จริงแล้ว เปิดหน้ามาช่องนี้ว่างเสมอ
+// จึงต้องเติมซ้ำหลังล้าง listener ตัวนี้ลงทะเบียนทีหลัง จึงทำงานตามหลังตัวล้างเสมอ
+window.addEventListener('pageshow', fillCheckedDate);
+
+// อ่านวันที่ที่เลือกกลับเป็นข้อความไทย (พ.ศ.) ใต้ช่อง — ช่องวันที่ของเบราว์เซอร์เรียงวัน/เดือนตามภาษา
+// ของเครื่อง (เครื่องหนึ่งขึ้น 09/30/2026 อีกเครื่องขึ้น 30/09/2026) ส่วนวันที่เข้าคิวเป็นตัวชี้แถว
+// ในชีท อ่านสลับวันกับเดือนเมื่อไหร่ก็เขียนผิดแถว ข้อความไทยใต้ช่องอ่านสลับไม่ได้
+// รายชื่อเดือนอยู่ในฟังก์ชันเอง เพื่อให้ tests/test_form_dates.js ดึงฟังก์ชันเดียวไปรันได้
+function thaiDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m) return '';
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  // วันที่ที่ไม่มีจริง (เช่น 31 กุมภาพันธ์) จะตกไปเดือนถัดไป — ถือว่าอ่านไม่ได้ ไม่ปั้นข้อความให้
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1
+      || probe.getUTCDate() !== day) return '';
+  const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  return day + ' ' + months[month - 1] + ' ' + (year + 543);
+}
+function showDateEchoes() {
+  [['queue-date', 'queue-date-th'], ['checked-date', 'checked-date-th']].forEach(function(pair){
+    const field = document.getElementById(pair[0]);
+    const echo = document.getElementById(pair[1]);
+    if (!field || !echo) return;
+    const text = thaiDate(field.value);
+    echo.textContent = text ? 'ตรงกับ ' + text : '';
+  });
+}
+['queue-date', 'checked-date'].forEach(function(id){
+  const field = document.getElementById(id);
+  if (!field) return;
+  ['input', 'change'].forEach(function(ev){ field.addEventListener(ev, showDateEchoes); });
+});
+// กลับมาหน้านี้ด้วยปุ่มย้อนกลับ เบราว์เซอร์คืนค่าที่กรอกไว้โดยไม่ยิงเหตุการณ์ใด ๆ
+window.addEventListener('pageshow', showDateEchoes);
+showDateEchoes();
+
+// ระยะเผื่อด้านล่างของการเลื่อนหน้า = ความสูงจริงของแถบปุ่มปักล่าง + ระยะห่างขอบจอ + ช่องไฟ
+// (แถบนี้สูงขึ้นตอนมีข้อความ "ยังกรอกไม่ครบ" ด้วย จึงต้องตามดูตลอด ไม่ใช่วัดครั้งเดียว)
+(function trackBarSpace(){
+  const bar = document.querySelector('.actionbar');
+  if (!bar) return;
+  const update = function(){
+    const gap = parseFloat(getComputedStyle(bar).bottom) || 0;
+    document.documentElement.style.setProperty(
+      '--bar-space', Math.ceil(bar.offsetHeight + gap + 24) + 'px');
+  };
+  update();
+  if (window.ResizeObserver) new ResizeObserver(update).observe(bar);
+  else window.addEventListener('resize', update);
 })();
 
 // กดชิปแล้วเลื่อนไปที่ขั้นนั้น

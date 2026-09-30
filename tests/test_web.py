@@ -877,9 +877,98 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         self.assertIn("f.closest(own) === sec", code)
         self.assertNotIn("sec.contains(f)", self.html)
 
+    def test_every_label_is_tied_to_its_field(self):
+        """คลิกที่ป้ายต้องโฟกัสช่อง และโปรแกรมอ่านหน้าจอต้องอ่านชื่อช่องได้
+
+        ของเดิมมีป้าย 13 ป้ายวางลอย ๆ ข้างช่อง (ไม่มี for) — คลิกที่ป้ายแล้วไม่เกิดอะไรขึ้น
+        ผู้ใช้โปรแกรมอ่านหน้าจอได้ยินแค่ "ช่องกรอก" โดยไม่รู้ว่าช่องอะไร
+        """
+        from html.parser import HTMLParser
+        controls = {"input", "select", "textarea"}
+
+        class Scan(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.ids, self.labels, self._label = {}, [], None
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get("id"):
+                    self.ids[attrs["id"]] = tag
+                if tag == "label":
+                    self._label = {"for": attrs.get("for"), "wraps": False, "text": ""}
+                    self.labels.append(self._label)
+                elif tag in controls and self._label is not None:
+                    self._label["wraps"] = True
+
+            def handle_endtag(self, tag):
+                if tag == "label":
+                    self._label = None
+
+            def handle_data(self, data):
+                if self._label is not None:
+                    self._label["text"] += data
+
+        scan = Scan()
+        scan.feed(self.client.get("/").text)
+        loose = [label for label in scan.labels if not label["wraps"]]
+        self.assertGreaterEqual(len(loose), 13)      # ป้ายลอยเดิมทั้ง 13 ยังอยู่ ไม่ได้ถูกลบทิ้งให้เทสต์ผ่านง่าย
+        for label in loose:
+            name = " ".join(label["text"].split())
+            self.assertTrue(label["for"], f'ป้าย "{name}" ไม่ผูกกับช่องใดเลย')
+            self.assertIn(scan.ids.get(label["for"]), controls,
+                          f'ป้าย "{name}" ชี้ไปที่ id ที่ไม่ใช่ช่องกรอก: {label["for"]}')
+
+    def test_the_two_dates_are_read_back_in_thai(self):
+        """ช่องวันที่ของเบราว์เซอร์เรียงวัน/เดือนตามภาษาของเครื่อง — วันที่เข้าคิวเป็นตัวชี้แถวในชีท
+
+        อ่านสลับวันกับเดือนเมื่อไหร่ก็เขียนผิดแถว ข้อความไทยใต้ช่องอ่านสลับไม่ได้ (ตัวฟังก์ชันมีเทสต์ใน
+        tests/test_form_dates.js) ตรงนี้ล็อกการต่อสาย
+        """
+        for name in ("queue-date", "checked-date"):
+            self.assertIn(f'id="{name}-th"', self.html)
+            self.assertIn(f'aria-describedby="{name}-th"', self.html)
+        code = self.html.split("function showDateEchoes()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("thaiDate(field.value)", code)
+        self.assertIn("addEventListener('pageshow', showDateEchoes)", self.html)
+
+    def test_the_date_of_checking_is_filled_again_after_the_form_is_reset(self):
+        """วัดในเบราว์เซอร์จริง: เปิดหน้ามาช่องวันที่ตรวจว่างเสมอ ทั้งที่โค้ดเติมวันนี้ไว้ตอนโหลด
+
+        pageshow -> resetCheckForm() -> form.reset() ล้างทั้งฟอร์มทุกครั้งที่เข้าหน้านี้ (ตั้งใจ: เริ่มตรวจ
+        เล่มใหม่) แต่ pageshow เกิดหลัง load จึงล้างค่าที่เพิ่งเติมทิ้งไปด้วย ต้องเติมซ้ำหลังล้าง และ listener
+        ที่เติมต้องลงทะเบียนหลังตัวล้าง (ลำดับที่ลงทะเบียน = ลำดับที่ทำงาน)
+        """
+        reset = self.html.index("window.addEventListener('pageshow', resetCheckForm)")
+        fill = self.html.index("window.addEventListener('pageshow', fillCheckedDate)")
+        echo = self.html.index("window.addEventListener('pageshow', showDateEchoes)")
+        self.assertLess(reset, fill)
+        self.assertLess(fill, echo)          # ข้อความไทยต้องอ่านจากค่าที่เติมแล้ว
+
+    def test_the_fixed_bars_never_cover_the_field_being_typed_in(self):
+        """โฟกัสไล่ช่องทีละช่องบนจอ 1336x771 (ก่อนแก้) โดนแถบปักบน/ล่างบัง 8 จาก 19 ช่อง
+
+        - ระยะเผื่อต้องตั้งที่ html ไม่ใช่ที่ตัวช่อง: textarea เบราว์เซอร์เลื่อนเฉพาะเคอร์เซอร์ให้พ้นขอบ
+          ไม่สนระยะเผื่อของตัวช่อง (ชื่อเรื่องสองช่องยังโดนบังอยู่หลังลองตั้งที่ตัวช่อง)
+        - ด้านล่างตามความสูงจริงของแถบ (77px ที่จอกว้าง แต่ 127px ที่จอโทรศัพท์)
+        - .panel ต้องไม่มี scroll-margin-top ของตัวเองอีก ไม่งั้นบวกซ้อนกับ html เป็นสองเท่า
+        """
+        import re
+        css = re.sub(r"/\*.*?\*/", "", self.html.split("<style>", 1)[1].split("</style>", 1)[0], flags=re.S)
+        root = re.search(r"(?<![\w.#-])html\s*\{([^{}]*)\}", css).group(1)
+        self.assertRegex(root, r"scroll-padding-top\s*:\s*84px")
+        self.assertRegex(root, r"scroll-padding-bottom\s*:\s*var\(--bar-space\s*,\s*120px\)")
+        panel = re.search(r"\.panel\s*\{([^{}]*)\}", css).group(1)
+        self.assertNotIn("scroll-margin", panel)
+        self.assertNotRegex(css, r"(input|select|textarea)[^{}]*\{[^{}]*scroll-margin")
+        code = self.html.split("function trackBarSpace()", 1)[1].split("})();", 1)[0]
+        self.assertIn("'--bar-space'", code)
+        self.assertIn("bar.offsetHeight", code)
+        self.assertIn("new ResizeObserver(update).observe(bar)", code)
+
     def test_the_date_of_checking_starts_at_today(self):
         """ต้องคิดจากเวลาในเครื่อง — toISOString เป็น UTC ซึ่งตอนเช้าบ้านเรายังเป็นเมื่อวาน"""
-        code = self.html.split("function fillCheckedDate()", 1)[1].split("})();", 1)[0]
+        code = self.html.split("function fillCheckedDate()", 1)[1].split("\n};\n", 1)[0]
         self.assertIn("now.getFullYear()", code)
         self.assertNotIn("toISOString", code)
 
@@ -1788,3 +1877,125 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         client = TestClient(main.app)
         response = client.post("/sheet/sheet", json={})
         self.assertEqual(response.status_code, 401)
+
+
+
+class TheReportPageStaysReadable(unittest.TestCase):
+    """เก็บงาน UI/UX หน้ารายงานที่ไม่แตะกฎตรวจ (ก.ย. 2569) — วัดในเบราว์เซอร์จริงก่อนแก้ทุกข้อ"""
+
+    @classmethod
+    def setUpClass(cls):
+        import checker
+        report = {"verdict": "ผ่าน", "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []},
+                  "info": [{"topic": "บทที่พบในเนื้อหา",
+                            "detail": ["บทที่ 1: บทนำ (หน้า 1)", "บทที่ 2: วิธีวิจัย (หน้า 7)"]},
+                           {"topic": "รายชื่อที่ระบบอ่านได้จากหน้าลงนาม 1",
+                            "detail": "1. สมชาย  2. สมหญิง"}],
+                  "human_checklist": [], "not_checked": [], "verification": [],
+                  "section_order": checker.SUMMARY_SECTION_ORDER,
+                  "staff_findings": list(checker.STAFF_CHECKS),
+                  "plain_summary": "ผลการตรวจ: ผ่าน", "context": {}}
+        with main.JOBS_LOCK:
+            main.JOBS["readable"] = {"stage": "done", "done": True, "error": None, "report": report,
+                                     "pdf_name": "b.pdf", "approved": {}, "ts": time.time()}
+        client = TestClient(main.app)
+        client.post("/login", data={"password": "test-password", "next": "/"}, follow_redirects=False)
+        cls.html = client.get("/result/readable").text
+        with main.JOBS_LOCK:
+            main.JOBS.pop("readable", None)
+
+    def _info_boxes(self):
+        import re
+        section = self.html.split('<section class="panel tone-teal">', 1)[1].split("</section>", 1)[0]
+        return re.findall(r'<div class="infobox">(.*?)</div>', section, re.S)
+
+    def test_a_list_is_shown_one_item_per_line(self):
+        """ของเดิมพิมพ์ list ของ Python ทั้งก้อนออกหน้าจอ: ['บทที่ 1: ...', 'บทที่ 2: ...']"""
+        chapters, _names = self._info_boxes()
+        self.assertEqual(chapters.count('<li class="tr-dyn">'), 2)
+        self.assertIn("บทที่ 1: บทนำ (หน้า 1)", chapters)
+        for junk in ("[", "]", "&#39;", "'"):
+            self.assertNotIn(junk, chapters)
+
+    def test_a_plain_text_detail_is_unchanged(self):
+        _chapters, names = self._info_boxes()
+        self.assertIn('<span class="tr-dyn">1. สมชาย  2. สมหญิง</span>', names)
+        self.assertNotIn("<li", names)
+
+    def test_printing_opens_the_summary_box_too(self):
+        """พับกล่องสรุปไว้แล้วสั่งพิมพ์ = ได้ไฟล์ที่ไม่มีสรุปเลย โดยไม่มีอะไรเตือน"""
+        import re
+        selector = re.search(r"var _PRINT_SEL = '([^']*)'", self.html).group(1)
+        for wanted in ("details.vf-group", "details.cat-group", "details.copybox"):
+            self.assertIn(wanted, selector)
+
+    def test_the_sign_out_button_follows_the_language_switch(self):
+        """เป็นคำไทยคำเดียวที่ค้างบนหน้าจอตอนสลับเป็น EN"""
+        import re
+        form = re.search(r'<form class="logout-form"[^>]*>(.*?)</form>', self.html, re.S).group(1)
+        self.assertIn('data-th="ออกจากระบบ"', form)
+        self.assertIn('data-en="Sign out"', form)
+
+
+class SmallTextIsReadable(unittest.TestCase):
+    """ข้อความตัวเล็กต้องได้ความต่างสี 4.5:1 (เกณฑ์ WCAG AA)
+
+    สแกนหน้าจริงด้วยเบราว์เซอร์ก่อนแก้: 19 / 3 / 157 / 101 จุด (แบบฟอร์ม / เข้าสู่ระบบ / รายงานเล่มไม่ผ่าน /
+    รายงานเล่มผ่าน) หลังแก้เหลือ 0 ทุกหน้า ต้นเหตุสองอย่าง คือสีข้อความรอง (--ink-3) อ่อนไป กับสีส้ม/เหลือง/
+    เขียวที่ใช้กับป้ายตัวเล็ก
+    """
+
+    TEMPLATES = Path(main.__file__).resolve().parent / "templates"
+    # พื้นหลังที่ข้อความรองวางอยู่จริง: การ์ด · พื้นหน้า · ปลายบนของพื้นไล่สี · ป้าย · ตัวนับ · กล่องว่าง
+    BACKGROUNDS = ("#ffffff", "#f4f6fa", "#e9eff8", "#eef1f5", "#f1f4f8", "#f8fafc")
+
+    @staticmethod
+    def _luminance(colour):
+        channels = [int(colour.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    @classmethod
+    def _ratio(cls, a, b):
+        hi, lo = sorted((cls._luminance(a), cls._luminance(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def _template(self, name):
+        return (self.TEMPLATES / f"{name}.html").read_text(encoding="utf-8")
+
+    def _token(self, name, token):
+        import re
+        found = re.search(rf"--{token}\s*:\s*(#[0-9a-fA-F]{{6}})", self._template(name))
+        self.assertIsNotNone(found, f"หา --{token} ใน {name}.html ไม่เจอ")
+        return found.group(1)
+
+    def test_the_secondary_text_colour_passes_on_every_background(self):
+        for name in ("index", "report", "login"):
+            ink3 = self._token(name, "ink-3")
+            for background in self.BACKGROUNDS:
+                with self.subTest(page=name, background=background):
+                    self.assertGreaterEqual(self._ratio(ink3, background), 4.5, ink3)
+
+    def test_the_small_report_labels_pass(self):
+        white = "#ffffff"
+        for token in ("orange-ink", "yellow-ink"):
+            with self.subTest(token):
+                self.assertGreaterEqual(self._ratio(self._token("report", token), white), 4.5)
+        green, green_bg = self._token("report", "green"), self._token("report", "green-bg")
+        self.assertGreaterEqual(self._ratio(green, green_bg), 4.5)      # ป้าย "ตรงทุกหน้า" / "ผ่าน"
+        self.assertGreaterEqual(self._ratio(white, green), 4.5)         # ตัวขาวบนปุ่มเขียว
+        self.assertGreaterEqual(
+            self._ratio(self._token("index", "ok"), self._token("index", "ok-bg")), 4.5)
+
+    def test_the_stat_labels_use_the_darker_ink(self):
+        """ตัวเลขใหญ่ผ่านเกณฑ์ตัวใหญ่ (3:1) ด้วยสีสดเดิม แต่ป้ายใต้ตัวเลขเป็นตัวเล็ก"""
+        css = self._template("report")
+        self.assertIn(".stat.o span { color:var(--orange-ink); }", css)
+        self.assertIn(".stat.y span { color:var(--yellow-ink); }", css)
+
+    def test_no_small_text_keeps_a_hard_coded_light_grey(self):
+        for name in ("index", "report", "login"):
+            text = self._template(name)
+            for old in ("#8091a6", "#7a8797"):
+                with self.subTest(page=name, colour=old):
+                    self.assertNotIn(old, text)

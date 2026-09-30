@@ -43,6 +43,10 @@ class JavaScriptSuites(unittest.TestCase):
         """การนับความพร้อมก่อนตรวจ เมื่อขั้นหนึ่งซ้อนอยู่ในการ์ดของอีกขั้น"""
         self._run("test_form_progress.js")
 
+    def test_form_dates(self):
+        """วันที่ในหน้าแบบฟอร์ม — อ่านกลับเป็นข้อความไทย และวันที่ตรวจเริ่มที่วันนี้ตามเวลาในเครื่อง"""
+        self._run("test_form_dates.js")
+
     def test_sheet_webhook(self):
         """สคริปต์ที่ติดอยู่กับชีท — หาคอลัมน์จากหัวตาราง หาแถว และกันเขียนทับ"""
         self._run("test_sheet_webhook.js")
@@ -52,7 +56,7 @@ class JavaScriptSuites(unittest.TestCase):
         # test_ethesis_parser.js ถูกถอดพร้อมวิธี "วางข้อความ" (ก.ย. 2569) — ตัวอ่านข้อมูล eThesis
         # เหลือตัวเดียวฝั่งเซิร์ฟเวอร์ (ethesis_import.py) มีเทสต์ใน test_ethesis_import.py
         wired = {"test_report_summary.js", "test_form_progress.js",
-                 "test_sheet_webhook.js"}
+                 "test_form_dates.js", "test_sheet_webhook.js"}
         found = {p.name for p in TESTS.glob("test_*.js")}
         self.assertEqual(found, wired,
                          "มีไฟล์เทสต์ JS ที่ยังไม่ได้ผูกเข้า pytest")

@@ -13,10 +13,14 @@
   :root { --navy:#16365a; --navy-2:#23548a; --navy-3:#2f6db3; --navy-soft:#eef3fa;
           --gold:#c9a227; --gold-soft:#fcf7e6; --gold-line:#efe1b0;
           --bg:#f4f6fa; --surface:#ffffff; --line:#e4e9f0; --line-2:#d5dde8;
-          --ink:#16212e; --ink-2:#465567; --ink-3:#7a8797;
-          --ok:#1e8449; --ok-bg:#eaf7ef;
-          --red:#c0392b; --red-bg:#fdf1f0; --orange:#c77c0e; --orange-bg:#fdf5ea;
-          --yellow:#a8870a; --yellow-bg:#fdf9e7; --green:#1e8449; --green-bg:#eaf7ef;
+          /* ข้อความตัวเล็กต้องได้ความต่างสี 4.5:1 (เกณฑ์ WCAG AA) — ink-3 เดิมได้ 3.2-3.7
+             ใช้กับข้อความรองทั้งหน้า จึงเข้มขึ้นที่ค่าเดียวแล้วครบทุกจุด */
+          /* -ink ของส้ม/เหลืองไว้ให้ป้ายตัวเล็ก (ตัวเลขใหญ่กับขอบบนยังใช้สีสดเดิมได้ เกณฑ์ตัวใหญ่คือ 3:1)
+             เขียวเข้มขึ้นเพราะบนพื้นเขียวอ่อนของป้าย "ตรงทุกหน้า" เดิมได้ 4.28 */
+          --ink:#16212e; --ink-2:#465567; --ink-3:#5f6d7e;
+          --ok:#1a7a43; --ok-bg:#eaf7ef;
+          --red:#c0392b; --red-bg:#fdf1f0; --orange:#c77c0e; --orange-bg:#fdf5ea; --orange-ink:#a8640a;
+          --yellow:#a8870a; --yellow-bg:#fdf9e7; --yellow-ink:#8a6d00; --green:#1a7a43; --green-bg:#eaf7ef;
           --purple:#7d3c98; --purple-bg:#f8f2fb;
           --ring:0 0 0 3px rgba(47,109,179,.22);
           --shadow-sm:0 1px 2px rgba(16,24,40,.05);
@@ -90,6 +94,8 @@
   .stat b { display:block; font-size:1.75rem; line-height:1.1; font-weight:700; font-variant-numeric:tabular-nums; }
   .stat span { font-size:.74rem; font-weight:600; }
   .stat.r { color:var(--red); } .stat.o { color:var(--orange); } .stat.y { color:var(--yellow); }
+  /* ป้ายใต้ตัวเลขเป็นตัวเล็กจึงต้องเข้มกว่าตัวเลข (3.3 ผ่านเกณฑ์ตัวใหญ่ แต่ตัวเล็กต้อง 4.5) */
+  .stat.o span { color:var(--orange-ink); } .stat.y span { color:var(--yellow-ink); }
 
   /* ---- หัวข้อของแต่ละการ์ด: แถบสีตามเรื่อง (เจ้าหน้าที่ขอ ก.ย. 2569 "หัวข้อการ์ดต่างๆ มีการใช้สีมาช่วย") ----
      แต่ละการ์ดตั้งตัวแปรสีของตัวเอง (tone-*) หัวการ์ดใช้ตัวแปรชุดนั้น */
@@ -156,7 +162,7 @@
   .cat-sum:hover { background:#f6f8fb; }
   .cat-group[open] > .cat-sum { border-bottom:1px solid var(--line); }
   .cat-name { flex:1; min-width:150px; }
-  .cat-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
+  .cat-arrow { font-size:.8rem; transition:transform .15s; color:var(--ink-3); }
   details[open] > .cat-sum .cat-arrow { transform:rotate(90deg); }
   .cat-n { font-size:.72rem; font-weight:600; background:#f1f4f8; color:var(--ink-2); padding:2px 10px; border-radius:99px; }
   .cat-group .issue { margin:0; border-width:1px 0 0; border-top-color:#eef1f5; border-radius:0; box-shadow:none; }
@@ -223,9 +229,9 @@
   .vf-topic.notice { box-shadow:inset 4px 0 0 var(--yellow); }
   .vf-topic.skipped { box-shadow:inset 4px 0 0 #a3aebb; }
   .vf-topic-name { flex:1; min-width:150px; }
-  .vf-arrow { font-size:.8rem; transition:transform .15s; color:#8091a6; }
+  .vf-arrow { font-size:.8rem; transition:transform .15s; color:var(--ink-3); }
   details[open] > .vf-topic .vf-arrow { transform:rotate(90deg); }
-  .vf-count { font-size:.72rem; font-weight:600; color:#8091a6; background:#f1f4f8; padding:2px 10px; border-radius:99px; }
+  .vf-count { font-size:.72rem; font-weight:600; color:var(--ink-3); background:#f1f4f8; padding:2px 10px; border-radius:99px; }
   .vf-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:8px 18px 8px 36px;
        border-top:1px solid #eef1f5; font-size:.86rem; }
   .vf-loc { min-width:220px; color:#3d4c5e; }
@@ -279,6 +285,7 @@
        padding:10px 16px; font-size:.84rem; margin-bottom:8px; color:#3d4c5e; }
   .infobox b { color:var(--navy); }
   .infobox:last-child { margin-bottom:0; }
+  .info-list { margin:6px 0 0; padding-left:22px; }
 
   /* ---- ปุ่มท้ายหน้า ---- */
   .actions { display:flex; justify-content:space-between; gap:12px; margin-top:16px; flex-wrap:wrap;
@@ -356,7 +363,7 @@
     <div class="top-actions">
       <a class="top-new" href="/" data-th="＋ ตรวจเล่มใหม่" data-en="＋ New check">＋ ตรวจเล่มใหม่</a>
       <button type="button" class="langbtn" id="langbtn" onclick="toggleLang()">EN</button>
-      <form class="logout-form" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
+      <form class="logout-form" action="/logout" method="post"><button type="submit" data-th="ออกจากระบบ" data-en="Sign out">ออกจากระบบ</button></form>
     </div>
   </div>
 </header>
@@ -639,7 +646,11 @@
     <section class="panel tone-teal">
     <h2 class="sec"><span data-th="ℹ️ ข้อมูลประกอบ" data-en="ℹ️ Information">ℹ️ ข้อมูลประกอบ</span></h2>
     {% for it in report.info %}
-    <div class="infobox"><b class="tr-dyn">{{ it.topic }}</b> — <span class="tr-dyn">{{ it.detail }}</span></div>
+    {# detail เป็นข้อความหรือรายการก็ได้ — รายการ (เช่นบทที่พบในเนื้อหา) แสดงบรรทัดละข้อ
+       ไม่ใช่พิมพ์ list ของ Python ทั้งก้อน (วงเล็บเหลี่ยม เครื่องหมายคำพูด คอมมา) #}
+    <div class="infobox"><b class="tr-dyn">{{ it.topic }}</b>
+    {% if it.detail is string %} — <span class="tr-dyn">{{ it.detail }}</span>
+    {% else %}<ul class="info-list">{% for line in it.detail %}<li class="tr-dyn">{{ line }}</li>{% endfor %}</ul>{% endif %}</div>
     {% endfor %}
     </section>
     {% endif %}
@@ -1665,8 +1676,9 @@ function applyLang(){
 function toggleLang(){ LANG = (LANG === 'th') ? 'en' : 'th'; applyLang(); }
 
 // เปิด dropdown ทุกหัวข้อตอนพิมพ์/บันทึก PDF แล้วคืนค่าเดิมหลังพิมพ์เสร็จ
+// รวมกล่องข้อความสรุปด้วย — เจ้าหน้าที่พับไว้แล้วสั่งพิมพ์ จะได้ไฟล์ที่ไม่มีสรุปเลยโดยไม่มีอะไรเตือน
 var _vfPrintState = [];
-var _PRINT_SEL = 'details.vf-group, details.cat-group';
+var _PRINT_SEL = 'details.vf-group, details.cat-group, details.copybox';
 window.addEventListener('beforeprint', function(){
   _vfPrintState = [];
   document.querySelectorAll(_PRINT_SEL).forEach(function(d){
