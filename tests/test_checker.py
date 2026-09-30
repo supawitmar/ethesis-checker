@@ -3401,6 +3401,12 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
                 "Mahidol University Health Infectious Disease and Epidemiology "
                 "Faculty of Public health Mahidol University")
 
+    # แถวล่างสุดของหน้าลงนาม 2 ของเล่มนานาชาติ สถาบันโภชนาการ (เจ้าหน้าที่ส่งมา 30 ก.ย. 2569 ว่า
+    # "เล่มนี้มันไม่ฟ้อง เรื่อง Dean/Director") ช่องล่างขวายังเป็น "Dean/Director" ทั้งสองคำตามตัวอย่าง
+    # ของ template ส่วน "Dean" ตัวที่สองคือช่องล่างซ้าย (บัณฑิตวิทยาลัย ถูกแล้ว)
+    NUTRITION = ("Ph.D. (Medical Technology) Dean/Director Dean Institute of Nutrition "
+                 "Faculty of Graduate Studies, Mahidol University Mahidol University")
+
     def _found(self, bottom):
         rep = Report()
         checker_module._check_faculty_head_title(rep, bottom, "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
@@ -3475,12 +3481,187 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
         hits = [i for i in rep.zones["RED"] if "ใช้ตำแหน่ง" in i["found"]]
         self.assertEqual([i["location"] for i in hits], ["หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"])
 
+    # ------------------------------------------------------------ ยังเป็น "Dean/Director" ทั้งสองคำ
+    def test_a_box_that_still_offers_both_titles_is_reported(self):
+        """เจ้าหน้าที่ (30 ก.ย. 2569): เล่มนี้ไม่ฟ้องเรื่อง Dean/Director
+
+        ช่องล่างขวาพิมพ์ "Dean/Director" ทั้งสองคำตามตัวอย่างของ template = ยังไม่ได้เลือกตำแหน่ง
+        กฎเดิมจับแค่ Program Director จึงปล่อยผ่านทั้งที่ข้อความบนหน้าไม่ใช่ตำแหน่งจริง
+        """
+        issues = self._found(self.NUTRITION)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["found"],
+                         'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Dean/Director"')
+        self.assertEqual(issues[0]["expected"],
+                         'ต้องเลือกตำแหน่งเดียว: "Dean" หรือ "Director" อย่างใดอย่างหนึ่ง')
+        self.assertEqual(issues[0]["rule_id"], "FRONT.COMMITTEE")
+
+    def test_the_choice_is_caught_however_it_is_spaced_or_ordered(self):
+        for bottom, printed in (("Dean / Director Institute of X", "Dean / Director"),
+                                ("Dean/ Director Institute of X", "Dean/ Director"),
+                                ("Dean /Director Institute of X", "Dean /Director"),
+                                ("DEAN/DIRECTOR Institute of X", "DEAN/DIRECTOR"),
+                                ("Director/Dean Institute of X", "Director/Dean"),
+                                ("Dean/\nDirector Institute of X", "Dean/ Director"),
+                                ("Dean or Director Institute of X", "Dean or Director")):
+            issues = self._found(bottom)
+            self.assertEqual(len(issues), 1, bottom)
+            self.assertIn(f'"{printed}"', issues[0]["found"], bottom)
+
+    def test_a_thai_book_is_told_the_thai_titles_for_the_choice(self):
+        for bottom in ("คณบดี/ผู้อำนวยการ บัณฑิตวิทยาลัย คณะสังคมศาสตร์",
+                       "คณบดี / ผู้อำนวยการ บัณฑิตวิทยาลัย",
+                       "ผู้อำนวยการ/คณบดี บัณฑิตวิทยาลัย",
+                       # สระ/วรรณยุกต์ของภาษาไทยใน PDF เพี้ยนประจำ (ตัดทิ้ง หรือแยกตัวออกมา)
+                       "คณบด/ผอานวยการ บัณฑิตวิทยาลัย",
+                       "คณบดี/ผูอํานวยการ บัณฑิตวิทยาลัย"):
+            issues = self._found(bottom)
+            self.assertEqual(len(issues), 1, bottom)
+            self.assertEqual(issues[0]["found"],
+                             'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "คณบดี/ผู้อำนวยการ"', bottom)
+            self.assertEqual(issues[0]["expected"],
+                             'ต้องเลือกตำแหน่งเดียว: "คณบดี" หรือ "ผู้อำนวยการ" อย่างใดอย่างหนึ่ง',
+                             bottom)
+
+    def test_two_titles_side_by_side_without_a_slash_are_not_a_choice(self):
+        """ควบคุมเชิงลบ — แถวล่างสุดเรียงตามลำดับการอ่านของสองช่อง
+
+        ช่องซ้าย (คณบดีบัณฑิตวิทยาลัย) กับช่องขวาที่เลือกคำเดียวแล้วมาต่อกันเป็น "Dean Director" /
+        "คณบดี ผู้อำนวยการ" ได้ในเล่มที่ถูกต้อง ห้ามฟ้อง (ถ้าเทียบแค่ว่าสองคำอยู่ติดกัน หรือใช้ norm ที่
+        ตัดช่องว่างและเครื่องหมายทิ้ง เล่มพวกนี้จะโดนฟ้องผิดทั้งหมด)
+        """
+        for bottom in ("Dean Director Institute of Nutrition Faculty of Graduate Studies",
+                       "Director Dean Institute of Nutrition",
+                       "Dean\nDirector Institute of Nutrition",
+                       "Dean\n  Director",
+                       "Ph.D. (Medical Technology) Dean Institute of Nutrition Director",
+                       "คณบดี ผู้อำนวยการ บัณฑิตวิทยาลัย สถาบันวิจัยประชากรและสังคม",
+                       "คณบดี\nผู้อำนวยการ บัณฑิตวิทยาลัย",
+                       "ผู้อำนวยการ คณบดี บัณฑิตวิทยาลัย"):
+            self.assertEqual(self._found(bottom), [], bottom)
+
+    def test_the_choice_and_the_programme_title_are_reported_separately(self):
+        issues = self._found("Dean/Director Program Director Institute of X")
+        self.assertEqual(len(issues), 2)
+        self.assertEqual({i["found"] for i in issues},
+                         {'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"',
+                          'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Dean/Director"'})
+
+    def test_the_summary_tells_the_student_to_pick_one(self):
+        """ประโยค expected ห้ามจบด้วยเครื่องหมายคำพูด ไม่งั้นข้อความสรุปดึงตัวท้ายไปพิมพ์เป็น
+        'ต้องแก้เป็น "Director"' ตัวเดียว ทั้งที่ค่าที่ถูกมีสองตัวเลือก"""
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, self.NUTRITION,
+                                                 "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)")
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('ต้องเลือกตำแหน่งเดียว: "Dean" หรือ "Director" อย่างใดอย่างหนึ่ง', summary)
+        self.assertNotIn("ต้องแก้เป็น", summary)
+
+    # ------------------------------------------------------------ ตรวจแม้ไม่มีรายชื่อกรรมการจาก eThesis
+    def _without_committees(self, bottom, pages=None, sig_pages=(0, 1), opener=None):
+        pages = pages or ["Thesis Advisory Committee", "Thesis Examination Committee"]
+
+        class _Pdf:
+            pages = [object(), object()]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        rep = Report()
+        with mock.patch.object(checker_module.pdfplumber, "open", opener or (lambda _p: _Pdf())), \
+                mock.patch.object(checker_module, "signature_committee_slots",
+                                  lambda _pg: ({}, {}, bottom, {})):
+            checker_module._check_signature_heads_without_committees(
+                rep, list(sig_pages), pages, "x.pdf", lambda i: ["หน้า i", "หน้า ii"][i])
+        return rep
+
+    def test_the_head_title_is_checked_even_without_committee_data(self):
+        """ไฟล์ eThesis ไม่บังคับแนบ และอ่านพลาดได้ (เช่นแนบผิดหน้า) run_check เดิมเรียกตรวจหน้าลงนาม
+        ก็ต่อเมื่อมีรายชื่อกรรมการ ข้อนี้ไม่ต้องใช้รายชื่อ จึงหลุดไปทั้งที่ระบบเห็นข้อความครบ"""
+        rep = self._without_committees(self.NUTRITION)
+        self.assertEqual([i["location"] for i in rep.zones["RED"]],
+                         ["หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"])      # หน้าลงนาม 1 ไม่ถูกตรวจ
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_without_committee_data_a_program_director_box_is_reported_too(self):
+        rep = self._without_committees(self.SIRIPHON)
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn('"Program Director"', rep.zones["RED"][0]["found"])
+
+    def test_without_committee_data_a_correct_page_stays_quiet(self):
+        rep = self._without_committees(
+            "Dean Faculty of Graduate Studies, Mahidol University Dean Faculty of Engineering")
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_a_swapped_page_is_left_to_the_purple_warning(self):
+        """หัวข้อบนหน้าลำดับสองบอกว่าเป็นหน้าที่ปรึกษา = สลับหน้ากัน ไม่ฟ้อง (เหมือนใน _check_committees)"""
+        rep = self._without_committees(
+            self.NUTRITION, pages=["Thesis Examination Committee", "Thesis Advisory Committee"])
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_an_unreadable_book_does_not_break_the_run(self):
+        def broken(_path):
+            raise OSError("cannot open")
+        rep = self._without_committees(self.NUTRITION, opener=broken)
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_both_paths_report_the_same_thing(self):
+        """เส้นทางที่มีรายชื่อ (_check_committees) กับที่ไม่มี ต้องให้ข้อตำแหน่งเหมือนกันทุกตัวอักษร
+        ไม่งั้นสองที่เริ่มเดินคนละทางเมื่อมีใครแก้เงื่อนไขที่เดียว"""
+        committees = {"advisory": ["A B"], "exam": ["C D"]}
+        pages = ["Thesis Advisory Committee", "Thesis Examination Committee"]
+
+        class _Pdf:
+            pages = [object(), object()]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def with_names(bottom):
+            slot = ({1: "A B"}, {1: "Ph.D."}, bottom, {1: "A B"})
+            rep = Report()
+            with mock.patch.object(checker_module.pdfplumber, "open", lambda _p: _Pdf()), \
+                    mock.patch.object(checker_module, "signature_committee_slots", lambda _pg: slot), \
+                    mock.patch.object(checker_module, "sig_visible_placeholders", lambda _pg: []):
+                checker_module._check_committees(rep, committees, [0, 1], pages, "x.pdf",
+                                                 lambda i: ["หน้า i", "หน้า ii"][i],
+                                                 "international", {})
+            return rep
+
+        for bottom in (self.NUTRITION, self.SIRIPHON, "Dean Dean Faculty of X",
+                       "คณบดี/ผู้อำนวยการ บัณฑิตวิทยาลัย", "Dean/Director Program Director"):
+            def heads(rep):
+                return sorted((i["location"], i["found"], i["expected"], i["fix"])
+                              for i in rep.zones["RED"] + rep.zones["ORANGE"]
+                              if "ใช้ตำแหน่ง" in i["found"])
+            self.assertEqual(heads(with_names(bottom)),
+                             heads(self._without_committees(bottom)), bottom)
+
+    def test_run_check_falls_back_to_it_when_there_are_no_committees(self):
+        """ล็อกการต่อสาย ไม่ใช่ล็อกแค่ตัวฟังก์ชัน"""
+        source = inspect.getsource(checker_module.run_check)
+        with_names = source.index("checked_committee = _check_committees(")
+        without = source.index(
+            "_check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref)")
+        self.assertLess(with_names, without)
+        between = source[with_names:without]
+        self.assertIn("else:", between)        # อยู่ในกิ่งที่ไม่มีรายชื่อกรรมการ ไม่ใช่ทุกกรณี
+
     def test_it_translates(self):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
         for text in ('ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Program Director"',
                      'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น',
                      "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+                     'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "Dean/Director"',
+                     'ต้องเลือกตำแหน่งเดียว: "Dean" หรือ "Director" อย่างใดอย่างหนึ่ง',
+                     "เลือกเหลือคำเดียวตามหัวหน้าส่วนงานของนักศึกษา แล้วลบอีกคำออก",
                      "หน้าลงนาม 2 คณบดีคณะ (หน้า ii)"):
             en = i18n.tr_en(text, pairs)
             self.assertEqual(i18n.re.findall(r"[ก-๙]+", en), [], en)

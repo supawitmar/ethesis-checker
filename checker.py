@@ -1451,6 +1451,32 @@ def programme_head_title(bottom_text):
     return None
 
 
+# ช่องล่างขวาของหน้าลงนาม 2 ใน template พิมพ์ "Dean/Director" ให้นักศึกษาเลือกเอาคำเดียว
+# ทั้งสองคำติดกันด้วยเครื่องหมาย "/" = ยังไม่ได้เลือก ต้องมี "/" (หรือ "or") คั่นจริงเท่านั้น —
+# ห้ามเทียบแค่ว่าสองคำอยู่ติดกัน เพราะแถวล่างสุดเรียงตามลำดับการอ่านของสองช่อง ช่องซ้าย
+# (คณบดีบัณฑิตวิทยาลัย) กับช่องขวาที่เลือกแล้วจึงมาต่อกันเป็น "Dean Director" / "คณบดี ผู้อำนวยการ"
+# ได้ในเล่มที่ถูกต้อง (มีเทสต์คุมทั้งสองภาษา)
+_FACULTY_HEAD_CHOICE_EN = re.compile(r'\b(?:Dean\s*(?:/|or)\s*Director|Director\s*(?:/|or)\s*Dean)\b', re.I)
+# ฝั่งไทยเทียบหลังตัดสระ/วรรณยุกต์ทิ้ง (สระ/วรรณยุกต์ใน PDF เพี้ยนประจำ) แต่ต้องคง "/" ไว้ จึงไม่ใช้ norm
+_FACULTY_HEAD_CHOICE_TH = re.compile(r'คณบด\s*/\s*ผอานวยการ|ผอานวยการ\s*/\s*คณบด')
+
+
+def faculty_head_choice(bottom_text):
+    """ช่องล่างขวาของหน้าลงนาม 2 ยังเป็น "Dean/Director" ทั้งสองคำ — คืน (คำที่พบ, "en"/"th") หรือ None
+
+    ตัวอย่างจริง (เล่มนานาชาติ สถาบันโภชนาการ เจ้าหน้าที่ส่งมา 30 ก.ย. 2569): แถวล่างสุดอ่านได้
+        "Ph.D. (Medical Technology) Dean/Director Dean Institute of Nutrition ..."
+    "Dean" ตัวที่สองคือช่องล่างซ้าย (บัณฑิตวิทยาลัย) ส่วน "Dean/Director" คือช่องล่างขวาที่ยังไม่ได้เลือก
+    """
+    text = bottom_text or ""
+    match = _FACULTY_HEAD_CHOICE_EN.search(text)
+    if match:
+        return soft(match.group(0)), "en"
+    if _FACULTY_HEAD_CHOICE_TH.search(_TH_MARKS.sub("", text.replace("ำ", "า"))):
+        return "คณบดี/ผู้อำนวยการ", "th"
+    return None
+
+
 def _check_faculty_head_title(rep, bottom_text, loc):
     """หน้าลงนาม 2 มุมล่างขวาต้องเป็นตำแหน่ง Dean หรือ Director ไม่ใช่ Program Director
 
@@ -1468,15 +1494,54 @@ def _check_faculty_head_title(rep, bottom_text, loc):
     (ชื่อสาขา/คณะ = ส้ม) เพราะคำตำแหน่งอ่านได้แน่นอน ไม่ใช่การเทียบข้อความที่อาจอ่านเพี้ยน
     """
     found = programme_head_title(bottom_text)
-    if not found:
+    if found:
+        title, lang = found
+        heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+        rep.add("RED", "front_matter", loc,
+                f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
+                f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
+                "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
+                "FRONT.COMMITTEE")
+    # ช่องเดียวกันนี้ template พิมพ์ "Dean/Director" ไว้ให้เลือกเอาคำเดียว (เจ้าหน้าที่ 30 ก.ย. 2569
+    # ส่งเล่มที่ยังเป็น "Dean/Director" ทั้งสองคำมาว่าระบบไม่ฟ้อง) — สีแดงเหมือนข้อบน และเหมือนข้อ
+    # "REFERENCES/BIBLIOGRAPHY" ที่ยังไม่ได้เลือกคำเดียว: คำตำแหน่งอ่านได้แน่นอน ไม่ใช่การเทียบข้อความ
+    # ประโยค expected ห้ามจบด้วยเครื่องหมายคำพูด (เหตุผลเดียวกับข้างบน)
+    choice = faculty_head_choice(bottom_text)
+    if choice:
+        printed, lang = choice
+        heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+        rep.add("RED", "front_matter", loc,
+                f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{printed}"',
+                f'ต้องเลือกตำแหน่งเดียว: "{heads[0]}" หรือ "{heads[1]}" อย่างใดอย่างหนึ่ง',
+                "เลือกเหลือคำเดียวตามหัวหน้าส่วนงานของนักศึกษา แล้วลบอีกคำออก",
+                "FRONT.COMMITTEE")
+
+
+def _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref):
+    """ตรวจตำแหน่งมุมล่างขวาของหน้าลงนาม 2 เมื่อไม่มีรายชื่อกรรมการจาก eThesis
+
+    run_check เรียก _check_committees ก็ต่อเมื่อมีรายชื่อกรรมการ ไม่งั้นข้ามทั้งหน้าลงนามเงียบ ๆ รวมข้อ
+    ตำแหน่งที่เป็นกฎของ template ล้วน (ดู comment ใน _check_committees: "ไม่ต้องมีรายชื่อจาก eThesis")
+    ไฟล์ eThesis ไม่บังคับแนบ และอ่านพลาดได้ (เช่นแนบผิดหน้า) เล่มที่ตำแหน่งผิดจึงหลุดได้ทั้งที่ระบบมีข้อมูลพอ
+
+    ตรวจเฉพาะข้อตำแหน่งข้อเดียว ข้ออื่นของหน้าลงนาม (ตัวพิมพ์ชื่อ คุณวุฒิ ฯลฯ) ยังทำงานเมื่อมีรายชื่อเท่านั้น
+    เงื่อนไขเลือกหน้าต้องตรงกับใน _check_committees (หน้าลงนามลำดับที่สอง และหัวข้อบนหน้าไม่ขัด)
+    """
+    try:
+        with pdfplumber.open(pdf_path) as _pl:
+            for idx in sig_pages[:2]:
+                if not 0 <= idx < min(len(_pl.pages), len(pages)):
+                    continue
+                if signature_page_committee(sig_pages, idx) != "exam":
+                    continue
+                if _committee_page_kind(pages[idx]) not in ("", "exam"):
+                    continue
+                bottom_text = signature_committee_slots(_pl.pages[idx])[2]
+                page_label = signature_page_position(sig_pages, idx)
+                _check_faculty_head_title(rep, bottom_text,
+                                          f"{page_label} คณบดีคณะ ({page_ref(idx)})")
+    except Exception:
         return
-    title, lang = found
-    heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
-    rep.add("RED", "front_matter", loc,
-            f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
-            f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
-            "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
-            "FRONT.COMMITTEE")
 
 
 def _report_sig_placeholders(rep, found, loc):
@@ -7144,6 +7209,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             checked_committee = _check_committees(
                 rep, committees, sig_pages, pages, pdf_path, page_ref,
                 prog_lang, A, page_labels)
+        else:
+            # ไม่มีรายชื่อกรรมการ (ไม่ได้แนบ eThesis หรืออ่านไม่ได้) — ข้อตำแหน่ง Dean/Director
+            # ของหน้าลงนาม 2 ไม่ต้องใช้รายชื่อ ต้องตรวจต่อ ไม่ใช่ข้ามไปพร้อมทั้งหน้า
+            _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref)
         # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
         # ของ template ล้วน จึงตรวจเสมอ ส่วนการนับจำนวนทำเมื่อมีข้อมูล eThesis
         _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,

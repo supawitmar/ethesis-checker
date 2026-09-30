@@ -840,6 +840,8 @@ var TR = [
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) ใช้ตำแหน่ง/g, 'The faculty dean box (bottom right) uses the title'],
   [/ตำแหน่งต้องเป็น ("[^"]+") หรือ ("[^"]+") เท่านั้น/g, 'The title must be $1 or $2'],
   [/ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1/g, 'Use the title of the head of the faculty or institute; the programme director signs on signature page 1'],
+  [/ต้องเลือกตำแหน่งเดียว: ("[^"]+") หรือ ("[^"]+") อย่างใดอย่างหนึ่ง/g, 'Choose one title only: $1 or $2'],
+  [/เลือกเหลือคำเดียวตามหัวหน้าส่วนงานของนักศึกษา แล้วลบอีกคำออก/g, "Keep only the title that matches the head of the student's unit and delete the other"],
   [/ไม่พบชื่อคณะ ("[^"]+") ในช่องคณบดีคณะ \(มุมล่างขวา\)/g, 'The faculty name $1 was not found in the faculty dean box (bottom right)'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อสาขา/g, 'The text under the signature must contain the subject'],
   [/ข้อความใต้ลายเซ็นต้องมีชื่อคณะ/g, 'The text under the signature must contain the faculty name'],
