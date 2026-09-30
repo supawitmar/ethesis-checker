@@ -3876,6 +3876,42 @@ class ACaseOnlyTitleDifferenceSaysWhereItIs(unittest.TestCase):
         self.assertIn("the letter case differs", whole)
         self.assertNotIn("Must be", whole)   # กฎทั่วไปต้องไม่มากินท่อนหลังก่อน
 
+    def test_the_summary_line_is_translated_too(self):
+        """ข้อความสรุปตัดท่อน 'ต้องเป็น "..."' ออก เหลือรูปที่กฎชุดบนจับไม่ได้
+
+        เจ้าหน้าที่เจอจริง (ก.ย. 2569 เล่ม 6736945 NUFS/M): ข้อความอังกฤษที่ส่งนักศึกษา
+        มี "ต่างที่ตัวพิมพ์เล็ก-ใหญ่" ค้างเป็นภาษาไทยกลางประโยค
+        """
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        title = "UTILIZATION OF CAMELINA NAHEEL: A CULTIVAR OF CAMELINA SATIVA OILSEED"
+        approved = "UTILIZATION OF CAMELINA NAHEEL: A CULTIVAR OF Camelina sativa OILSEED"
+        detail = checker_module.title_mismatch_detail(
+            "ชื่อเรื่อง", checker_module.compare_values(title, approved, "title"), approved)
+        line = checker_module._prose_found(detail)
+        self.assertIn('ต่างที่ตัวพิมพ์เล็ก-ใหญ่ "CAMELINA" และ "SATIVA"', line)
+        en = i18n.tr_en(line, pairs)
+        self.assertEqual(i18n.translation_problems(line, en), [])
+        self.assertIn('the letter case differs in "CAMELINA" and "SATIVA"', en)
+        for words, wanted in ((['"A"'], 'in "A"'),
+                              (['"A"', '"B"', '"C"'], 'in "A", "B" and "C"')):
+            short = "ต่างที่ตัวพิมพ์เล็ก-ใหญ่ " + " และ ".join(words)
+            en = i18n.tr_en(short, pairs)
+            self.assertEqual(i18n.translation_problems(short, en), [], short)
+            self.assertIn("the letter case differs " + wanted, en)
+
+    def test_the_acknowledgements_author_lines_are_translated(self):
+        """สามถ้อยคำของชื่อผู้เขียนท้ายกิตติกรรมประกาศ มีคำแปลแค่อันเดียว (ก.ย. 2569)"""
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for line in ("พบชื่อผู้เขียนท้ายกิตติกรรมประกาศ แต่ตัวพิมพ์ไม่ตรงรูปแบบ: "
+                     "her presence and support. Zain ul Abideen",
+                     "พบชื่อผู้เขียนในกิตติกรรมประกาศ แต่ไม่อยู่ในส่วนท้าย",
+                     "ไม่พบชื่อผู้เขียนในส่วนท้ายของกิตติกรรมประกาศ"):
+            en = i18n.tr_en(line, pairs)
+            self.assertEqual(i18n.translation_problems(line, en), [], line)
+            self.assertIn("author's name", en)
+
 
 class NoStaffLineReachesTheStudent(unittest.TestCase):
     """ข้อความสรุปถึงนักศึกษาต้องไม่มีบรรทัดที่เขียนถึงเจ้าหน้าที่ (ก.ย. 2569)

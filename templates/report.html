@@ -790,6 +790,15 @@ var TR = [
    'the letter case differs: $1 should be $2 and $3 should be $4'],
   [/ต่างที่ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*") ต้องเป็น ("[^"]*")/g,
    'the letter case differs: $1 should be $2'],
+  // ข้อความสรุปตัดท่อน 'ต้องเป็น "..."' ออก (checker._prose_found) เพราะบรรทัด "ต้องแก้เป็น"
+  // บอกค่าที่ถูกอยู่แล้ว จึงเหลือแค่คำที่ต่าง — รูปนี้ไม่มีกฎรองรับ เล่มอังกฤษเลยได้
+  // ภาษาไทยค้างกลางประโยค (เจ้าหน้าที่เจอ ก.ย. 2569 เล่ม 6736945 NUFS/M)
+  [/ต่างที่ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*") และ ("[^"]*") และ ("[^"]*")/g,
+   'the letter case differs in $1, $2 and $3'],
+  [/ต่างที่ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*") และ ("[^"]*")/g,
+   'the letter case differs in $1 and $2'],
+  [/ต่างที่ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*")/g,
+   'the letter case differs in $1'],
   [/ต้องเป็น ("[^"]*")/g, 'Must be $1'],
   // ประกาศฉบับนี้เป็น พ.ศ. 2569 = ค.ศ. 2026 — ฝั่งอังกฤษต้องใช้ ค.ศ.
   // กฎทั่วไปข้างล่างจับปีเป็นตัวแปรแล้วใส่กลับดิบ ๆ จึงได้ "the 2569 regulation"
@@ -1083,6 +1092,8 @@ var TR = [
   [/ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า:/g, 'These committee names have an academic rank before the name:'],
   [/ชื่อภาษาอังกฤษของนักศึกษาในหน้าบทคัดย่อภาษาอังกฤษต้องสะกดตรงข้อมูลอนุมัติ/g, 'The student\'s English name on the English abstract page must be spelled as in the approved data'],
   [/ไม่พบชื่อผู้เขียนในส่วนท้ายของกิตติกรรมประกาศ/g, 'The author\'s name was not found at the end of the acknowledgements'],
+  [/พบชื่อผู้เขียนท้ายกิตติกรรมประกาศ แต่ตัวพิมพ์ไม่ตรงรูปแบบ:/g, 'The author\'s name at the end of the acknowledgements is not in the required letter case:'],
+  [/พบชื่อผู้เขียนในกิตติกรรมประกาศ แต่ไม่อยู่ในส่วนท้าย/g, 'The author\'s name appears in the acknowledgements but not at the end'],
   [/ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน/g, 'The acknowledgements must end with the author\'s name'],
   [/เพิ่มหรือแก้ชื่อผู้เขียนท้ายกิตติกรรมประกาศเป็น/g, 'Add or correct the author\'s name at the end of the acknowledgements to'],
   [/บรรทัดชื่อนักศึกษาในบทคัดย่ออังกฤษต้องมีรหัส/g, 'The student-name line in the English abstract must include the ID'],
