@@ -952,8 +952,26 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
             [i["found"] for i in rep.zones["RED"]],
             ["ไม่พบข้อความ template ใต้ชื่อหัวข้อ",
              'ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา'])
+        # ตารางมีแถวเดียวต่อหน้า และต้องบอกทั้งสองเรื่อง (เจ้าหน้าที่ท้วง 2 ต.ค. 2569: หน้า ข ในตารางเทียบ
+        # ขึ้นแค่ "ไม่พบข้อความ template" ทั้งที่มีบรรทัดเกินด้วย)
         rows = [c for g in rep.verification for c in g["checks"]]
-        self.assertEqual([c["status"] for c in rows], ["fail"])      # ตารางมีแถวเดียวต่อหน้า
+        self.assertEqual([(c["status"], c["detail"]) for c in rows],
+                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ '
+                                   'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')])
+
+    def test_a_misspelt_sentence_and_the_extra_line_share_one_table_row(self):
+        """ประโยคมีแต่ผิดคำ (ตก "นับ") แล้วมีบรรทัดเกินด้วย — แถวในตารางยกประโยคที่พิมพ์จริงมาแล้วต่อด้วย
+        เรื่องบรรทัดเกิน ส่วนการ์ดแดงยังแยกเป็นสองข้อ"""
+        printed = "ได้รับการพิจารณาให้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+        rep = self._report(self._page(printed))
+        self.assertEqual(len(rep.zones["RED"]), 2)
+        rows = [c for g in rep.verification for c in g["checks"]]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "fail")
+        # แถวยกท่อนที่ใกล้ประโยค template ที่สุดตามที่พิมพ์จริง (ตก "นับ") แล้วต่อด้วยเรื่องบรรทัดเกิน
+        self.assertEqual(rows[0]["detail"],
+                         'เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร '
+                         'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')
 
     def test_english_books_are_not_checked_for_it(self):
         """template อังกฤษมี "Faculty of Graduate Studies, Mahidol University" ในประโยคเองโดยชอบ"""
@@ -977,7 +995,9 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
                      "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
                      "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
                      "ลบบรรทัดนี้ออกจากหน้าลงนาม",
-                     'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'):
+                     'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"',
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ '
+                     'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'):
             problems = i18n.translation_problems(text, i18n.tr_en(text, pairs))
             self.assertEqual(problems, [], (text, problems))
 

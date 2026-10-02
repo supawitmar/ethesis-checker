@@ -773,6 +773,7 @@ var TR = [
   [/ใต้ชื่อหัวข้อมีบรรทัด ("[^"]+") เกินมา/g, 'The line $1 appears under the title but is not part of the template'],
   [/ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ ไม่มีบรรทัดนี้ \(ใช้เฉพาะหน้าปก\)/g, 'The text under the title must contain only the template sentence, the degree name and the date, without this line (it belongs on the cover only)'],
   [/ลบบรรทัดนี้ออกจากหน้าลงนาม/g, 'Delete this line from the approval page'],
+  [/ และมีบรรทัดเกิน: ("[^"]+")/g, ", and an extra line: $1"],
   [/มีบรรทัดเกิน: ("[^"]+")/g, 'Extra line: $1'],
   [/ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ("[^"]*")/g, 'The template wording below the title was not found: $1'],
   [/ไม่พบข้อความ template ใต้ชื่อหัวข้อ/g, 'The template wording below the title was not found'],

@@ -1406,6 +1406,10 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
             # ยกสองรอบทำให้ข้อเดียวมีประโยคยาว ๆ ซ้ำกันสองครั้ง
             found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
             detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+        # ตารางเทียบมีแถวเดียวต่อหน้า — ถ้ามีบรรทัดเกินด้วยต้องบอกในแถวนั้นด้วย ไม่ใช่โชว์แค่เรื่อง
+        # ประโยค (การ์ดแดงแยกเป็นสองข้ออยู่แล้ว) เจ้าหน้าที่ท้วง 2 ต.ค. 2569
+        if extra_line:
+            detail += f' และมีบรรทัดเกิน: "{extra_line}"'
         rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
         rep.add("RED", "front_matter", spot, found_msg,
                 f'ต้องเป็น "{sig_template}"',
