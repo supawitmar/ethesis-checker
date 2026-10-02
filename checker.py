@@ -1325,6 +1325,100 @@ def signature_template_zone(page_text, degree):
     return text[:cut] if cut > 0 else text
 
 
+# บรรทัดนี้ใช้เฉพาะหน้าปก ("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร ปริญญา... / บัณฑิตวิทยาลัย
+# มหาวิทยาลัยมหิดล / พ.ศ. ...") และช่องล่างซ้ายของตารางลายเซ็น (คณบดีบัณฑิตวิทยาลัย) — หน้าลงนามเล่มไทย
+# ใต้ชื่อหัวข้อมีแค่ ประโยค template -> ปริญญา<ชื่อปริญญา> -> วันที่ (ดู signature_template_zone)
+_THAI_COVER_ONLY_LINE = "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"
+
+
+def signature_page_extra_line(page_text):
+    """บรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" ที่โผล่ใต้ชื่อหัวข้อของหน้าลงนามเล่มไทย — คืนบรรทัดตามที่พิมพ์
+    หรือ "" ถ้าไม่มี
+
+    เจ้าหน้าที่ (2 ต.ค. 2569) ส่งเล่ม PHIE/M มาว่าทั้งสองหน้าลงนามมีบรรทัดนี้คั่นระหว่างชื่อปริญญากับ
+    วันที่ "ซึ่งมันไม่ถูก" template หน้าลงนามเล่มไทยเรียงเป็น ประโยค -> ปริญญา... -> วันที่ เล่มทดสอบไทยจริง
+    ก็ไม่มีบรรทัดนี้ ผู้เขียนน่าจะคัดมาจากหน้าปก ซึ่งบรรทัดนี้ถูกต้องตาม template
+
+    ดูเฉพาะส่วนบนของหน้า (ก่อนเส้นประลงนามแรก/หัวข้อคณะกรรมการ ตาม _degree_search_text) เพราะช่องล่างซ้าย
+    ของตารางลายเซ็นพิมพ์ "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" ตามกฎอยู่แล้วทุกเล่ม
+
+    ต้องเป็นบรรทัดของตัวมันเอง (หรือแยกสองบรรทัด หรือตามด้วย "วันที่" ในบรรทัดเดียวกัน) ไม่เทียบแค่ว่ามี
+    ข้อความนี้อยู่ในบรรทัดไหนก็ได้ เพราะชื่อเรื่องอาจกล่าวถึงบัณฑิตวิทยาลัยกลางประโยค และเทียบด้วย norm
+    เพราะข้อความไทยใน PDF เพี้ยนประจำ (หน้าปกของเล่มนี้เองอ่านได้ว่า "บัณฑติ วทิ ยาลัย")
+    """
+    want = norm(_THAI_COVER_ONLY_LINE)
+    date_mark = norm("วันที่")
+    lines = [soft(line) for line in _degree_search_text(page_text).splitlines() if soft(line)]
+    for i in range(len(lines)):
+        for span in (1, 2):
+            chunk = soft(" ".join(lines[i:i + span]))
+            squashed = norm(chunk)
+            if squashed == want or (squashed.startswith(want)
+                                    and squashed[len(want):].startswith(date_mark)):
+                return chunk
+    return ""
+
+
+def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, thai_book):
+    """ข้อความ template ใต้ชื่อหัวข้อของหน้าลงนามหนึ่งหน้า
+
+    ประโยคตายตัวต้องครบ ไม่ใช่แค่ชื่อปริญญาถูก และเล่มไทยต้องไม่มีบรรทัดที่ใช้เฉพาะหน้าปก
+    (โค้ดส่วนประโยคย้ายมาจากลูปใน run_check ตรง ๆ ไม่แก้ตรรกะ เพื่อให้เทสต์ได้ทุกกรณี)
+    """
+    # บรรทัดที่ใช้ได้เฉพาะหน้าปก (ดู signature_page_extra_line) — ตรวจเฉพาะเล่มไทย เพราะ template
+    # อังกฤษมี "Faculty of Graduate Studies, Mahidol University" อยู่ในประโยคเองโดยชอบ
+    extra_line = signature_page_extra_line(page_text) if thai_book else ""
+    if norm(sig_template) in norm(page_text):
+        if extra_line:
+            rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail",
+                                 f'มีบรรทัดเกิน: "{extra_line}"')
+        else:
+            rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "pass")
+    else:
+        # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
+        # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
+        # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความ template" เจ้าหน้าที่จะนึกว่าระบบ
+        # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
+        #
+        # ตัด "ชื่อปริญญา" ออกจากหน้าก่อน แล้วที่เหลือจึงเป็นข้อความ template
+        # ล้วน (ดู signature_template_zone) — ชื่อปริญญาต่อท้ายประโยคนี้พอดี
+        # ถ้าไม่ตัดออก ตัวหาช่วงจะคร่อมชื่อปริญญาเข้ามาแล้วสองประเด็นปนกัน
+        #
+        # กันอีกชั้นด้วยเกณฑ์ความใกล้เคียงที่สูงกว่าค่าปกติ (0.6) เผื่อกรณี
+        # ที่ตัดชื่อปริญญาไม่ได้ (เล่มไม่มีชื่อปริญญา หรือฟอร์มไม่ได้กรอกมา)
+        # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
+        # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
+        template_zone = signature_template_zone(page_text, sig_degree)
+        near = _closest_run(template_zone, sig_template,
+                            min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+        # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
+        # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
+        # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
+        #  สิ่งที่พบ และบรรทัดที่ควรเป็น)
+        if near:
+            diff = describe_diff(near, sig_template)
+            found_msg = f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"'
+            if diff:
+                found_msg += f" {diff}"
+            detail = near
+        else:
+            # ไม่ยกประโยคเต็มมาตรงนี้ เพราะบรรทัด "ต้องเป็น" ข้างล่างมีอยู่แล้ว
+            # ยกสองรอบทำให้ข้อเดียวมีประโยคยาว ๆ ซ้ำกันสองครั้ง
+            found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+            detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
+        rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
+        rep.add("RED", "front_matter", spot, found_msg,
+                f'ต้องเป็น "{sig_template}"',
+                "", "FRONT.APPROVAL")
+    # ประโยคครบแล้วแต่มีบรรทัดเกิน กับประโยคหายแล้วมีบรรทัดเกิน เป็นสองข้อฟ้องแยกกัน (แก้คนละอย่าง)
+    if extra_line:
+        rep.add("RED", "front_matter", spot,
+                f'ใต้ชื่อหัวข้อมีบรรทัด "{extra_line}" เกินมา',
+                "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
+                "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
+                "ลบบรรทัดนี้ออกจากหน้าลงนาม", "FRONT.APPROVAL")
+
+
 _SMALL_WORDS = {"a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the",
                 "to", "with"}
 
@@ -7056,45 +7150,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # ขึ้นต้น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." จึงเช็คท่อนร่วมท่อนเดียว
         sig_template = (SIGNATURE_TEMPLATE_TH if thai_book else SIGNATURE_TEMPLATE_EN)
         for k, idx in enumerate(sig_pages):
-            spot = f"หน้าลงนาม {k + 1} ({page_ref(idx)})"
-            if norm(sig_template) in norm(pages[idx]):
-                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "pass")
-            else:
-                # เล่มพิมพ์ประโยคมาแต่ผิดคำ กับเล่มไม่มีประโยคนี้เลย เป็นคนละเรื่องกัน
-                # เล่มจริงพิมพ์ "ได้รับการพิจารณาให้เป็นส่วนหนึ่ง..." ตกคำว่า "นับ"
-                # ถ้าบอกลอย ๆ ว่า "ไม่พบข้อความ template" เจ้าหน้าที่จะนึกว่าระบบ
-                # อ่านไม่เจอ ทั้งที่ประโยคอยู่บนหน้ากระดาษครบ แค่ผิดคำเดียว
-                #
-                # ตัด "ชื่อปริญญา" ออกจากหน้าก่อน แล้วที่เหลือจึงเป็นข้อความ template
-                # ล้วน (ดู signature_template_zone) — ชื่อปริญญาต่อท้ายประโยคนี้พอดี
-                # ถ้าไม่ตัดออก ตัวหาช่วงจะคร่อมชื่อปริญญาเข้ามาแล้วสองประเด็นปนกัน
-                #
-                # กันอีกชั้นด้วยเกณฑ์ความใกล้เคียงที่สูงกว่าค่าปกติ (0.6) เผื่อกรณี
-                # ที่ตัดชื่อปริญญาไม่ได้ (เล่มไม่มีชื่อปริญญา หรือฟอร์มไม่ได้กรอกมา)
-                # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
-                # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
-                template_zone = signature_template_zone(pages[idx], sig_degree)
-                near = _closest_run(template_zone, sig_template,
-                                    min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
-                # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
-                # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
-                # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
-                #  สิ่งที่พบ และบรรทัดที่ควรเป็น)
-                if near:
-                    diff = describe_diff(near, sig_template)
-                    found_msg = f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"'
-                    if diff:
-                        found_msg += f" {diff}"
-                    detail = near
-                else:
-                    # ไม่ยกประโยคเต็มมาตรงนี้ เพราะบรรทัด "ต้องเป็น" ข้างล่างมีอยู่แล้ว
-                    # ยกสองรอบทำให้ข้อเดียวมีประโยคยาว ๆ ซ้ำกันสองครั้ง
-                    found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
-                    detail = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
-                rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
-                rep.add("RED", "front_matter", spot, found_msg,
-                        f'ต้องเป็น "{sig_template}"',
-                        "", "FRONT.APPROVAL")
+            _report_signature_template(
+                rep, f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx],
+                sig_template, sig_degree, thai_book)
         if cover_degree or sig_degree:
             degree_spots = []
             if cover_degree:

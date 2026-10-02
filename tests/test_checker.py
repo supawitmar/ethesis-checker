@@ -825,6 +825,171 @@ class SignatureTemplateSentenceTests(unittest.TestCase):
                          norm("ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"))
 
 
+class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
+    """หน้าลงนามเล่มไทย: ใต้ชื่อหัวข้อห้ามมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" (2 ต.ค. 2569)
+
+    เจ้าหน้าที่ส่งเล่ม PHIE/M มา: ทั้งสองหน้าลงนามมีบรรทัดนี้คั่นระหว่างชื่อปริญญากับวันที่ "ซึ่งมันไม่ถูก"
+    template เรียงเป็น ประโยค -> ปริญญา<ชื่อปริญญา> -> วันที่ (เล่มทดสอบไทยจริงก็ไม่มีบรรทัดนี้) ผู้เขียน
+    น่าจะคัดมาจากหน้าปก ซึ่งบรรทัดนี้ถูกต้องตาม template ส่วนช่องล่างซ้ายของตารางลายเซ็น
+    (คณบดีบัณฑิตวิทยาลัย) ก็พิมพ์ข้อความนี้ตามกฎอยู่แล้วทุกเล่ม จึงต้องไม่โดนฟ้อง
+    """
+
+    DEGREE = "วิทยาศาสตรมหาบัณฑิต (โรคติดเชื้อและวิทยาการระบาดทางการสาธารณสุข)"
+    ADVISORY = "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+    EXAM = "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+    LINE = "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"
+    DOTS = "…………………………………………………………………………...…………"
+
+    def _page(self, sentence=None, extra=(LINE,), title="ชื่อเรื่องตัวอย่างของวิทยานิพนธ์",
+              bottom=True):
+        lines = ["ก", "วิทยานิพนธ์", "เรื่อง", title]
+        if sentence:
+            lines.append(sentence)
+        lines.append("ปริญญา" + self.DEGREE)
+        lines += list(extra)
+        lines += ["วันที่ 18 กันยายน 2569", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์", "อาจารย์ที่ปรึกษาหลัก",
+                  self.DOTS, "ชื่อ นามสกุล, ผู้ช่วยศาสตราจารย์ ตัวอย่าง", self.DOTS]
+        if bottom:
+            # ช่องล่างของตารางลายเซ็นตามที่ดึงได้จากเล่มจริง (PHIE/M หน้า ข): ช่องซ้ายคือคณบดี
+            # บัณฑิตวิทยาลัย และบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" ตรงกับข้อความที่ห้ามมี
+            # ใต้ชื่อหัวข้อ "ทุกตัวอักษร" — ถ้าค้นทั้งหน้าจะฟ้องหน้าที่ถูกต้องทุกหน้า
+            lines += ["คณบดี", "คณบดี", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล",
+                      "คณะสาธารณสุขศาสตร์ มหาวิทยาลัยมหิดล"]
+        return NEWLINE.join(lines)
+
+    def _report(self, page, thai_book=True, sentence_template=SIGNATURE_TEMPLATE_TH):
+        rep = Report()
+        checker_module._report_signature_template(
+            rep, "หน้าลงนาม 1 (หน้า ก)", page, sentence_template, self.DEGREE, thai_book)
+        return rep
+
+    # ------------------------------------------------------------ ตัวหาบรรทัด
+    def test_the_extra_line_is_found_on_both_pages(self):
+        for sentence in (self.ADVISORY, self.EXAM):
+            self.assertEqual(
+                checker_module.signature_page_extra_line(self._page(sentence)), self.LINE, sentence)
+
+    def test_a_correct_page_is_quiet(self):
+        """ควบคุมเชิงลบ — หน้าที่ถูก (มีช่องล่างซ้ายพิมพ์บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดลตามกฎ)"""
+        for sentence in (self.ADVISORY, self.EXAM):
+            page = self._page(sentence, extra=())
+            self.assertIn(self.LINE, page.splitlines())            # ช่องล่างซ้ายอยู่จริง ตรงทุกตัวอักษร
+            self.assertEqual(checker_module.signature_page_extra_line(page), "", sentence)
+
+    def test_only_the_top_of_the_page_is_read(self):
+        """ข้อความเดียวกันใต้เส้นประลงนามแรกเป็นของช่องล่างซ้าย ไม่ใช่บรรทัดเกิน"""
+        self.assertEqual(
+            checker_module.signature_page_extra_line(self._page(self.EXAM, extra=(), bottom=True)),
+            "")
+
+    def test_a_damaged_text_layer_is_still_recognised(self):
+        """ข้อความไทยใน PDF เพี้ยนประจำ — หน้าปกของเล่มนี้เองอ่านได้ว่า "บัณฑติ วทิ ยาลัย" """
+        damaged = "บัณฑติ วทิ ยาลัย มหาวทิ ยาลยั มหดิ ล"
+        found = checker_module.signature_page_extra_line(
+            self._page(self.EXAM, extra=(damaged,)))
+        self.assertEqual(found, damaged)
+
+    def test_the_line_split_in_two_is_still_found(self):
+        found = checker_module.signature_page_extra_line(
+            self._page(self.EXAM, extra=("บัณฑิตวิทยาลัย", "มหาวิทยาลัยมหิดล")))
+        self.assertEqual(found, self.LINE)
+
+    def test_the_line_followed_by_the_date_is_still_found(self):
+        found = checker_module.signature_page_extra_line(
+            self._page(self.EXAM, extra=(self.LINE + " วันที่ 18 กันยายน 2569",)))
+        self.assertEqual(found, self.LINE + " วันที่ 18 กันยายน 2569")
+
+    def test_a_title_that_mentions_the_graduate_school_is_not_the_line(self):
+        """ควบคุมเชิงลบ — ต้องเป็นบรรทัดของตัวมันเอง ไม่ใช่แค่มีข้อความนี้อยู่ที่ไหนก็ได้"""
+        for title in ("การศึกษาในบัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล: กรณีศึกษา",
+                      "นักศึกษาบัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล กับความเครียด"):
+            page = self._page(self.EXAM, extra=(), title=title)
+            self.assertEqual(checker_module.signature_page_extra_line(page), "", title)
+
+    def test_the_real_thai_book_pages_are_quiet(self):
+        """ควบคุมเชิงลบ — ข้อความจริงของหน้าลงนามเล่มไทยที่ถูกต้อง (เหมือนใน SignatureTemplateSentenceTests)"""
+        for page in ("นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" + NEWLINE
+                     + "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" + NEWLINE
+                     + "วันที่ 11 พฤษภาคม พ.ศ. 2569",
+                     "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" + NEWLINE
+                     + "ปริญญาศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)" + NEWLINE
+                     + "วันที่ 11 พฤษภาคม พ.ศ. 2569"):
+            self.assertEqual(checker_module.signature_page_extra_line(page), "")
+
+    # ------------------------------------------------------------ การรายงานรายหน้า
+    def test_a_page_with_the_extra_line_is_reported_in_red(self):
+        rep = self._report(self._page(self.EXAM))
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertEqual(rep.zones["ORANGE"], [])
+        issue = rep.zones["RED"][0]
+        self.assertEqual(issue["location"], "หน้าลงนาม 1 (หน้า ก)")
+        self.assertEqual(issue["found"], 'ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา')
+        self.assertEqual(issue["expected"],
+                         "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
+                         "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)")
+        self.assertEqual(issue["fix"], "ลบบรรทัดนี้ออกจากหน้าลงนาม")
+        self.assertEqual(issue["rule_id"], "FRONT.APPROVAL")
+
+    def test_the_comparison_table_shows_the_page_as_not_matching(self):
+        """สถานะในตารางต้องคู่กับการ์ดแดง (ไม่ใช่ "ตรง" ทั้งที่มีการ์ดฟ้อง)"""
+        rep = self._report(self._page(self.EXAM))
+        rows = [c for g in rep.verification if g["topic"] == "ข้อความ template ใต้ชื่อหัวข้อ"
+                for c in g["checks"]]
+        self.assertEqual([(c["status"], c["detail"]) for c in rows],
+                         [("fail", 'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')])
+
+    def test_a_correct_page_still_passes_as_before(self):
+        for sentence in (self.ADVISORY, self.EXAM):
+            rep = self._report(self._page(sentence, extra=()))
+            self.assertEqual(rep.zones["RED"], [], sentence)
+            rows = [c["status"] for g in rep.verification for c in g["checks"]]
+            self.assertEqual(rows, ["pass"], sentence)
+
+    def test_a_missing_sentence_and_the_extra_line_are_two_findings(self):
+        """หน้าลงนาม 2 ของเล่มจริง: ประโยคหายไปด้วย — สองเรื่องแก้คนละอย่าง ต้องฟ้องแยกกัน"""
+        rep = self._report(self._page(sentence=None))
+        self.assertEqual(
+            [i["found"] for i in rep.zones["RED"]],
+            ["ไม่พบข้อความ template ใต้ชื่อหัวข้อ",
+             'ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา'])
+        rows = [c for g in rep.verification for c in g["checks"]]
+        self.assertEqual([c["status"] for c in rows], ["fail"])      # ตารางมีแถวเดียวต่อหน้า
+
+    def test_english_books_are_not_checked_for_it(self):
+        """template อังกฤษมี "Faculty of Graduate Studies, Mahidol University" ในประโยคเองโดยชอบ"""
+        rep = self._report(self._page(self.EXAM), thai_book=False,
+                           sentence_template=SIGNATURE_TEMPLATE_EN)
+        self.assertEqual([i["found"] for i in rep.zones["RED"]],
+                         ["ไม่พบข้อความ template ใต้ชื่อหัวข้อ"])         # ฟ้องแค่ประโยคอังกฤษที่ไม่มี
+        self.assertNotIn("เกินมา", " ".join(i["found"] for i in rep.zones["RED"]))
+
+    def test_the_sentence_check_keeps_its_old_behaviour(self):
+        """ย้ายโค้ดมาเป็นฟังก์ชัน ห้ามเปลี่ยนตรรกะเดิม — ประโยคผิดคำเดียวยังบอกว่าขาดคำไหน"""
+        page = self._page("ได้รับการพิจารณาให้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร", extra=())
+        rep = self._report(page)
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn('ขาด "นับ"', rep.zones["RED"][0]["found"])
+
+    def test_it_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for text in ('ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา',
+                     "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
+                     "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
+                     "ลบบรรทัดนี้ออกจากหน้าลงนาม",
+                     'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'):
+            problems = i18n.translation_problems(text, i18n.tr_en(text, pairs))
+            self.assertEqual(problems, [], (text, problems))
+
+    def test_run_check_hands_every_signature_page_to_the_function(self):
+        """ล็อกการต่อสาย ไม่ใช่ล็อกแค่ตัวฟังก์ชัน"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("_report_signature_template(", source)
+        self.assertIn("sig_template, sig_degree, thai_book)", source)
+        function = inspect.getsource(checker_module._report_signature_template)
+        self.assertIn("signature_page_extra_line(page_text) if thai_book else", function)
+
+
 class MultiLineTitleTests(unittest.TestCase):
     """ชื่อเรื่องบนหน้าลงนามที่ตัดขึ้นหลายบรรทัด ต้องดึงมาครบ ไม่ฟ้อง "ขาด" ผิด ๆ"""
 
