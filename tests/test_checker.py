@@ -949,11 +949,27 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         issue = rep.zones["RED"][0]
         self.assertEqual(issue["location"], "หน้าลงนาม 1 (หน้า ก)")
         self.assertEqual(issue["found"], 'ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา')
-        self.assertEqual(issue["expected"],
-                         "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
-                         "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)")
-        self.assertEqual(issue["fix"], "ลบบรรทัดนี้ออกจากหน้าลงนาม")
+        # บอกแค่ให้ตัดออก ไม่อธิบายว่า template ต้องมีอะไร (เจ้าหน้าที่ 2 ต.ค. 2569: "ไอ้ส่วนที่เกินมา
+        # แค่บอกให้ตัดออกก็พอ") และไม่ใส่ fix ซ้ำบนการ์ด
+        self.assertEqual(issue["expected"], "ตัดบรรทัดนี้ออก")
+        self.assertEqual(issue["fix"], "")
         self.assertEqual(issue["rule_id"], "FRONT.APPROVAL")
+
+    def test_the_student_summary_just_says_to_cut_the_line_out(self):
+        """ข้อความสรุปที่ส่งนักศึกษา: ตำแหน่ง / สิ่งที่พบ / ตัดออก — ไม่มีคำอธิบายยาวของ template ตามหลัง"""
+        rep = self._report(self._page(self.FULL))
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("1. หน้าลงนาม 1 (หน้า ก)\n"
+                      '   ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา\n'
+                      "   ตัดบรรทัดนี้ออก", summary)
+        for explanation in ("ใช้เฉพาะหน้าปก", "ต้องมีเฉพาะประโยค", "ชื่อปริญญา และวันที่"):
+            self.assertNotIn(explanation, summary)
+
+    def test_the_card_is_not_filed_under_the_degree_name(self):
+        """ข้อความอธิบายเดิมมีคำว่า "ชื่อปริญญา" ทำให้ classify() จัดการ์ดนี้เป็น "ชื่อปริญญาไม่ตรงข้อมูลอนุมัติ"
+        ทั้งที่ชื่อปริญญาตรงทุกตัว ปัญหาคือบรรทัดเกิน — เป็นเรื่องโครงสร้างหน้า"""
+        issue = self._report(self._page(self.FULL)).zones["RED"][0]
+        self.assertEqual(checker_module.classify(issue), "โครงสร้างเล่ม")
 
     def test_the_comparison_table_shows_the_page_as_not_matching(self):
         """สถานะในตารางต้องคู่กับการ์ดแดง (ไม่ใช่ "ตรง" ทั้งที่มีการ์ดฟ้อง)"""
@@ -1108,9 +1124,7 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
         for text in ('ใต้ชื่อหัวข้อมีบรรทัด "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล" เกินมา',
-                     "ข้อความใต้ชื่อหัวข้อต้องมีเฉพาะประโยคของ template ชื่อปริญญา และวันที่ "
-                     "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
-                     "ลบบรรทัดนี้ออกจากหน้าลงนาม",
+                     "ตัดบรรทัดนี้ออก",
                      'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"',
                      # แถวในตาราง ข้อ "ควรเป็น" และแถวที่มีบรรทัดเกินด้วย (ประโยคที่ถูกมีอันเดียว)
                      'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.WANTED,
@@ -1133,6 +1147,7 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         self.assertEqual(i18n.tr_en('ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.WANTED, pairs),
                          'The template wording below the title was not found: ' + self.WANTED)
         self.assertEqual(i18n.tr_en("ต้องเป็น " + self.WANTED, pairs), "Must be " + self.WANTED)
+        self.assertEqual(i18n.tr_en("ตัดบรรทัดนี้ออก", pairs), "Remove this line")
         self.assertEqual(
             i18n.tr_en('ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.WANTED
                        + ' และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"', pairs),
