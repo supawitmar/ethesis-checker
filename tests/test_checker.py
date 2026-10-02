@@ -956,8 +956,29 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         # ขึ้นแค่ "ไม่พบข้อความ template" ทั้งที่มีบรรทัดเกินด้วย)
         rows = [c for g in rep.verification for c in g["checks"]]
         self.assertEqual([(c["status"], c["detail"]) for c in rows],
-                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ '
+                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
+                                   '"นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" '
                                    'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')])
+
+    def test_the_table_row_says_which_text_was_not_found(self):
+        """เจ้าหน้าที่ถาม (2 ต.ค. 2569): "ไม่พบข้อความ template ไม่พบข้อความอะไร บอกด้วย"
+
+        การ์ดแดงมีบรรทัด "ควรเป็น" บอกอยู่แล้ว แต่แถวในตารางเทียบไม่มีบรรทัดนั้น จึงต้องบอกในแถวเอง"""
+        rep = self._report(self._page(sentence=None, extra=()))
+        rows = [c for g in rep.verification for c in g["checks"]]
+        self.assertEqual([(c["status"], c["detail"]) for c in rows],
+                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
+                                   '"นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"')])
+        # ข้อความที่บอกต้องเป็นตัวเดียวกับที่การ์ดบอกว่า "ต้องเป็น" ไม่ใช่คนละข้อความ
+        self.assertEqual(rep.zones["RED"][0]["expected"],
+                         'ต้องเป็น "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"')
+
+    def test_an_english_book_is_told_the_english_sentence(self):
+        rep = self._report(self._page(sentence=None, extra=()), thai_book=False,
+                           sentence_template=SIGNATURE_TEMPLATE_EN)
+        rows = [c for g in rep.verification for c in g["checks"]]
+        self.assertEqual(rows[0]["detail"],
+                         'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "' + SIGNATURE_TEMPLATE_EN + '"')
 
     def test_a_misspelt_sentence_and_the_extra_line_share_one_table_row(self):
         """ประโยคมีแต่ผิดคำ (ตก "นับ") แล้วมีบรรทัดเกินด้วย — แถวในตารางยกประโยคที่พิมพ์จริงมาแล้วต่อด้วย
@@ -996,10 +1017,21 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
                      "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
                      "ลบบรรทัดนี้ออกจากหน้าลงนาม",
                      'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"',
-                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ '
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"',
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" '
                      'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'):
             problems = i18n.translation_problems(text, i18n.tr_en(text, pairs))
             self.assertEqual(problems, [], (text, problems))
+
+    def test_the_extra_line_suffix_translates_after_book_text(self):
+        """แถวของประโยคผิดคำ: ท่อนที่ยกจากเล่มคงเป็นไทย (เป็นข้อความของเล่ม) แต่ส่วนต่อท้ายที่ระบบเขียน
+        ต้องแปล ไม่ใช่ค้างคำว่า "และ" เป็นไทยกลางประโยคอังกฤษ"""
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en('เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร '
+                        'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"', pairs)
+        self.assertTrue(en.endswith(', and an extra line: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'), en)
+        self.assertNotIn("และมีบรรทัดเกิน", en)
 
     def test_run_check_hands_every_signature_page_to_the_function(self):
         """ล็อกการต่อสาย ไม่ใช่ล็อกแค่ตัวฟังก์ชัน"""
