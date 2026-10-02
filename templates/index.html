@@ -198,6 +198,9 @@
   .final-notes p { margin:0 0 8px; }
   .final-notes p:last-child { margin-bottom:0; }
   .final-notes b { color:var(--navy); }
+  /* เวอร์ชันของโค้ดที่ระบบกำลังรันอยู่ (ท้ายหน้า) — ตัวเล็กสีรอง ไม่แย่งสายตา */
+  .appver { margin:22px 0 0; text-align:center; font-size:.76rem; color:var(--ink-3); }
+  .appver b { font-weight:600; font-family:ui-monospace,Consolas,monospace; letter-spacing:.02em; }
 
   /* หน้าจอระหว่างตรวจ — id overlay/stage ใช้ในสคริปต์ ห้ามเปลี่ยน */
   #overlay { position:fixed; inset:0; z-index:99; background:rgba(14,24,40,.55);
@@ -430,6 +433,8 @@
     </div>
   </div>
   </form>
+  {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง") #}
+  <p class="appver">เวอร์ชันระบบ <b>{{ app_version }}</b> · เริ่มทำงาน {{ app_started }}</p>
 </main>
 
 <div id="overlay" style="display:none;">

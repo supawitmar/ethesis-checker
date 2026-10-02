@@ -106,12 +106,23 @@ python tools/check_i18n.py --lint
 python tools/check_i18n.py --corpus
 ```
 
+```bash
+python tools/smoke_web.py
+```
+
 | ด่าน | ตรวจอะไร | ต้องมีข้อมูลทดสอบไหม |
 |---|---|---|
-| `unittest` | ตรรกะทีละกฎ (เร็ว ~1 วิ) | ไม่ต้อง |
+| `unittest` | ตรรกะทีละกฎ + เส้นทางเว็บ + สคริปต์ JS (~10 วิ) | ไม่ต้อง |
 | `tools/regress_books.py` | ผลตรวจเล่มจริงต้องไม่เพี้ยนจาก `tools/baseline.json` | **ต้องมี** |
 | `tools/check_i18n.py --lint` | โครงสร้างตารางคำแปล `TR` ในหน้ารายงาน | ไม่ต้อง |
 | `tools/check_i18n.py --corpus` | ข้อความที่เล่มจริงทำให้เกิด ต้องมีคำแปลอังกฤษครบ | **ต้องมี** |
+| `tools/smoke_web.py` | ไล่ใช้งานจริงผ่าน HTTP ทั้งเส้นทาง แล้วกดปุ่มบนหน้ารายงาน | **ต้องมี** |
+
+**CI บน GitHub** (`.github/workflows/ci.yml`) รันสองด่านที่ไม่ต้องใช้ข้อมูลทดสอบ คือ `unittest` กับ
+`check_i18n.py --lint` บน Linux (Python 3.11 และ 3.14) ทุกครั้งที่ push — Linux คือระบบที่ Render
+รันจริง ส่วนเครื่องที่พัฒนาเป็น Windows สามด่านที่ต้องมีเล่มทดสอบ CI **ไม่รัน** เพราะไม่มีเล่มแล้วทั้งสาม
+ตัวจะข้ามแล้วจบแบบผ่าน (CI เขียวทั้งที่ไม่ได้ตรวจ) จึงยังต้องรันในเครื่องที่มีเล่มก่อน commit เหมือนเดิม
+รายละเอียดและวิธีให้ Render deploy เองหลัง CI ผ่านอยู่ใน `DEPLOY.md`
 
 - **regression เปลี่ยนตัวเลข** ต้องอธิบายให้ได้ว่าทำไม ถ้าอธิบายไม่ได้แปลว่ากฎใหม่
   ทำให้เล่มที่เคยถูกกลายเป็นผิด — ถ้าเปลี่ยนโดยตั้งใจ ให้บันทึกฐานใหม่ด้วย `--save`
@@ -124,6 +135,14 @@ python tools/check_i18n.py --corpus
 ```bash
 docker build -t ethesis-checker .
 docker run -p 8000:8000 ethesis-checker
+```
+
+ท้ายหน้าเว็บกับ `/health` บอกรหัส commit ของโค้ดที่รันอยู่ (ไว้เทียบว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง)
+`.git` ไม่อยู่ใน image จึงต้องส่งรหัสเข้าไปตอน build ไม่ส่งก็ใช้งานได้ปกติ แค่ขึ้นว่า `unknown`
+(บน Render ไม่ต้องทำ Render ใส่ให้เอง)
+
+```bash
+docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t ethesis-checker .
 ```
 
 ## Deploy ให้ใช้งานออนไลน์ (ฟรี/ราคาถูก)
@@ -151,7 +170,8 @@ docker run -p 8000:8000 ethesis-checker
 - `templates/index.html` — ฟอร์มกรอกข้อมูล + อัปโหลด PDF
 - `templates/report.html` — หน้าแสดงผลตรวจ (โซนสี 🔴🟠🟡) + ตารางคำแปลอังกฤษ `TR`
 - `tests/` — unittest ทั้งหมด (ไม่ต้องใช้ไฟล์ PDF)
-- `tools/` — ด่านตรวจก่อน commit: `regress_books.py`, `check_i18n.py`, `baseline.json`
+- `tools/` — ด่านตรวจก่อน commit: `regress_books.py`, `check_i18n.py`, `smoke_web.py`, `baseline.json`
+- `.github/workflows/ci.yml` — CI บน GitHub: รัน `unittest` + `check_i18n.py --lint` บน Linux ทุกครั้งที่ push
 - `.claude/` — คู่มือทำงานสำหรับ Claude Code (ขั้นตอนแก้กฎ + กับดักเฉพาะโปรเจกต์)
   กับ `launch.json` ของ dev server · **เปิด Claude Code ที่โฟลเดอร์ `code/` นี้**
   จึงจะเจอเอง · ไม่เกี่ยวกับการรันหรือ deploy ระบบเลย (`.dockerignore` ตัดออกอยู่แล้ว)

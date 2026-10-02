@@ -56,6 +56,9 @@
 
   /* ---- โครงหน้า ---- */
   .page { max-width:980px; margin:0 auto; padding:28px 24px 48px; }
+  /* เวอร์ชันของโค้ดที่ระบบกำลังรันอยู่ (ท้ายหน้า) — ตัวเล็กสีรอง ไม่แย่งสายตา */
+  .appver { margin:22px 0 0; text-align:center; font-size:.76rem; color:var(--ink-3); }
+  .appver b { font-weight:600; font-family:ui-monospace,Consolas,monospace; letter-spacing:.02em; }
   .hero h1 { margin:0; font-size:1.55rem; font-weight:700; color:var(--navy); letter-spacing:-.01em; }
   .hero .sub { margin:4px 0 0; color:var(--ink-2); font-size:.92rem; }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
@@ -673,6 +676,10 @@
       <button class="btn ghost" onclick="window.print()" data-th="🖨 พิมพ์ / บันทึก PDF" data-en="🖨 Print / Save PDF">🖨 พิมพ์ / บันทึก PDF</button>
     </div>
   </div>
+  {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง")
+     อยู่นอกสคริปต์และนอกกล่องรายงาน — รายงานที่บันทึกเป็นไฟล์ไว้ก็ยังบอกได้ว่าสร้างจากโค้ดรุ่นไหน #}
+  <p class="appver"><span data-th="เวอร์ชันระบบ" data-en="System version">เวอร์ชันระบบ</span> <b>{{ app_version }}</b> ·
+    <span data-th="เริ่มทำงาน" data-en="running since">เริ่มทำงาน</span> {{ app_started }}</p>
 </main>
 
 <script>

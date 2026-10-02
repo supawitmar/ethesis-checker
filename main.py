@@ -6,6 +6,8 @@ Run:  uvicorn main:app --host 0.0.0.0 --port 8000
 """
 import atexit
 import json
+import platform
+import subprocess
 import tempfile
 import threading
 import time
@@ -16,6 +18,7 @@ import asyncio
 import hashlib
 import hmac
 import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import re
@@ -47,6 +50,49 @@ STATIC_DIR = BASE / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
+
+# เวอร์ชันของโค้ดที่ระบบกำลังรันอยู่ — โชว์ท้ายหน้าอัปโหลด/หน้ารายงานและใน /health เพื่อให้
+# เห็นเองว่าระบบจริงตรงกับ commit ล่าสุดที่ push หรือยัง (2 ต.ค. 2569 รายงานบนระบบจริงยังเป็น
+# โค้ดเก่าโดยไม่มีอะไรบอก จนแจ้งนักศึกษาผิดถ้อยคำ)
+#
+# ค่าที่แสดงมีแบบเดียวคือรหัส commit 7 ตัว (เลขฐานสิบหก) หรือ "unknown" — ไม่เอาข้อความจาก
+# ตัวแปรสภาพแวดล้อมไปแสดงตรง ๆ จึงไม่มีข้อความแปลกปลอมหลุดลงหน้าเว็บหรือ JSON
+# Render ใส่ RENDER_GIT_COMMIT ให้เอง · โฮสต์/Docker อื่นส่ง GIT_COMMIT เข้ามา (ดู Dockerfile)
+# เครื่องที่พัฒนาไม่มีตัวแปรทั้งสอง จึงถาม git ตรง ๆ
+APP_VERSION_UNKNOWN = "unknown"
+_COMMIT_ENV_NAMES = ("GIT_COMMIT", "RENDER_GIT_COMMIT")
+_COMMIT_HEX = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
+
+
+def _resolve_app_version(environ=None, repo_dir=None):
+    """รหัส commit 7 ตัวของโค้ดที่รันอยู่ — ตัวแปรสภาพแวดล้อมก่อน แล้วค่อยถาม git"""
+    environ = os.environ if environ is None else environ
+    for name in _COMMIT_ENV_NAMES:
+        value = str(environ.get(name, "")).strip()
+        if _COMMIT_HEX.match(value):
+            return value[:7].lower()
+    repo_dir = Path(repo_dir or BASE)
+    # image Docker ไม่มี .git (.dockerignore ตัดออก) ไม่ต้องเสียเวลาเรียก git
+    if (repo_dir / ".git").exists():
+        try:
+            run = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=repo_dir,
+                                 capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            return APP_VERSION_UNKNOWN
+        value = run.stdout.strip()
+        if run.returncode == 0 and _COMMIT_HEX.match(value):
+            return value[:7].lower()
+    return APP_VERSION_UNKNOWN
+
+
+# เวลาไทย (UTC+7 ไม่มีเวลาออมแสง) — เซิร์ฟเวอร์ Render ใช้ UTC แต่คนอ่านหน้านี้อยู่เมืองไทย
+# เวลาที่ process นี้เริ่มทำงานบอกด้วย เพราะ deploy/restart/cold start ทุกครั้งทำให้ผลตรวจที่
+# อยู่ในหน่วยความจำหายหมด เจ้าหน้าที่เห็นเวลานี้ก็รู้ว่าทำไมรายงานที่เปิดค้างไว้ถึงหาย
+_BANGKOK = timezone(timedelta(hours=7))
+APP_STARTED_AT = datetime.now(_BANGKOK)
+APP_VERSION = _resolve_app_version()
+templates.env.globals["app_version"] = APP_VERSION
+templates.env.globals["app_started"] = APP_STARTED_AT.strftime("%d/%m/%Y %H:%M")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 SESSION_COOKIE = "ethesis_session"
@@ -939,4 +985,8 @@ def book_file(job_id: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    # เปิดได้โดยไม่ต้องล็อกอิน — Render ใช้เช็กว่าบริการขึ้น และหลัง deploy เปิดดูเองได้เลย
+    # version คือรหัส commit 7 ตัว (ไม่ใช่ความลับ) ไว้เทียบกับ commit ที่ push · python คือเวอร์ชัน
+    # ที่เครื่องจริงใช้รันอยู่ ไว้เทียบกับที่ CI ทดสอบ · started คือเวลาที่ process นี้เริ่มทำงาน
+    return {"status": "ok", "version": APP_VERSION, "python": platform.python_version(),
+            "started": APP_STARTED_AT.isoformat(timespec="seconds")}

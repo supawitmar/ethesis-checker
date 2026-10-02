@@ -1,0 +1,60 @@
+# ด่านตรวจอัตโนมัติ — รันทุกครั้งที่ push (และกดรันเองได้ที่แท็บ Actions ของ GitHub)
+#
+# รันบน Linux ซึ่งเป็นระบบเดียวกับที่ Render ใช้รันจริง ส่วนเครื่องที่พัฒนาเป็น Windows
+# จึงเป็นการทดสอบบนระบบที่ใช้งานจริงครั้งแรก และรัน Python สองเวอร์ชัน
+#   3.11 = เวอร์ชันใน Dockerfile  ·  3.14 = เวอร์ชันบนเครื่องที่พัฒนา
+# (เปิด /health ของระบบจริงดูช่อง "python" ว่าเครื่องจริงรันเวอร์ชันไหน แล้วปรับรายการนี้ให้ตรง)
+#
+# รันเฉพาะด่านที่ไม่ต้องใช้ข้อมูลนักศึกษา
+#   unittest     ตรรกะทุกกฎ + เส้นทางเว็บทั้งหมด (สร้าง PDF ตัวอย่างเอง) + สคริปต์ JS ผ่าน node
+#   check_i18n   --lint ตรวจโครงสร้างตารางคำแปลในหน้ารายงาน
+#
+# สามด่านที่ต้องใช้วิทยานิพนธ์จริง (tools/regress_books.py, tools/check_i18n.py --corpus,
+# tools/smoke_web.py) ไม่ใส่ที่นี่ — ไม่มีเล่ม ทั้งสามตัว "ข้าม" แล้วจบแบบผ่าน CI จะเขียวทั้งที่
+# ไม่ได้ตรวจอะไรเลย ยังต้องรันในเครื่องที่มีเล่มทดสอบก่อน commit เหมือนเดิม
+# (tests/test_app_version.py ล็อกข้อนี้ไว้ และจะเปลี่ยนเมื่อมีชุดเล่มสมมติที่เก็บใน repo ได้)
+#
+# ไม่ใช้ secrets ใด ๆ และไม่เขียนอะไรกลับ repo
+
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# push ซ้อนกันบน branch เดียว ให้ยกเลิกรอบเก่า เหลือเฉพาะรอบล่าสุด
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: checks (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: ติดตั้งแพ็กเกจ
+        run: pip install -r requirements-dev.txt
+
+      - name: unittest
+        run: python -B -m unittest discover -s tests
+
+      - name: i18n lint
+        run: python tools/check_i18n.py --lint
