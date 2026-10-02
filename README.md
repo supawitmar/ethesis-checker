@@ -172,6 +172,7 @@ docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t ethesis-checker .
 - `tests/` — unittest ทั้งหมด (ไม่ต้องใช้ไฟล์ PDF)
 - `tools/` — ด่านตรวจก่อน commit: `regress_books.py`, `check_i18n.py`, `smoke_web.py`, `baseline.json`
 - `.github/workflows/ci.yml` — CI บน GitHub: รัน `unittest` + `check_i18n.py --lint` บน Linux ทุกครั้งที่ push
+- `HANDOFF.md` — สถานะงานและขั้นตอนต่อสำหรับส่งต่อ (ธรรมเนียมการทำงาน งานค้าง สิ่งที่ยังไม่ได้ยืนยัน กับดักที่เจอมาแล้ว)
 - `.claude/` — คู่มือทำงานสำหรับ Claude Code (ขั้นตอนแก้กฎ + กับดักเฉพาะโปรเจกต์)
   กับ `launch.json` ของ dev server · **เปิด Claude Code ที่โฟลเดอร์ `code/` นี้**
   จึงจะเจอเอง · ไม่เกี่ยวกับการรันหรือ deploy ระบบเลย (`.dockerignore` ตัดออกอยู่แล้ว)
