@@ -24,6 +24,7 @@ from ethesis_rules import (
     NOT_CHECKED,
     SIGNATURE_TEMPLATE_EN,
     SIGNATURE_TEMPLATE_TH,
+    SIGNATURE_TEMPLATE_TH_FULL,
     TOC_ALLOWED_LIST_HEADINGS,
     TYPE_MARKERS,
     rule_reference,
@@ -1368,6 +1369,14 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
     # บรรทัดที่ใช้ได้เฉพาะหน้าปก (ดู signature_page_extra_line) — ตรวจเฉพาะเล่มไทย เพราะ template
     # อังกฤษมี "Faculty of Graduate Studies, Mahidol University" อยู่ในประโยคเองโดยชอบ
     extra_line = signature_page_extra_line(page_text) if thai_book else ""
+    # ข้อความที่บอกเจ้าหน้าที่/นักศึกษา: เล่มไทยรับได้ 2 แบบ (เต็ม/สั้น ดู ethesis_rules.py) เล่มอังกฤษแบบเดียว
+    # การเทียบยังใช้ sig_template ซึ่งเป็นท่อนท้ายของแบบเต็ม จึงรับได้ทั้งสองแบบ
+    accepted = ((SIGNATURE_TEMPLATE_TH_FULL, sig_template) if thai_book else (sig_template,))
+    wanted = " หรือ ".join(f'"{text}"' for text in accepted)
+    # ประโยคกลางของข้อ "ควรเป็น" ห้ามจบด้วยเครื่องหมายคำพูดเมื่อมีสองตัวเลือก ไม่งั้นข้อความสรุป
+    # ดึงตัวท้ายไปพิมพ์ว่า "ต้องแก้เป็น ..." ตัวเดียว (เหมือนข้อ Dean/Director)
+    expected_msg = (f"ต้องเป็น {wanted} อย่างใดอย่างหนึ่ง" if len(accepted) > 1
+                    else f"ต้องเป็น {wanted}")
     if norm(sig_template) in norm(page_text):
         if extra_line:
             rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail",
@@ -1407,14 +1416,14 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
             found_msg = "ไม่พบข้อความ template ใต้ชื่อหัวข้อ"
             # แถวในตารางเทียบไม่มีบรรทัด "ควรเป็น" เหมือนการ์ด จึงต้องบอกในแถวเองว่าไม่พบข้อความอะไร
             # (เจ้าหน้าที่ถาม 2 ต.ค. 2569) ส่วนการ์ดไม่ยกซ้ำเพราะบรรทัดข้างล่างมีอยู่แล้ว
-            detail = f'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "{sig_template}"'
+            detail = f"ไม่พบข้อความ template ใต้ชื่อหัวข้อ: {wanted}"
         # ตารางเทียบมีแถวเดียวต่อหน้า — ถ้ามีบรรทัดเกินด้วยต้องบอกในแถวนั้นด้วย ไม่ใช่โชว์แค่เรื่อง
         # ประโยค (การ์ดแดงแยกเป็นสองข้ออยู่แล้ว) เจ้าหน้าที่ท้วง 2 ต.ค. 2569
         if extra_line:
             detail += f' และมีบรรทัดเกิน: "{extra_line}"'
         rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
         rep.add("RED", "front_matter", spot, found_msg,
-                f'ต้องเป็น "{sig_template}"',
+                expected_msg,
                 "", "FRONT.APPROVAL")
     # ประโยคครบแล้วแต่มีบรรทัดเกิน กับประโยคหายแล้วมีบรรทัดเกิน เป็นสองข้อฟ้องแยกกัน (แก้คนละอย่าง)
     if extra_line:
@@ -7152,8 +7161,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         sig_degree = soft(A.get("degree_sig_th" if thai_book else "degree_sig_en", ""))
 
         # ประโยคตายตัวของ template หน้าลงนาม ต้องอยู่ครบ ไม่ใช่แค่ชื่อปริญญาถูก
-        # เล่มไทยหน้าอาจารย์ที่ปรึกษาใช้ "นับเป็นส่วนหนึ่ง..." ส่วนหน้ากรรมการสอบ
-        # ขึ้นต้น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." จึงเช็คท่อนร่วมท่อนเดียว
+        # template ทางการเขียนทั้งสองหน้าเป็น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." และเจ้าหน้าที่
+        # ยอมรับแบบสั้น ("นับเป็นส่วนหนึ่ง...") ด้วย จึงเช็คท่อนร่วมท่อนเดียว (ดู ethesis_rules.py)
         sig_template = (SIGNATURE_TEMPLATE_TH if thai_book else SIGNATURE_TEMPLATE_EN)
         for k, idx in enumerate(sig_pages):
             _report_signature_template(

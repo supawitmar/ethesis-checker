@@ -87,6 +87,7 @@ from ethesis_rules import (
     RULE_CATALOG,
     SIGNATURE_TEMPLATE_EN,
     SIGNATURE_TEMPLATE_TH,
+    SIGNATURE_TEMPLATE_TH_FULL,
     SOURCE_PRECEDENCE,
     rule_zone,
 )
@@ -956,9 +957,13 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         # ขึ้นแค่ "ไม่พบข้อความ template" ทั้งที่มีบรรทัดเกินด้วย)
         rows = [c for g in rep.verification for c in g["checks"]]
         self.assertEqual([(c["status"], c["detail"]) for c in rows],
-                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
-                                   '"นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" '
-                                   'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')])
+                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.BOTH_WORDINGS
+                                   + ' และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"')])
+
+    # ข้อความที่ต้องบอก: เล่มไทยรับได้สองแบบ (เจ้าหน้าที่ 2 ต.ค. 2569: "ข้อความ template คือ ได้รับการพิจารณาให้...
+    # หรือ นับเป็นส่วนหนึ่ง..." และเช็คกับ template ทางการแล้วว่าทั้งสองหน้าเขียนแบบเต็ม)
+    BOTH_WORDINGS = ('"ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" '
+                     'หรือ "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"')
 
     def test_the_table_row_says_which_text_was_not_found(self):
         """เจ้าหน้าที่ถาม (2 ต.ค. 2569): "ไม่พบข้อความ template ไม่พบข้อความอะไร บอกด้วย"
@@ -967,11 +972,50 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         rep = self._report(self._page(sentence=None, extra=()))
         rows = [c for g in rep.verification for c in g["checks"]]
         self.assertEqual([(c["status"], c["detail"]) for c in rows],
-                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: '
-                                   '"นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"')])
-        # ข้อความที่บอกต้องเป็นตัวเดียวกับที่การ์ดบอกว่า "ต้องเป็น" ไม่ใช่คนละข้อความ
+                         [("fail", 'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.BOTH_WORDINGS)])
+        # ข้อความที่บอกต้องเป็นชุดเดียวกับที่การ์ดบอกว่า "ต้องเป็น" ไม่ใช่คนละข้อความ
         self.assertEqual(rep.zones["RED"][0]["expected"],
-                         'ต้องเป็น "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"')
+                         "ต้องเป็น " + self.BOTH_WORDINGS + " อย่างใดอย่างหนึ่ง")
+
+    def test_both_wordings_are_accepted(self):
+        """เจ้าหน้าที่ยอมรับทั้งแบบเต็ม (ตาม template ทางการ) และแบบสั้น — ห้ามฟ้องแบบใดแบบหนึ่ง"""
+        for sentence in (self.EXAM, self.ADVISORY):
+            rep = self._report(self._page(sentence, extra=()))
+            self.assertEqual(rep.zones["RED"], [], sentence)
+            self.assertEqual([c["status"] for g in rep.verification for c in g["checks"]],
+                             ["pass"], sentence)
+
+    def test_the_official_one_line_form_is_accepted(self):
+        """template ทางการพิมพ์ประโยคต่อด้วยชื่อปริญญาในย่อหน้าเดียว ("...ตามหลักสูตรปริญญา<ชื่อปริญญา>")
+        ต่างจากเล่มที่ตัดเป็นสองบรรทัด — ต้องผ่านเหมือนกัน"""
+        for sentence in (self.EXAM, self.ADVISORY):
+            lines = ["ก", "วิทยานิพนธ์", "เรื่อง", "ชื่อเรื่องตัวอย่างของวิทยานิพนธ์",
+                     sentence + "ปริญญา" + self.DEGREE, "วันที่ 18 กันยายน 2569",
+                     "คณะกรรมการที่ปรึกษาวิทยานิพนธ์", self.DOTS]
+            rep = self._report(NEWLINE.join(lines))
+            self.assertEqual(rep.zones["RED"], [], sentence)
+
+    def test_the_two_wordings_are_one_sentence_with_and_without_the_lead(self):
+        """การเทียบใช้แบบสั้นแบบเดียวแล้วรับได้ทั้งสองแบบ ก็ต่อเมื่อแบบสั้นเป็นท่อนท้ายของแบบเต็มจริง"""
+        full, short = SIGNATURE_TEMPLATE_TH_FULL, SIGNATURE_TEMPLATE_TH
+        self.assertTrue(full.endswith(short))
+        self.assertEqual(full[:-len(short)], "ได้รับการพิจารณาให้")
+
+    def test_the_summary_keeps_both_wordings(self):
+        """ข้อความสรุปที่ส่งให้นักศึกษาต้องไม่เหลือ 'ต้องแก้เป็น "<แบบสั้น>"' ตัวเดียว ทั้งที่รับได้สองแบบ"""
+        rep = self._report(self._page(sentence=None, extra=()))
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn("ต้องเป็น " + self.BOTH_WORDINGS + " อย่างใดอย่างหนึ่ง", summary)
+        self.assertNotIn("ต้องแก้เป็น", summary)
+
+    def test_a_misspelt_sentence_is_told_both_wordings(self):
+        """ผิดคำเดียว (ตก "นับ") ก็ต้องบอกว่าใช้แบบไหนก็ได้ ไม่ใช่ชี้ไปแบบเดียว"""
+        printed = "ได้รับการพิจารณาให้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+        rep = self._report(self._page(printed, extra=()))
+        self.assertEqual(len(rep.zones["RED"]), 1)
+        self.assertIn('ขาด "นับ"', rep.zones["RED"][0]["found"])
+        self.assertEqual(rep.zones["RED"][0]["expected"],
+                         "ต้องเป็น " + self.BOTH_WORDINGS + " อย่างใดอย่างหนึ่ง")
 
     def test_an_english_book_is_told_the_english_sentence(self):
         rep = self._report(self._page(sentence=None, extra=()), thai_book=False,
@@ -979,6 +1023,8 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
         rows = [c for g in rep.verification for c in g["checks"]]
         self.assertEqual(rows[0]["detail"],
                          'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "' + SIGNATURE_TEMPLATE_EN + '"')
+        # เล่มอังกฤษมีแบบเดียว — ห้ามมี "หรือ"/"อย่างใดอย่างหนึ่ง" โผล่มา
+        self.assertEqual(rep.zones["RED"][0]["expected"], 'ต้องเป็น "' + SIGNATURE_TEMPLATE_EN + '"')
 
     def test_a_misspelt_sentence_and_the_extra_line_share_one_table_row(self):
         """ประโยคมีแต่ผิดคำ (ตก "นับ") แล้วมีบรรทัดเกินด้วย — แถวในตารางยกประโยคที่พิมพ์จริงมาแล้วต่อด้วย
@@ -1017,11 +1063,26 @@ class ThaiSignaturePageHasNoCoverOnlyLine(unittest.TestCase):
                      "ไม่มีบรรทัดนี้ (ใช้เฉพาะหน้าปก)",
                      "ลบบรรทัดนี้ออกจากหน้าลงนาม",
                      'มีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"',
-                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"',
-                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" '
-                     'และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"'):
+                     # เล่มไทยรับได้สองแบบ — ทั้งแถวในตาราง ข้อ "ควรเป็น" และแถวที่มีบรรทัดเกินด้วย
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.BOTH_WORDINGS,
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.BOTH_WORDINGS
+                     + ' และมีบรรทัดเกิน: "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"',
+                     "ต้องเป็น " + self.BOTH_WORDINGS + " อย่างใดอย่างหนึ่ง",
+                     # เล่มอังกฤษยังมีแบบเดียว
+                     'ไม่พบข้อความ template ใต้ชื่อหัวข้อ: "' + SIGNATURE_TEMPLATE_EN + '"',
+                     'ต้องเป็น "' + SIGNATURE_TEMPLATE_EN + '"'):
             problems = i18n.translation_problems(text, i18n.tr_en(text, pairs))
             self.assertEqual(problems, [], (text, problems))
+
+    def test_the_two_wordings_translate_to_one_english_sentence(self):
+        """ข้อความอังกฤษต้องบอกว่า "either ... or ..." ให้ครบทั้งสองแบบ ไม่ทิ้งคำไทย "หรือ" ค้างกลางประโยค"""
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        en = i18n.tr_en('ไม่พบข้อความ template ใต้ชื่อหัวข้อ: ' + self.BOTH_WORDINGS, pairs)
+        self.assertEqual(en, 'The template wording below the title was not found: either '
+                             + self.BOTH_WORDINGS.replace(" หรือ ", " or "))
+        self.assertEqual(i18n.tr_en("ต้องเป็น " + self.BOTH_WORDINGS + " อย่างใดอย่างหนึ่ง", pairs),
+                         "Must be either " + self.BOTH_WORDINGS.replace(" หรือ ", " or "))
 
     def test_the_extra_line_suffix_translates_after_book_text(self):
         """แถวของประโยคผิดคำ: ท่อนที่ยกจากเล่มคงเป็นไทย (เป็นข้อความของเล่ม) แต่ส่วนต่อท้ายที่ระบบเขียน
