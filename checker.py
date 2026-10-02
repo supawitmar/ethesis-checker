@@ -24,7 +24,7 @@ from ethesis_rules import (
     NOT_CHECKED,
     SIGNATURE_TEMPLATE_EN,
     SIGNATURE_TEMPLATE_TH,
-    SIGNATURE_TEMPLATE_TH_FULL,
+    SIGNATURE_TEMPLATE_TH_TAIL,
     TOC_ALLOWED_LIST_HEADINGS,
     TYPE_MARKERS,
     rule_reference,
@@ -1369,14 +1369,10 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
     # บรรทัดที่ใช้ได้เฉพาะหน้าปก (ดู signature_page_extra_line) — ตรวจเฉพาะเล่มไทย เพราะ template
     # อังกฤษมี "Faculty of Graduate Studies, Mahidol University" อยู่ในประโยคเองโดยชอบ
     extra_line = signature_page_extra_line(page_text) if thai_book else ""
-    # ข้อความที่บอกเจ้าหน้าที่/นักศึกษา: เล่มไทยรับได้ 2 แบบ (เต็ม/สั้น ดู ethesis_rules.py) เล่มอังกฤษแบบเดียว
-    # การเทียบยังใช้ sig_template ซึ่งเป็นท่อนท้ายของแบบเต็ม จึงรับได้ทั้งสองแบบ
-    accepted = ((SIGNATURE_TEMPLATE_TH_FULL, sig_template) if thai_book else (sig_template,))
-    wanted = " หรือ ".join(f'"{text}"' for text in accepted)
-    # ประโยคกลางของข้อ "ควรเป็น" ห้ามจบด้วยเครื่องหมายคำพูดเมื่อมีสองตัวเลือก ไม่งั้นข้อความสรุป
-    # ดึงตัวท้ายไปพิมพ์ว่า "ต้องแก้เป็น ..." ตัวเดียว (เหมือนข้อ Dean/Director)
-    expected_msg = (f"ต้องเป็น {wanted} อย่างใดอย่างหนึ่ง" if len(accepted) > 1
-                    else f"ต้องเป็น {wanted}")
+    # ข้อความที่ถูกต้องมีอันเดียวต่อภาษา (ดู ethesis_rules.py) บอกทั้งเจ้าหน้าที่และนักศึกษาตรง ๆ
+    # และลงท้ายด้วยเครื่องหมายคำพูด ข้อความสรุปจึงดึงไปเขียนเป็น "ต้องแก้เป็น ..." ได้
+    wanted = f'"{sig_template}"'
+    expected_msg = f"ต้องเป็น {wanted}"
     if norm(sig_template) in norm(page_text):
         if extra_line:
             rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail",
@@ -1398,8 +1394,21 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
         # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
         # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
         template_zone = signature_template_zone(page_text, sig_degree)
-        near = _closest_run(template_zone, sig_template,
-                            min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+        if thai_book and norm(SIGNATURE_TEMPLATE_TH_TAIL) in norm(template_zone):
+            # พิมพ์ประโยคมาแต่ตกคำนำ "ได้รับการพิจารณาให้" (แบบสั้น) — ยกท่อนที่พิมพ์จริงมาบอกว่าขาดอะไร
+            # ต้องเทียบด้วยท่อนท้ายก่อนเทียบทั้งประโยค เพราะหน้าต่างยาวเท่าประโยคเต็มจะคร่อมท้ายชื่อเรื่อง
+            # เข้ามาด้วย (เล่มทดสอบ 3: "การพัฒนาปิโตรเลียม นับเป็นส่วนหนึ่ง..." ได้ข้อความขาด/เกินปนกัน
+            # จนอ่านไม่ออก)
+            near = _closest_run(template_zone, SIGNATURE_TEMPLATE_TH_TAIL,
+                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+        else:
+            near = _closest_run(template_zone, sig_template,
+                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+            if not near and thai_book:
+                # ทั้งคำนำและท่อนท้ายพิมพ์ผิด: ลองหาท่อนที่ใกล้ท่อนท้ายที่สุด ไม่ให้บอกว่า "ไม่พบ" ทั้งที่
+                # มีข้อความอยู่บนหน้า
+                near = _closest_run(template_zone, SIGNATURE_TEMPLATE_TH_TAIL,
+                                    min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
         # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
         # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
         # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
@@ -2806,7 +2815,7 @@ def book_language_signals(pages, cover_idx=0, doc_type=""):
 
     # หน้าลงนามอยู่ถัดจากหน้าปกเสมอตามลำดับที่ประกาศกำหนด
     after_cover = norm("\n".join(pages[cover_idx + 1:cover_idx + 4]))
-    sig_lang = _one_sided(int(norm(SIGNATURE_TEMPLATE_TH) in after_cover),
+    sig_lang = _one_sided(int(norm(SIGNATURE_TEMPLATE_TH_TAIL) in after_cover),
                           int(norm(SIGNATURE_TEMPLATE_EN) in after_cover))
 
     thai_ch = en_ch = 0
@@ -7161,8 +7170,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         sig_degree = soft(A.get("degree_sig_th" if thai_book else "degree_sig_en", ""))
 
         # ประโยคตายตัวของ template หน้าลงนาม ต้องอยู่ครบ ไม่ใช่แค่ชื่อปริญญาถูก
-        # template ทางการเขียนทั้งสองหน้าเป็น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." และเจ้าหน้าที่
-        # ยอมรับแบบสั้น ("นับเป็นส่วนหนึ่ง...") ด้วย จึงเช็คท่อนร่วมท่อนเดียว (ดู ethesis_rules.py)
+        # template ทางการเขียนทั้งสองหน้าเป็น "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง..." ถูกต้องอันเดียว
+        # (ดู ethesis_rules.py) เล่มที่พิมพ์แบบสั้นจึงไม่ตรง template
         sig_template = (SIGNATURE_TEMPLATE_TH if thai_book else SIGNATURE_TEMPLATE_EN)
         for k, idx in enumerate(sig_pages):
             _report_signature_template(
