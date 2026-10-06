@@ -7601,9 +7601,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                      else rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
-                    # บอกภาษาตรง ๆ ไม่ใช่ "อีกภาษา" — เจ้าหน้าที่ (ต.ค. 2569): ควรเขียนว่า
-                    # "ชื่อเรื่องภาษาไทยไม่ตรงกับข้อมูลในระบบ" นักศึกษาอ่านแล้วรู้เลยว่าต้องแก้ชื่อไหน
-                    alt_word = "ชื่อเรื่องภาษาอังกฤษ" if thai_book else "ชื่อเรื่องภาษาไทย"
+                    # บอกภาษาตรง ๆ และบอกว่าเป็นค่าในเล่ม — เจ้าหน้าที่ (ต.ค. 2569): ให้เขียนว่า
+                    # "ชื่อเรื่องภาษาไทยในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ" (เดิม "ชื่อเรื่องอีกภาษา...")
+                    # ช่องว่างท้ายป้ายตามถ้อยคำของเจ้าหน้าที่ title_mismatch_detail ต่อ "ไม่ตรงกับ..." ทันที
+                    alt_word = ("ชื่อเรื่องภาษาอังกฤษในรูปเล่ม " if thai_book
+                                else "ชื่อเรื่องภาษาไทยในรูปเล่ม ")
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
                             title_mismatch_detail(alt_word, compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
