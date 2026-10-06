@@ -408,6 +408,7 @@ def student_names(lines):
     ให้การอ่านฟอร์มจากไฟล์ ที่แนบเข้าไปให้ตัดคำนำหน้านามทิ้งไปก่อนตรวจเลย") ด้วยตัวตัดเดียวกับตัวตรวจ
     (thai_text.strip_student_title) — เดิมรู้จักแค่ นาย/นาง/นางสาว/น.ส./ดร. และ Mr/Mrs/Miss/Ms/Dr ฟอร์มจึงได้
     "VDC Lt Col ..." "Dental Surgeon ..." "ทพญ. ..." ไปทั้งก้อน แล้วฟ้องแดงเล่มที่พิมพ์ชื่อล้วนถูกตามกติกา
+    · ฝั่งอังกฤษดึงเฉพาะชื่อ-สกุล ตัดคำนำหน้าแบบไหนก็ได้ทิ้ง ไม่ใช่เฉพาะที่อยู่ในรายการ (english_name_only)
     """
     name_th = name_en = ''
     name_value, name_index = _find(lines, 'ชื่อ-สกุล')
@@ -415,34 +416,42 @@ def student_names(lines):
         if re.search(r'[ก-๙]', name_value):
             name_th = strip_student_title(name_value)
         else:
-            name_th = name_en = strip_student_title(name_value)
+            name_th = name_en = english_name_only(name_value)
         offset = 2 if name_value == _next(lines, name_index) else 1
         following = _next(lines, name_index, offset)
         if following and re.search(r'[A-Za-z]', following) and not re.search(r'[ก-๙]', following):
-            name_en = _english_name_without_title(strip_student_title(following), name_th)
+            name_en = english_name_only(following)
     if not name_th and name_en:
         name_th = name_en
     return name_th, name_en
 
 
-def _english_name_without_title(name_en, name_th):
-    """ชื่ออังกฤษที่ยังมีคำนำหน้าที่ตัวตัดไม่รู้จัก — ตัดตามจำนวนคำของชื่อไทยที่ตัดคำนำหน้าแล้ว
+# คำหนึ่งคำของชื่อ-สกุลภาษาอังกฤษในไฟล์ eThesis — ตัวพิมพ์ใหญ่ล้วน (มีขีดกลาง/อัญประกาศเดี่ยวได้)
+_EN_NAME_WORD = re.compile(r"[A-Z][A-Z'\-]*")
 
-    eThesis เก็บชื่อเป็น "<คำนำหน้า> <ชื่อ> <สกุล>" ทั้งสองภาษา ชื่อ-สกุลภาษาอังกฤษเป็นตัวพิมพ์ใหญ่ล้วน ส่วนคำนำหน้า
-    พิมพ์ตามที่กรอก (ไฟล์จริง 11 ไฟล์: Miss · Mr. · DR. · Dental Surgeon · VDC Lt Col) ตัดเฉพาะเมื่อครบทุกข้อ
-      - ชื่อไทยเป็นอักษรไทย (นักศึกษาต่างชาติไม่มีชื่อไทยให้นับ)
-      - ชื่ออังกฤษมีคำมากกว่าชื่อไทย และคำที่เกินมาข้างหน้ามีตัวพิมพ์เล็กหรือจุด (หน้าตาคำนำหน้า)
-      - คำที่เหลือเป็นตัวพิมพ์ใหญ่ล้วน (หน้าตาชื่อ-สกุลของ eThesis)
-    ไม่ครบข้อใดคงค่าเดิม — ชื่อที่พิมพ์ตัวเล็กปน หรือชื่อสามคำที่ตัวใหญ่ทุกคำ จึงไม่ถูกตัดคำในชื่อทิ้ง
+
+def english_name_only(value):
+    """ชื่อนักศึกษาภาษาอังกฤษ "เฉพาะชื่อ-สกุล" — คำนำหน้าแบบไหนก็ตัดทิ้ง (เจ้าหน้าที่สั่ง 6 ต.ค. 2569)
+
+    เจ้าหน้าที่: "ให้ตอนที่อัปโหลดไฟล์ e-thesis เข้าไป ส่วนชื่อนักศึกษาให้ดึงเฉพาะ ชื่อไว้ ตัดคำนำหน้าอื่นทิ้ง"
+    เช่น "VDC Lt Col <ชื่อ> <สกุล>" ต้องได้ "<ชื่อ> <สกุล>" — ไม่ใช่ตัดเฉพาะคำที่อยู่ในรายการ
+
+    eThesis เก็บเป็น "<คำนำหน้า> <ชื่อ> <สกุล>" ชื่อ-สกุลอังกฤษเป็นตัวพิมพ์ใหญ่ล้วนเสมอ ส่วนคำนำหน้าพิมพ์ตามที่กรอก
+    (ไฟล์จริง 11 ไฟล์: Miss · Mr. · DR. · Dental Surgeon · VDC Lt Col) ชื่อจึงคือ "คำตัวพิมพ์ใหญ่ล้วนที่ต่อกันอยู่ท้ายสุด"
+    1. ตัดคำนำหน้าที่รู้จักก่อน (thai_text.strip_student_title — จำเป็นกับคำนำหน้าตัวใหญ่ล้วนไม่มีจุดอย่าง MR ที่ข้อ 2
+       แยกจากชื่อไม่ได้)
+    2. ถ้ายังมีคำนำหน้าคำตัวใหญ่ชุดท้าย และในนั้นมีคำที่มีตัวพิมพ์เล็กหรือจุด (หน้าตาคำนำหน้าที่กรอกเอง) ตัดทิ้งทั้งหมด
+       — ชุดท้ายต้องมีอย่างน้อย 2 คำ (ชื่อ + สกุล) ชื่อที่พิมพ์ตัวเล็กปน ("Somchai Jaidee") หรือมีคำเชื่อมตัวเล็กกลางชื่อ
+       ("... van ...") จึงไม่ถูกตัดคำในชื่อทิ้ง
     """
-    th_words, en_words = name_th.split(), name_en.split()
-    if not re.search(r'[ก-๙]', name_th) or not th_words or len(en_words) <= len(th_words):
-        return name_en
-    head, tail = en_words[:-len(th_words)], en_words[-len(th_words):]
-    if (any(re.search(r'[a-z.]', word) for word in head)
-            and all(re.fullmatch(r"[A-Z][A-Z'\-]*", word) for word in tail)):
-        return ' '.join(tail)
-    return name_en
+    words = strip_student_title(value).split()
+    start = len(words)
+    while start and _EN_NAME_WORD.fullmatch(words[start - 1]):
+        start -= 1
+    head, name = words[:start], words[start:]
+    if len(name) >= 2 and any(re.search(r'[a-z.]', word) for word in head):
+        return ' '.join(name)
+    return ' '.join(words)
 
 
 def parse_ethesis_pdf(pdf_path):

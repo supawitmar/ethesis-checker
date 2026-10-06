@@ -41,16 +41,24 @@ class TheFormGetsNamesWithoutTitles(unittest.TestCase):
         self.assertEqual(_names("ว่าที่ ร.ต. สมชาย ใจดี", "SOMCHAI JAIDEE"), ("สมชาย ใจดี", "SOMCHAI JAIDEE"))
 
     def test_an_english_title_nobody_listed_yet(self):
-        """คำนำหน้าอังกฤษที่ตัวตัดยังไม่รู้จัก ตัดตามจำนวนคำของชื่อไทย (คำที่เกินมีตัวเล็ก/จุด ชื่อที่เหลือตัวใหญ่ล้วน)"""
+        """เจ้าหน้าที่: "ส่วนชื่อนักศึกษาให้ดึงเฉพาะ ชื่อไว้ ตัดคำนำหน้าอื่นทิ้ง" — ไม่ใช่เฉพาะคำที่อยู่ในรายการ"""
         self.assertEqual(_names("ว่าที่ร้อยตรี สมชาย ใจดี", "Acting Sub Lt. SOMCHAI JAIDEE"),
                          ("สมชาย ใจดี", "SOMCHAI JAIDEE"))
+        self.assertEqual(ethesis_import.english_name_only("Unit Lt Col SOMYING TUAYANG"), "SOMYING TUAYANG")
+        self.assertEqual(ethesis_import.english_name_only("Rev. Fr. JOHN SMITH"), "JOHN SMITH")
 
     def test_a_foreign_student_without_a_thai_name(self):
         self.assertEqual(_names("Miss ANNA LEE", "ANNA LEE"), ("ANNA LEE", "ANNA LEE"))
+        self.assertEqual(_names("Acting Sub Lt. JOHN SMITH", "Acting Sub Lt. JOHN SMITH"),
+                         ("JOHN SMITH", "JOHN SMITH"))
+
+    def test_a_capital_title_without_a_dot_needs_the_list(self):
+        """คำนำหน้าตัวใหญ่ล้วนไม่มีจุดแยกจากชื่อด้วยหน้าตาไม่ได้ — ตัดได้เพราะอยู่ในรายการ"""
+        self.assertEqual(ethesis_import.english_name_only("MR SOMCHAI JAIDEE"), "SOMCHAI JAIDEE")
 
 
-class TheFallbackNeverCutsAName(unittest.TestCase):
-    """ทางสำรองตัดตามจำนวนคำ — ต้องไม่ตัดคำที่เป็นชื่อจริงทิ้ง"""
+class NameOnlyNeverCutsAName(unittest.TestCase):
+    """ดึงเฉพาะชื่อ = คำตัวพิมพ์ใหญ่ล้วนที่ต่อกันท้ายสุด — ต้องไม่ตัดคำที่เป็นชื่อจริงทิ้ง"""
 
     def test_a_three_word_english_name_in_capitals_is_kept(self):
         self.assertEqual(_names("นาย สมชาย ใจดี", "SOMCHAI JAI DEE")[1], "SOMCHAI JAI DEE")
@@ -59,12 +67,17 @@ class TheFallbackNeverCutsAName(unittest.TestCase):
         self.assertEqual(_names("นาย สมชาย ใจดี", "Somchai Jai Dee")[1], "Somchai Jai Dee")
 
     def test_a_name_particle_is_not_a_title(self):
-        """คำเชื่อมนามสกุลตัวเล็ก (van/de/bin) อยู่ในส่วนที่เหลือ = ไม่ใช่ตัวใหญ่ล้วน = ไม่ตัด"""
+        """คำเชื่อมตัวเล็กกลางชื่อ (van/de/bin) ทำให้ชุดตัวใหญ่ท้ายสุดเหลือคำเดียว = ไม่ใช่ชื่อ-สกุลครบ = ไม่ตัด"""
         self.assertEqual(_names("นาย สมชาย ใจดี", "SOMCHAI van JAIDEE")[1], "SOMCHAI van JAIDEE")
 
-    def test_without_a_thai_name_nothing_is_counted(self):
-        self.assertEqual(ethesis_import._english_name_without_title("Acting Sub Lt. JOHN SMITH", "JOHN SMITH"),
-                         "Acting Sub Lt. JOHN SMITH")
+    def test_words_before_the_name_must_look_like_a_title(self):
+        """คำข้างหน้าต้องมีตัวพิมพ์เล็กหรือจุด (หน้าตาคำนำหน้าที่กรอกเอง) — ชื่อเล่นตัวใหญ่ในวงเล็บไม่ใช่คำนำหน้า"""
+        self.assertEqual(ethesis_import.english_name_only("SOMCHAI (TOM) JAIDEE NGAMDEE"),
+                         "SOMCHAI (TOM) JAIDEE NGAMDEE")
+
+    def test_a_one_word_name_keeps_its_unknown_title(self):
+        """ชื่อคำเดียว แยกไม่ได้ว่าคำไหนเป็นชื่อ — คงไว้ให้เจ้าหน้าที่ดูในฟอร์ม"""
+        self.assertEqual(ethesis_import.english_name_only("Rev. SUKARNO"), "Rev. SUKARNO")
 
 
 class TheSharedTitleStripper(unittest.TestCase):
