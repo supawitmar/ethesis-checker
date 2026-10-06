@@ -1749,19 +1749,35 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         self.assertIn("สังคมศาสตร์สิ่งแวดล้ม", bad[0])       # ค่าที่พบจริงในเล่ม
         self.assertNotIn("ไม่พบ", bad[0])
 
-    def test_misspelt_box_is_red_but_a_missing_one_is_orange(self):
-        """สะกดผิด = แดง (เจ้าหน้าที่ ต.ค. 2569) · หาไม่เจอเลย = ส้ม (อาจเป็นระบบอ่านแถวล่างไม่ครบ)"""
+    def _zones(self, kind, bottom, english=False):
         rep = Report()
-        _check_signature_institution(rep, "advisory",
+        _check_signature_institution(rep, kind, bottom, self.APPROVED, english)
+        return len(rep.zones["RED"]), len(rep.zones["ORANGE"])
+
+    def test_misspelt_box_is_red(self):
+        """สะกดผิด = แดง (เจ้าหน้าที่ ต.ค. 2569)"""
+        self.assertEqual(self._zones("advisory",
                                      "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
-                                     "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม",
-                                     self.APPROVED, False)
-        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (1, 0))
-        rep = Report()
-        _check_signature_institution(rep, "advisory",
-                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร",
-                                     self.APPROVED, False)
-        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (0, 1))
+                                     "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม"), (1, 0))
+
+    def test_box_read_but_text_missing_from_the_book_is_red(self):
+        """ระบบอ่านช่องขวาได้ (เจอ "ประธานหลักสูตร") แต่ไม่มีชื่อสาขา = เล่มไม่มี = แดง
+        (เจ้าหน้าที่ ต.ค. 2569: "หาไม่เจอ ... ถ้าไม่มีในเล่ม แดง")"""
+        self.assertEqual(self._zones("advisory",
+                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร"), (1, 0))
+        self.assertEqual(self._zones("exam", "คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณบดี "
+                                             "มหาวิทยาลัยมหิดล"), (1, 0))
+
+    def test_box_the_system_could_not_read_stays_orange(self):
+        """อ่านช่องขวาไม่ได้เลย (ไม่มีตำแหน่งของช่องขวาในแถวล่าง) = ส้ม — แยกไม่ออกว่าเล่มขาดหรือระบบอ่านไม่ครบ"""
+        self.assertEqual(self._zones("advisory", "คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"), (0, 1))
+        self.assertEqual(self._zones("exam", "คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"), (0, 1))
+
+    def test_english_exam_box_needs_two_head_titles_to_count_as_read(self):
+        self.assertTrue(checker_module._right_institution_box_read(
+            "exam", "Dean Faculty of Graduate Studies Dean Faculty of Science"))
+        self.assertFalse(checker_module._right_institution_box_read(
+            "exam", "Dean Faculty of Graduate Studies, Mahidol University"))
 
     def test_completely_absent_subject_still_says_not_found(self):
         """ไม่มีอะไรใกล้เคียงเลย ต้องคงข้อความ "ไม่พบ" ไว้ ไม่ใช่เดาสุ่มมาโชว์"""
