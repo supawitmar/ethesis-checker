@@ -598,6 +598,11 @@ class StudentNameIgnoresTitles(unittest.TestCase):
                          "Somchai Jaidee")
         self.assertEqual(_strip_student_title("Miss Suda Deengam"), "Suda Deengam")
 
+    def test_strips_profession_title_before_english_name(self):
+        """ eThesis เขียน "Dental Surgeon WIPAWEE APIRATANACHAI" — เล่มพิมพ์แค่ชื่อ-สกุล"""
+        self.assertEqual(_strip_student_title("Dental Surgeon WIPAWEE APIRATANACHAI"),
+                         "WIPAWEE APIRATANACHAI")
+
     def test_plain_names_are_untouched(self):
         for raw in ("ณัชนพ เพชรสุข", "NUTCHANOP PETSUK", "นภา ใจดี",
                     "MISSAKORN SOMCHAI"):     # ห้ามกิน "MISS" ที่เป็นส่วนของชื่อ

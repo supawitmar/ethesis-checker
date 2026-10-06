@@ -691,6 +691,7 @@ _STUDENT_TITLE_PREFIX = re.compile(
     r'(?:พล|พัน|ร้อย|พันจ่า|จ่าสิบ|สิบ|นาวา|เรือ)(?:เอก|โท|ตรี)(?:หญิง)?|'
     r'นางสาว|นาง|นาย(?=\s|[ก-๙])|'
     r'(?:[A-Z]\.){2,4}'
+    r'|Dental\s+Surgeon\b|Dentist\b|Pharmacist\b'
     r'|(?:Pol\.?\s*)?(?:Gen|Lt|Col|Maj|Capt|Sgt|Cpl|Pvt|CPO|PO|Cdr|Adm|Lieut|'
     r'Mr|Mrs|Miss|Ms|Dr)\b\.?'
     r')\s*\.?\s*\d*\s*', re.I)
@@ -2558,7 +2559,7 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 def strip_name_prefix(name):
     """Remove honorifics that must not be printed as part of the student name."""
     return re.sub(
-        r'^(?:นาย|นางสาว|นาง|ดร\.?|MR\.?|MRS\.?|MISS|MS\.?|DR\.?)\s*',
+        r'^(?:นาย|นางสาว|นาง|ดร\.?|DENTAL\s+SURGEON|DENTIST|PHARMACIST|MR\.?|MRS\.?|MISS|MS\.?|DR\.?)\s*',
         '', soft(name), flags=re.I,
     )
 
@@ -4281,6 +4282,8 @@ def toc_page_mismatch_is_appendix_alt(section_kind, toc_label, appendix_labels):
 # จุดเริ่มของ "โซนรายชื่อกรรมการ" บนหน้าลงนามและหน้าบทคัดย่อ
 # ใต้จุดนี้มีแต่ชื่อคนกับคุณวุฒิ ซึ่งเป็นตัวย่อชุดเดียวกับชื่อปริญญา (Ph.D. / ปร.ด.)
 # ตำแหน่งนี้ตายตัวตาม template ทุกเล่ม จึงใช้เป็นขอบเขตได้โดยไม่ต้องเดา
+# บรรทัดที่เป็นแต่จุดไข่ปลา/เส้นประ (ตรงกับกิ่งเส้นประของ _DEGREE_SEARCH_STOP)
+_DOT_LEADER_LINE = re.compile(r'^[ \t]*(?:[…]{3,}|\.{6,})')
 _DEGREE_SEARCH_STOP = re.compile(
     r'^[ \t]*(?:'
     r'[…]{3,}|\.{6,}'                                    # เส้นประสำหรับลงนาม
@@ -4351,9 +4354,9 @@ def cover_degree_line_expected(expected, thai_book):
     return f"ปริญญา{expected}" if thai_book else expected
 
 
-def degree_line_search_text(page_text):
+def degree_line_search_text(page_text, abstract=False):
     """ส่วนของหน้าที่บรรทัดชื่อปริญญาอยู่ได้: ก่อนโซนรายชื่อกรรมการ และไม่รวมบรรทัดชื่อ-รหัสนักศึกษา"""
-    return "\n".join(line for line in _degree_search_text(page_text).splitlines()
+    return "\n".join(line for line in _degree_search_text(page_text, abstract).splitlines()
                      if not _STUDENT_ID_SHAPE.search(line))
 
 
@@ -4375,7 +4378,7 @@ def _without_degree_template_words(nl):
     return nl
 
 
-def degree_line_extras(page_text, expected):
+def degree_line_extras(page_text, expected, abstract=False):
     """ข้อความบนบรรทัดชื่อปริญญาที่ "เกิน" จากข้อมูลอนุมัติ — คืน "" ถ้าบรรทัดตรงพอดี
 
     เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าชื่อปริญญาต้องตรงเป๊ะและห้ามมีคำเกิน ส่วนการเว้นวรรค
@@ -4407,7 +4410,7 @@ def degree_line_extras(page_text, expected):
     want = norm(expected)
     if not want:
         return ""
-    lines = degree_line_search_text(page_text).splitlines()
+    lines = degree_line_search_text(page_text, abstract).splitlines()
     # ดูทีละบรรทัดก่อน ถ้าไม่เจอค่อยต่อบรรทัดที่ติดกันเข้าด้วยกัน — เจ้าหน้าที่ทัก
     # (ก.ย. 2569) ว่า "อาจจะคนละบรรทัดนะ อยู่ที่แล้วแต่เล่ม" ประโยคของ template
     # ตัดบรรทัดไม่เหมือนกันทุกเล่ม บางเล่มตัดกลางชื่อปริญญาหรือก่อนวงเล็บสาขา
@@ -4461,7 +4464,7 @@ def _looks_like_degree_line(line):
 _FULL_DEGREE_NAME = re.compile(r'^\s*(?:MASTER|DOCTOR|BACHELOR)\s+OF\s+\S|มหาบัณฑิต|ดุษฎีบัณฑิต', re.I)
 
 
-def _degree_search_text(page_text):
+def _degree_search_text(page_text, abstract=False):
     """ตัดโซนรายชื่อกรรมการทิ้งก่อนหาบรรทัดชื่อปริญญา
 
     คุณวุฒิใต้ชื่อกรรมการเขียนด้วยตัวย่อชุดเดียวกับชื่อปริญญา และมักมีสาขาในวงเล็บครบ
@@ -4472,12 +4475,22 @@ def _degree_search_text(page_text):
     ซึ่งเป็นชื่ออาจารย์ ไม่ใช่ชื่อปริญญา
     """
     text = page_text or ""
-    stop = _DEGREE_SEARCH_STOP.search(text)
+    # กฎแยกตามชนิดหน้า ไม่เดาจากหน้าตาข้อความ: หน้าบทคัดย่อ (abstract=True) ไม่มีเส้นลงนามเลย
+    # เส้นประ "………" บนหน้านี้เป็นเศษใต้ชื่อเรื่อง (เล่มจริง ต.ค. 2569 ทำให้หยุดค้นก่อนบรรทัด
+    # "ส.ม." แล้วฟ้องผิดว่าไม่พบ) จึงไม่ใช่จุดตัด — โซนกรรมการของหน้านี้ตัดด้วยหัวข้อ
+    # "คณะกรรมการที่ปรึกษา/ADVISORY COMMITTEE" เท่านั้น · เส้นประใต้ชื่อเรื่องฟ้องแยกเอง
+    # (_report_abstract_title_dots) · หน้าลงนาม/หน้าปกใช้เส้นประเป็นจุดตัดตามเดิม
+    stop = None
+    for m in _DEGREE_SEARCH_STOP.finditer(text):
+        if abstract and _DOT_LEADER_LINE.match(m.group(0)):
+            continue
+        stop = m
+        break
     head = text[:stop.start()] if stop else text
     return head if soft(head) else text
 
 
-def closest_degree_line(page_text, expected):
+def closest_degree_line(page_text, expected, abstract=False):
     """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
 
     ชื่อปริญญาบนหน้าปกมักถูกตัดเป็น 2-3 บรรทัด ได้หลายแบบ เช่น
@@ -4486,7 +4499,7 @@ def closest_degree_line(page_text, expected):
     จึงสร้างตัวเลือกจาก "หน้าต่างบรรทัดต่อเนื่อง 1-3 บรรทัด" รอบบรรทัดที่มีคำบ่งชี้
     แล้วเลือกอันที่ใกล้เคียงข้อมูลอนุมัติที่สุด (เล่มไทยต้องมีคำบ่งชี้ไทยด้วย)
     """
-    page_text = _degree_search_text(page_text)
+    page_text = _degree_search_text(page_text, abstract)
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     markers = ('DEGREE', 'MASTER', 'DOCTOR', 'BACHELOR', 'MENG', 'MSC', 'PHD',
                norm('ปริญญา'), norm('มหาบัณฑิต'), norm('ดุษฎีบัณฑิต'))
@@ -4540,7 +4553,7 @@ def compare_values(actual, expected, rule_name):
     return {'status': status, 'actual': actual, 'score': score}
 
 
-def compare_reference_text(page_text, expected, rule_name, degree_line=False):
+def compare_reference_text(page_text, expected, rule_name, degree_line=False, abstract=False):
     """Find the relevant PDF line, then classify exact/case/typo/mismatch.
 
     degree_line=True ค้นเฉพาะส่วนที่บรรทัดชื่อปริญญาอยู่ได้ (degree_line_search_text) — การค้น
@@ -4550,13 +4563,13 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
     """
     rule = MATCH_RULES[rule_name]
     if degree_line:
-        page_text = degree_line_search_text(page_text)
+        page_text = degree_line_search_text(page_text, abstract)
     if not rule['case_sensitive'] and norm(expected) in norm(page_text):
         return {'status': 'exact', 'actual': soft(expected), 'score': 1.0}
     matched, reason = exact_reference_status(page_text, expected)
     if matched:
         return {'status': 'exact', 'actual': soft(expected), 'score': 1.0}
-    actual = closest_degree_line(page_text, expected) if degree_line else closest_text_line(page_text, expected)
+    actual = closest_degree_line(page_text, expected, abstract) if degree_line else closest_text_line(page_text, expected)
     compared = compare_values(actual, expected, rule_name)
     if reason == 'case':
         compared['status'] = 'case'
@@ -4669,7 +4682,7 @@ def _letters_keep_case(text):
     return re.sub(r'[^A-Za-zก-๙0-9]', '', text)
 
 
-def degree_differs_only_in_spacing(expected, page_text):
+def degree_differs_only_in_spacing(expected, page_text, abstract=False):
     """ชื่อปริญญาบนหน้านี้ต่างจากข้อมูลอนุมัติ "เฉพาะวรรคตอน/ช่องว่าง" หรือไม่
 
     เป็นเงื่อนไขของข้อสังเกตสีเหลือง "ต่างเฉพาะวรรคตอน/ช่องว่าง" ซึ่งผ่านได้ ของเดิมเทียบ
@@ -4682,7 +4695,7 @@ def degree_differs_only_in_spacing(expected, page_text):
     ในรหัสนักศึกษา "6838776 TMCT/M" จึงตอบว่าต่างแค่วรรคตอน ได้สีเหลืองผ่านทั้งที่ผิดคนละคำ
     """
     want = _letters_keep_case(expected)
-    return bool(want) and want in _letters_keep_case(degree_line_search_text(page_text))
+    return bool(want) and want in _letters_keep_case(degree_line_search_text(page_text, abstract))
 
 
 def mismatch_detail(label, compared, expected=''):
@@ -5055,6 +5068,28 @@ def _report_abstract_title_format(rep, lines, loc):
             "ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา",
             "แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย",
             "FORMAT.ABSTRACT_LAYOUT")
+
+
+def _report_abstract_title_dots(rep, lines, loc):
+    """ชื่อเรื่องบนหน้าบทคัดย่อต้องไม่มีเส้นประ/จุดไข่ปลาต่อท้าย
+
+    เจ้าหน้าที่ (ต.ค. 2569): เล่มที่มีเส้นประ "………" ใต้ชื่อเรื่องบนบทคัดย่อ "ต้องผิดที่
+    ชื่อหัวข้อมี ....." — เดิมเศษนี้ทำให้ระบบหยุดค้นก่อนถึงบรรทัด "ส.ม." แล้วฟ้องว่าไม่พบ
+    ชื่อปริญญาแบบย่อทั้งที่มีอยู่ ดูเฉพาะส่วนก่อนบรรทัดชื่อ-รหัสนักศึกษา (บล็อกชื่อเรื่อง)
+    """
+    stop = next((i for i, l in enumerate(lines)
+                 if _ABS_STUDENT_LINE.search(l['text'])), None)
+    if stop is None:
+        return
+    if not any(_DOT_LEADER_LINE.match(soft(l['text']))
+               or re.search(r'[…]{3,}|\.{6,}\s*$', l['text'])
+               for l in lines[:stop]):
+        return
+    rep.add("RED", "front_matter", loc,
+            "ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา (.....) ต่อท้าย",
+            "ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา",
+            "ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก",
+            "FRONT.ABSTRACT")
 
 
 def _is_toc_major_heading(text):
@@ -6678,6 +6713,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         # เพราะเป็นกฎเฉพาะของบรรทัดชื่อเรื่อง ไม่ใช่ทั้งหน้า)
                         _report_abstract_title_format(
                             rep, lines, f"{abs_label} ({page_ref(abs_page_idx)})")
+                        _report_abstract_title_dots(
+                            rep, lines, f"{abs_label} ({page_ref(abs_page_idx)})")
                         bold_lines = [
                             line['text'] for line in lines
                             if line['bold_ratio'] > 0 and len(norm(line['text'])) >= 2
@@ -7232,13 +7269,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if not abbr or abstract_idx is None:
                 return
             abstract_text = pages[abstract_idx]
-            compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True)
+            compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True, abstract=True)
             vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
             box = f"{lang} ({page_ref(abstract_idx)})"
             # ต้องตรวจคำเกินก่อนทุกกิ่ง — ของเดิมตรวจเฉพาะตอนเทียบได้ exact และเทียบ
             # ด้วย substring ดิบ ๆ เล่มที่เว้นวรรคต่างด้วย ("Dr.PH (PUBLIC HEALTH)"
             # กับ "Dr. P.H.") จึงหลุดไปกิ่ง "ต่างเฉพาะวรรคตอน" แล้วได้เหลืองผ่าน
-            extras = degree_line_extras(abstract_text, abbr)
+            extras = degree_line_extras(abstract_text, abbr, abstract=True)
             if extras:
                 rep.add_verification("ชื่อปริญญา", vloc, "fail",
                                      f"มีข้อความเกิน: {extras}")
@@ -7248,7 +7285,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
             elif compared['status'] == 'exact':
                 rep.add_verification("ชื่อปริญญา", vloc, "pass")
-            elif degree_differs_only_in_spacing(abbr, abstract_text):
+            elif degree_differs_only_in_spacing(abbr, abstract_text, abstract=True):
                 # ตัวอักษรครบ ต่างเฉพาะวรรคตอน/ช่องว่าง = ข้อสังเกตสีเหลือง ผ่านได้
                 rep.add_verification("ชื่อปริญญา", vloc, "notice", "ต่างเฉพาะวรรคตอน/ช่องว่าง")
                 rep.add(DEGREE_SPACING_ZONE, "front_matter", box,
