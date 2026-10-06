@@ -2628,8 +2628,10 @@ class TitleIsQuotedAsPrintedNotAsTheClosestFragment(unittest.TestCase):
         "This study aims to identify warehouse processes suitable for future",
         "implementation of Robotic Process Automation (RPA), and to establish a",
     ])
+    # รอยตัดบรรทัดหลังขีดกลาง ("MULTI-" / "CRITERIA") ไม่มีช่องว่างจริงในเล่ม จึงต่อกันตรง ๆ
+    # (ของเดิมต่อด้วยช่องว่างได้ "MULTI- CRITERIA" ซึ่งเล่มไม่ได้พิมพ์ — ดู _join_wrapped)
     FULL = ("SELECTION OF SMART WAREHOUSE PROCESSES FOR ROBOTIC "
-            "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI- "
+            "PROCESS AUTOMATION IMPLEMENTATION: A HYBRID MULTI-"
             "CRITERIA DECISION-MAKING BASED ON BOCR FRAMEWORK")
 
     def test_cover_title_stops_at_the_author_name(self):

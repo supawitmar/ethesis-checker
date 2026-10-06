@@ -791,6 +791,7 @@ var TR = [
   [/หน้าลงนามต้องมีข้อความ ("[^"]*") นำหน้าชื่อปริญญา/g, 'The approval page must carry the wording $1 before the degree name'],
   [/ข้อความที่ถูกต้อง: ("[^"]*")/g, 'The correct wording is: $1'],
   [/ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ: ("[^"]*")/g, 'The thesis title does not match the approved data: $1'],
+  [/ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ: ("[^"]*")/g, 'The other-language title does not match the system record: $1'],
   [/ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: ("[^"]*")/g, 'Must match the approved data exactly: $1'],
   [/ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: ("[^"]*")/g, 'Must be spelled as in the approved data on every page: $1'],
   // ---- ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ (describe_case_diff) ----
@@ -811,6 +812,22 @@ var TR = [
    'the letter case differs in $1 and $2'],
   [/ต่างที่ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*")/g,
    'the letter case differs in $1'],
+  // ---- วิธีแก้ทีละคำสั่งในข้อความสรุป (checker._edit_steps / _word_steps / analyze_case_diff) ----
+  // ข้อความสรุปถอดท่อนจุดต่างออกจากบรรทัดที่พบ แล้วเขียนวิธีแก้เป็นบรรทัดเดี่ยว ("ให้ลบ ... ออก")
+  // ทีละบรรทัด จึงเป็นกฎเต็มประโยคทั้งหมด ผูกหัวท้ายไว้ไม่ให้ชั้นเศษคำไปแตะกลางประโยคอื่น
+  // ค่าที่อยู่ในเครื่องหมายคำพูดคือข้อความจากเล่ม คงเป็นไทยตามเดิม
+  [/^ให้ลบ ("[^"]*") ที่อยู่หลัง ("[^"]*") ออก$/g, 'Delete $1 that follows $2'],
+  [/^ให้ลบ ("[^"]*") ที่อยู่หน้า ("[^"]*") ออก$/g, 'Delete $1 that comes before $2'],
+  [/^ให้ลบ ("[^"]*") ออก$/g, 'Delete $1'],
+  [/^ให้เติม ("[^"]*") หลัง ("[^"]*")$/g, 'Add $1 after $2'],
+  [/^ให้เติม ("[^"]*") หน้า ("[^"]*")$/g, 'Add $1 before $2'],
+  [/^ให้เติม ("[^"]*")$/g, 'Add $1'],
+  [/^ให้แก้ ("[^"]*") ที่อยู่หลัง ("[^"]*") เป็น ("[^"]*")$/g, 'Change $1 that follows $2 to $3'],
+  [/^ให้แก้ ("[^"]*") ที่อยู่หน้า ("[^"]*") เป็น ("[^"]*")$/g, 'Change $1 that comes before $2 to $3'],
+  [/^ให้แก้ ("[^"]*") เป็น ("[^"]*")$/g, 'Change $1 to $2'],
+  [/^ให้แก้การเว้นวรรค ("[^"]*") เป็น ("[^"]*")$/g, 'Fix the spacing: change $1 to $2'],
+  [/^ให้แก้ตัวพิมพ์เล็ก-ใหญ่ ("[^"]*") เป็น ("[^"]*")$/g, 'Fix the letter case: change $1 to $2'],
+  [/^ให้ลบช่องว่างระหว่าง ("[^"]*") กับ ("[^"]*")$/g, 'Remove the space between $1 and $2'],
   [/ต้องเป็น ("[^"]*")/g, 'Must be $1'],
   // ประกาศฉบับนี้เป็น พ.ศ. 2569 = ค.ศ. 2026 — ฝั่งอังกฤษต้องใช้ ค.ศ.
   // กฎทั่วไปข้างล่างจับปีเป็นตัวแปรแล้วใส่กลับดิบ ๆ จึงได้ "the 2569 regulation"
@@ -843,6 +860,8 @@ var TR = [
   [/ระบบนับจำนวนกรรมการให้แล้ว แต่ไม่ได้เทียบชื่อและตัวสะกด โปรดทานรายชื่อกับข้อมูลอนุมัติ \(บฑ\.\) คือ/g, 'The system counted the committee members but did not compare names or spelling — please check the list against the approved data (Form GR.):'],
   // ---- หัวข้อในสารบัญสะกดผิด (ประโยคเต็ม ต้องอยู่บนสุด) ----
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า ("[^"]*") (.+)/g, 'This heading is misspelled in the table of contents: it reads $1, $2'],
+  // บรรทัดที่พบในข้อความสรุป: ท่อนจุดต่างถูกถอดไปเป็นวิธีแก้แยกบรรทัดแล้ว จึงเหลือแค่ค่าที่เล่มพิมพ์
+  [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า ("[^"]*")/g, 'This heading is misspelled in the table of contents: it reads $1'],
   [/สารบัญสะกดหัวข้อนี้ผิด เขียนว่า/g, 'This heading is misspelled in the table of contents: it reads'],
   [/หัวข้อในสารบัญต้องสะกดว่า/g, 'The heading in the table of contents must be spelled'],
   // ---- หัวข้อหน้าประวัติผู้วิจัย (ประโยคเต็ม ต้องอยู่ก่อนกฎเศษคำ "ประวัติผู้วิจัย") ----
@@ -851,6 +870,9 @@ var TR = [
   [/แก้หัวข้อในสารบัญเป็น ("[^"]*")/g, 'Change the heading in the table of contents to $1'],
   [/แก้ตัวสะกดในสารบัญเป็น/g, 'Correct the spelling in the table of contents to'],
   // ---- ช่องสถาบันมุมล่างขวาของหน้าลงนาม (ประโยคเต็ม ต้องอยู่บนสุด) ----
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า ("[^"]*")/g, 'The programme chair box (bottom right) misspells the subject; it reads $1'],
+  [/ช่องคณบดีคณะ \(มุมล่างขวา\) สะกดชื่อคณะผิด เขียนว่า ("[^"]*")/g, 'The faculty dean box (bottom right) misspells the faculty name; it reads $1'],
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อปริญญาผิด เขียนว่า ("[^"]*")/g, 'The programme chair box (bottom right) misspells the degree name; it reads $1'],
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อสาขาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the subject; it reads'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) สะกดชื่อคณะผิด เขียนว่า/g, 'The faculty dean box (bottom right) misspells the faculty name; it reads'],
   [/ช่องประธานหลักสูตร \(มุมล่างขวา\) สะกดชื่อปริญญาผิด เขียนว่า/g, 'The programme chair box (bottom right) misspells the degree name; it reads'],
@@ -938,6 +960,7 @@ var TR = [
   [/^ประเภทเล่ม$/g, 'Document type'],
   // หัวข้อรายชื่อกรรมการบนหน้าบทคัดย่อ ต้องตรง template
   [/^ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้$/g, 'The advisory committee heading was not found on this page'],
+  [/หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า ("[^"]*")/g, 'The advisory committee heading reads $1'],
   [/หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า/g, 'The advisory committee heading reads'],
   [/^แก้ข้อความหัวข้อให้ตรง template ทุกตัวอักษร$/g, 'Correct the heading to match the template exactly'],
   [/^ไฟล์ eThesis$/g, 'eThesis file'],
@@ -1268,6 +1291,8 @@ var TR = [
   [/ต้องมีบรรทัด ("[^"]*") อยู่ใต้บรรทัดชื่อและรหัสนักศึกษา/g, 'The line $1 must appear below the student name and ID line'],
   [/ต่างที่ ("[^"]*") ต้องเป็น ("[^"]*")/g, 'the difference is $1, which should be $2'],
   [/มี ("[^"]*") เกินมา/g, 'there is an extra $1'],
+  // ช่องว่างเกินระหว่างอักษรไทยในชื่อเรื่อง (describe_diff spaces=True) — ต้องแปลทั้งวลี
+  [/มีช่องว่างเกินระหว่าง ("[^"]*") กับ ("[^"]*")/g, 'there is an extra space between $1 and $2'],
   // รายการเลขแผ่นที่ถูกจับเป็นตัวแปรแล้วส่งไปแปลต่อ เช่น "5 และ 8"
   [/^([\d, ]+) และ ([\d, ]+)$/g, '$1 and $2'],
   // ข้อความสรุปตัดค่าที่ถูกต้องออก (บอกอีกทีบรรทัด "ต้องแก้เป็น") เหลือแค่จุดที่ผิด

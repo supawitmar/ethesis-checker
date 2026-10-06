@@ -9,6 +9,7 @@ treats ำ as า. Section headings are detected from top-of-page lines only.
 """
 import re
 import difflib
+from collections import namedtuple
 from pathlib import Path
 import pdfplumber
 
@@ -1414,10 +1415,8 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
         # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
         #  สิ่งที่พบ และบรรทัดที่ควรเป็น)
         if near:
-            diff = describe_diff(near, sig_template)
-            found_msg = f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"'
-            if diff:
-                found_msg += f" {diff}"
+            found_msg = found_with_diff(f'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "{near}"',
+                                        analyze_diff(near, sig_template))
             detail = near
         else:
             # ไม่ยกประโยคเต็มมาตรงนี้ เพราะบรรทัด "ต้องเป็น" ข้างล่างมีอยู่แล้ว
@@ -1492,9 +1491,9 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
     near = _closest_run(bottom_text, want)
     if near:
         want = match_printed_case(want, near)
-        diff = describe_diff(near, want)
-        found_msg = (f'{box} สะกด{label}ผิด เขียนว่า "{near}" {diff}' if diff
-                     else f'{box} เขียนว่า "{near}"')
+        analysis = analyze_diff(near, want)
+        found_msg = (found_with_diff(f'{box} สะกด{label}ผิด เขียนว่า "{near}"', analysis)
+                     if analysis.text else f'{box} เขียนว่า "{near}"')
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     rep.add("ORANGE", "front_matter", loc, found_msg,
@@ -2248,10 +2247,10 @@ def _report_abstract_committee_heading(rep, page_text, doc_type, english, loc):
         # ไล่ความต่างทีละตัวเฉพาะตอนที่ต่างกันจุดเดียว ไม่งั้นได้ประโยคอย่าง
         # 'มี "กรรม" เกินมา และ ต่างที่ " " ต้องเป็น "วิทยานิ" และ ขาด "นธ์"' ซึ่งอ่านไม่รู้เรื่อง
         # กว่าการดูข้อความสองอันเทียบกันเอง (หลักการเดียวกับข้อรหัสนักศึกษา)
-        diff = describe_diff(printed, want)
+        analysis = analyze_diff(printed, want)
         found = f'หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า "{printed}"'
-        if diff and " และ " not in diff:
-            found += f" {diff}"
+        if analysis.text and " และ " not in analysis.text:
+            found = found_with_diff(found, analysis)
     else:
         found = "ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้"
     rep.add("RED", "front_matter", loc, found, f'ต้องเป็น "{want}"',
@@ -3004,6 +3003,25 @@ def exact_reference_status(page_text, expected):
     return False, "text"
 
 
+def _join_wrapped(lines):
+    """ต่อบรรทัดที่ถูกตัดขึ้นบรรทัดใหม่ให้เป็นข้อความเดียว โดยไม่ใส่ช่องว่างที่ไม่มีอยู่ในเล่ม
+
+    ภาษาไทยไม่เว้นวรรคระหว่างคำ ผู้เขียนจึงตัดบรรทัดตรงไหนก็ได้ และรอยตัดนั้นไม่มีช่องว่างจริง
+    ของเดิมต่อทุกรอยด้วยช่องว่าง ชื่อเรื่อง "...ในระบบ" / "บริหาร..." จึงถูกอ่านเป็น "ในระบบ บริหาร"
+    แล้วรายงานว่า 'ต่างที่ "มาใช้ในระบบ บริหาร..."' ทั้งที่เล่มพิมพ์ติดกัน (เล่มจริง 6 ต.ค. 2569) ส่วนอังกฤษที่ตัดบรรทัดหลังขีดกลาง ("MULTI-" / "CRITERIA") ก็ไม่มีช่องว่างเช่นกัน
+
+    รอยตัดที่อักษรไทยชนอักษรไทย กับรอยตัดหลังขีดกลาง จึงต่อกันตรง ๆ รอยตัดอื่นใส่ช่องว่างเหมือนเดิม
+    (ภาษาอังกฤษแยกคำด้วยช่องว่างจริง) ผลต่อการตัดสิน = ไม่มี เพราะ norm() ตัดช่องว่างทิ้งก่อนเทียบ
+    """
+    out = ''
+    for line in lines:
+        if out and not ((_THAI_LETTER.match(out[-1]) and _THAI_LETTER.match(line[:1]))
+                        or (out[-1] == '-' and line[:1].isalnum())):
+            out += ' '
+        out += line
+    return out
+
+
 def closest_text_line(page_text, expected):
     """Return the run of text closest to the approved value (may span lines).
 
@@ -3022,7 +3040,7 @@ def closest_text_line(page_text, expected):
         for span in range(1, 5):
             if start + span > len(lines):
                 break
-            window = ' '.join(lines[start:start + span])
+            window = _join_wrapped(lines[start:start + span])
             ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
             if ratio > best_ratio:
                 best, best_ratio = window, ratio
@@ -3813,6 +3831,24 @@ def _prose_found(found):
     return re.sub(r'\s{2,}', ' ', found).strip()
 
 
+def _found_and_steps(issue):
+    """ข้อความ "ที่พบ" สำหรับข้อความสรุป + วิธีแก้เป็นข้อ ๆ (ถ้าข้อนั้นเทียบข้อความแล้วชี้จุดต่างได้)
+
+    ของเดิมถอดแค่ 'ต้องเป็น "..."' ออก เหลือ 'ต่างที่ "A"' ซึ่งบอกว่าต่างตรงไหนแต่ไม่บอกว่า
+    ต้องแก้ยังไง นักศึกษาต้องเอาข้อความยาวสองก้อนมาเทียบกันเอง (เจ้าหน้าที่สั่ง 6 ต.ค. 2569
+    ว่าควรบอกด้วย รวมถึงกรณีเว้นวรรค) จึงถอดท่อนจุดต่างทั้งท่อนออกจากบรรทัดที่พบ แล้วเขียนเป็น
+    คำสั่งทีละบรรทัดแทน เช่น 'ให้ลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก'
+
+    ข้อที่ไม่ได้มาจากการเทียบข้อความ (ไม่มี diff_tail/fix_steps) ใช้ของเดิมทุกอย่าง
+    """
+    found = summary_tidy(issue.get("found"))
+    tail = summary_tidy(issue.get("diff_tail"))
+    steps = [summary_tidy(step) for step in (issue.get("fix_steps") or ())]
+    if tail and steps and found.endswith(tail):
+        return found[:-len(tail)].rstrip(), [step for step in steps if step]
+    return _prose_found(issue.get("found")), []
+
+
 def _prose_location(location):
     """ทำตำแหน่งให้เป็นสำนวนคน ไม่ให้มีสัญลักษณ์ตกค้าง (↔ → ใช้คำเชื่อมแทน)"""
     loc = summary_tidy(location)
@@ -3860,9 +3896,12 @@ def _summary_sentence(issue, skip_location=False):
         return f"\n{SUMMARY_INDENT}".join(
             line.strip() for line in dictated.split("\n") if line.strip())
     lines = [] if skip_location else [_prose_location(issue.get("location"))]
-    found = _prose_found(issue.get("found"))
+    found, steps = _found_and_steps(issue)
     if found:
         lines.append(found)
+    # วิธีแก้ทีละคำสั่ง (ให้ลบ ... ออก) คั่นระหว่างบรรทัดที่พบกับ "ต้องแก้เป็น" — แต่ละคำสั่งเป็น
+    # บรรทัดเดี่ยว ตัวแปลอังกฤษจึงมีกฎเต็มประโยครองรับ (ดูหัวข้อของฟังก์ชันนี้ว่าทำไมต้องแยกบรรทัด)
+    lines += steps
     value = _corrected_value(issue)
     if value:
         lines.append(f'ต้องแก้เป็น "{value}"')
@@ -4582,85 +4621,587 @@ def _graphemes(text):
     return _GRAPHEME.findall(text or "")
 
 
-def describe_diff(found, expected):
+# ---------- ชี้จุดต่าง + บอกวิธีแก้ ----------
+# สระอำ (ำ) ผู้อ่านเห็นเป็นตัวเดียวกับพยัญชนะที่มันตามหลัง (นำ น้ำ จำ) แต่ _graphemes ข้างบนนับ ำ
+# เป็นตัวอักษรอีกตัว จุดต่างที่เกี่ยวกับ ำ จึงอ่านออกมาเป็น 'ขาด "ำ"' ลอย ๆ ที่ไม่รู้ว่าอยู่ตรงไหน
+# ชุดนี้ใช้เฉพาะตอนอธิบายจุดต่าง (ไม่แตะ _graphemes ที่ _closest_run ใช้อยู่)
+_DISPLAY_GRAPHEME = re.compile(
+    rf'[{_TH_LEAD_VOWEL}]?[^{_TH_ABOVE_BELOW}ำ][{_TH_ABOVE_BELOW}]*ำ?[{_TH_ABOVE_BELOW}]*'
+    rf'|[{_TH_ABOVE_BELOW}ำ]+')
+# ตัวที่ขึ้นต้นคำไม่ได้ — ถ้าจุดอ้างอิงเริ่มที่ตัวพวกนี้ แปลว่าตัดกลางคำ ให้ถอยไปอีกตัว
+_NOT_A_WORD_START = re.compile(rf'^[ะาๆฯำ{_TH_ABOVE_BELOW}]')
+_LEAD_VOWEL_START = re.compile(rf'^[{_TH_LEAD_VOWEL}]')
+
+# text = จุดต่างเป็นประโยคบอกเล่า (ต่อท้าย "ที่พบ" บนการ์ด)
+# steps = วิธีแก้เป็นคำสั่งทีละบรรทัด ("ให้ลบ ... ออก") ที่ข้อความสรุปส่งนักศึกษาใช้
+DiffAnalysis = namedtuple('DiffAnalysis', 'text steps')
+_NO_DIFF = DiffAnalysis('', ())
+# kind = delete / insert / replace / space_extra (ก้อนที่รวมหลายจุด = chunk) · pos, end = ตำแหน่งใน graphemes
+# ของข้อความที่พบ · lo, hi = ช่วงที่ข้อความบอกวิธีแก้ยกมาอ้าง (ใช้เฉพาะช่องว่างเกิน ที่ต้องยกคำรอบ ๆ มาชี้)
+_Edit = namedtuple('_Edit', 'kind got want pos end order lo hi', defaults=(None, None))
+# จุดต่างเกินนี้แปลว่าต่างกันมากจนไล่ทีละจุดไม่ช่วย ให้ดูข้อความที่ถูกต้องแทน
+_MAX_STEPS = 6
+# ความยาวของ "ตัวอ้างอิงตำแหน่ง" (กี่ตัวอักษรที่คนมองเห็น) — เริ่มสั้นแล้วยืดจนไม่ซ้ำกับที่อื่น
+_ANCHOR_MIN, _ANCHOR_MAX = 4, 12
+
+
+def _display_graphemes(text):
+    out = []
+    for grapheme in _DISPLAY_GRAPHEME.findall(text or ""):
+        # ช่องว่างที่มีวรรณยุกต์/สระลอยตามหลัง (ข้อความที่สระหลุดจากพยัญชนะ) ไม่ใช่ตัวอักษรตัวเดียว
+        if len(grapheme) > 1 and grapheme[0].isspace():
+            out += [grapheme[0], grapheme[1:]]
+        else:
+            out.append(grapheme)
+    return out
+
+
+def _fold_sara_am(text):
+    """รวมสระอำที่ถูกแตกเป็นนิคหิต + สระอา กลับเป็น ำ ตัวเดียว
+
+    ตาเห็นเหมือนกันทุกประการ แต่เป็นคนละอักขระ ถ้าปล่อยไว้จุดต่างจะอ่านออกมาว่า
+    'ต่างที่ "นํา" ต้องเป็น "นำ"' ซึ่งเจ้าหน้าที่และนักศึกษามองไม่เห็นว่าต่างตรงไหน
+    """
+    return (text or '').replace('ํำ', 'ำ').replace('ํา', 'ำ')
+
+
+def _is_latin(unit):
+    return bool(unit) and unit[0].isascii() and unit[0].isalnum()
+
+
+def _grow_to_latin_words(fa, ea, fi, ei, lo, hi, lo2, hi2):
+    """ขยายจุดต่างให้ครอบคำอังกฤษทั้งคำเมื่อไปแตะกลางคำ (ผู้อ่านเห็นคำ ไม่ใช่ตัวอักษรเดี่ยว)
+
+    ได้ 'ต่างที่ "Recogniton" ต้องเป็น "Recognition"' แทน 'ขาด "i"' คำต้องติดกันจริงในต้นฉบับ
+    (ไม่ข้ามช่องว่าง) ไม่งั้นคำถัดไปจะถูกกลืนเข้ามาด้วย
+    """
+    def starts_latin():
+        return (lo < hi and _is_latin(fa[lo])) or (lo2 < hi2 and _is_latin(ea[lo2]))
+
+    def ends_latin():
+        return (lo < hi and _is_latin(fa[hi - 1])) or (lo2 < hi2 and _is_latin(ea[hi2 - 1]))
+
+    while (lo > 0 and lo2 > 0 and starts_latin()
+           and fi[lo] - fi[lo - 1] == 1 and ei[lo2] - ei[lo2 - 1] == 1
+           and _is_latin(fa[lo - 1]) and _is_latin(ea[lo2 - 1])):
+        lo, lo2 = lo - 1, lo2 - 1
+    while (hi < len(fa) and hi2 < len(ea) and ends_latin()
+           and fi[hi] - fi[hi - 1] == 1 and ei[hi2] - ei[hi2 - 1] == 1
+           and _is_latin(fa[hi]) and _is_latin(ea[hi2])):
+        hi, hi2 = hi + 1, hi2 + 1
+    return lo, hi, lo2, hi2
+
+
+def _grow_to_syllables(fa, ea, lo, hi, lo2, hi2):
+    """ขยายจุดต่างไม่ให้เริ่มที่สระลอย ๆ ("าร") หรือจบที่พยางค์ที่ยังขาดตัวสะกด ("บั")
+
+    ตัวที่ขยายไปครอบต้องตรงกันทั้งสองฝั่ง (อยู่ในช่วงที่ข้อความเหมือนกัน) ไม่ใช่การเดาเพิ่ม
+    """
+    def starts_bad():
+        return ((lo < hi and _NOT_A_WORD_START.match(fa[lo]))
+                or (lo2 < hi2 and _NOT_A_WORD_START.match(ea[lo2])))
+
+    def ends_bad():
+        return ((lo < hi and _needs_next(fa[hi - 1]))
+                or (lo2 < hi2 and _needs_next(ea[hi2 - 1])))
+
+    while lo > 0 and lo2 > 0 and starts_bad() and fa[lo - 1] == ea[lo2 - 1]:
+        lo, lo2 = lo - 1, lo2 - 1
+    while hi < len(fa) and hi2 < len(ea) and ends_bad() and fa[hi] == ea[hi2]:
+        hi, hi2 = hi + 1, hi2 + 1
+    return lo, hi, lo2, hi2
+
+
+def _extra_gaps(fa, ea, fi, ei, i1, i2, j1):
+    """ช่องว่างที่เล่มมีแต่ข้อมูลอนุมัติไม่มี ระหว่างอักษรไทยสองตัวในช่วงที่ข้อความตรงกัน
+
+    ภาษาไทยไม่เว้นวรรคระหว่างคำ ช่องว่างกลางข้อความไทยที่ข้อมูลอนุมัติไม่มีจึงเป็นช่องว่างที่
+    พิมพ์เกินจริง คืน index (ในลำดับที่ตัดช่องว่างทิ้ง) ของตัวที่อยู่หลังช่องว่าง
+    """
+    out = []
+    for k in range(1, i2 - i1):
+        p, q = i1 + k, j1 + k
+        if (fi[p] - fi[p - 1] > 1 and ei[q] - ei[q - 1] == 1
+                and _THAI_LETTER.search(fa[p - 1]) and _THAI_LETTER.search(fa[p])
+                # ช่องว่างกลางพยางค์ ("กีฬ า") ผู้พิมพ์ไม่เคาะแบบนั้น เป็นช่องว่างที่ระบบอ่านเอง จึงไม่บอก
+                and not _NOT_A_WORD_START.match(fa[p]) and not _needs_next(fa[p - 1])):
+            out.append(p)
+    return out
+
+
+def _thai_edits(found_s, expected_s, spaces):
+    """จุดแก้ของข้อความที่มีอักษรไทย: (graphemes ของข้อความที่พบ, รายการจุดแก้) หรือ None
+
+    เทียบ "ตัวอักษรที่คนมองเห็น" โดยตัดช่องว่างทิ้งก่อน เพราะภาษาไทยไม่เว้นวรรคระหว่างคำ
+    ช่องว่างที่ติดมาจึงเป็นเรื่องของการขึ้นบรรทัดใหม่ ไม่ใช่ความต่างของข้อความ (เล่มจริง
+    ชื่อเรื่องไทยถูกตัดเป็นสองสามบรรทัด จุดตัดทุกจุดเคยกลายเป็นจุดต่างที่มองไม่เห็นว่าคืออะไร)
+
+    spaces=True เปิดให้บอกช่องว่างที่ "เกินจริง" ระหว่างอักษรไทยด้วย (เจ้าหน้าที่สั่ง 6 ต.ค. 2569)
+    ผู้เรียกต้องเป็นฝ่ายที่รู้ว่ารอยตัดบรรทัดไม่ได้ถูกต่อด้วยช่องว่าง (ดู _join_wrapped)
+    """
+    fg, eg = _display_graphemes(found_s), _display_graphemes(expected_s)
+    fi = [i for i, g in enumerate(fg) if g.strip()]
+    ei = [i for i, g in enumerate(eg) if g.strip()]
+    fa, ea = [fg[i].upper() for i in fi], [eg[i].upper() for i in ei]
+    matcher = difflib.SequenceMatcher(None, fa, ea, autojunk=False)
+    if matcher.ratio() < 0.5:
+        return None
+
+    def grow(core):
+        return _grow_to_syllables(fa, ea, *_grow_to_latin_words(fa, ea, fi, ei, *core))
+
+    cores, spans, gaps = [], [], []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            if spaces:
+                gaps += _extra_gaps(fa, ea, fi, ei, i1, i2, j1)
+            continue
+        core = (i1, i2, j1, j2)
+        span = grow(core)
+        # จุดต่างสองจุดที่ขยายแล้วชนกัน ต้องรวมที่ "แกน" (ส่วนที่ต่างจริง + ข้อความเหมือนที่คั่นอยู่) แล้วขยายใหม่
+        # ห้ามรวมปลายของแต่ละฝั่งแยกกัน: ขยายของจุดแรกอาจกลืนแกนของจุดหลังไปครึ่งหนึ่ง ปลายสองฝั่งจึงไม่
+        # สอดคล้องกัน (เล่มจริงลักษณะ "vaccine ne booster" เคยทำให้ "ne" ที่เกินมาหายไปจากรายงานเงียบ ๆ)
+        while spans and span[0] <= spans[-1][1]:
+            prev = cores.pop()
+            spans.pop()
+            core = (prev[0], core[1], prev[2], core[3])
+            span = grow(core)
+        cores.append(core)
+        spans.append(span)
+    edits = []
+    for lo, hi, lo2, hi2 in spans:
+        got = ''.join(fg[fi[lo]:fi[hi - 1] + 1]) if lo < hi else ''
+        want = ''.join(eg[ei[lo2]:ei[hi2 - 1] + 1]) if lo2 < hi2 else ''
+        if lo < hi:
+            pos, end = fi[lo], fi[hi - 1] + 1
+        else:
+            pos = fi[lo - 1] + 1 if lo > 0 else 0
+            end = pos
+        kind = 'replace' if got and want else ('delete' if got else 'insert')
+        edits.append(_Edit(kind, got, want, pos, end, lo))
+    for p in gaps:
+        # คำรอบช่องว่างที่ยกมาบอก ไม่ให้ขึ้นต้นด้วยสระลอย ๆ หรือจบกลางพยางค์ (เหมือนตัวอ้างอิงตำแหน่ง)
+        # และไม่ข้ามช่องว่างอื่น: ลบช่องว่างแรกไปแล้ว ข้อความที่อีกข้อยกมาอ้างซึ่งมีช่องว่างนั้นอยู่ก็หาไม่เจอ
+        gap_start, gap_end = fi[p - 1] + 1, fi[p]
+        lo = _snap_anchor_start(fg, fi[max(0, p - 5)])
+        hi = _snap_anchor_end(fg, fi[min(len(fi) - 1, p + 4)] + 1)
+        lo = max([lo] + [k + 1 for k in range(lo, gap_start) if not fg[k].strip()])
+        hi = min([hi] + [k for k in range(gap_end, hi) if not fg[k].strip()])
+        edits.append(_Edit('space_extra', ''.join(fg[lo:gap_start]), ''.join(fg[gap_end:hi]),
+                           gap_start, gap_end, p, lo, hi))
+    edits.sort(key=lambda e: (e.order, e.pos))
+    return fg, edits
+
+
+def _edit_phrase(edit):
+    """จุดแก้หนึ่งจุดเป็นประโยคบอกเล่า — คำเชื่อมของแต่ละแบบไม่เหมือนกัน ต่อท้ายประโยคได้เลย"""
+    if edit.kind == 'insert':
+        return f'ขาด "{edit.want}"'
+    if edit.kind == 'delete':
+        return f'มี "{edit.got}" เกินมา'
+    if edit.kind == 'space_extra':
+        return f'มีช่องว่างเกินระหว่าง "{edit.got}" กับ "{edit.want}"'
+    return f'ต่างที่ "{edit.got}" ต้องเป็น "{edit.want}"'
+
+
+def _needs_next(grapheme):
+    """พยางค์ที่ยังไม่จบ — ต้องมีตัวสะกด/ตัวตามอยู่ถัดไป (ไม้หันอากาศ ัเ หรือ เ-ีย เ-ือ)"""
+    return 'ั' in grapheme or (grapheme[:1] == 'เ' and ('ี' in grapheme or 'ื' in grapheme))
+
+
+def _snap_anchor_start(fg, start):
+    """ขยับจุดเริ่มของตัวอ้างอิงตำแหน่งไม่ให้ตัดกลางคำจนอ่านไม่ออก
+
+    ภาษาไทยไม่มีรอยต่อระหว่างคำให้ยึด จึงทำได้เท่าที่เดาจากตัวอักษร: ห้ามขึ้นต้นด้วยตัวที่เริ่มคำไม่ได้
+    (ะ า ๆ) หรือตัวสะกดของพยางค์ก่อนหน้า (บั|ณ) และถ้ามีสระหน้า (เ แ โ ใ ไ) อยู่ถัดไปไม่เกินสองตัว
+    ให้ครอบถึงพยางค์นั้น และคำอังกฤษไม่ถูกตัดกลางคำ ("ne bงoost" อ่านยากกว่า "vaccine bงooster" มาก)
+    """
+    while start > 0 and _is_latin(fg[start]) and _is_latin(fg[start - 1]):
+        start -= 1
+    while start > 0 and _NOT_A_WORD_START.match(fg[start]):
+        start -= 1
+    if start > 0 and _needs_next(fg[start - 1]):
+        start -= 1
+    if not _LEAD_VOWEL_START.match(fg[start]):
+        for extra in (1, 2):
+            if start - extra >= 0 and _LEAD_VOWEL_START.match(fg[start - extra]):
+                return start - extra
+    return 0 if start <= 3 else start
+
+
+def _snap_anchor_end(fg, stop):
+    """ขยับจุดสิ้นสุดของตัวอ้างอิงไม่ให้ลงท้ายกลางพยางค์ (เช่น "นามั" ที่ขาดตัวสะกด ย) หรือกลางคำอังกฤษ"""
+    while stop < len(fg) and _is_latin(fg[stop - 1]) and _is_latin(fg[stop]):
+        stop += 1
+    for _ in range(2):
+        if stop >= len(fg) or not _needs_next(fg[stop - 1]):
+            break
+        stop += 1
+    return min(stop, len(fg))
+
+
+# ก้อนที่รวมจากจุดแก้หลายจุดยาวเกินนี้ (ตัวอักษรที่คนมองเห็น) ไม่ช่วยนักศึกษา ให้ดูข้อความที่ถูกต้องแทน
+_MERGED_MAX = 36
+
+
+def _crosses(lo, hi, other):
+    """ข้อความอ้างอิง [lo, hi) คร่อมจุดแก้ other อยู่หรือไม่
+
+    คร่อมแล้วทำตามทีละข้อไม่ได้: ทำข้อของ other ไปแล้ว ข้อความที่อีกข้อยกมาอ้างก็ไม่ตรงกับตัวเล่มอีก
+    """
+    if other.pos == other.end:
+        return lo < other.pos < hi
+    return lo < other.end and other.pos < hi
+
+
+def _replacement(edit):
+    """ข้อความที่ต้องมีแทนที่ช่วงของจุดแก้นี้ในเล่ม — ช่องว่างเกินคือไม่มีอะไรเลย (want ของมันเป็นคำรอบข้าง)"""
+    return '' if edit.kind == 'space_extra' else edit.want
+
+
+def _merge_edits(fg, a, b):
+    """รวมจุดแก้สองจุดที่อยู่ใกล้กันเป็นก้อนเดียว (ข้อความเหมือนที่คั่นอยู่ ใส่ไว้ทั้งสองฝั่ง)"""
+    got = ''.join(fg[a.pos:b.end])
+    if len(_display_graphemes(got)) > _MERGED_MAX:
+        return None
+    want = _replacement(a) + ''.join(fg[a.end:b.pos]) + _replacement(b)
+    return _Edit('chunk', got, want, a.pos, b.end, a.order)
+
+
+def _count_overlapping(text, needle):
+    """จำนวนที่ needle ปรากฏใน text โดยนับที่ซ้อนทับกันด้วย ("จัดจ" ใน "จัดจัดจ" มีสองที่ ไม่ใช่ที่เดียว)"""
+    count, at = 0, text.find(needle) if needle else -1
+    while at != -1:
+        count += 1
+        at = text.find(needle, at + 1)
+    return count
+
+
+def _steps_once(fg, edits):
+    """วิธีแก้ของจุดแก้ชุดนี้ -> (ข้อ ๆ, None) หรือ (None, ลำดับของจุดแก้ที่ต้องรวมกับจุดถัดไป)"""
+    plain = ''.join(fg).replace(' ', '')
+    # ข้อความต้องไม่ซ้ำทั้งตอนที่ยังไม่ได้แก้อะไรเลย และตอนที่แก้ข้ออื่นครบแล้ว (แก้คำผิดแล้วบังเอิญได้คำเดียวกับ
+    # คำที่ต้องลบ "ของ" ก็ซ้ำขึ้นมาทันที) — ตั้งใหม่ทุกจุดแก้ใน states
+    states = [plain]
+
+    def others_applied(skip):
+        out, at = [], 0
+        for k, other in enumerate(edits):
+            if k != skip and other.kind != 'space_extra':
+                out += [''.join(fg[at:other.pos]), other.want]
+                at = other.end
+        out.append(''.join(fg[at:]))
+        return ''.join(out).replace(' ', '')
+
+    def occurs(text):
+        needle = text.replace(' ', '')
+        return max(_count_overlapping(state, needle) for state in states)
+
+    def before(pos, need, alone=False):
+        """ข้อความหน้าจุดแก้ที่ไม่ซ้ำ -> (ข้อความ, จุดเริ่ม) — alone=True ต้องไม่ซ้ำ "ด้วยตัวมันเอง"
+        (ใช้กับการเติมคำ ที่บอกแค่ "หลัง ...")"""
+        for size in range(_ANCHOR_MIN, _ANCHOR_MAX + 1):
+            start = _snap_anchor_start(fg, max(0, pos - size))
+            anchor = ''.join(fg[start:pos]).strip()
+            if not anchor:
+                return '', pos
+            if occurs(anchor if alone else anchor + need) == 1:
+                return anchor, start
+        return '', pos
+
+    def after(end, need, alone=False):
+        """ข้อความหลังจุดแก้ที่ไม่ซ้ำ -> (ข้อความ, จุดสิ้นสุด)"""
+        # จุดแก้จบกลางพยางค์ (ตัวถัดไปเป็นสระที่เริ่มคำไม่ได้) ยกข้อความหลังจุดนั้นมาเป็นตัวอ้างอิงไม่ได้
+        if end < len(fg) and _NOT_A_WORD_START.match(fg[end]):
+            return '', end
+        for size in range(_ANCHOR_MIN, _ANCHOR_MAX + 1):
+            stop = _snap_anchor_end(fg, min(len(fg), end + size))
+            anchor = ''.join(fg[end:stop]).strip()
+            if not anchor:
+                return '', end
+            if occurs(anchor if alone else need + anchor) == 1:
+                return anchor, stop
+        return '', end
+
+    def typo_step(edit):
+        """ผิดทีละตัวอักษร (ตกตัว/เกินตัว/สะกดผิดตัวเดียว) หรือหลายจุดที่อยู่ติดกัน: ยกคำรอบจุดแก้มาทั้งก้อน
+        แล้วบอกให้แก้เป็นอะไร
+
+        'ให้ลบ "ฑ" ที่อยู่หลัง "หาบัณ"' ไม่ช่วยนักศึกษา เห็น "บัณทิต" → "บัณฑิต" ทั้งคำเทียบกันชัดกว่ามาก
+        """
+        for size in range(4, 10):
+            lo = _snap_anchor_start(fg, max(0, edit.pos - size)) if edit.pos else 0
+            hi = _snap_anchor_end(fg, min(len(fg), edit.end + size))
+            left, right = ''.join(fg[lo:edit.pos]), ''.join(fg[edit.end:hi])
+            found_part = (left + edit.got + right).strip()
+            if found_part and occurs(found_part) == 1:
+                break
+        fixed_part = (left + edit.want + right).strip()
+        return f'ให้แก้ "{found_part}" เป็น "{fixed_part}"', lo, hi
+
+    def letter_step(edit):
+        """วิธีแก้ของจุดแก้หนึ่งจุด -> (ข้อความ, จุดเริ่ม, จุดสิ้นสุด) ของข้อความที่ข้อนี้ยกมาอ้างจากเล่ม"""
+        if edit.kind == 'chunk' or max(len(_display_graphemes(edit.got)),
+                                       len(_display_graphemes(edit.want))) <= 2:
+            return typo_step(edit)
+        if edit.kind == 'insert':
+            # "เติมหลัง L" ต้องชี้ตำแหน่งได้ด้วย L ตัวเดียว (ถ้า L มีหลายที่ นักศึกษาไม่รู้ว่าที่ไหน)
+            left, start = before(edit.pos, '', alone=True)
+            right, stop = ('', edit.pos) if left else after(edit.pos, '', alone=True)
+            if left:
+                return f'ให้เติม "{edit.want}" หลัง "{left}"', start, edit.pos
+            if right:
+                return f'ให้เติม "{edit.want}" หน้า "{right}"', edit.pos, stop
+            # หาตัวอ้างอิงที่ไม่ซ้ำไม่ได้ (เช่น ติดสระที่เริ่มคำไม่ได้): ยกคำรอบจุดนั้นมาทั้งก้อนแทนการเติมลอย ๆ
+            return typo_step(edit)
+        alone = occurs(edit.got) == 1 and len(_display_graphemes(edit.got)) >= 3
+        left, start = ('', edit.pos) if alone else before(edit.pos, edit.got)
+        right, stop = ('', edit.end) if (alone or left) else after(edit.end, edit.got)
+        if not (alone or left or right):
+            # ข้อความที่จะลบ/แก้ซ้ำกับที่อื่น และหาตัวอ้างอิงตำแหน่งไม่ได้: ยกคำรอบจุดนั้นมาทั้งก้อน
+            return typo_step(edit)
+        lo, hi = (start, edit.end) if left else (edit.pos, stop if right else edit.end)
+        if edit.kind == 'delete':
+            if left:
+                return f'ให้ลบ "{edit.got}" ที่อยู่หลัง "{left}" ออก', lo, hi
+            if right:
+                return f'ให้ลบ "{edit.got}" ที่อยู่หน้า "{right}" ออก', lo, hi
+            return f'ให้ลบ "{edit.got}" ออก', lo, hi
+        if left:
+            return f'ให้แก้ "{edit.got}" ที่อยู่หลัง "{left}" เป็น "{edit.want}"', lo, hi
+        if right:
+            return f'ให้แก้ "{edit.got}" ที่อยู่หน้า "{right}" เป็น "{edit.want}"', lo, hi
+        return f'ให้แก้ "{edit.got}" เป็น "{edit.want}"', lo, hi
+
+    steps = []
+    for k, edit in enumerate(edits):
+        if edit.kind == 'space_extra':
+            text, lo, hi = f'ให้ลบช่องว่างระหว่าง "{edit.got}" กับ "{edit.want}"', edit.lo, edit.hi
+        else:
+            states[:] = [plain, others_applied(k)]
+            text, lo, hi = letter_step(edit)
+        for j in (k - 1, k + 1):
+            if 0 <= j < len(edits) and _crosses(lo, hi, edits[j]):
+                return None, min(j, k)
+        steps.append(text)
+    return steps, None
+
+
+def _edit_steps(fg, edits):
+    """วิธีแก้เป็นข้อ ๆ — คำสั่งสั้น ๆ ที่นักศึกษาลงมือทำตามได้เลย พร้อมตัวอ้างอิงตำแหน่งเมื่อจำเป็น
+
+    ของเดิมข้อความสรุปบอกแค่ว่า 'ต่างที่ "..."' แล้วให้นักศึกษาไปเทียบข้อความยาวสองก้อนเอง
+    (เจ้าหน้าที่สั่ง 6 ต.ค. 2569: ควรบอกด้วยว่าต้องแก้ยังไง) ตัวอ้างอิงตำแหน่งใส่เฉพาะตอนที่ข้อความ
+    ที่จะลบ/แก้ ไปซ้ำกับที่อื่นในชื่อเดียวกัน (ลบ "การ" ที่ไหน — ในชื่อเรื่องมี "การ" อยู่หลายที่)
+
+    แต่ละข้อต้องทำตามเรียงลำดับหรือสลับลำดับก็ได้ผลเหมือนกัน: ถ้าข้อความที่ข้อหนึ่งยกมาอ้างไปคร่อมจุดแก้
+    ของข้อข้างเคียง (พิมพ์ผิดสองที่ห่างกันไม่กี่ตัวอักษร) จะรวมสองจุดเป็นข้อเดียว ไม่ปล่อยให้ข้อแรกแก้ไป
+    แล้วข้อที่สองหาข้อความที่อ้างไว้ไม่เจอ
+    """
+    if len(edits) > _MAX_STEPS:
+        return []
+    edits = list(edits)
+    # จุดแก้ที่ช่วงซ้อนทับกันเองไม่ควรเกิด (ตัวขยายคำกลืนจุดอื่น) ถ้าเกิดแล้วรวมกันจะได้ข้อความผิด ไม่ตอบดีกว่าตอบผิด
+    if any(left.end > right.pos for left, right in zip(edits, edits[1:])):
+        return []
+    while True:
+        steps, clash = _steps_once(fg, edits)
+        if clash is None:
+            return steps
+        merged = _merge_edits(fg, edits[clash], edits[clash + 1])
+        if merged is None:
+            return []
+        edits[clash:clash + 2] = [merged]
+
+
+def _analyze_thai(found_s, expected_s, spaces):
+    result = _thai_edits(_fold_sara_am(found_s), _fold_sara_am(expected_s), spaces)
+    if result is None or not result[1]:
+        return _NO_DIFF
+    fg, edits = result
+    return DiffAnalysis(' และ '.join(_edit_phrase(e) for e in edits),
+                        tuple(_edit_steps(fg, edits)))
+
+
+def _word_steps(words, tag, i1, i2, got, want):
+    """วิธีแก้ของจุดต่างระดับคำ (อังกฤษ) — ตัวอ้างอิงตำแหน่งคือคำที่อยู่ก่อนหน้า (ยืดจนไม่ซ้ำ)
+
+    ใส่ตัวอ้างอิงเฉพาะเมื่อจำเป็น: ขาดคำ = ต้องบอกว่าเติมตรงไหนเสมอ ส่วนลบ/แก้ ใส่ต่อเมื่อคำนั้น
+    มีซ้ำอยู่ในชื่อเรื่องเดียวกัน (ลบ "THE" ตัวไหน)
+    """
+    span = words[i1:i2]
+
+    def count(seq):
+        return sum(1 for k in range(len(words) - len(seq) + 1) if words[k:k + len(seq)] == seq)
+
+    anchor = ''
+    if i1 > 0 and (tag == 'insert' or (span and count(span) > 1)):
+        for size in (1, 2, 3):
+            before = words[max(0, i1 - size):i1]
+            if count(before + span) == 1:
+                break
+        anchor = ' '.join(before)
+    if tag == 'insert':
+        if anchor:
+            return f'ให้เติม "{want}" หลัง "{anchor}"'
+        return f'ให้เติม "{want}" หน้า "{words[0]}"' if words else f'ให้เติม "{want}"'
+    if tag == 'delete':
+        return f'ให้ลบ "{got}" ที่อยู่หลัง "{anchor}" ออก' if anchor else f'ให้ลบ "{got}" ออก'
+    # ต่างกันแค่ช่องว่าง ("OFTHE" กับ "OF THE") บอกให้ชัดว่าเป็นเรื่องเว้นวรรค
+    if got.replace(' ', '') == want.replace(' ', ''):
+        return f'ให้แก้การเว้นวรรค "{got}" เป็น "{want}"'
+    if anchor:
+        return f'ให้แก้ "{got}" ที่อยู่หลัง "{anchor}" เป็น "{want}"'
+    return f'ให้แก้ "{got}" เป็น "{want}"'
+
+
+def _legacy_diff(a, b, keyfn, join, words):
+    """จุดต่างของข้อความที่ไม่มีอักษรไทย: ระดับคำ (อังกฤษหลายคำ) หรือระดับตัวอักษร (คำเดียว/รหัส)"""
+    matcher = difflib.SequenceMatcher(None, keyfn(a), keyfn(b))
+    if matcher.ratio() < 0.5:
+        return _NO_DIFF
+    parts, steps = [], []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            continue
+        got, want = join(a[i1:i2]), join(b[j1:j2])
+        # ช่องว่างล้วนไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
+        if not got.strip() and not want.strip():
+            continue
+        if not want:
+            parts.append(f'มี "{got}" เกินมา')
+            kind = 'delete'
+        elif not got:
+            parts.append(f'ขาด "{want}"')
+            kind = 'insert'
+        else:
+            parts.append(f'ต่างที่ "{got}" ต้องเป็น "{want}"')
+            kind = 'replace'
+        if words:
+            steps.append(_word_steps(a, kind, i1, i2, got, want))
+    if not parts:
+        return _NO_DIFF
+    if not words:
+        # คำเดียวหรือรหัส: ไล่ทีละตัวอักษรอ่านยาก บอกให้แก้ทั้งคำเลย
+        whole_a, whole_b = join(a), join(b)
+        steps = [f'ให้แก้ "{whole_a}" เป็น "{whole_b}"'] if len(whole_a) <= 80 else []
+    elif len(steps) > _MAX_STEPS:
+        steps = []
+    return DiffAnalysis(' และ '.join(parts), tuple(steps))
+
+
+def _analyze_latin(found_s, expected_s):
+    # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
+    # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
+    if re.search(r'[A-Za-z]', expected_s) and ' ' in expected_s.strip():
+        by_word = _legacy_diff(found_s.split(), expected_s.split(),
+                               lambda xs: [x.upper() for x in xs], ' '.join, True)
+        if by_word.text:
+            return by_word
+    return _legacy_diff(_graphemes(found_s), _graphemes(expected_s),
+                        lambda xs: xs, ''.join, False)
+
+
+def analyze_diff(found, expected, spaces=False):
+    """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน และต้องแก้ยังไง
+
+    คืน DiffAnalysis(text, steps) — text = จุดต่างเป็นประโยคบอกเล่า steps = วิธีแก้ทีละคำสั่ง
+    ว่างทั้งคู่เมื่อตรงกันอยู่แล้ว หรือต่างกันมากจนการชี้จุดไม่ช่วย (ให้ดูข้อความที่ถูกต้องแทน)
+
+    - ข้อความที่มีอักษรไทย: เทียบระดับ "ตัวอักษรที่คนมองเห็น" โดยไม่สนช่องว่าง ชี้เป็นคำที่อ่านออก
+      (ขาด "กีฬา") และบอกช่องว่างเกินระหว่างอักษรไทยเมื่อ spaces=True
+    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น ต่างที่ "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
+    """
+    found_s, expected_s = soft(found), soft(expected)
+    if not found_s or not expected_s or norm(found_s) == norm(expected_s):
+        return _NO_DIFF
+    if _THAI_LETTER.search(expected_s):
+        return _analyze_thai(found_s, expected_s, spaces)
+    return _analyze_latin(found_s, expected_s)
+
+
+def describe_diff(found, expected, spaces=False):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน อย่างไร
 
-    - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น ต่างที่ "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
-    - ไทย/คำเดียว: เทียบระดับตัวอักษร (เช่น ขาด "อ")
     คืน '' ถ้าต่างกันมากจนการชี้จุดไม่ช่วย (ให้ผู้ใช้ดูข้อความเต็มที่ให้ไว้แทน)
 
     เขียนเป็นคำพูด ไม่ใช้ลูกศร — เจ้าหน้าที่สั่งว่าคำอธิบายไม่ต้องใช้สัญลักษณ์เยอะ
     ข้อความที่คืนมา "ต่อท้ายประโยคได้เลย" คือมีคำเชื่อมของตัวเองมาพร้อม เพราะคำเชื่อม
     ที่เหมาะกับแต่ละกรณีไม่เหมือนกัน ("ต่างที่ ก ต้องเป็น ข" แต่ "ขาด ก" / "มี ก เกินมา"
     ซึ่งถ้าเอา "ต่างที่" ไปนำหน้าจะกลายเป็น "ต่างที่ มี S เกินมา" ที่อ่านไม่เป็นภาษาคน)
+
+    เรื่องช่องว่าง (ถ้อยคำของเจ้าหน้าที่สองครั้งที่ดูเหมือนขัดกัน — ใช้ได้ทั้งคู่):
+      - ก.ย. 2569 "ต่างกันแค่ช่องว่าง = ไม่ต้องพูดถึง" เพราะชื่อเรื่องไทยถูกตัดขึ้นบรรทัดใหม่
+        2-3 บรรทัด การต่อบรรทัดด้วยช่องว่างทำให้จุดตัดทุกจุดกลายเป็น 'มี " " เกินมา' ที่มองไม่เห็น
+        ว่าในเครื่องหมายคำพูดคืออะไร (เล่มจริง ก.ย. 2569) เจ้าหน้าที่ลบทิ้งทั้งหมดก่อนส่ง
+      - 6 ต.ค. 2569 "กรณีที่เป็นเว้นวรรคก็ควรบอก" (เล่มจริง ต.ค. 2569 ที่ระบบบอก 'ต่างที่'
+        ซึ่งส่วนหนึ่งคือรอยตัดบรรทัดล้วน ๆ ไม่มีช่องว่างจริงในเล่ม)
+      จึงแก้ที่ต้นเหตุ: รอยตัดบรรทัดไม่ถูกต่อด้วยช่องว่างอีก (_join_wrapped) แล้วบอกช่องว่างเกินระหว่าง
+      อักษรไทยด้วยถ้อยคำที่อ่านออก ("มีช่องว่างเกินระหว่าง "ในระบบ" กับ "บริหาร"") เมื่อผู้เรียก
+      ส่ง spaces=True — ช่องว่างล้วน (ข้อความอื่นตรงกันทุกตัว) ยังไม่เป็นจุดผิดเหมือนเดิม
+      เพราะ norm() ตัดช่องว่างทิ้งก่อนเทียบ
     """
-    found_s, expected_s = soft(found), soft(expected)
-    if not found_s or not expected_s or norm(found_s) == norm(expected_s):
-        return ''
-
-    def _diff(a, b, keyfn, join):
-        matcher = difflib.SequenceMatcher(None, keyfn(a), keyfn(b))
-        if matcher.ratio() < 0.5:
-            return ''
-        parts = []
-        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            if tag == 'equal':
-                continue
-            got, want = join(a[i1:i2]), join(b[j1:j2])
-            # ต่างกันแค่ช่องว่าง = ไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
-            # ชื่อเรื่องไทยในเล่มถูกตัดขึ้นบรรทัดใหม่ 2-3 บรรทัด การดึงข้อความจาก PDF ต่อ
-            # บรรทัดด้วยช่องว่าง จุดตัดบรรทัดทุกจุดจึงกลายเป็น 'มี " " เกินมา' ที่มองไม่เห็น
-            # ว่าในเครื่องหมายคำพูดคืออะไร เล่มจริง 6736605 NSCN/M ได้ประโยคว่า 'มี " "
-            # เกินมา และ มี " " เกินมา และ มี " " เกินมา และ ขาด "เขต"' ซึ่งเจ้าหน้าที่ลบ
-            # ส่วนช่องว่างทิ้งทั้งหมดก่อนส่งให้นักศึกษา เหลือไว้แค่ 'ขาด "เขต"'
-            # ช่องว่างล้วนไม่เคยเป็นเหตุให้เกิดจุดผิดอยู่แล้ว เพราะ norm() ตัดช่องว่างทิ้ง
-            # ก่อนเทียบ (ต่างแค่ช่องว่าง = exact) จุดผิดที่เห็นจึงมาจากตัวอักษรที่ต่างกันจริง
-            if not got.strip() and not want.strip():
-                continue
-            if not want:
-                parts.append(f'มี "{got}" เกินมา')
-            elif not got:
-                parts.append(f'ขาด "{want}"')
-            else:
-                parts.append(f'ต่างที่ "{got}" ต้องเป็น "{want}"')
-        return " และ ".join(parts)
-
-    # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
-    # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
-    if re.search(r'[A-Za-z]', expected_s) and ' ' in expected_s.strip():
-        by_word = _diff(found_s.split(), expected_s.split(),
-                        lambda xs: [x.upper() for x in xs], ' '.join)
-        if by_word:
-            return by_word
-    return _diff(_graphemes(found_s), _graphemes(expected_s), lambda xs: xs, ''.join)
+    return analyze_diff(found, expected, spaces).text
 
 
-def describe_case_diff(found, expected):
-    """ชี้คำที่ต่างกัน "แค่ตัวพิมพ์เล็ก-ใหญ่" — describe_diff มองไม่เห็นเพราะเทียบแบบตัวใหญ่หมด
+def _case_pairs(found, expected):
+    got, want = soft(found).split(), soft(expected).split()
+    if len(got) != len(want):
+        return []
+    pairs = [(a, b) for a, b in zip(got, want)
+             if a != b and a.casefold() == b.casefold()]
+    # เกินสามคำแปลว่าทั้งประโยคเขียนคนละแบบ (เล่มใช้ Sentence case ทั้งชื่อเรื่อง)
+    # ไล่ทีละคำจะยาวจนไม่ช่วยอะไร ให้ดูข้อความที่ถูกต้องในบรรทัดถัดไปแทน
+    return pairs if len(pairs) <= 3 else []
+
+
+def analyze_case_diff(found, expected):
+    """ชี้คำที่ต่างกัน "แค่ตัวพิมพ์เล็ก-ใหญ่" — analyze_diff มองไม่เห็นเพราะเทียบแบบตัวใหญ่หมด
 
     เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าตัวพิมพ์เล็ก-ใหญ่ที่ต่างกันถือว่า "ไม่ตรง" ต้องฟ้อง
     แต่ของเดิมฟ้องแล้วไม่บอกว่าต่างตรงไหน รายงานจึงขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะ
     (เล่มจริง 6237391 EGCH/M: เล่มพิมพ์ "NI-BASED" ระบบมี "Ni-BASED" ซึ่งเป็นสัญลักษณ์
     ธาตุ) เจ้าหน้าที่กับนักศึกษาต้องไล่สายตาทีละตัวอักษรเอง
 
-    คืน '' เมื่อจำนวนคำไม่เท่ากัน หรือไม่มีคำไหนต่างแค่ตัวพิมพ์ — ให้ describe_diff
+    ว่างเมื่อจำนวนคำไม่เท่ากัน หรือไม่มีคำไหนต่างแค่ตัวพิมพ์ — ให้ analyze_diff
     ที่เรียกก่อนหน้าเป็นคนอธิบายแทน
     """
-    got, want = soft(found).split(), soft(expected).split()
-    if len(got) != len(want):
-        return ''
-    pairs = [(a, b) for a, b in zip(got, want)
-             if a != b and a.casefold() == b.casefold()]
+    pairs = _case_pairs(found, expected)
     if not pairs:
-        return ''
-    # เกินสามคำแปลว่าทั้งประโยคเขียนคนละแบบ (เล่มใช้ Sentence case ทั้งชื่อเรื่อง)
-    # ไล่ทีละคำจะยาวจนไม่ช่วยอะไร ให้ดูข้อความที่ถูกต้องในบรรทัดถัดไปแทน
-    if len(pairs) > 3:
-        return ''
+        return _NO_DIFF
     # คำนำหน้าเขียนครั้งเดียว แล้วไล่คู่ต่อกันด้วย " และ " เหมือน describe_diff
     # (ซ้ำคำนำหน้าทุกคู่จะอ่านยากเมื่อต่างหลายคำ)
     body = " และ ".join(f'"{a}" ต้องเป็น "{b}"' for a, b in pairs)
-    return f"ต่างที่ตัวพิมพ์เล็ก-ใหญ่ {body}"
+    return DiffAnalysis(
+        f"ต่างที่ตัวพิมพ์เล็ก-ใหญ่ {body}",
+        tuple(f'ให้แก้ตัวพิมพ์เล็ก-ใหญ่ "{a}" เป็น "{b}"' for a, b in pairs))
+
+
+def describe_case_diff(found, expected):
+    return analyze_case_diff(found, expected).text
+
+
+class DetailText(str):
+    """ข้อความ "ที่พบ" ที่พกวิธีแก้เป็นข้อ ๆ มาด้วย — เป็น str ธรรมดาทุกประการ
+
+    Report.add เก็บ diff_tail (ท่อนจุดต่างท้ายข้อความ) กับ fix_steps ไว้กับข้อนั้น ข้อความสรุป
+    จึงถอดท่อนจุดต่างออกจากบรรทัดที่พบ แล้วเขียนวิธีแก้เป็นคำสั่งทีละบรรทัดแทน
+    """
+    diff_tail = ""
+    fix_steps = ()
+
+    def __new__(cls, text, diff_tail="", fix_steps=()):
+        obj = super().__new__(cls, text)
+        obj.diff_tail = diff_tail
+        obj.fix_steps = tuple(fix_steps)
+        return obj
+
+
+def found_with_diff(base, analysis):
+    """ข้อความ "ที่พบ" ต่อท้ายด้วยจุดต่าง (ถ้ามี) พร้อมวิธีแก้ที่ข้อความสรุปจะใช้"""
+    if not analysis.text:
+        return DetailText(base)
+    return DetailText(f"{base} {analysis.text}", analysis.text, analysis.steps)
 
 
 def _letters_keep_case(text):
@@ -4688,7 +5229,8 @@ def degree_differs_only_in_spacing(expected, page_text):
 def mismatch_detail(label, compared, expected=''):
     """Make small differences visible instead of silently accepting fuzzy matches.
 
-    ถ้าส่ง expected มาด้วย จะต่อท้ายว่า "ต่างที่ ..." ชี้ตำแหน่ง/วิธีที่ผิด
+    ถ้าส่ง expected มาด้วย จะต่อท้ายว่า "ต่างที่ ..." ชี้ตำแหน่ง/วิธีที่ผิด และเก็บวิธีแก้เป็นข้อ ๆ
+    ไว้ให้ข้อความสรุป (DetailText)
     """
     # เขียนให้เหมือนคนพูด: บอกว่า "ในเล่มเขียนว่าอะไร" ก่อน แล้วค่อยบอกว่าต่างยังไง
     # (ของเดิมขึ้นต้นด้วยคำตัดสินแบบระบบ เช่น "ชื่อบทข้อความไม่ตรง:" และมีคะแนน
@@ -4696,16 +5238,16 @@ def mismatch_detail(label, compared, expected=''):
     detail = f'{label}ในเล่มเขียนว่า "{compared["actual"]}"'
     # ชี้จุดต่างเฉพาะเมื่อใกล้เคียงกัน (typo/ตัวพิมพ์) — ถ้าเป็นคนละข้อความ
     # (mismatch) การไล่ทีละตัวอักษรจะรกและสับสน ให้ดูข้อความที่ถูกต้องแทน
-    diff = describe_diff(compared['actual'], expected) \
-        if expected and compared['status'] in ('typo', 'case') else ''
+    analysis = analyze_diff(compared['actual'], expected) \
+        if expected and compared['status'] in ('typo', 'case') else _NO_DIFF
     # ถ้าชี้จุดต่างได้แล้ว ไม่ต้องบอกซ้ำว่า "พิมพ์ผิดเล็กน้อย" — จุดต่างบอกอยู่ในตัว
-    if diff:
-        detail += f' {diff}'
-    elif compared['status'] == 'case':
+    if analysis.text:
+        return found_with_diff(detail, analysis)
+    if compared['status'] == 'case':
         detail += ' ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
     elif compared['status'] == 'typo':
         detail += ' พิมพ์ผิดเล็กน้อย'
-    return detail
+    return DetailText(detail)
 
 
 # ---------- "ชื่อเรื่องนี้เป็นภาษาอะไร" ----------
@@ -4769,7 +5311,7 @@ def title_printed_on_page(page_text, title, min_ratio=TITLE_ON_PAGE_MIN):
         for span in range(1, 5):
             if start + span > len(lines):
                 break
-            window = " ".join(lines[start:start + span])
+            window = _join_wrapped(lines[start:start + span])
             if title_script(window) != want:
                 continue
             ratio = difflib.SequenceMatcher(None, target, norm(window)).ratio()
@@ -4819,7 +5361,7 @@ def printed_title(page_text, student_name=""):
         if want_name and want_name in norm(line):
             break
         out.append(line)
-    return ' '.join(out).strip()
+    return _join_wrapped(out).strip()
 
 
 # ข้อความ template ที่พิมพ์ต่อจากชื่อนักศึกษาบนหน้าปกเสมอ ทุกภาษาและทุกประเภทเล่ม
@@ -4897,17 +5439,19 @@ def title_mismatch_detail(label, compared, expected=''):
     ชื่อเรื่องที่เก็บใน eThesis เป็นตัวพิมพ์ใหญ่ทั้งหมด แต่ในเล่มอาจใช้ Sentence case
     ซึ่งไม่ควรตีความว่าเป็น "ตัวพิมพ์เล็ก-ใหญ่ผิด" — ประเด็นคือข้อความไม่ตรงกับที่
     อนุมัติในระบบเฉย ๆ จึงบอกกลาง ๆ แล้วชี้จุดต่างเฉพาะเมื่อใกล้เคียงกันพอ (typo)
+
+    ชื่อเรื่องคือข้อความเดียวที่ถูกตัดขึ้นบรรทัดใหม่หลายบรรทัดและผู้ใช้เห็นว่าช่องว่างต่างกันตรงไหน
+    จึงเปิด spaces=True ให้บอกช่องว่างเกินด้วย (รอยตัดบรรทัดไม่ถูกต่อด้วยช่องว่าง ดู _join_wrapped)
     """
     detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
     if expected and compared['status'] in ('typo', 'case'):
-        diff = describe_diff(compared['actual'], expected)
-        # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ describe_diff คืน '' (มันเทียบแบบตัวใหญ่หมด)
+        analysis = analyze_diff(compared['actual'], expected, spaces=True)
+        # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ analyze_diff คืนว่าง (มันเทียบแบบตัวใหญ่หมด)
         # ถ้าปล่อยไว้ รายงานจะขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะโดยไม่บอกว่าต่างตรงไหน
-        if not diff and compared['status'] == 'case':
-            diff = describe_case_diff(compared['actual'], expected)
-        if diff:
-            detail += f' {diff}'
-    return detail
+        if not analysis.text and compared['status'] == 'case':
+            analysis = analyze_case_diff(compared['actual'], expected)
+        return found_with_diff(detail, analysis)
+    return DetailText(detail)
 
 
 def find_signature_date(text):
@@ -5774,8 +6318,12 @@ class Report:
         self.zones[zone].append({
             "part": part,
             "location": loc,
-            "found": found,
+            "found": str(found) if isinstance(found, DetailText) else found,
             "expected": expected,
+            # ท่อนจุดต่างท้าย "ที่พบ" กับวิธีแก้เป็นข้อ ๆ (DetailText) ข้อความสรุปถอดท่อนจุดต่างออก
+            # แล้วเขียนวิธีแก้เป็นคำสั่งทีละบรรทัดแทน — ข้อที่ไม่ได้มาจากการเทียบข้อความไม่มีสองช่องนี้
+            "diff_tail": getattr(found, "diff_tail", ""),
+            "fix_steps": list(getattr(found, "fix_steps", ())),
             "fix": fix,
             # ข้อความที่ต้องส่งถึง "นักศึกษา" ต่อท้ายข้อนั้น (คนละอย่างกับ fix ซึ่งเป็น
             # คำแนะนำสั้น ๆ บนการ์ด) — เช่นขั้นตอนขออนุมัติที่ต้องทำนอกเล่ม
@@ -6284,10 +6832,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             if right == "body" else
                             ("เนื้อหา", title, f"บทที่ {cn} ({page_ref(ppage)})"))
                         correct = title if right == "body" else toc_title
-                        diff = describe_diff(wrong_text, correct)
-                        found_msg = f'ชื่อบทใน{wrong_side}เขียนว่า "{wrong_text}"'
-                        if diff:
-                            found_msg += f" {diff}"
+                        found_msg = found_with_diff(
+                            f'ชื่อบทใน{wrong_side}เขียนว่า "{wrong_text}"',
+                            analyze_diff(wrong_text, correct))
                         rep.add("RED", "body", loc, found_msg,
                                 f'ต้องแก้เป็น "{correct}"', "", "FRONT.TOC")
                 # เลิกตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว (กติกา ส.ค. 2569) — ยังบันทึก
@@ -6751,10 +7298,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # เกณฑ์ 0.8: ข้อความพิมพ์ผิดเล็กน้อย (ตก S/สลับคำ) จะได้คะแนนสูงกว่านี้
             # ส่วนการบังเอิญไปตรง substring คนละบรรทัด (โดยเฉพาะไทย) จะต่ำกว่า
             if ratio >= 0.8 and snippet:
-                diff = describe_diff(snippet, expected_text)
-                found_msg = f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})"
-                if diff:
-                    found_msg += f" {diff}"
+                found_msg = found_with_diff(
+                    f"หน้าปกพิมพ์ \"{snippet}\" ไม่ตรงข้อความบังคับ ({label})",
+                    analyze_diff(snippet, expected_text))
             else:
                 found_msg = f"ไม่พบข้อความบังคับ ({label}) บนหน้าปก"
             rep.add(
@@ -7148,10 +7694,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         # ถ้าเป็นคนละรหัสกันคนละเรื่อง การไล่ทีละตัวอักษรจะได้
                         # "ต่างที่ 1 และ ขาด 35 และ มี 17 เกินมา" ซึ่งอ่านไม่รู้เรื่อง
                         # กว่าการดูรหัสเต็มสองอันเทียบกันเอง
-                        diff = describe_diff(printed, student_id)
+                        analysis = analyze_diff(printed, student_id)
                         found_msg = f'บรรทัดชื่อนักศึกษาพิมพ์รหัสว่า "{printed}"'
-                        if diff and " และ " not in diff:
-                            found_msg += f" {diff}"
+                        if analysis.text and " และ " not in analysis.text:
+                            found_msg = found_with_diff(found_msg, analysis)
                         detail = printed
                     else:
                         found_msg = ("ไม่พบรหัสนักศึกษาบนหน้านี้ "
@@ -7371,9 +7917,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         head, typo_idx = typo
                         found_msg = f'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "{head}"'
                         toc_typos_reported.add(norm(head))
-                        diff = describe_diff(head, section_label)
-                        if diff:
-                            found_msg += f" {diff}"
+                        found_msg = found_with_diff(found_msg, analyze_diff(head, section_label))
                         rep.add(
                             "RED", "front_matter", f"สารบัญ ({page_ref(typo_idx)})",
                             found_msg,
