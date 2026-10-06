@@ -80,6 +80,27 @@ class NameOnlyNeverCutsAName(unittest.TestCase):
         self.assertEqual(ethesis_import.english_name_only("Rev. SUKARNO"), "Rev. SUKARNO")
 
 
+class APrefixInTheBookIsOrangeButAMisspellingIsRed(unittest.TestCase):
+    """เจ้าหน้าที่ 6 ต.ค. 2569: "ในเล่มกลับมีคำนำหน้านาม ปรากฏไม่ว่าจะหน้าปก หน้าลงนาม หรือหน้าบทคัดย่อ ให้แจ้งสีส้มไว้
+    ถ้าชื่อที่ตามมาสะกดถูก แต่ให้แดง ถ้าสะกดผิด" — ส้มมาจาก _report_student_name_style (tests/test_thai_and_pages.py)
+    ส่วนแดงมาจากการเทียบชื่อใน run_check ซึ่งต้องมาก่อนและหยุดไม่ให้ไปถึงตัวตรวจคำนำหน้า"""
+
+    def test_a_misspelt_name_after_a_prefix_is_not_a_match(self):
+        self.assertEqual(checker_module.compare_values("SOMCHAI JAIDEE", "SOMCHAI JAIDEE", "student_name")["status"],
+                         "exact")
+        self.assertNotEqual(
+            checker_module.compare_values("Mr. SOMCHAI JAIDEX", "SOMCHAI JAIDEE", "student_name")["status"], "exact")
+
+    def test_the_spelling_check_is_red_and_comes_before_the_prefix_check(self):
+        source = inspect.getsource(checker_module.run_check)
+        for marker in ('mismatch_detail("ชื่อนักศึกษา", compared, core_name)',     # หน้าปก + หน้าลงนาม
+                       'mismatch_detail(f"{nlbl}", compared, core3)'):              # หน้าบทคัดย่อ
+            before, after = source.split(marker, 1)
+            self.assertIn('rep.add("RED"', before[-160:], marker)
+            between = after.split("_report_student_name_style(", 1)[0]
+            self.assertTrue("continue" in between or "else:" in between, marker)
+
+
 class TheSharedTitleStripper(unittest.TestCase):
     def test_unit_before_rank(self):
         self.assertEqual(strip_student_title("VDC Lt Col SOMYING TUAYANG"), "SOMYING TUAYANG")

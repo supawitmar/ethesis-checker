@@ -650,6 +650,8 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
     "ชื่อนักศึกษาภาษาอังกฤษในหน้าลงนาม ต้องเป็น Capital case และจะมีหรือไม่มี
      คำนำหน้านามก็ได้ ส่วนชื่อในหน้าปก และหน้าบทคัดย่อ ต้องเป็น UPPERCASE
      และไม่มีคำนำหน้านาม"
+
+    คำนำหน้านามบนหน้าลงนามเปลี่ยนเป็นส้มเหมือนหน้าอื่น (เจ้าหน้าที่ 6 ต.ค. 2569)
     """
 
     CORE = "NAMMONT PROMPIANPONG"
@@ -675,11 +677,41 @@ class StudentNameLetterCaseByPage(unittest.TestCase):
         self.assertEqual(out[0][0], "RED")
         self.assertIn("UPPERCASE", out[0][1])
 
-    def test_signature_accepts_sentence_case_with_or_without_prefix(self):
-        """เล่มที่ 15 พิมพ์ "Mr. Nammont Prompianpong" บนหน้าลงนาม — ต้องผ่าน"""
-        self.assertEqual(
-            self._issues("Mr. Nammont Prompianpong, Asst. Prof. X,\n", "signature"), [])
-        self.assertEqual(self._issues("Nammont Prompianpong\n", "signature"), [])
+    def test_signature_flags_a_prefix_orange_like_the_other_pages(self):
+        """เจ้าหน้าที่ 6 ต.ค. 2569: คำนำหน้าในเล่ม "ไม่ว่าจะหน้าปก หน้าลงนาม หรือหน้าบทคัดย่อ ให้แจ้งสีส้มไว้
+        ถ้าชื่อที่ตามมาสะกดถูก" — เดิม (ก.ค. 2569) หน้าลงนามมีหรือไม่มีคำนำหน้าก็ได้ ซึ่งเทสต์นี้เคยล็อกไว้ว่าผ่าน"""
+        out = self._issues("Mr. Somchai Jaidee, Asst. Prof. X,\n", "signature", core="SOMCHAI JAIDEE")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0], "ORANGE")
+        self.assertIn('"Mr."', out[0][1])
+        self.assertEqual(self._issues("Somchai Jaidee\n", "signature", core="SOMCHAI JAIDEE"), [])
+
+    def test_every_page_flags_the_prefix_orange_never_red(self):
+        for kind, printed in (("cover", "Mr. SOMCHAI JAIDEE\n"),
+                              ("abstract", "Mr. SOMCHAI JAIDEE 6700000 TEST/M\n"),
+                              ("signature", "Mr. Somchai Jaidee\n")):
+            self.assertEqual([z for z, _ in self._issues(printed, kind, core="SOMCHAI JAIDEE")],
+                             ["ORANGE"], kind)
+
+    def test_a_thai_prefix_on_the_signature_page_is_orange_without_letter_case_talk(self):
+        """ชื่อไทยไม่มีตัวพิมพ์ใหญ่-เล็ก ข้อความจึงบอกแค่ว่าต้องไม่มีคำนำหน้า ไม่สั่งให้เป็น Sentence Case"""
+        rep = self._run("นายสมชาย ใจดี\n", "signature", core="สมชาย ใจดี")
+        self.assertEqual(rep.zones["RED"], [])
+        issue = rep.zones["ORANGE"][0]
+        self.assertIn('"นาย"', issue["found"])
+        self.assertNotIn("Sentence Case", issue["expected"])
+        self.assertNotIn("UPPERCASE", self._run("นายสมชาย ใจดี\n", "cover", core="สมชาย ใจดี")
+                         .zones["ORANGE"][0]["expected"])
+        self.assertIn("ไม่มีคำนำหน้านาม", issue["expected"])
+
+    def test_the_thai_prefix_wording_translates(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        issue = self._run("นายสมชาย ใจดี\n", "signature", core="สมชาย ใจดี").zones["ORANGE"][0]
+        for th in (issue["found"], issue["expected"], issue["fix"]):
+            en = i18n.tr_en(th, pairs)
+            left = i18n.re.findall(r"[ก-๙]+", i18n.re.sub(r'"[^"]*"', "", en))
+            self.assertEqual(left, [], f"ยังไม่แปล {left}: {en}")
 
     def test_signature_flags_all_caps_and_lowercase_as_orange(self):
         for text in ("NAMMONT PROMPIANPONG\n", "nammont prompianpong\n"):

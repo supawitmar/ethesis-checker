@@ -796,10 +796,13 @@ def _student_title_in_page(page_text, core_name):
 # รูปแบบการพิมพ์ชื่อนักศึกษา แยกตามหน้า (นโยบายเจ้าหน้าที่ ก.ค. 2569)
 # "ชื่อนักศึกษาภาษาอังกฤษในหน้าลงนาม ต้องเป็น Capital case และจะมีหรือไม่มีคำนำหน้านามก็ได้
 #  ส่วนชื่อในหน้าปก และหน้าบทคัดย่อ ต้องเป็น UPPERCASE และไม่มีคำนำหน้านาม"
+# คำนำหน้านามเปลี่ยนเป็นห้ามมีทั้งสามหน้า (เจ้าหน้าที่ 6 ต.ค. 2569: "ถ้าสมมุติว่า ไปตรวจแล้ว ในเล่มกลับมีคำนำหน้านาม
+# ปรากฏไม่ว่าจะหน้าปก หน้าลงนาม หรือหน้าบทคัดย่อ ให้แจ้งสีส้มไว้ ถ้าชื่อที่ตามมาสะกดถูก แต่ให้แดง ถ้าสะกดผิด")
+# — สะกดผิด = แดงจากการเทียบชื่อใน run_check ก่อนถึงตัวตรวจนี้ · ตัวตรวจนี้ทำงานเฉพาะเมื่อชื่อสะกดถูกแล้ว
 _STUDENT_NAME_STYLE = {
     "cover":     ("upper", False),
     "abstract":  ("upper", False),
-    "signature": ("title", True),
+    "signature": ("title", False),
 }
 
 # หน้าลงนามใช้คำว่า Sentence Case เหมือนข้อชื่อกรรมการ (เจ้าหน้าที่สั่ง ก.ย. 2569
@@ -881,14 +884,18 @@ def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule
     # ตัวพิมพ์ผิดบนหน้าปก/บทคัดย่อ = ชัดเจน ฟันธงแดงได้ (เทียบกับกฎชื่อกรรมการที่แดงอยู่แล้ว)
     # ส่วนหน้าลงนามและกรณีมีแต่คำนำหน้าเกิน = ส้ม ให้เจ้าหน้าที่ตัดสิน
     zone = "RED" if (bad_case and kind != "signature") else "ORANGE"
+    # ชื่อภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก — บอกเฉพาะเรื่องคำนำหน้า ไม่พูดถึง UPPERCASE/Sentence Case ที่ไม่เกี่ยว
+    # (หน้าลงนามเล่มไทยเริ่มถูกตรวจคำนำหน้า ต.ค. 2569 ถ้อยคำเดิมจะสั่งให้ชื่อไทยเป็น "Sentence Case")
+    if english:
+        expected = (f'{label}ในหน้านี้ต้องเป็น{_STYLE_LABEL[want_case]}'
+                    + ("" if allow_title else " และไม่มีคำนำหน้านาม") + f' คือ "{want_text}"')
+    else:
+        expected = f'{label}ต้องเป็นชื่อ-นามสกุลเท่านั้น ไม่มีคำนำหน้านามหรือยศ คือ "{want_text}"'
     rep.add_verification("ชื่อนักศึกษา", loc,
                          "fail" if zone == "RED" else "pending", "; ".join(reasons))
     rep.add(zone, "front_matter", loc,
             f'{label}บนหน้านี้พิมพ์ว่า "{seen}" ' + " และ ".join(reasons),
-            f'{label}ในหน้านี้ต้องเป็น{_STYLE_LABEL[want_case]}'
-            + ("" if allow_title else " และไม่มีคำนำหน้านาม")
-            + f' คือ "{want_text}"',
-            f'แก้{label}บนหน้านี้เป็น "{want_text}"', rule_id)
+            expected, f'แก้{label}บนหน้านี้เป็น "{want_text}"', rule_id)
 
 
 def _display_committee_name(name):
