@@ -12,13 +12,7 @@
 import re
 import pdfplumber
 
-from thai_text import fix_thai_pua, fold_sara_am
-
-THAI_PREFIX = re.compile(
-    r'^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|'
-    r'ว่าที่\s*(?:ร|พ)\.?[ตทอ]\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*'
-)
-EN_PREFIX = re.compile(r'^(?:MR|MRS|MISS|MS|DR)\.?\s+', re.I)
+from thai_text import fix_thai_pua, fold_sara_am, strip_student_title
 
 THAI_MONTHS = {
     'มกราคม': 'January', 'กุมภาพันธ์': 'February', 'มีนาคม': 'March',
@@ -409,21 +403,46 @@ def student_names(lines):
     ช่องนั้นจึงเป็นชื่ออังกฤษ — เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ดึงค่านั้นมาเป็นชื่อไทยด้วย ไม่ปล่อยว่าง
     เพราะหลักสูตรไทย/ไทย-อังกฤษบังคับกรอกช่องชื่อไทย ถ้าว่างระบบจะไม่ให้ตรวจ ถ้าไม่มีค่าในช่อง
     ชื่อไทยเลยแต่มีชื่ออังกฤษ ใช้ชื่ออังกฤษแทนด้วยเหตุผลเดียวกัน
+
+    คำนำหน้าชื่อตัดออกตั้งแต่ตรงนี้ (เจ้าหน้าที่ 6 ต.ค. 2569: "หลักการเขียนในเล่ม มันต้องเขียนแบบไม่มี คำนำหน้า ถ้างั้นแก้ไข
+    ให้การอ่านฟอร์มจากไฟล์ ที่แนบเข้าไปให้ตัดคำนำหน้านามทิ้งไปก่อนตรวจเลย") ด้วยตัวตัดเดียวกับตัวตรวจ
+    (thai_text.strip_student_title) — เดิมรู้จักแค่ นาย/นาง/นางสาว/น.ส./ดร. และ Mr/Mrs/Miss/Ms/Dr ฟอร์มจึงได้
+    "VDC Lt Col ..." "Dental Surgeon ..." "ทพญ. ..." ไปทั้งก้อน แล้วฟ้องแดงเล่มที่พิมพ์ชื่อล้วนถูกตามกติกา
     """
     name_th = name_en = ''
     name_value, name_index = _find(lines, 'ชื่อ-สกุล')
     if name_value:
         if re.search(r'[ก-๙]', name_value):
-            name_th = THAI_PREFIX.sub('', name_value)
+            name_th = strip_student_title(name_value)
         else:
-            name_th = name_en = EN_PREFIX.sub('', name_value)
+            name_th = name_en = strip_student_title(name_value)
         offset = 2 if name_value == _next(lines, name_index) else 1
         following = _next(lines, name_index, offset)
         if following and re.search(r'[A-Za-z]', following) and not re.search(r'[ก-๙]', following):
-            name_en = EN_PREFIX.sub('', following)
+            name_en = _english_name_without_title(strip_student_title(following), name_th)
     if not name_th and name_en:
         name_th = name_en
     return name_th, name_en
+
+
+def _english_name_without_title(name_en, name_th):
+    """ชื่ออังกฤษที่ยังมีคำนำหน้าที่ตัวตัดไม่รู้จัก — ตัดตามจำนวนคำของชื่อไทยที่ตัดคำนำหน้าแล้ว
+
+    eThesis เก็บชื่อเป็น "<คำนำหน้า> <ชื่อ> <สกุล>" ทั้งสองภาษา ชื่อ-สกุลภาษาอังกฤษเป็นตัวพิมพ์ใหญ่ล้วน ส่วนคำนำหน้า
+    พิมพ์ตามที่กรอก (ไฟล์จริง 11 ไฟล์: Miss · Mr. · DR. · Dental Surgeon · VDC Lt Col) ตัดเฉพาะเมื่อครบทุกข้อ
+      - ชื่อไทยเป็นอักษรไทย (นักศึกษาต่างชาติไม่มีชื่อไทยให้นับ)
+      - ชื่ออังกฤษมีคำมากกว่าชื่อไทย และคำที่เกินมาข้างหน้ามีตัวพิมพ์เล็กหรือจุด (หน้าตาคำนำหน้า)
+      - คำที่เหลือเป็นตัวพิมพ์ใหญ่ล้วน (หน้าตาชื่อ-สกุลของ eThesis)
+    ไม่ครบข้อใดคงค่าเดิม — ชื่อที่พิมพ์ตัวเล็กปน หรือชื่อสามคำที่ตัวใหญ่ทุกคำ จึงไม่ถูกตัดคำในชื่อทิ้ง
+    """
+    th_words, en_words = name_th.split(), name_en.split()
+    if not re.search(r'[ก-๙]', name_th) or not th_words or len(en_words) <= len(th_words):
+        return name_en
+    head, tail = en_words[:-len(th_words)], en_words[-len(th_words):]
+    if (any(re.search(r'[a-z.]', word) for word in head)
+            and all(re.fullmatch(r"[A-Z][A-Z'\-]*", word) for word in tail)):
+        return ' '.join(tail)
+    return name_en
 
 
 def parse_ethesis_pdf(pdf_path):

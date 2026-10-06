@@ -31,7 +31,7 @@ from ethesis_rules import (
     rule_reference,
     rule_zone,
 )
-from thai_text import fix_thai_pua, fold_sara_am, fold_sara_am_in
+from thai_text import fix_thai_pua, fold_sara_am, fold_sara_am_in, strip_student_title
 
 FRONT_FAILURE_ZONE = FRONT_MATTER_RULES['failure_zone']
 BOLD_FAILURE_ZONE = rule_zone("FORMAT.BOLD", "ORANGE")
@@ -770,37 +770,9 @@ def _strip_committee_title(name):
     return s.strip(' ,')
 
 
-# คำนำหน้าชื่อ "นักศึกษา" — ตัดออกก่อนเทียบเสมอ ตามที่เจ้าหน้าที่กำหนด (ก.ค. 2569)
-# "ชื่อนักศึกษา ให้ตรวจแบบไม่มีคำนำหน้า ถ้ามีให้เตือนส้ม"
-#
-# ยศทหาร/ตำรวจเขียนย่อได้หลายสิบแบบ (พ.จ.ต. จ.ส.อ. ร.ต.อ. น.ท. พล.ต.ต. ...)
-# ไล่รายคำไม่มีวันครบ จึงจับ "อักษรไทย 1-4 ตัวคั่นด้วยจุด" เป็นรูปแบบเดียว —
-# ชื่อคนไทยไม่มีจุดอยู่แล้ว จึงไม่ไปโดนชื่อจริง
-# ฝั่งอังกฤษยศมักตามด้วยเลขชั้น (บฑ. ของเล่มที่ 9 เขียน "CPO 3 NUTCHANOP PETSUK")
-# จึงเผื่อเลขท้ายคำนำหน้าไว้ด้วย
-_STUDENT_TITLE_PREFIX = re.compile(
-    r'^\s*(?:'
-    # "หญิง" ต่อท้ายยศได้ เช่น "ร.ต.อ.หญิง" / "พันเอกหญิง" ต้องตัดไปด้วย
-    r'(?:[ก-๙]{1,4}\.\s*){1,4}(?:หญิง)?'
-    r'|ว่าที่\s*(?:ร้อยตรี|ร้อยโท|ร้อยเอก)|'
-    r'นายแพทย์|แพทย์หญิง|ทันตแพทย์|สัตวแพทย์|เภสัชกร|'   # ต้องมาก่อน "นาย"
-    r'(?:พล|พัน|ร้อย|พันจ่า|จ่าสิบ|สิบ|นาวา|เรือ)(?:เอก|โท|ตรี)(?:หญิง)?|'
-    r'นางสาว|นาง|นาย(?=\s|[ก-๙])|'
-    r'(?:[A-Z]\.){2,4}'
-    r'|Dental\s+Surgeon\b|Dentist\b|Pharmacist\b'
-    r'|(?:Pol\.?\s*)?(?:Gen|Lt|Col|Maj|Capt|Sgt|Cpl|Pvt|CPO|PO|Cdr|Adm|Lieut|'
-    r'Mr|Mrs|Miss|Ms|Dr)\b\.?'
-    r')\s*\.?\s*\d*\s*', re.I)
-
-
-def _strip_student_title(name):
-    """ตัดคำนำหน้า/ยศออกจากชื่อนักศึกษา เหลือเฉพาะชื่อ-สกุล"""
-    s = (name or "").strip()
-    prev = None
-    while s and s != prev:
-        prev = s
-        s = _STUDENT_TITLE_PREFIX.sub('', s, count=1).strip()
-    return s or (name or "").strip()
+# คำนำหน้าชื่อ "นักศึกษา" ตัดออกก่อนเทียบเสมอ (เจ้าหน้าที่ ก.ค. 2569) — ตัวตัดอยู่ที่ thai_text.strip_student_title
+# ใช้ตัวเดียวกับตัวนำเข้า eThesis ซึ่งตัดตั้งแต่ตอนอ่านไฟล์เข้าฟอร์ม (เจ้าหน้าที่ 6 ต.ค. 2569)
+_strip_student_title = strip_student_title
 
 
 def _student_title_in_page(page_text, core_name):
@@ -2698,11 +2670,12 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 
 
 def strip_name_prefix(name):
-    """Remove honorifics that must not be printed as part of the student name."""
-    return re.sub(
-        r'^(?:นาย|นางสาว|นาง|ดร\.?|DENTAL\s+SURGEON|DENTIST|PHARMACIST|MR\.?|MRS\.?|MISS|MS\.?|DR\.?)\s*',
-        '', soft(name), flags=re.I,
-    )
+    """Remove honorifics that must not be printed as part of the student name.
+
+    ใช้ตัวตัดชุดเดียวกับตัวนำเข้า eThesis (thai_text.strip_student_title) — เดิมรู้จักแค่ นาย/นาง/นางสาว/ดร./Mr/Mrs/Miss/Ms/Dr
+    ชื่อที่เจ้าหน้าที่พิมพ์ในฟอร์มเองพร้อมยศ ("VDC Lt Col ...") จึงยังมียศติดไปเทียบกับเล่มที่พิมพ์ชื่อล้วนตามกติกา
+    """
+    return strip_student_title(soft(name))
 
 
 def person_name_sentence_case(name):
