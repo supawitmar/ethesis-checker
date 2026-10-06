@@ -336,7 +336,8 @@ def apply_all(found, steps, reverse=False):
 
 
 def same_letters(a, b):
-    return checker_module.norm(a) == checker_module.norm(b)
+    """ทำตามวิธีแก้แล้วต้องได้ข้อความที่ถูก "ทุกตัวอักษร" รวมวรรณยุกต์/สระ/ำ (ไม่ใช่แค่ตรงแบบหยาบของ norm)"""
+    return checker_module.same_spelling(a, b)
 
 
 class TheStepsCanBeFollowedOneByOne(unittest.TestCase):
@@ -510,6 +511,9 @@ class TheStepsCanBeFollowedOneByOne(unittest.TestCase):
                     found = found[:at] + " " + found[at:]
             # ระบบเทียบข้อความที่ยุบช่องว่างซ้อนเป็นช่องเดียวแล้วเสมอ (soft) การ์ดก็แสดงแบบนั้น
             found = re.sub(r"\s+", " ", found)
+            # ข้อความที่ระบบอ่านจากเล่มเรียงตัวเล็กบน/ล่างลำดับมาตรฐานเสมอ (_attach_thai_marks) ส่วนตัวสุ่มข้างบน
+            # แทรกตัวอักษรกลางพยางค์จนลำดับเพี้ยนแบบที่เล่มจริงไม่มีทางได้ จึงเรียงให้ก่อนเหมือนตัวอ่าน
+            found = checker_module._canonical_marks(found)
             analysis = analyze_diff(found, expected, spaces=True)
             if not analysis.text:
                 continue

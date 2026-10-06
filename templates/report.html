@@ -836,6 +836,8 @@ var TR = [
   [/พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: ("[^"]*")/g, 'The examination pass date does not match the approved data: $1'],
   [/ที่ถูกต้องตามระบบคือ ("[^"]*")/g, 'The approved data says $1'],
   [/ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน ("[^"]*")/g, 'The acknowledgements must end with the author name $1'],
+  // ชื่อท้ายกิตติกรรมประกาศครบทุกตัวอักษรแต่วรรณยุกต์/สระ/ำ ไม่ตรง (เจ้าหน้าที่สั่ง 6 ต.ค. 2569 ให้นับเป็นสะกดผิด)
+  [/ชื่อผู้เขียนท้ายกิตติกรรมประกาศเขียนว่า ("[^"]*")/g, 'The author name at the end of the acknowledgements reads $1'],
   [/เพิ่มหรือแก้ชื่อผู้เขียนท้ายกิตติกรรมประกาศเป็น ("[^"]*")/g, 'Add or correct the author name at the end of the acknowledgements to $1'],
   [/บรรทัดชื่อนักศึกษาในบทคัดย่ออังกฤษต้องมีรหัส ("[^"]*")/g, 'The student-name line on the English abstract must include the ID $1'],
   [/บรรทัดชื่อนักศึกษาในบทคัดย่อไทยต้องมีรหัส ("[^"]*")/g, 'The student-name line on the Thai abstract must include the ID $1'],
@@ -1150,6 +1152,8 @@ var TR = [
   [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ที่ระบบอ่านได้คือ ("[^"]*") ซึ่งอาจเพี้ยนเพราะฟอนต์ในไฟล์/g, 'The name the system could read is $2, which may be garbled by the font in the file'],
   [/(ชื่อภาษาไทย|ชื่อภาษาอังกฤษ|ชื่อนักศึกษา)ต้องเป็น ("[^"]*")/g, 'The name must be $2'],
   [/เปิดหน้านี้ดูชื่อด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน/g, 'Check the name on this page by eye; if it is printed correctly, press Pass'],
+  // ต่างเฉพาะวรรณยุกต์/สระ/ำ แต่ระบบยืนยันไม่ได้ว่าอ่านถูก (checker.MARKS_UNRELIABLE_FIX) — การ์ดสีส้ม
+  [/^ระบบอ่านวรรณยุกต์และสระจากไฟล์นี้ได้ไม่แน่นอน เปิดหน้านี้ดูด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน$/g, 'The system cannot read tone marks and vowels from this file reliably. Check this page by eye; if it is printed correctly, press Pass'],
   [/บรรทัดชื่อนักศึกษาพิมพ์รหัสเป็นเลขไทย ("[^"]*")/g, 'The student-name line prints the ID in Thai numerals: $1'],
   [/รหัสนักศึกษาใน(บทคัดย่ออังกฤษ|บทคัดย่อไทย)ต้องเป็นเลขอารบิกเท่านั้น คือ ("[^"]*")/g, 'The student ID must use Arabic numerals only: $2'],
   [/แก้รหัสนักศึกษาเป็นเลขอารบิก/g, 'Change the student ID to Arabic numerals'],

@@ -345,11 +345,16 @@ class ThaiBookRegressionTests(unittest.TestCase):
         self.assertEqual(resolve_option(body, {"format": "2"}, "strict"), 2)
 
     def test_scrambled_thai_chapter_prefix_is_stripped(self):
-        # PDF ไทยดึง "บทที่ 1" เป็น "บทท ี่ 1" — ต้องตัด prefix ได้และชื่อบทเทียบตรง
+        # PDF ไทยดึง "บทที่ 1" เป็น "บทท ี่ 1" — ต้องตัด prefix ได้
         self.assertEqual(_toc_chapter_title("บทท ี่ 1 บทน า 1"), "บทน า")
+        # ชื่อบทที่อ่านมาเพี้ยน (วงกลมของ ำ กลายเป็นช่องว่าง) ตัวอักษรครบแต่ ำ หายไป — เดิมนับว่าตรงเพราะเทียบแบบ
+        # ตัดตัวเล็กทิ้ง ตอนนี้ ำ กับ า ต่างกัน = สะกดผิด (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) แต่ข้อความมีร่องรอยว่าระบบอ่าน
+        # เพี้ยน ("น า") จึงเป็นข้อให้เจ้าหน้าที่ดูหน้าจริง (ส้ม) ไม่ใช่แดง — ดู tests/test_sara_am.py
         compared, _ = compare_canonical_title(
             _toc_chapter_title("บทท ี่ 1 บทน า 1"), ("บทนำ", "INTRODUCTION"))
-        self.assertEqual(compared["status"], "exact")
+        self.assertEqual(compared["status"], "typo")
+        self.assertTrue(compared["marks_only"])
+        self.assertTrue(Report().marks_doubtful(compared["marks_only"], compared["actual"]))
 
     def test_symbol_abbreviation_list_heading_is_recognized(self):
         self.assertEqual(_toc_section_kind("คำอธิบายสัญลักษณ์/คำย่อ ฎ"), "list_abbreviations")
@@ -3319,8 +3324,15 @@ class ChapterTitlesThatAreOnlyTheStartOfTheRule(unittest.TestCase):
         self.assertEqual(expected, "CONCLUSION AND RECOMMENDATIONS")
 
     def test_the_check_uses_the_next_line_not_a_bare_prefix(self):
-        """ควบคุมเชิงลบ: ห้ามกลับไปยอมรับ prefix ลอย ๆ อีก"""
-        source = inspect.getsource(checker_module.run_check)
+        """ควบคุมเชิงลบ: ห้ามกลับไปยอมรับ prefix ลอย ๆ อีก
+
+        ตัวตัดสินย้ายออกจาก run_check มาเป็น chapter_title_verdict (6 ต.ค. 2569 — ให้เทสต์ชื่อบทที่ต่อบรรทัดได้)
+        run_check ต้องเรียกตัวนี้ และตัวนี้ต้องดูบรรทัดถัดไปจริง
+        """
+        run_source = inspect.getsource(checker_module.run_check)
+        self.assertIn("chapter_title_verdict(title, cn, option, next_line)", run_source)
+        self.assertNotIn("norm(cand).startswith(nb)", run_source)
+        source = inspect.getsource(checker_module.chapter_title_verdict)
         self.assertIn("canonical_title_wrapped(title, next_line", source)
         self.assertNotIn("norm(cand).startswith(nb)", source)
 

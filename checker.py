@@ -48,6 +48,9 @@ KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
 # ฟอนต์ทำให้อ่านรหัส/ชื่อนักศึกษาไม่ออก = สีส้ม (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้ามันเพี้ยนแบบนี้
 # งั้นควรใส่สีส้ม") เดิมปล่อยผ่านเป็นข้อมูลประกอบ ซึ่งไม่มีปุ่มให้กดเมื่อเปิดหน้าจริงแล้วพบว่าผิด
 FONT_UNREADABLE_ZONE = rule_zone("FORM.FONT_UNREADABLE", "ORANGE")
+# วิธีแก้บนการ์ดสีส้มเมื่อเล่มสะกดต่างเฉพาะวรรณยุกต์/สระ/ำ แต่ระบบยืนยันไม่ได้ว่าอ่านถูก (ดู Report.add)
+MARKS_UNRELIABLE_FIX = ("ระบบอ่านวรรณยุกต์และสระจากไฟล์นี้ได้ไม่แน่นอน "
+                        "เปิดหน้านี้ดูด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน")
 # เลขหน้าที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ทั้งส่วนนำและเนื้อหา
 # กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด / ไม่มีเลขหน้า / เลขหน้าอารบิกไม่เริ่มที่บทที่ 1)
 # ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
@@ -78,6 +81,79 @@ def norm(s):
 
 def soft(s):
     return re.sub(r'\s+', ' ', (s or '')).strip()
+
+
+# ---------- ตัวสะกดไทยครบทุกตัว (ใช้ "ตัดสิน" ว่าเล่มสะกดตรงหรือไม่) ----------
+# norm() ข้างบนตัดวรรณยุกต์ สระบน-ล่าง การันต์ทิ้ง และมอง ำ เป็น า เพราะ PDF ทำตัวเล็กพวกนี้หายหรือสลับที่บ่อย
+# จึงใช้ "หา" ข้อความได้ดี (หัวข้อ ส่วนของเล่ม บรรทัดที่จะยกมาแสดง) แต่ใช้ตัดสินไม่ได้ — เจ้าหน้าที่สั่ง
+# 6 ต.ค. 2569 ว่าเล่มพิมพ์ "นา" ที่ควรเป็น "นำ" (หรือกลับกัน) คือสะกดผิด ต้องเป็นสีแดง รวมถึงวรรณยุกต์
+# ตัวเทียบชุดนี้จึงคงทุกตัวไว้ (สระอำทุกแบบนับเป็นสระอำผ่าน fold_sara_am · ตัวเล็กบน/ล่างของตัวอักษรเดียวกัน
+# เรียงลำดับมาตรฐานก่อน เพราะไฟล์เก็บลำดับต่างกันได้ทั้งที่ตาเห็นเหมือนกัน เช่น "ท่ี" กับ "ที่")
+# ใช้เฉพาะจุดที่ "ตัดสินว่าตรงหรือไม่" ส่วนการหาตำแหน่งยังใช้ norm() — ถ้าหาด้วยตัวเทียบนี้ หัวข้อที่ฟอนต์ทำ
+# วรรณยุกต์หายจะหาไม่เจอ แล้วเกิดข้อ "ไม่พบ" ต่อกันเป็นพรวนทั้งเล่ม
+_SPELLING_CHAR = re.compile('[A-Z0-9ก-๙]')
+_UNIT_SEP = chr(0)
+
+
+def _mark_rank(mark):
+    """ลำดับมาตรฐานของตัวเล็กบน/ล่างบนตัวอักษรเดียวกัน: สระ (รวมไม้ไต่คู้ นิคหิต) → วรรณยุกต์ → การันต์"""
+    return (_MARK_ORDER.get(mark, 0), mark)
+
+
+def _spelling_units(text, keep_case=False):
+    """ตัวอักษรทีละตัวพร้อมตัวเล็กบน/ล่างของมัน (เรียงลำดับมาตรฐาน)
+
+    ถอดตัวเล็กบน/ล่างออกแล้วแทน ำ ด้วย า จะได้ norm(text) พอดี — คือ "ตำแหน่ง" เดียวกับที่ norm() หาเจอ
+    """
+    units = []
+    folded = fold_sara_am(text)
+    for ch in (folded if keep_case else folded.upper()):
+        if _TH_MARKS.match(ch):
+            if units:
+                units[-1].append(ch)
+        elif _SPELLING_CHAR.match(ch.upper()):
+            units.append([ch])
+    return [unit[0] + ''.join(sorted(unit[1:], key=_mark_rank)) for unit in units]
+
+
+def spelling_key(text):
+    """ตัวเทียบ "สะกดตรงทุกตัวอักษร" — เหมือน norm() แต่คง ำ และตัวเล็กบน/ล่างไว้ (ดูหัวข้อข้างบน)
+
+    คั่นทุกตัวด้วยตัวแบ่งหน่วย การค้นข้อความย่อย (spelled_in) จึงตรงขอบตัวอักษรเสมอ — "ย" ไม่ไปตรงกับ "ย่"
+    """
+    units = _spelling_units(text)
+    return _UNIT_SEP + _UNIT_SEP.join(units) + _UNIT_SEP if units else ''
+
+
+def same_spelling(a, b):
+    """สองข้อความสะกดตรงกันทุกตัวอักษร (ไม่สนช่องว่าง/วรรคตอน/ตัวพิมพ์เล็ก-ใหญ่ เหมือน norm())"""
+    return spelling_key(a) == spelling_key(b)
+
+
+def spelled_in(needle, haystack):
+    """needle อยู่ใน haystack โดยสะกดตรงทุกตัวอักษร — ตัวตัดสินแทน norm(needle) in norm(haystack)"""
+    return spelling_key(needle) in spelling_key(haystack)
+
+
+def marks_only_difference(a, b):
+    """ตัวอักษรครบตรงกันทุกตัว ต่างเฉพาะวรรณยุกต์ สระบน-ล่าง การันต์ หรือ ำ กับ า"""
+    return norm(a) == norm(b) and not same_spelling(a, b)
+
+
+_MARK_RUN = re.compile(_TH_MARKS.pattern + '{2,}')
+# ช่องว่างตามด้วยสระที่ขึ้นต้นคำไม่ได้ (ะ า ำ ๅ) หรือตัวเล็กบน/ล่าง ไม่มีในข้อความไทยที่อ่านถูก — เป็นร่องรอยว่า
+# ระบบอ่านบรรทัดนั้นเพี้ยน เช่นฟอนต์ที่เก็บวงกลมของ ำ เป็นช่องว่างจริง ("บทน า") ตัวสะกดระดับวรรณยุกต์/สระ
+# ของข้อความนั้นจึงเชื่อไม่ได้ (ดู Report.add) — ไม่รวม ๆ ซึ่งราชบัณฑิตยสถานให้เว้นวรรคหน้า ("ต่าง ๆ")
+_READ_DEFECT = re.compile('[ ][ะาำๅ' + _TH_MARKS.pattern[1:-1] + ']')
+
+
+def _has_read_defect(text):
+    return bool(_READ_DEFECT.search(soft(text)))
+
+
+def _canonical_marks(text):
+    """เรียงตัวเล็กบน/ล่างที่ติดกันเป็นลำดับมาตรฐาน โดยไม่แตะอย่างอื่น (ใช้ก่อนชี้จุดต่างให้คนอ่าน)"""
+    return _MARK_RUN.sub(lambda m: ''.join(sorted(m.group(0), key=_mark_rank)), text or '')
 
 
 def _page_text(page):
@@ -1375,7 +1451,8 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
     # และลงท้ายด้วยเครื่องหมายคำพูด ข้อความสรุปจึงดึงไปเขียนเป็น "ต้องแก้เป็น ..." ได้
     wanted = f'"{sig_template}"'
     expected_msg = f"ต้องเป็น {wanted}"
-    if norm(sig_template) in norm(page_text):
+    # ประโยคตายตัวต้องสะกดตรงทุกตัวรวมวรรณยุกต์/สระ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ดู spelling_key
+    if spelled_in(sig_template, page_text):
         if extra_line:
             rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail",
                                  f'มีบรรทัดเกิน: "{extra_line}"')
@@ -1396,7 +1473,12 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
         # วัดจากเคสจริง: ประโยคที่มีอยู่แต่ผิด ได้ ratio 0.87-0.99
         # ส่วนช่วงที่คร่อมชื่อปริญญาเมื่อไม่มีประโยคเลย ได้ 0.68 — ตั้งที่ 0.8
         template_zone = signature_template_zone(page_text, sig_degree)
-        if thai_book and norm(SIGNATURE_TEMPLATE_TH_TAIL) in norm(template_zone):
+        if norm(sig_template) in norm(template_zone):
+            # ประโยคครบทุกคำ แต่สะกดวรรณยุกต์/สระ/ำ ไม่ตรง — ยกทั้งประโยคมาชี้จุดต่าง ไม่ใช่ท่อนท้าย
+            # (ถ้าเข้ากิ่งท่อนท้ายข้างล่าง จะได้ 'ขาด "ได้รับการพิจารณาให้"' ทั้งที่เล่มพิมพ์ครบ)
+            near = _closest_run(template_zone, sig_template,
+                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+        elif thai_book and norm(SIGNATURE_TEMPLATE_TH_TAIL) in norm(template_zone):
             # พิมพ์ประโยคมาแต่ตกคำนำ "ได้รับการพิจารณาให้" (แบบสั้น) — ยกท่อนที่พิมพ์จริงมาบอกว่าขาดอะไร
             # ต้องเทียบด้วยท่อนท้ายก่อนเทียบทั้งประโยค เพราะหน้าต่างยาวเท่าประโยคเต็มจะคร่อมท้ายชื่อเรื่อง
             # เข้ามาด้วย (เล่มทดสอบ 3: "การพัฒนาปิโตรเลียม นับเป็นส่วนหนึ่ง..." ได้ข้อความขาด/เกินปนกัน
@@ -1430,7 +1512,11 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
         # ประโยค (การ์ดแดงแยกเป็นสองข้ออยู่แล้ว) เจ้าหน้าที่ท้วง 2 ต.ค. 2569
         if extra_line:
             detail += f' และมีบรรทัดเกิน: "{extra_line}"'
-        rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "fail", detail)
+        # บรรทัดเกินเป็นการ์ดแดงเสมอ แถวนี้จึง fail ส่วนประโยคที่ต่างเฉพาะวรรณยุกต์/สระบนเล่มฟอนต์เพี้ยนเป็นส้ม (Report.add)
+        rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot,
+                             "fail" if extra_line
+                             else rep.mismatch_status(getattr(found_msg, "marks_only", False), found_msg),
+                             detail)
         rep.add("RED", "front_matter", spot, found_msg,
                 expected_msg,
                 "", "FRONT.APPROVAL")
@@ -1518,8 +1604,10 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
             or approved.get("degree_cover_en", "")
         subject = _degree_subject(degree)
+        # มีบรรทัดหลักสูตรอยู่ไหม หาแบบหยาบ (norm) — ส่วนการตัดสินว่าสะกดตรงต้องครบทุกตัวรวมวรรณยุกต์/สระ/ำ
+        # (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) ชื่อสาขาที่ผิดแค่วรรณยุกต์จึงยังนับว่าเจอบรรทัด และยังตรวจชื่อปริญญาต่อได้
         subject_found = not subject or norm(subject) in found_text
-        if not subject_found:
+        if subject and not spelled_in(subject, bottom_text):
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
                 bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
@@ -1530,14 +1618,14 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         # เทียบเฉพาะเมื่อเจอชื่อสาขาแล้ว — ถ้าทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว
         # ไม่ต้องได้สองข้อจากช่องเดียวกัน
         degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
-        if subject_found and degree_name and norm(degree_name) not in found_text:
+        if subject_found and degree_name and not spelled_in(degree_name, bottom_text):
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อปริญญา", degree_name,
                 bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
     faculty = approved.get("faculty", "")
-    if faculty and not english_book and norm(faculty) not in found_text:
+    if faculty and not english_book and not spelled_in(faculty, bottom_text):
         _institution_mismatch(
             rep, f"{loc_prefix}คณบดีคณะ{loc_suffix}", "ชื่อคณะ", faculty,
             bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE")
@@ -2241,7 +2329,11 @@ def _report_abstract_committee_heading(rep, page_text, doc_type, english, loc):
     มีข้อ FORM.DOC_TYPE ฟ้องอยู่แล้ว จึงไม่ฟ้องซ้ำที่นี่
     """
     want = abstract_committee_heading(doc_type, english)
-    if not want or norm(want) in norm(page_text) or doc_types_printed(page_text):
+    if not want or spelled_in(want, page_text):
+        return
+    # หัวข้อครบทุกคำแต่สะกดวรรณยุกต์/สระ/ำ ไม่ตรง (เจ้าหน้าที่สั่ง 6 ต.ค. 2569 = สะกดผิด) ต้องฟ้องเสมอ —
+    # ข้ามได้เฉพาะหน้าที่ไม่มีหัวข้อนี้เลยแต่เขียนประเภทเล่มอื่นไว้ (FORM.DOC_TYPE ฟ้องอยู่แล้ว)
+    if norm(want) not in norm(page_text) and doc_types_printed(page_text):
         return
     printed = abstract_committee_heading_printed(page_text, english) or _closest_run(page_text, want)
     if printed:
@@ -2252,6 +2344,8 @@ def _report_abstract_committee_heading(rep, page_text, doc_type, english, loc):
         found = f'หัวข้อรายชื่อคณะกรรมการที่ปรึกษาเขียนว่า "{printed}"'
         if analysis.text and " และ " not in analysis.text:
             found = found_with_diff(found, analysis)
+        else:
+            found = DetailText(found, marks_only=analysis.marks_only)
     else:
         found = "ไม่พบหัวข้อรายชื่อคณะกรรมการที่ปรึกษาบนหน้านี้"
     rep.add("RED", "front_matter", loc, found, f'ต้องเป็น "{want}"',
@@ -2989,7 +3083,8 @@ def exact_reference_status(page_text, expected):
     if not expected:
         return True, ""
     if re.search(r'[ก-๙]', expected):
-        return norm(expected) in norm(page_text), "text"
+        # สะกดตรงทุกตัวรวมวรรณยุกต์/สระ/ำ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ดู spelling_key
+        return spelled_in(expected, page_text), "text"
     if expected in page_flat:
         return True, "exact"
     nows = lambda s: re.sub(r'\s+', '', s)
@@ -4569,12 +4664,18 @@ def compare_values(actual, expected, rule_name):
             return {'status': 'exact', 'actual': actual, 'score': 1.0}
         if actual.casefold() == expected.casefold():
             return {'status': 'case', 'actual': actual, 'score': 1.0}
-        # ภาษาไทยไม่มีตัวพิมพ์เล็ก-ใหญ่ และการดึงข้อความ PDF ทำสระ/วรรณยุกต์
-        # เรียงเพี้ยนได้ จึงเทียบแบบ normalize เช่นเดียวกับ exact_reference_status
-        if re.search(r'[ก-๙]', expected) and norm(actual) == norm(expected):
+        # ภาษาไทยไม่มีตัวพิมพ์เล็ก-ใหญ่ และการดึงข้อความ PDF เรียงสระ/วรรณยุกต์เพี้ยนได้
+        # จึงเทียบด้วยตัวเทียบที่เรียงตัวเล็กบน/ล่างให้ก่อน แต่ยังสะกดตรงทุกตัว (spelling_key)
+        if re.search(r'[ก-๙]', expected) and same_spelling(actual, expected):
             return {'status': 'exact', 'actual': actual, 'score': 1.0}
-    elif norm(actual) == norm(expected):
+    elif same_spelling(actual, expected):
         return {'status': 'exact', 'actual': actual, 'score': 1.0}
+    if marks_only_difference(actual, expected):
+        # ตัวอักษรครบทุกตัว ต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์ หรือ ำ กับ า = สะกดผิด เป็นแดงเหมือนสะกดผิดอื่น
+        # (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) ให้เป็น typo เสมอแม้คำสั้น ("บทนา") ข้อความจึงชี้จุดต่างให้ด้วย
+        # marks_only บอกกฎปลายทางว่าถ้าฟอนต์ของเล่มเพี้ยน ตัวเล็กพวกนี้อาจเป็นระบบอ่านผิด (ดู Report.add)
+        score = difflib.SequenceMatcher(None, _spelling_units(expected), _spelling_units(actual)).ratio()
+        return {'status': 'typo', 'actual': actual, 'score': score, 'marks_only': True}
     score = difflib.SequenceMatcher(None, norm(expected), norm(actual)).ratio()
     status = 'typo' if score >= rule['typo_threshold'] else 'mismatch'
     return {'status': status, 'actual': actual, 'score': score}
@@ -4591,7 +4692,7 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False):
     rule = MATCH_RULES[rule_name]
     if degree_line:
         page_text = degree_line_search_text(page_text)
-    if not rule['case_sensitive'] and norm(expected) in norm(page_text):
+    if not rule['case_sensitive'] and spelled_in(expected, page_text):
         return {'status': 'exact', 'actual': soft(expected), 'score': 1.0}
     matched, reason = exact_reference_status(page_text, expected)
     if matched:
@@ -4635,7 +4736,8 @@ _LEAD_VOWEL_START = re.compile(rf'^[{_TH_LEAD_VOWEL}]')
 
 # text = จุดต่างเป็นประโยคบอกเล่า (ต่อท้าย "ที่พบ" บนการ์ด)
 # steps = วิธีแก้เป็นคำสั่งทีละบรรทัด ("ให้ลบ ... ออก") ที่ข้อความสรุปส่งนักศึกษาใช้
-DiffAnalysis = namedtuple('DiffAnalysis', 'text steps')
+# marks_only = ตัวอักษรครบทุกตัว ต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์/ำ (ดู marks_only_difference)
+DiffAnalysis = namedtuple('DiffAnalysis', 'text steps marks_only', defaults=(False,))
 _NO_DIFF = DiffAnalysis('', ())
 # kind = delete / insert / replace / space_extra (ก้อนที่รวมหลายจุด = chunk) · pos, end = ตำแหน่งใน graphemes
 # ของข้อความที่พบ · lo, hi = ช่วงที่ข้อความบอกวิธีแก้ยกมาอ้าง (ใช้เฉพาะช่องว่างเกิน ที่ต้องยกคำรอบ ๆ มาชี้)
@@ -5009,7 +5111,9 @@ def _edit_steps(fg, edits):
 def _analyze_thai(found_s, expected_s, spaces):
     # สระอำทุกแบบ (ำ · ํา · นํ้า) ตาเห็นเหมือนกันทุกประการ ถ้าไม่รวมก่อนเทียบ จุดต่างจะอ่านออกมาว่า
     # 'ต่างที่ "นํา" ต้องเป็น "นำ"' ซึ่งเจ้าหน้าที่และนักศึกษามองไม่เห็นว่าต่างตรงไหน (thai_text.fold_sara_am)
-    result = _thai_edits(fold_sara_am(found_s), fold_sara_am(expected_s), spaces)
+    # ตัวเล็กบน/ล่างที่เก็บคนละลำดับ ("ท่ี" กับ "ที่") ก็เช่นกัน — เรียงลำดับมาตรฐานก่อน (_canonical_marks)
+    result = _thai_edits(_canonical_marks(fold_sara_am(found_s)),
+                         _canonical_marks(fold_sara_am(expected_s)), spaces)
     if result is None or not result[1]:
         return _NO_DIFF
     fg, edits = result
@@ -5107,11 +5211,16 @@ def analyze_diff(found, expected, spaces=False):
     - อังกฤษที่มีช่องว่าง: เทียบระดับคำ (เช่น ต่างที่ "REQUIREMENT" ต้องเป็น "REQUIREMENTS")
     """
     found_s, expected_s = soft(found), soft(expected)
-    if not found_s or not expected_s or norm(found_s) == norm(expected_s):
+    # ตรงกันทุกตัวอักษรรวมวรรณยุกต์/สระ/ำ = ไม่มีอะไรต้องชี้ (ต่างแค่ช่องว่าง/วรรคตอนยังไม่นับเหมือนเดิม)
+    if not found_s or not expected_s or same_spelling(found_s, expected_s):
         return _NO_DIFF
     if _THAI_LETTER.search(expected_s):
-        return _analyze_thai(found_s, expected_s, spaces)
-    return _analyze_latin(found_s, expected_s)
+        analysis = _analyze_thai(found_s, expected_s, spaces)
+    else:
+        analysis = _analyze_latin(found_s, expected_s)
+    if analysis.text and marks_only_difference(found_s, expected_s):
+        return analysis._replace(marks_only=True)
+    return analysis
 
 
 def describe_diff(found, expected, spaces=False):
@@ -5183,25 +5292,34 @@ class DetailText(str):
     """
     diff_tail = ""
     fix_steps = ()
+    # ต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์/ำ — Report.add ใช้ตัดสินสีเมื่อฟอนต์ของเล่มเพี้ยน
+    marks_only = False
 
-    def __new__(cls, text, diff_tail="", fix_steps=()):
+    def __new__(cls, text, diff_tail="", fix_steps=(), marks_only=False):
         obj = super().__new__(cls, text)
         obj.diff_tail = diff_tail
         obj.fix_steps = tuple(fix_steps)
+        obj.marks_only = bool(marks_only)
         return obj
 
 
 def found_with_diff(base, analysis):
     """ข้อความ "ที่พบ" ต่อท้ายด้วยจุดต่าง (ถ้ามี) พร้อมวิธีแก้ที่ข้อความสรุปจะใช้"""
     if not analysis.text:
-        return DetailText(base)
-    return DetailText(f"{base} {analysis.text}", analysis.text, analysis.steps)
+        return DetailText(base, marks_only=analysis.marks_only)
+    return DetailText(f"{base} {analysis.text}", analysis.text, analysis.steps,
+                      marks_only=analysis.marks_only)
 
 
 def _letters_keep_case(text):
-    """ตัวอักษรและตัวเลขล้วน โดย "คงตัวพิมพ์เล็ก-ใหญ่ไว้" — norm() แปลงเป็นตัวใหญ่หมด"""
-    text = _TH_MARKS.sub('', (text or '').replace('ำ', 'า'))
-    return re.sub(r'[^A-Za-zก-๙0-9]', '', text)
+    """ตัวอักษรและตัวเลขล้วน โดย "คงตัวพิมพ์เล็ก-ใหญ่ไว้" — norm() แปลงเป็นตัวใหญ่หมด
+
+    คงตัวสะกดไทยครบด้วย (วรรณยุกต์ สระบน-ล่าง การันต์ ำ — ดู spelling_key) เพราะผู้เรียกใช้ตัดสินว่า
+    "ต่างเฉพาะวรรคตอน/ช่องว่าง" ซึ่งผ่านได้ (สีเหลือง) — ถ้าตัดตัวเล็กทิ้ง ชื่อปริญญาที่สะกดวรรณยุกต์ผิด
+    จะหลุดเป็นเหลืองผ่าน ทั้งที่เป็นสะกดผิด (เจ้าหน้าที่สั่ง 6 ต.ค. 2569 ให้เป็นแดง)
+    """
+    units = _spelling_units(text, keep_case=True)
+    return _UNIT_SEP + _UNIT_SEP.join(units) + _UNIT_SEP if units else ''
 
 
 def degree_differs_only_in_spacing(expected, page_text):
@@ -5241,7 +5359,7 @@ def mismatch_detail(label, compared, expected=''):
         detail += ' ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่'
     elif compared['status'] == 'typo':
         detail += ' พิมพ์ผิดเล็กน้อย'
-    return DetailText(detail)
+    return DetailText(detail, marks_only=compared.get('marks_only', False))
 
 
 # ---------- "ชื่อเรื่องนี้เป็นภาษาอะไร" ----------
@@ -5445,7 +5563,7 @@ def title_mismatch_detail(label, compared, expected=''):
         if not analysis.text and compared['status'] == 'case':
             analysis = analyze_case_diff(compared['actual'], expected)
         return found_with_diff(detail, analysis)
-    return DetailText(detail)
+    return DetailText(detail, marks_only=compared.get('marks_only', False))
 
 
 def find_signature_date(text):
@@ -5930,13 +6048,14 @@ def _report_biography_heading(rep, printed, want, loc):
     "หน้าประวัติเล่มนี้เขียนหัวข้อแค่ "ประวัติ" ไม่ใช่ "ประวัติผู้วิจัย" หัวข้อประวัติผู้วิจัย
     ก็ควรต้องถูก" (เล่มจริง 6538041 SHPP/D) — ระบบหาหน้านี้เจอได้จากหัวข้อ "ประวัติ" /
     "ประวัติผู้เขียน" ด้วย (is_biography_heading) แต่หาเจอไม่ได้แปลว่าหัวข้อถูก
-    เทียบด้วย norm จึงไม่ฟ้องเรื่องตัวพิมพ์ ("Biography" กับ "BIOGRAPHY") หรือช่องว่าง
-    สีแดงแบบเดียวกับหัวข้อหน้าสารบัญที่ไม่ใช่ TABLE OF CONTENTS
+    ไม่ฟ้องเรื่องตัวพิมพ์ ("Biography" กับ "BIOGRAPHY") หรือช่องว่าง แต่ตัวสะกดไทยต้องครบทุกตัวรวมวรรณยุกต์/สระ
+    (same_spelling — เจ้าหน้าที่สั่ง 6 ต.ค. 2569) สีแดงแบบเดียวกับหัวข้อหน้าสารบัญที่ไม่ใช่ TABLE OF CONTENTS
     """
-    if not printed or norm(printed) == norm(want):
+    if not printed or same_spelling(printed, want):
         return
     rep.add("RED", "end_matter", loc,
-            f'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "{soft(printed)}"',
+            DetailText(f'หัวข้อหน้าประวัติผู้วิจัยเขียนว่า "{soft(printed)}"',
+                       marks_only=marks_only_difference(printed, want)),
             f'ต้องแก้เป็น "{want}"', "", "END.STRUCTURE")
 
 
@@ -5947,10 +6066,10 @@ def _report_toc_biography_heading(rep, raw, want, loc):
     ถ้าไม่ฟ้องตรงนี้ นักศึกษาแก้หัวข้อในหน้าจริงแล้วสารบัญยังเขียนว่า "ประวัติ" อยู่
     """
     head = soft(_strip_toc_page_number(raw or ""))
-    if not head or norm(head) == norm(want):
+    if not head or same_spelling(head, want):
         return
     rep.add("RED", "front_matter", loc,
-            f'สารบัญเขียนหัวข้อนี้ว่า "{head}"',
+            DetailText(f'สารบัญเขียนหัวข้อนี้ว่า "{head}"', marks_only=marks_only_difference(head, want)),
             f'หัวข้อในสารบัญต้องเป็น "{want}"',
             f'แก้หัวข้อในสารบัญเป็น "{want}"', "FRONT.TOC_CONTENT")
 
@@ -6100,9 +6219,28 @@ def canonical_title_status(actual_title, chapter_no, option):
     if compared['status'] == 'exact':
         return 'exact', compared, expected
     for variant in CANONICAL_ACCEPTED_VARIANTS.get((option, chapter_no), ()):
-        if norm(actual_title) == norm(variant):
+        if same_spelling(actual_title, variant):
             return 'variant', compared, expected
     return 'wrong', compared, expected
+
+
+def chapter_title_verdict(title, chapter_no, option, next_line=""):
+    """สถานะของชื่อบทหนึ่งฝั่ง (สารบัญหรือเนื้อหา) เทียบประกาศ — None ถ้าใช้ได้ ไม่งั้น (kind, compared, expected)
+
+    ชื่อที่เป็นแค่ต้นของชื่อในประกาศ ยอมรับได้ต่อเมื่อบรรทัดถัดไปต่อให้ครบจริง (ดู canonical_title_wrapped)
+    และชื่อที่ต่อครบแล้วยังต้องสะกดตรงทุกตัวรวมวรรณยุกต์/สระ/ำ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ถ้าไม่ตรง
+    ตัดสินจากชื่อที่ต่อครบ ข้อความจึงชี้จุดที่สะกดผิดได้ถูกที่ ไม่ใช่ยกมาแค่บรรทัดแรก
+    """
+    canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
+    kind, compared, expected = canonical_title_status(title, chapter_no, option)
+    if kind == 'exact':
+        return None
+    if canonical_title_wrapped(title, next_line, canon[chapter_no - 1]):
+        whole = f"{title} {_strip_toc_page_number(next_line)}"
+        if any(same_spelling(whole, candidate) for candidate in canon[chapter_no - 1]):
+            return None
+        return canonical_title_status(whole, chapter_no, option)
+    return kind, compared, expected
 
 
 # ระดับความตรงกับประกาศ — ตรงเป๊ะ > ตัวสะกดที่คู่มือยอมรับ > ไม่ตรงเลย
@@ -6278,6 +6416,17 @@ class Report:
         self.info = []
         self.human_checklist = []
         self.verification = []
+        # เล่มที่ฟอนต์ในไฟล์ทำให้อ่านตัวอักษรเพี้ยน (font_damage_score) — ฟอนต์แบบนี้ทำวรรณยุกต์/สระหายหรือกลายเป็น
+        # ตัวอื่นได้ ข้อที่ต่างกันแค่ตัวเล็กบน/ล่างหรือ ำ กับ า จึงแยกไม่ออกว่าเล่มพิมพ์ผิดหรือระบบอ่านผิด (ดู add)
+        self.marks_unreliable = False
+
+    def marks_doubtful(self, marks_only, read_text=""):
+        """จุดที่ต่างเฉพาะวรรณยุกต์/สระ/ำ แต่ระบบยืนยันไม่ได้ว่าอ่านถูก — ฟอนต์ของเล่มเพี้ยน หรือข้อความที่อ่านมามีร่องรอยเพี้ยน"""
+        return bool(marks_only) and (self.marks_unreliable or _has_read_defect(read_text))
+
+    def mismatch_status(self, marks_only, read_text=""):
+        """สถานะในตารางเทียบของจุดที่ไม่ตรง — ต้องตรงกับสีของการ์ดคู่กัน (ดู add)"""
+        return "pending" if self.marks_doubtful(marks_only, read_text) else "fail"
 
     def add_verification(self, topic, location, status, detail=""):
         """บันทึกผลเทียบข้อมูลอนุมัติรายตำแหน่ง
@@ -6306,6 +6455,12 @@ class Report:
         ข้ามการเทียบ — เป็นเรื่องของการกรอกฟอร์ม นักศึกษาทำอะไรกับเล่มก็ไม่หาย)
         """
         rule_id = rule_id or DEFAULT_RULE_BY_PART.get(part, "FORM.REQUIRED")
+        if zone == "RED" and self.marks_doubtful(getattr(found, "marks_only", False), found):
+            # สะกดต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์/ำ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569 ให้เป็นแดง) แต่ฟอนต์ของเล่มเพี้ยน
+            # หรือข้อความที่อ่านมามีร่องรอยเพี้ยน — "การอ่านที่เพี้ยนต้องไม่กลายเป็นคำตัดสินว่าเล่มไม่ผ่าน" จึงเป็นสีส้ม
+            # ให้เจ้าหน้าที่เปิดหน้าดู (แนวเดียวกับข้อชื่อนักศึกษาบนหน้าที่อ่านตัวเลขไม่ออก ซึ่งเจ้าหน้าที่สั่งให้ฟอนต์เพี้ยน
+            # เป็นสีส้ม ก.ย. 2569)
+            zone, fix, rule_id = FONT_UNREADABLE_ZONE, MARKS_UNRELIABLE_FIX, "FORM.FONT_UNREADABLE"
         # ไม่เติม "แก้ไขให้เป็นไปตามข้อกำหนด: <expected>" อัตโนมัติอีกแล้ว — มันคือการ
         # พูดซ้ำบรรทัด "ควรเป็น" ที่อยู่เหนือมันคำต่อคำ ทำให้การ์ดยาวขึ้นโดยไม่ได้ข้อมูล
         # เพิ่ม ข้อที่มีวิธีแก้จริงจะส่ง fix มาเอง ข้อที่ไม่ส่งก็ไม่ต้องมีบรรทัดนี้
@@ -6474,6 +6629,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 _pg.flush_cache()
             except Exception:
                 pass
+    # ฟอนต์ที่ทำตัวอักษรเพี้ยนหน้าหนึ่งก็ใช้ทั้งเล่ม — ตัวสะกดระดับวรรณยุกต์/สระของเล่มนี้เชื่อไม่ได้ (ดู Report.add)
+    rep.marks_unreliable = bool(font_damaged)
 
     all_norm = norm("\n".join(pages))
     doc_type = next((t for t, ms in TYPE_MARKERS.items()
@@ -6948,24 +7105,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # ฝั่งที่ต่างมากเข้าหมวด "ชื่อบทไม่ตรงประกาศ") จึงดูเหมือนเป็นคนละปัญหา
     # ตอนนี้รวมเป็นข้อเดียวต่อบท และบอกในข้อความว่าผิดที่ไหนบ้าง
     if chapters_mode == "strict":
-        canon = CANONICAL_OPT1 if option == 1 else CANONICAL_OPT2
         rule_id = "BODY.OPTION1" if option == 1 else "BODY.OPTION2"
         toc_by_ch = {c[0]: (_toc_chapter_title(c[3]), c[4], c[5]) for c in toc_ch}
         body_by_ch = ({c[0]: (c[1], c[2], c[4]) for c in body_ch}
                       if body_ch and BODY_RULES['check_body_title_against_canonical'] else {})
 
         def _title_status(title, cn, next_line=""):
-            """สถานะของชื่อบทหนึ่งฝั่ง — คืน None ถ้าถือว่าใช้ได้
-
-            ชื่อที่เป็นแค่ต้นของชื่อในประกาศ ยอมรับได้ต่อเมื่อบรรทัดถัดไปต่อให้ครบจริง
-            (ดู canonical_title_wrapped)
-            """
-            kind, compared, expected = canonical_title_status(title, cn, option)
-            if kind == 'exact':
-                return None
-            if canonical_title_wrapped(title, next_line, canon[cn - 1]):
-                return None
-            return kind, compared, expected
+            return chapter_title_verdict(title, cn, option, next_line)
 
         for cn in sorted(set(toc_by_ch) | set(body_by_ch)):
             if not (1 <= cn <= enforced_chapters):
@@ -6979,7 +7125,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
             expected_title = (toc_bad or body_bad)[2]
             both = bool(toc_bad and body_bad)
-            same = both and norm(toc_title) == norm(body_title)
+            same = both and same_spelling(toc_title, body_title)
             zone = ("ORANGE" if all(s[0] == 'variant' for s in (toc_bad, body_bad) if s)
                     else "RED")
             if both:
@@ -7288,7 +7434,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         missing_cover_items = [
             (label, expected_text)
             for label, expected_text in cover_required_items(cover_type, program_language)
-            if expected_text and norm(expected_text) not in norm(cover_text)
+            # ต้องสะกดตรงทุกตัวรวมวรรณยุกต์/สระ/ำ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ดู spelling_key
+            if expected_text and not spelled_in(expected_text, cover_text)
         ]
         for label, expected_text in missing_cover_items:
             snippet, ratio = _best_cover_match(expected_text, cover_text)
@@ -7390,7 +7537,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     compared = _title_as_printed(compared, spot_text,
                                                  main_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", spot_name,
-                                     "pass" if compared['status'] == 'exact' else "fail",
+                                     "pass" if compared['status'] == 'exact'
+                                     else rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", spot_name,
@@ -7406,7 +7554,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     compared = _title_as_printed(compared, pages[alt_abs],
                                                  alt_title, primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(alt_abs)})",
-                                     "pass" if compared['status'] == 'exact' else "fail",
+                                     "pass" if compared['status'] == 'exact'
+                                     else rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
@@ -7484,10 +7633,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # "ไม่เอาคำนำหน้า" ตามกติกาเดียวกัน (บฑ. มียศ แต่เล่มมักพิมพ์แค่ชื่อ-สกุล)
             expected_ack_name = _strip_student_title(
                 student_name_th if thai_book else person_name_sentence_case(student_name))
+            misspelled_at_end = ""
             if thai_book:
-                exact_at_end = norm(expected_ack_name) in norm(ack_tail_text)
-                name_elsewhere = norm(expected_ack_name) in norm(ack_full_text)
+                # ชื่อต้องสะกดตรงทุกตัวรวมวรรณยุกต์/สระ/ำ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ดู spelling_key
+                exact_at_end = spelled_in(expected_ack_name, ack_tail_text)
+                name_elsewhere = spelled_in(expected_ack_name, ack_full_text)
                 wrong_case = False
+                if not exact_at_end and norm(expected_ack_name) in norm(ack_tail_text):
+                    # ชื่อครบทุกตัวอักษรแต่วรรณยุกต์/สระ/ำ ไม่ตรง — ยกที่พิมพ์จริงมาชี้จุดต่าง ไม่ใช่บอกว่า "ไม่พบชื่อ"
+                    misspelled_at_end = _closest_run(ack_tail_text, expected_ack_name)
             else:
                 exact_at_end = expected_ack_name in ack_tail_text
                 name_elsewhere = expected_ack_name in ack_full_text
@@ -7495,6 +7649,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if not exact_at_end:
                 if wrong_case:
                     found_ack = f"พบชื่อผู้เขียนท้ายกิตติกรรมประกาศ แต่ตัวพิมพ์ไม่ตรงรูปแบบ: {ack_tail_text[-120:]}"
+                elif misspelled_at_end:
+                    found_ack = found_with_diff(
+                        f'ชื่อผู้เขียนท้ายกิตติกรรมประกาศเขียนว่า "{misspelled_at_end}"',
+                        analyze_diff(misspelled_at_end, expected_ack_name))
                 elif name_elsewhere:
                     found_ack = "พบชื่อผู้เขียนในกิตติกรรมประกาศ แต่ไม่อยู่ในส่วนท้าย"
                 else:
@@ -7529,7 +7687,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if printed_name:
                         compared = compare_values(printed_name, core_name, 'student_name')
                 if compared['status'] != 'exact':
-                    rep.add_verification("ชื่อนักศึกษา", spot_name, "fail",
+                    rep.add_verification("ชื่อนักศึกษา", spot_name,
+                                         rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                          compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อนักศึกษา", compared, core_name),
@@ -7630,7 +7789,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     compared = compare_values(printed_name, core3, 'student_name')
             if compared['status'] != 'exact':
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
-                                     "fail", compared['actual'])
+                                     rep.mismatch_status(compared.get('marks_only'), compared['actual']),
+                                     compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",
                         mismatch_detail(f"{nlbl}", compared, core3),
                         f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{core3}\"",
@@ -7763,7 +7923,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             f"ข้อมูลอนุมัติ: \"{expected_degree}\"",
                             "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FORM.DEGREE_SPACING")
                 else:
-                    rep.add_verification("ชื่อปริญญา", spot_name, "fail", compared['actual'])
+                    rep.add_verification("ชื่อปริญญา", spot_name,
+                                         rep.mismatch_status(compared.get('marks_only'), compared['actual']),
+                                         compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
                             mismatch_detail("ชื่อปริญญา", compared, expected_degree),
                             f"ต้องเป็น \"{expected_degree}\"",
@@ -7809,7 +7971,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         f'ต้องมีบรรทัด "{abbr}" อยู่ใต้บรรทัดชื่อและรหัสนักศึกษา',
                         "", "FORM.APPROVED_MATCH")
             else:
-                rep.add_verification("ชื่อปริญญา", vloc, "fail", compared['actual'])
+                rep.add_verification("ชื่อปริญญา", vloc,
+                                     rep.mismatch_status(compared.get('marks_only'), compared['actual']),
+                                     compared['actual'])
                 rep.add("RED", "front_matter", box,
                         mismatch_detail("ชื่อปริญญาแบบย่อ", compared, abbr),
                         degree_abbr_expected(abbr),
