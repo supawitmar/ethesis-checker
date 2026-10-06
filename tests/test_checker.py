@@ -2027,14 +2027,35 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
             block = source.split(marker, 1)[0][-260:]
             self.assertIn('rep.add("RED", "front_matter"', block, marker)
 
-    def test_the_signature_page_is_left_alone(self):
-        """หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template จึงห้ามตรวจคำเกิน"""
+    def test_signature_page_checks_extras_only_for_thai_books(self):
+        """เล่มอังกฤษวางชื่อปริญญากลางประโยค template ("for the degree of ...") ห้ามตรวจคำเกิน
+        ส่วนเล่มไทยวาง "ปริญญา..." บรรทัดของมันเอง ตรวจคำเกินเหมือนหน้าปก (ต.ค. 2569)"""
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("degree_spots = []", 1)[1][:900]
+        block = source.split("degree_spots = []", 1)[1][:1800]
         self.assertIn('("หน้าปก", cover_text, cover_degree, True,', block)
-        self.assertIn("sig_degree, False", block)
+        self.assertIn("sig_degree, thai_book,", block)
+        self.assertIn("cover_degree_line_expected(sig_degree, True)", block)
         # บรรทัด "ต้องเป็น" ของหน้าปกต้องมาจากถ้อยคำของ template ไม่ใช่ชื่อปริญญาเปล่า ๆ
         self.assertIn("cover_degree_line_expected(cover_degree, thai_book)", block)
+
+
+class ThaiSignaturePageDegreeLine(unittest.TestCase):
+    """หน้าลงนามเล่มไทย: บรรทัด "ปริญญา..." ห้ามมีคำเกิน (เล่มจริง PHMP/M ต.ค. 2569)"""
+
+    HEAD = ("สารนิพนธ์\nเรื่อง\nพฤติกรรมการดูแลสุขภาพช่องปาก\n"
+            "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n")
+    TAIL = ("\nวันที่ 28 กันยายน 2569\nคณะกรรมการที่ปรึกษาสารนิพนธ์\n"
+            "...........................\nประธานหลักสูตร\nสาธารณสุขศาสตรมหาบัณฑิต (ภาคพิเศษ)\n")
+
+    def test_extra_words_on_the_degree_line_are_found(self):
+        page = self.HEAD + "ปริญญาสาธารณสุขศาสตร์มหาบัณฑิต (ภาคพิเศษ)" + self.TAIL
+        self.assertEqual(checker_module.degree_line_extras(page, "สาธารณสุขศาสตรมหาบัณฑิต"),
+                         "ปริญญาสาธารณสุขศาสตร์มหาบัณฑิต (ภาคพิเศษ)")
+
+    def test_correct_degree_line_passes(self):
+        """บรรทัดประธานหลักสูตรด้านล่าง (หลังเส้นลงนาม) ต้องไม่ถูกยกมาเป็นคำเกิน"""
+        page = self.HEAD + "ปริญญาสาธารณสุขศาสตรมหาบัณฑิต" + self.TAIL
+        self.assertEqual(checker_module.degree_line_extras(page, "สาธารณสุขศาสตรมหาบัณฑิต"), "")
 
 
 class ChapterHeadingsMustUseArabicNumerals(unittest.TestCase):

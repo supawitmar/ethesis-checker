@@ -7222,10 +7222,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 degree_spots.append(("หน้าปก", cover_text, cover_degree, True,
                                      cover_degree_line_expected(cover_degree, thai_book)))
             if sig_degree:
-                # หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template ("for the degree of ...")
-                # มีคำอื่นล้อมรอบโดยชอบ จึงตรวจคำเกินไม่ได้
+                # เล่มอังกฤษวางชื่อปริญญาไว้กลางประโยค template ("for the degree of ...")
+                # มีคำอื่นล้อมรอบโดยชอบ จึงตรวจคำเกินไม่ได้ · เล่มไทยวาง "ปริญญา..." ไว้
+                # บรรทัดของมันเองเหมือนหน้าปก จึงตรวจคำเกินด้วยกฎเดียวกัน (เจ้าหน้าที่ ต.ค. 2569:
+                # หน้าลงนามพิมพ์ "ปริญญาสาธารณสุขศาสตร์มหาบัณฑิต (ภาคพิเศษ)" "ต้องผิดกฎเดียวกับ"
+                # หน้าปก — เดิมผ่านเพราะถามแค่ว่ามีชื่อปริญญาอยู่บนหน้าไหม)
                 degree_spots.extend((f"หน้าลงนาม {k + 1} ({page_ref(idx)})", pages[idx],
-                                     sig_degree, False, sig_degree)
+                                     sig_degree, thai_book,
+                                     cover_degree_line_expected(sig_degree, True)
+                                     if thai_book else sig_degree)
                                     for k, idx in enumerate(sig_pages))
             for spot_name, spot_text, expected_degree, own_line, expected_line in degree_spots:
                 compared = compare_reference_text(spot_text, expected_degree, 'degree', degree_line=True)
