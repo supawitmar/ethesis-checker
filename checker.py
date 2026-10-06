@@ -691,6 +691,7 @@ _STUDENT_TITLE_PREFIX = re.compile(
     r'(?:พล|พัน|ร้อย|พันจ่า|จ่าสิบ|สิบ|นาวา|เรือ)(?:เอก|โท|ตรี)(?:หญิง)?|'
     r'นางสาว|นาง|นาย(?=\s|[ก-๙])|'
     r'(?:[A-Z]\.){2,4}'
+    r'|Dental\s+Surgeon\b|Dentist\b|Pharmacist\b'
     r'|(?:Pol\.?\s*)?(?:Gen|Lt|Col|Maj|Capt|Sgt|Cpl|Pvt|CPO|PO|Cdr|Adm|Lieut|'
     r'Mr|Mrs|Miss|Ms|Dr)\b\.?'
     r')\s*\.?\s*\d*\s*', re.I)
@@ -2558,17 +2559,9 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 def strip_name_prefix(name):
     """Remove honorifics that must not be printed as part of the student name."""
     return re.sub(
-        r'^(?:นาย|นางสาว|นาง|ดร\.?|MR\.?|MRS\.?|MISS|MS\.?|DR\.?)\s*',
+        r'^(?:นาย|นางสาว|นาง|ดร\.?|DENTAL\s+SURGEON|DENTIST|PHARMACIST|MR\.?|MRS\.?|MISS|MS\.?|DR\.?)\s*',
         '', soft(name), flags=re.I,
     )
-
-
-def _printed_name_is_approved_minus_prefix(printed, approved):
-    """ชื่อที่พิมพ์ในเล่มเท่ากับชื่อตามอนุมัติ "หลังตัดคำนำหน้าไม่กี่คำแรก" (เหลือ >= 2 คำ)"""
-    got = (printed or "").upper().split()
-    want = (approved or "").upper().split()
-    return (len(got) >= 2 and len(want) > len(got)
-            and [norm(w) for w in want[-len(got):]] == [norm(w) for w in got])
 
 
 def person_name_sentence_case(name):
@@ -7129,20 +7122,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 printed_name = abstract_printed_name(pages[aidx])
                 if printed_name:
                     compared = compare_values(printed_name, core3, 'student_name')
-            if compared['status'] != 'exact' and _printed_name_is_approved_minus_prefix(
-                    compared['actual'], core3):
-                # เล่มพิมพ์ "ชื่อ-สกุล" ล้วนตามกติกาของบทคัดย่อ แต่ข้อมูลอนุมัติมีคำนำหน้านำหน้าชื่อ
-                # ที่ระบบไม่รู้จัก (เช่น "Dental Surgeon") — ไม่ตัดคำนำหน้าทิ้งแล้วเทียบเงียบ ๆ
-                # และไม่ฟันธงแดง เพราะแยกไม่ออกว่านักศึกษาตัดถูกหรือพิมพ์ชื่อขาด (เจ้าหน้าที่ ต.ค. 2569
-                # "เทียบกับชื่อเต็มตามอนุมัติ ไม่ตรง = ส้ม")
-                rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
-                                     "pending", compared['actual'])
-                rep.add("ORANGE", "front_matter", f"{albl} ({page_ref(aidx)})",
-                        f'{nlbl}ในเล่มเขียนว่า "{compared["actual"]}" '
-                        f'ไม่ตรงกับข้อมูลอนุมัติ "{core3}" เพราะข้อมูลอนุมัติมีคำนำหน้านำหน้าชื่อ',
-                        f'หน้า{albl}ต้องมีเฉพาะชื่อ-สกุล ไม่มีคำนำหน้า ถ้าชื่อในเล่มตรงกับผู้สอบแล้วให้กดผ่าน',
-                        "เจ้าหน้าที่ตรวจชื่อด้วยตา", "FORM.APPROVED_MATCH")
-            elif compared['status'] != 'exact':
+            if compared['status'] != 'exact':
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      "fail", compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",

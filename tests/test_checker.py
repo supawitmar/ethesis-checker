@@ -112,11 +112,9 @@ class ExactReferenceTests(unittest.TestCase):
             (False, "case"),
         )
 
-    def test_printed_name_without_unknown_approved_prefix_is_flagged_for_staff(self):
-        from checker import _printed_name_is_approved_minus_prefix as f
-        self.assertTrue(f("WIPAWEE APIRATANACHAI", "Dental Surgeon WIPAWEE APIRATANACHAI"))
-        self.assertFalse(f("WIPAWEE APIRATANACHI", "Dental Surgeon WIPAWEE APIRATANACHAI"))
-        self.assertFalse(f("WIPAWEE APIRATANACHAI", "WIPAWEE APIRATANACHAI"))
+    def test_dental_surgeon_is_not_part_of_name(self):
+        self.assertEqual(strip_name_prefix("Dental Surgeon WIPAWEE APIRATANACHAI"),
+                         "WIPAWEE APIRATANACHAI")
 
     def test_student_honorific_is_not_part_of_name(self):
         self.assertEqual(strip_name_prefix("Mr. WISIT KAWAYAPANIK"), "WISIT KAWAYAPANIK")

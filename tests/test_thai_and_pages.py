@@ -16,6 +16,7 @@ from checker import (
     classify,
     _report_student_name_style,
     _strip_student_title,
+    _student_title_in_page,
     _rejoin_thai_marks,
     _sig_words,
     _page_count_issue,
@@ -597,6 +598,17 @@ class StudentNameIgnoresTitles(unittest.TestCase):
         self.assertEqual(_strip_student_title("Lt. Col. Somchai Jaidee"),
                          "Somchai Jaidee")
         self.assertEqual(_strip_student_title("Miss Suda Deengam"), "Suda Deengam")
+
+    def test_strips_profession_title_before_english_name(self):
+        self.assertEqual(_strip_student_title("Dental Surgeon WIPAWEE APIRATANACHAI"),
+                         "WIPAWEE APIRATANACHAI")
+
+    def test_book_that_prints_the_title_is_flagged_orange(self):
+        """เล่มพิมพ์ "Dental Surgeon" นำหน้าชื่อบนบทคัดย่อ = ส้ม (ข้อมูลอนุมัติตัดคำนำหน้าก่อนเทียบ)"""
+        self.assertEqual(
+            _student_title_in_page("Dental Surgeon WIPAWEE APIRATANACHAI 6836119 PHMP/M",
+                                   "WIPAWEE APIRATANACHAI"),
+            "Dental Surgeon")
 
     def test_plain_names_are_untouched(self):
         for raw in ("ณัชนพ เพชรสุข", "NUTCHANOP PETSUK", "นภา ใจดี",
