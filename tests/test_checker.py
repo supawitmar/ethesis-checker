@@ -1712,7 +1712,7 @@ class SignatureInstitutionCellTests(unittest.TestCase):
     def _run(self, kind, bottom, english=False):
         rep = Report()
         _check_signature_institution(rep, kind, bottom, self.APPROVED, english)
-        return [i["found"] for i in rep.zones["ORANGE"]]
+        return [i["found"] for i in rep.zones["RED"] + rep.zones["ORANGE"]]
 
     def test_advisory_page_wants_program_subject(self):
         ok = self._run("advisory",
@@ -1748,6 +1748,20 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         self.assertIn("เขียนว่า", bad[0])
         self.assertIn("สังคมศาสตร์สิ่งแวดล้ม", bad[0])       # ค่าที่พบจริงในเล่ม
         self.assertNotIn("ไม่พบ", bad[0])
+
+    def test_misspelt_box_is_red_but_a_missing_one_is_orange(self):
+        """สะกดผิด = แดง (เจ้าหน้าที่ ต.ค. 2569) · หาไม่เจอเลย = ส้ม (อาจเป็นระบบอ่านแถวล่างไม่ครบ)"""
+        rep = Report()
+        _check_signature_institution(rep, "advisory",
+                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
+                                     "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม",
+                                     self.APPROVED, False)
+        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (1, 0))
+        rep = Report()
+        _check_signature_institution(rep, "advisory",
+                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร",
+                                     self.APPROVED, False)
+        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (0, 1))
 
     def test_completely_absent_subject_still_says_not_found(self):
         """ไม่มีอะไรใกล้เคียงเลย ต้องคงข้อความ "ไม่พบ" ไว้ ไม่ใช่เดาสุ่มมาโชว์"""
@@ -3780,7 +3794,8 @@ class TheProgrammeChairBoxReportsASpellingMistakeInTheBooksCase(unittest.TestCas
         checker_module._institution_mismatch(
             rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT, bottom,
             "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
-        return rep.zones["ORANGE"][0]
+        self.assertEqual(rep.zones["ORANGE"], [])        # สะกดผิด = แดง (ต.ค. 2569)
+        return rep.zones["RED"][0]
 
     def test_it_says_misspelled_and_keeps_the_books_case(self):
         issue = self._issue("Dean, Faculty of Graduate Studies Program Director "
@@ -3795,8 +3810,7 @@ class TheProgrammeChairBoxReportsASpellingMistakeInTheBooksCase(unittest.TestCas
         checker_module._institution_mismatch(
             rep, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "ชื่อสาขา", self.WANT,
             self.PRINTED, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
-        summary = checker_module.plain_summary(checker_module.check_result(rep),
-                                               failed=["ORANGE:0"])
+        summary = checker_module.plain_summary(checker_module.check_result(rep))
         self.assertIn('ต้องแก้เป็น "Public Health Infectious Diseases and Epidemiology"', summary)
 
     def test_an_all_caps_box_gets_an_all_caps_correction(self):
@@ -7194,7 +7208,7 @@ class EveryFormFieldThatTheBookPrintsIsCompared(unittest.TestCase):
     def _chair(self, bottom, degree_field, degree, english=False):
         rep = Report()
         _check_signature_institution(rep, "advisory", bottom, {degree_field: degree}, english)
-        return [i["found"] for i in rep.zones["ORANGE"]]
+        return [i["found"] for i in rep.zones["RED"] + rep.zones["ORANGE"]]
 
     def test_the_degree_name_in_the_programme_chair_box_is_checked(self):
         found = self._chair(self.THAI_CHAIR, "degree_cover_th", "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")

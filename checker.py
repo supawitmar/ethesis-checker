@@ -1577,14 +1577,20 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
     สะกดผิด ต้องบอกว่าสะกดผิด และค่าที่ต้องแก้เป็นต้องใช้ตัวพิมพ์ตามที่เล่มพิมพ์
     """
     near = _closest_run(bottom_text, want)
+    misspelt = False
     if near:
         want = match_printed_case(want, near)
         analysis = analyze_diff(near, want)
+        misspelt = bool(analysis.text)
         found_msg = (found_with_diff(f'{box} สะกด{label}ผิด เขียนว่า "{near}"', analysis)
-                     if analysis.text else f'{box} เขียนว่า "{near}"')
+                     if misspelt else f'{box} เขียนว่า "{near}"')
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
-    rep.add("ORANGE", "front_matter", loc, found_msg,
+    # สะกดผิด (เจอข้อความแล้ว ชี้จุดต่างได้) = แดง ตามกติกาตัวสะกดไทย "ต่างทุกตัว = สะกดผิด = แดง"
+    # (เจ้าหน้าที่ ต.ค. 2569: ช่องประธานหลักสูตรพิมพ์ "สาธารณสุขศาสตร์มหาบัณฑิต" (มีการันต์)
+    # "สะกดผิดแบบนี้ควรแดง") · หาข้อความไม่เจอเลย = ส้ม เพราะแยกไม่ออกว่าเล่มขาดหรือระบบอ่าน
+    # แถวล่างของตารางลายเซ็นมาไม่ครบ
+    rep.add("RED" if misspelt else "ORANGE", "front_matter", loc, found_msg,
             f'ข้อความใต้ลายเซ็นต้องมี{label} "{want}"',
             f"โปรดตรวจ{label}มุมล่างขวาให้ถูกต้อง", rule_id)
 

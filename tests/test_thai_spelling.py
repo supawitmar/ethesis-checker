@@ -187,13 +187,14 @@ class EachCheckJudgesSpellingStrictly(unittest.TestCase):
         self.assertEqual(rep.zones["RED"], [])
         self.assertEqual(rep.verification[0]["checks"][0]["status"], "pass")
 
-    def test_the_faculty_box_with_a_missing_karan_is_orange_like_any_spelling_slip_there(self):
+    def test_the_faculty_box_with_a_missing_karan_is_red_like_any_spelling_slip(self):
+        """เจ้าหน้าที่ ต.ค. 2569: การันต์ต่างในช่องประธานหลักสูตร/คณบดี "สะกดผิดแบบนี้ควรแดง" """
         rep = Report()
         checker_module._check_signature_institution(
             rep, "exam", "คณบดี บัณฑิตวิทยาลัย คณบดี คณะสาธารณสุขศาสตร", {"faculty": "คณะสาธารณสุขศาสตร์"},
             False, "หน้าลงนาม 2 ", " (หน้า ข)")
-        self.assertEqual(len(rep.zones["ORANGE"]), 1)
-        card = rep.zones["ORANGE"][0]
+        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (1, 0))
+        card = rep.zones["RED"][0]
         self.assertEqual(card["diff_tail"], 'ต่างที่ "ร" ต้องเป็น "ร์"')
         self.assertIn('ศาสตร์"', card["fix_steps"][0])          # วิธีแก้ยกทั้งคำมาให้เทียบ
 
@@ -210,7 +211,7 @@ class EachCheckJudgesSpellingStrictly(unittest.TestCase):
         checker_module._check_signature_institution(
             rep, "advisory", "ประธานหลักสูตร วิทยาศาสตรมหาบัณฑิด สาขาวิชาโรคติดเชือ",
             {"degree_cover_th": "วิทยาศาสตรมหาบัณฑิต (โรคติดเชื้อ)"}, False, "หน้าลงนาม 1 ", " (หน้า ก)")
-        self.assertEqual([("ชื่อสาขา" in i["found"], "ชื่อปริญญา" in i["found"]) for i in rep.zones["ORANGE"]],
+        self.assertEqual([("ชื่อสาขา" in i["found"], "ชื่อปริญญา" in i["found"]) for i in rep.zones["RED"]],
                          [(True, False), (False, True)])
 
     def test_the_abstract_committee_heading_with_a_missing_tone_mark_is_red(self):
