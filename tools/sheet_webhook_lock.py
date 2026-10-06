@@ -27,8 +27,12 @@ def version_and_hash():
     """เลขเวอร์ชันในไฟล์ กับลายนิ้วมือของ "เนื้อไฟล์ที่ไม่รวมบรรทัดเลขเวอร์ชัน"
 
     ไม่รวมบรรทัดเลขเวอร์ชัน เพราะการขยับเลขอย่างเดียวไม่ใช่การแก้พฤติกรรม
+
+    ปิดท้ายบรรทัดแบบ CRLF นับเป็นเนื้อเดียวกับ LF — git บน Windows (core.autocrlf=true) checkout ไฟล์นี้เป็น CRLF
+    ลายนิ้วมือที่บันทึกไว้คิดจาก LF โคลนใหม่บน Windows จึงฟ้องว่าเนื้อไฟล์เปลี่ยนทุกครั้ง ทั้งที่ไม่ได้แก้ (เจอ 6 ต.ค. 2569
+    ตอนรันเทสต์แยกทีละ commit) — CI บน Linux ไม่เจอเพราะ checkout เป็น LF
     """
-    text = io.open(SCRIPT, encoding="utf-8", newline="").read()
+    text = io.open(SCRIPT, encoding="utf-8", newline="").read().replace("\r\n", "\n")
     found = _VERSION_LINE.search(text)
     if not found:
         raise SystemExit("หาบรรทัด var SCRIPT_VERSION ในไฟล์ไม่เจอ")

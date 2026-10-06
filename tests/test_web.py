@@ -1623,6 +1623,33 @@ class SavingTheResultToTheSheet(unittest.TestCase):
                                lambda: (lock.saved()["version"], "0" * 64)):
             self.assertTrue(lock.problems())
 
+    def test_line_endings_alone_are_not_an_edit(self):
+        """git บน Windows (core.autocrlf=true) checkout ไฟล์ .gs เป็น CRLF — ลายนิ้วมือต้องเท่ากับไฟล์ LF
+        (เดิมโคลนใหม่บน Windows แล้วเทสต์ข้างบนตกเสมอ ทั้งที่เนื้อไฟล์ไม่ได้เปลี่ยน)"""
+        import tempfile
+        import tools.sheet_webhook_lock as lock
+        lf = lock.SCRIPT.read_bytes().replace(b"\r\n", b"\n")
+        results = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data in (("lf.gs", lf), ("crlf.gs", lf.replace(b"\n", b"\r\n"))):
+                path = Path(tmp) / name
+                path.write_bytes(data)
+                with mock.patch.object(lock, "SCRIPT", path):
+                    results.append(lock.version_and_hash())
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0][1], lock.saved()["sha256"])
+
+    def test_a_real_edit_still_changes_the_fingerprint(self):
+        """ควบคุมเชิงลบของข้อบน — การแปลงท้ายบรรทัดต้องไม่ทำให้การแก้เนื้อหาจริงหลุด"""
+        import tempfile
+        import tools.sheet_webhook_lock as lock
+        lf = lock.SCRIPT.read_bytes().replace(b"\r\n", b"\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edited.gs"
+            path.write_bytes(lf + b"\n// edited\n")
+            with mock.patch.object(lock, "SCRIPT", path):
+                self.assertNotEqual(lock.version_and_hash()[1], lock.saved()["sha256"])
+
     def test_the_token_goes_to_the_sheet_but_never_back_to_the_browser(self):
         response, sent = self._save()
         self.assertEqual(sent["token"], "secret-token")
