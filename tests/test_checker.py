@@ -29,6 +29,10 @@ from checker import (
     issue_sort_key,
     summary_section,
     _report_abstract_title_format,
+    _report_abstract_title_dots,
+    degree_line_search_text,
+    _report_abstract_title_dots,
+    degree_line_search_text,
     _report_missing_abstract_language,
     toc_page_mismatch_is_appendix_alt,
     _extract_page_label,
@@ -107,6 +111,10 @@ class ExactReferenceTests(unittest.TestCase):
             ),
             (False, "case"),
         )
+
+    def test_dental_surgeon_is_not_part_of_name(self):
+        self.assertEqual(strip_name_prefix("Dental Surgeon WIPAWEE APIRATANACHAI"),
+                         "WIPAWEE APIRATANACHAI")
 
     def test_student_honorific_is_not_part_of_name(self):
         self.assertEqual(strip_name_prefix("Mr. WISIT KAWAYAPANIK"), "WISIT KAWAYAPANIK")
@@ -1340,6 +1348,43 @@ class SignatureCommitteeTests(unittest.TestCase):
         self.assertEqual(_degree_subject("No Parens Here"), "")
 
 
+class AbstractTitleDotLeader(unittest.TestCase):
+    """เส้นประ "………" ใต้ชื่อเรื่องบนหน้าบทคัดย่อ (เล่มจริง ต.ค. 2569) ต้องถูกฟ้องเอง
+    และต้องไม่ทำให้ระบบหาบรรทัด "ส.ม." ไม่เจอ"""
+
+    DOTS = "…………………………………………………………………………………………"
+    STUDENT = {"text": "วิภาวี อภิรัตนาชัย 6836119 PHMP/ M", "x0": 70.9, "bold_ratio": 0.0}
+    TITLE = {"text": "พฤติกรรมการดูแลสุขภาพช่องปาก", "x0": 70.9, "bold_ratio": 0.0}
+
+    def _reds(self, *title_lines):
+        rep = Report()
+        _report_abstract_title_dots(rep, list(title_lines) + [self.STUDENT],
+                                    "บทคัดย่อไทย (หน้า ง)")
+        return [i["found"] for i in rep.zones["RED"]]
+
+    def test_dotted_line_under_title_is_red(self):
+        found = self._reds(self.TITLE, {"text": self.DOTS, "x0": 70.9, "bold_ratio": 0.0})
+        self.assertEqual(len(found), 1)
+        self.assertIn("เส้นประ", found[0])
+
+    def test_clean_title_passes(self):
+        self.assertEqual(self._reds(self.TITLE), [])
+
+    def test_abstract_page_ignores_dots_everywhere(self):
+        page = f"ง\nพฤติกรรมการดูแลสุขภาพช่องปาก\n{self.DOTS}\nวิภาวี อภิรัตนาชัย 6836119 PHMP/ M\nส.ม.\n"
+        self.assertIn("ส.ม.", degree_line_search_text(page, abstract=True))
+        self.assertEqual(compare_reference_text(page, "ส.ม.", "degree", degree_line=True,
+                                                abstract=True)["status"], "exact")
+
+    def test_abstract_page_still_stops_at_committee_heading(self):
+        page = "ง\nส.ม.\nคณะกรรมการที่ปรึกษาสารนิพนธ์: ก, ปร.ด.\n"
+        self.assertNotIn("ปร.ด.", degree_line_search_text(page, abstract=True))
+
+    def test_signature_pages_still_stop_at_dots(self):
+        page = "ง\nส.ม.\n" + self.DOTS + "\nPh.D.\n"
+        self.assertNotIn("Ph.D.", degree_line_search_text(page))
+
+
 class AbstractTitleMustBeLeftAligned(unittest.TestCase):
     """ชื่อเรื่องบนหน้าบทคัดย่อต้องชิดซ้าย ไม่ใช่กึ่งกลาง/ชิดขวา
 
@@ -1981,20 +2026,41 @@ class TheDegreeLineMustNotCarryExtraWords(unittest.TestCase):
         self.assertIn(
             "extras = degree_line_extras(spot_text, expected_degree) if own_line",
             source)
-        self.assertIn("extras = degree_line_extras(abstract_text, abbr)", source)
+        self.assertIn("extras = degree_line_extras(abstract_text, abbr, abstract=True)", source)
         for marker in ('บรรทัดชื่อปริญญาในเล่มเขียนว่า',
                        'บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน'):
             block = source.split(marker, 1)[0][-260:]
             self.assertIn('rep.add("RED", "front_matter"', block, marker)
 
-    def test_the_signature_page_is_left_alone(self):
-        """หน้าลงนามวางชื่อปริญญาไว้กลางประโยค template จึงห้ามตรวจคำเกิน"""
+    def test_signature_page_checks_extras_only_for_thai_books(self):
+        """เล่มอังกฤษวางชื่อปริญญากลางประโยค template ("for the degree of ...") ห้ามตรวจคำเกิน
+        ส่วนเล่มไทยวาง "ปริญญา..." บรรทัดของมันเอง ตรวจคำเกินเหมือนหน้าปก (ต.ค. 2569)"""
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("degree_spots = []", 1)[1][:900]
+        block = source.split("degree_spots = []", 1)[1][:1800]
         self.assertIn('("หน้าปก", cover_text, cover_degree, True,', block)
-        self.assertIn("sig_degree, False", block)
+        self.assertIn("sig_degree, thai_book,", block)
+        self.assertIn("cover_degree_line_expected(sig_degree, True)", block)
         # บรรทัด "ต้องเป็น" ของหน้าปกต้องมาจากถ้อยคำของ template ไม่ใช่ชื่อปริญญาเปล่า ๆ
         self.assertIn("cover_degree_line_expected(cover_degree, thai_book)", block)
+
+
+class ThaiSignaturePageDegreeLine(unittest.TestCase):
+    """หน้าลงนามเล่มไทย: บรรทัด "ปริญญา..." ห้ามมีคำเกิน (เล่มจริง PHMP/M ต.ค. 2569)"""
+
+    HEAD = ("สารนิพนธ์\nเรื่อง\nพฤติกรรมการดูแลสุขภาพช่องปาก\n"
+            "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร\n")
+    TAIL = ("\nวันที่ 28 กันยายน 2569\nคณะกรรมการที่ปรึกษาสารนิพนธ์\n"
+            "...........................\nประธานหลักสูตร\nสาธารณสุขศาสตรมหาบัณฑิต (ภาคพิเศษ)\n")
+
+    def test_extra_words_on_the_degree_line_are_found(self):
+        page = self.HEAD + "ปริญญาสาธารณสุขศาสตร์มหาบัณฑิต (ภาคพิเศษ)" + self.TAIL
+        self.assertEqual(checker_module.degree_line_extras(page, "สาธารณสุขศาสตรมหาบัณฑิต"),
+                         "ปริญญาสาธารณสุขศาสตร์มหาบัณฑิต (ภาคพิเศษ)")
+
+    def test_correct_degree_line_passes(self):
+        """บรรทัดประธานหลักสูตรด้านล่าง (หลังเส้นลงนาม) ต้องไม่ถูกยกมาเป็นคำเกิน"""
+        page = self.HEAD + "ปริญญาสาธารณสุขศาสตรมหาบัณฑิต" + self.TAIL
+        self.assertEqual(checker_module.degree_line_extras(page, "สาธารณสุขศาสตรมหาบัณฑิต"), "")
 
 
 class ChapterHeadingsMustUseArabicNumerals(unittest.TestCase):
