@@ -710,6 +710,12 @@ var TR = [
   [/ชื่อเรื่องบนหน้าบทคัดย่อไม่ได้จัดชิดซ้าย/g, 'The thesis title on the abstract page is not left-aligned'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องจัดชิดซ้าย ไม่ใช่กึ่งกลางหรือชิดขวา/g, 'The thesis title on the abstract page must be left-aligned, not centred or right-aligned'],
   [/แก้การจัดวางชื่อเรื่องบนหน้าบทคัดย่อให้ชิดซ้าย/g, 'Change the alignment of the thesis title on the abstract page to left'],
+  [/ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย/g, 'The thesis title on the abstract page has a dotted line or ellipsis (.....) after it'],
+  [/ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา/g, 'The thesis title on the abstract page must contain only the title, with no dotted line or ellipsis'],
+  [/(ชื่อภาษาอังกฤษ|ชื่อภาษาไทย|ชื่อนักศึกษา)ในเล่มเขียนว่า ("[^"]*") ไม่ตรงกับข้อมูลอนุมัติ ("[^"]*") เพราะข้อมูลอนุมัติมีคำนำหน้านำหน้าชื่อ/g, 'The $1 in the document reads $2, which does not match the approved data $3 because the approved data has a title before the name'],
+  [/หน้า(.+)ต้องมีเฉพาะชื่อ-สกุล ไม่มีคำนำหน้า ถ้าชื่อในเล่มตรงกับผู้สอบแล้วให้กดผ่าน/g, 'The $1 page must contain only the name, with no title; if the name in the document matches the student, mark it as passed'],
+  [/เจ้าหน้าที่ตรวจชื่อด้วยตา/g, 'Staff to check the name by eye'],
+  [/ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก/g, 'Remove the dotted line or ellipsis below the thesis title'],
   // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
   [/บทคัดย่อไม่ครบถ้วน ขาดบทคัดย่อภาษาอังกฤษ \(พบเฉพาะบทคัดย่อภาษาไทย \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete: the English abstract is missing (only the Thai abstract was found, page $1)'],
   [/บทคัดย่อไม่ครบถ้วน ขาดบทคัดย่อภาษาไทย \(พบเฉพาะบทคัดย่อภาษาอังกฤษ \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete: the Thai abstract is missing (only the English abstract was found, page $1)'],
