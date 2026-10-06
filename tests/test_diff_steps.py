@@ -527,14 +527,15 @@ class TheStepsCanBeFollowedOneByOne(unittest.TestCase):
 
 
 class TheAlternateTitleCardNamesItsLanguage(unittest.TestCase):
-    """เจ้าหน้าที่ (ต.ค. 2569): ข้อความต้องบอกภาษา "ชื่อเรื่องภาษาไทยไม่ตรงกับข้อมูลในระบบ"
+    """เจ้าหน้าที่ (ต.ค. 2569): ข้อความต้องบอกภาษา "ชื่อเรื่องภาษาไทยในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ"
     ไม่ใช่ "ชื่อเรื่องอีกภาษา..." ที่นักศึกษาต้องเดาเองว่าหมายถึงชื่อไหน"""
 
     def test_run_check_names_the_language_not_the_other_one(self):
         import inspect
         import checker as checker_module
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn('alt_word = "ชื่อเรื่องภาษาอังกฤษ" if thai_book else "ชื่อเรื่องภาษาไทย"', source)
+        self.assertIn('"ชื่อเรื่องภาษาอังกฤษในรูปเล่ม " if thai_book', source)
+        self.assertIn('else "ชื่อเรื่องภาษาไทยในรูปเล่ม ")', source)
         self.assertIn("title_mismatch_detail(alt_word, compared, alt_title)", source)
         self.assertNotIn('title_mismatch_detail("ชื่อเรื่องอีกภาษา"', source)
 
@@ -542,11 +543,12 @@ class TheAlternateTitleCardNamesItsLanguage(unittest.TestCase):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
         compared = compare_reference_text(ABSTRACT_PAGE, APPROVED_TITLE, "title")
-        for word in ("ชื่อเรื่องภาษาไทย", "ชื่อเรื่องภาษาอังกฤษ"):
+        for word in ("ชื่อเรื่องภาษาไทยในรูปเล่ม ", "ชื่อเรื่องภาษาอังกฤษในรูปเล่ม "):
             line = str(title_mismatch_detail(word, compared, APPROVED_TITLE))
             self.assertTrue(line.startswith(word + "ไม่ตรงกับข้อมูลในระบบ: "), line)
             en = i18n.tr_en(line, pairs)
             self.assertEqual(i18n.translation_problems(line, en), [], (line, en))
+            self.assertIn("title in the document does not match", en)
 
 
 class TheCardKeepsItsWordsButCarriesTheSteps(unittest.TestCase):

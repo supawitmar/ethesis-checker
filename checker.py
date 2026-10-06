@@ -1570,7 +1570,7 @@ def match_printed_case(want, printed):
     return re.sub(r"[A-Za-z][A-Za-z'-]*", recase, want)
 
 
-def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
+def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id, box_read=False):
     """ฟ้องช่องสถาบันที่ข้อความไม่ตรง — บอกด้วยว่าเล่มเขียนว่าอะไรและต่างตรงไหน
 
     เทียบแบบไม่สนตัวพิมพ์เล็ก-ใหญ่ (ตัวพิมพ์ตาม template ถูกแล้ว) ข้อที่ขึ้นจึงเป็นเรื่อง
@@ -1588,11 +1588,33 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
     # สะกดผิด (เจอข้อความแล้ว ชี้จุดต่างได้) = แดง ตามกติกาตัวสะกดไทย "ต่างทุกตัว = สะกดผิด = แดง"
     # (เจ้าหน้าที่ ต.ค. 2569: ช่องประธานหลักสูตรพิมพ์ "สาธารณสุขศาสตร์มหาบัณฑิต" (มีการันต์)
-    # "สะกดผิดแบบนี้ควรแดง") · หาข้อความไม่เจอเลย = ส้ม เพราะแยกไม่ออกว่าเล่มขาดหรือระบบอ่าน
-    # แถวล่างของตารางลายเซ็นมาไม่ครบ
-    rep.add("RED" if misspelt else "ORANGE", "front_matter", loc, found_msg,
+    # "สะกดผิดแบบนี้ควรแดง")
+    # หาไม่เจอเลย แยกสองกรณี (เจ้าหน้าที่ ต.ค. 2569: "หาไม่เจอ นี่มันคือระบบไม่เจอ หรือไม่มีในเล่ม
+    # ถ้าไม่มีในเล่ม แดง"): ระบบอ่านช่องนี้ได้ (box_read — เจอตำแหน่งของช่องขวาในแถวล่าง) แต่ไม่มี
+    # ข้อความนั้น = เล่มไม่มี = แดง · อ่านช่องนี้ไม่ได้เลย = ส้ม เพราะแยกไม่ออกว่าเล่มขาดหรือระบบอ่านไม่ครบ
+    zone = "RED" if (misspelt or (not near and box_read)) else "ORANGE"
+    rep.add(zone, "front_matter", loc, found_msg,
             f'ข้อความใต้ลายเซ็นต้องมี{label} "{want}"',
             f"โปรดตรวจ{label}มุมล่างขวาให้ถูกต้อง", rule_id)
+
+
+_HEAD_ROLE_EN = re.compile(r'\b(?:Dean|Director)\b', re.I)
+
+
+def _right_institution_box_read(kind, bottom_text):
+    """ระบบอ่านช่องสถาบัน "มุมล่างขวา" ได้จริงไหม — ใช้แยก "เล่มไม่มีข้อความ" ออกจาก "ระบบอ่านไม่ครบ"
+
+    ดูจากตำแหน่งที่ template พิมพ์ไว้ในช่องขวาเสมอ ไม่ดูจากพิกัด
+      หน้าที่ปรึกษา : ตำแหน่งระดับหลักสูตร (ประธานหลักสูตร / Program Director) ซึ่งช่องซ้ายไม่มี
+      หน้ากรรมการสอบ: คำตำแหน่งหัวหน้าส่วนงานต้องมี 2 ที่ (ช่องซ้ายคือคณบดีบัณฑิตวิทยาลัย 1 ที่
+                      ช่องขวาคือคณบดี/ผู้อำนวยการคณะอีก 1 ที่) — เจอที่เดียวแปลว่าอ่านช่องขวาไม่ได้
+    """
+    text = bottom_text or ""
+    if kind == "advisory":
+        return programme_head_title(text) is not None
+    squashed = norm(text)
+    th = sum(squashed.count(norm(w)) for w in ("คณบดี", "ผู้อำนวยการ"))
+    return th >= 2 or len(_HEAD_ROLE_EN.findall(text)) >= 2
 
 
 def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
@@ -1607,6 +1629,7 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
     จึงค้นจากข้อความทั้งแถวล่างรวมกัน — ช่องซ้ายเป็นบัณฑิตวิทยาลัยเสมอ จึงไม่ชนกัน
     """
     found_text = norm(bottom_text)
+    box_read = _right_institution_box_read(kind, bottom_text)
     if kind == "advisory":
         degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
             or approved.get("degree_cover_en", "")
@@ -1617,7 +1640,7 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         if subject and not spelled_in(subject, bottom_text):
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
-                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE", box_read)
         # ชื่อปริญญาหน้าวงเล็บก็พิมพ์อยู่ในช่องนี้ ("ศิลปศาสตรมหาบัณฑิต สาขาวิชา..." /
         # "Doctor of Philosophy Program in ...") — เดิมเทียบแค่ชื่อสาขา เล่มจริง repo 3 พิมพ์
         # "ศิลปศาสตรมหาบัณทิต" (ฑ เป็น ท) แล้วไม่มีใครเห็น ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569)
@@ -1628,14 +1651,14 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
         if subject_found and degree_name and not spelled_in(degree_name, bottom_text):
             _institution_mismatch(
                 rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อปริญญา", degree_name,
-                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE")
+                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE", box_read)
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
     faculty = approved.get("faculty", "")
     if faculty and not english_book and not spelled_in(faculty, bottom_text):
         _institution_mismatch(
             rep, f"{loc_prefix}คณบดีคณะ{loc_suffix}", "ชื่อคณะ", faculty,
-            bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE")
+            bottom_text, "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE", box_read)
 
 
 # ตำแหน่งระดับหลักสูตร — ใช้ได้เฉพาะมุมล่างขวาของหน้าลงนาม 1 (ประธานหลักสูตร)
@@ -7601,9 +7624,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                      else rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
-                    # บอกภาษาตรง ๆ ไม่ใช่ "อีกภาษา" — เจ้าหน้าที่ (ต.ค. 2569): ควรเขียนว่า
-                    # "ชื่อเรื่องภาษาไทยไม่ตรงกับข้อมูลในระบบ" นักศึกษาอ่านแล้วรู้เลยว่าต้องแก้ชื่อไหน
-                    alt_word = "ชื่อเรื่องภาษาอังกฤษ" if thai_book else "ชื่อเรื่องภาษาไทย"
+                    # บอกภาษาตรง ๆ และบอกว่าเป็นค่าในเล่ม — เจ้าหน้าที่ (ต.ค. 2569): ให้เขียนว่า
+                    # "ชื่อเรื่องภาษาไทยในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ" (เดิม "ชื่อเรื่องอีกภาษา...")
+                    # ช่องว่างท้ายป้ายตามถ้อยคำของเจ้าหน้าที่ title_mismatch_detail ต่อ "ไม่ตรงกับ..." ทันที
+                    alt_word = ("ชื่อเรื่องภาษาอังกฤษในรูปเล่ม " if thai_book
+                                else "ชื่อเรื่องภาษาไทยในรูปเล่ม ")
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
                             title_mismatch_detail(alt_word, compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
