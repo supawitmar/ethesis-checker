@@ -31,7 +31,7 @@ from ethesis_rules import (
     rule_reference,
     rule_zone,
 )
-from thai_text import fold_sara_am, fold_sara_am_in
+from thai_text import fix_thai_pua, fold_sara_am, fold_sara_am_in
 
 FRONT_FAILURE_ZONE = FRONT_MATTER_RULES['failure_zone']
 BOLD_FAILURE_ZONE = rule_zone("FORMAT.BOLD", "ORANGE")
@@ -234,6 +234,9 @@ def _group_into_lines(chars):
 
 
 _CID_GLYPH = re.compile(r'\(cid:\d+\)')
+# ฟอนต์สูตรคณิตศาสตร์ (Cambria Math ฯลฯ) — x̄ ในตารางสถิติวาดด้วย glyph ที่ไม่มีรหัสยูนิโค้ด ("(cid:1876)") กับขีดบน
+# ที่กว้างศูนย์ ดูเหมือนฟอนต์เพี้ยนทุกประการ แต่ไม่ใช่ข้อความไทย จึงไม่ทำให้อ่านวรรณยุกต์ผิด
+_MATH_FONT = re.compile(r'math', re.I)
 
 
 def font_damage_score(page, text=None):
@@ -248,15 +251,24 @@ def font_damage_score(page, text=None):
     วัดกับเล่มจริง 6 เล่ม: เล่มที่ถูกต้อง 4 เล่มได้ 0 ทุกหน้า ไม่มี false positive เลย
     ส่วนเล่มที่ฟอนต์เพี้ยนจับได้ทั้งสองเล่ม (เล่มหนึ่ง 38 หน้า อีกเล่ม 9 หน้า) ตรงกับ
     หน้าที่ตรวจด้วยตาแล้วพบว่าเพี้ยนจริง
+
+    สองอย่างที่ไม่นับ เพราะไม่ทำให้อ่านข้อความไทยผิด (เดิมนับ เล่มจริงสองเล่ม ต.ค. 2569 ขึ้นว่าฟอนต์เพี้ยน
+    119 หน้า และ 4 หน้า ทั้งที่อ่านได้ครบ แล้วข้อสะกดผิดระดับวรรณยุกต์ของเล่มนั้นถูกลดเป็นส้มทั้งหมด)
+    - รหัส PUA ของฟอนต์ไทย (วรรณยุกต์ตัวต่ำ/เยื้องซ้าย) — แปลงกลับได้ตรงตัว (thai_text.fix_thai_pua)
+    - อักขระจากฟอนต์สูตรคณิตศาสตร์ (x̄ ในตารางสถิติ ดู _MATH_FONT)
     """
-    bad = 0
+    bad = formula_cids = 0
     for c in (getattr(page, 'chars', None) or []):
-        t = c.get('text') or ''
+        t = fix_thai_pua(c.get('text'))
+        wide = float(c.get('x1', 0)) - float(c.get('x0', 0)) >= 0.5
+        if _MATH_FONT.search(c.get('fontname') or ''):
+            formula_cids += bool(wide and _CID_GLYPH.fullmatch(t))
+            continue
         if not t or t == ' ' or _TH_MARKS.match(t):
             continue
-        if float(c.get('x1', 0)) - float(c.get('x0', 0)) < 0.5:
+        if not wide:
             bad += 1
-    return bad + len(_CID_GLYPH.findall(text or ''))
+    return bad + max(0, len(_CID_GLYPH.findall(text or '')) - formula_cids)
 
 
 def _thai_chars(chars):
@@ -272,10 +284,17 @@ def _thai_chars(chars):
 
     เมื่อกลายเป็นนิคหิตแล้ว _compose_thai_line จะผูกกลับเข้าพยัญชนะฐานเอง
     ได้ "จํา" แล้วรวมเป็น "จำ" ตามปกติ
+
+    รหัส PUA ของฟอนต์ไทย (วรรณยุกต์ตัวต่ำ/เยื้องซ้าย พยัญชนะตัดเชิง) แปลงกลับเป็นอักษรจริงก่อนอย่างอื่น
+    (thai_text.fix_thai_pua) ไม่งั้นวรรณยุกต์พวกนี้เป็น "อักขระกว้างศูนย์ที่ไม่ใช่สระ/วรรณยุกต์" แล้วถูกทิ้ง
+    — เล่มจริง ต.ค. 2569 จึงอ่าน "ได้รับการพิจารณา" ได้ "ไดรับการพิจารณา" ทั้งเล่ม
     """
     out = []
     for c in chars:
         text = c.get('text') or ''
+        real = fix_thai_pua(text)
+        if real != text:
+            c, text = {**c, 'text': real}, real
         zero_width = (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5
         if zero_width and text == ' ':
             out.append({**c, 'text': 'ํ'})     # NIKHAHIT
@@ -424,9 +443,8 @@ def header_extra_text(pdf_page):
     for word in (pdf_page.extract_words() or []):
         if float(word.get('top', height)) >= cutoff:
             continue
-        # ตัดอักขระ PUA ของฟอนต์ไทย (F700-F70F) ที่ดึงมาเป็นกล่องออกก่อน
-        raw = word.get('text', '') or ''
-        token = ''.join(c for c in raw if not (0xF700 <= ord(c) <= 0xF70F)).strip()
+        # รหัส PUA ของฟอนต์ไทยที่ดึงมาเป็นกล่อง แปลงกลับเป็นอักษรจริงก่อน (thai_text.fix_thai_pua)
+        token = fix_thai_pua(word.get('text', '') or '').strip()
         if token and not _is_page_number_token(token):
             extras.append(token)
     return ' '.join(extras).strip()
@@ -5474,14 +5492,33 @@ def title_printed_on_page(page_text, title, min_ratio=TITLE_ON_PAGE_MIN):
     return best if best_ratio >= min_ratio else ""
 
 
-# คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้
-_TITLE_LEAD_IN = re.compile(r'^(?:entitled|เรื่อง)$', re.I)
+def _loose_keys(*phrases):
+    """ข้อความ template ภาษาไทยในรูปที่ใช้ "หา" — norm() ตัดวรรณยุกต์/สระบน-ล่าง ช่องว่างทิ้ง (ดู _starts_loosely)"""
+    return tuple(norm(phrase) for phrase in phrases)
+
+
+def _starts_loosely(line, keys):
+    """บรรทัดขึ้นต้นด้วยข้อความ template ใน keys โดยไม่สนวรรณยุกต์ สระบน-ล่าง และช่องว่าง
+
+    ใช้ "หา" ขอบเขตของบล็อกบนหน้า ไม่ใช่ตัดสินว่าสะกดถูก (ตัดสินด้วย spelled_in ที่อื่น) — ฟอนต์บางตัวทำ
+    วรรณยุกต์หายจริง เล่มจริง ต.ค. 2569 อ่าน "ได้รับการพิจารณา" ได้ "ไดรับการพิจารณา" ตัวหาที่เทียบตรงตัวจึงไม่เจอ
+    จุดจบของชื่อเรื่องบนหน้าลงนาม แล้วกินประโยค template ชื่อปริญญา วันที่ และหัวข้อกรรมการไปเป็นชื่อเรื่องด้วย
+    กลายเป็นข้อแดง "ชื่อเรื่องไม่ตรง" ทั้งที่เล่มพิมพ์ชื่อเรื่องถูก
+    """
+    head = norm(line)
+    return any(head.startswith(key) for key in keys)
+
+
+# คำนำหน้าบล็อกชื่อเรื่องบนหน้าลงนาม — ชื่อเรื่องเริ่มบรรทัดถัดจากนี้ (ฝั่งไทยหาแบบไม่สนวรรณยุกต์ ดู _starts_loosely)
+_TITLE_LEAD_IN = re.compile(r'^entitled$', re.I)
+_TITLE_LEAD_IN_TH = _loose_keys('เรื่อง')
 # บรรทัดที่บอกว่าบล็อกชื่อเรื่องจบแล้ว (ข้อความ template ที่ตามหลังชื่อเรื่องเสมอ)
 _TITLE_STOP = re.compile(
     r'^(?:was\s+submitted\s+to'
     r'|A\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|MASTER|DOCTOR)'
-    r'|ได้รับการพิจารณา|วิทยานิพนธ์นี้เป็นส่วนหนึ่ง|สารนิพนธ์นี้เป็นส่วนหนึ่ง'
-    r'|ABSTRACT|บทคัดย่อ|FACULTY\s+OF|บัณฑิตวิทยาลัย)', re.I)
+    r'|ABSTRACT|FACULTY\s+OF)', re.I)
+_TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา', 'วิทยานิพนธ์นี้เป็นส่วนหนึ่ง', 'สารนิพนธ์นี้เป็นส่วนหนึ่ง',
+                             'บทคัดย่อ', 'บัณฑิตวิทยาลัย')
 
 
 def printed_title(page_text, student_name=""):
@@ -5499,7 +5536,7 @@ def printed_title(page_text, student_name=""):
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     start = None
     for i, line in enumerate(lines):
-        if _TITLE_LEAD_IN.match(line.strip()):
+        if _TITLE_LEAD_IN.match(line.strip()) or norm(line) in _TITLE_LEAD_IN_TH:
             start = i + 1
             break
     if start is None:
@@ -5510,7 +5547,8 @@ def printed_title(page_text, student_name=""):
     want_name = norm(_strip_student_title(student_name)) if student_name else ""
     out = []
     for line in lines[start:start + 6]:
-        if _TITLE_STOP.match(line.strip()) or _ABS_STUDENT_LINE.search(line):
+        if (_TITLE_STOP.match(line.strip()) or _starts_loosely(line, _TITLE_STOP_TH)
+                or _ABS_STUDENT_LINE.search(line)):
             break
         if want_name and want_name in norm(line):
             break
@@ -5525,9 +5563,9 @@ def printed_title(page_text, student_name=""):
 # คูณสามประเภทเล่ม คูณสองรูปแบบ) ได้ถ้อยคำ 7 แบบ — เล่มการค้นคว้าอิสระภาษาอังกฤษ
 # ใช้ "AN INDEPENDENT STUDY" ไม่ใช่ "A ..." จึงต้องรับ "AN" ด้วย
 _COVER_NAME_STOP = re.compile(
-    r'^(?:AN?\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|INDEPENDENT\s+STUDY)'
-    r'\s+SUBMITTED'
-    r'|(?:วิทยานิพนธ์|สารนิพนธ์|การค้นคว้าอิสระ)นี้เป็นส่วนหนึ่ง)', re.I)
+    r'^AN?\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|INDEPENDENT\s+STUDY)\s+SUBMITTED', re.I)
+_COVER_NAME_STOP_TH = _loose_keys('วิทยานิพนธ์นี้เป็นส่วนหนึ่ง', 'สารนิพนธ์นี้เป็นส่วนหนึ่ง',
+                                  'การค้นคว้าอิสระนี้เป็นส่วนหนึ่ง')
 
 
 def cover_printed_name(page_text, title=""):
@@ -5543,7 +5581,8 @@ def cover_printed_name(page_text, title=""):
     """
     lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
     stop = next((i for i, line in enumerate(lines)
-                 if _COVER_NAME_STOP.match(line.strip())), 0)
+                 if _COVER_NAME_STOP.match(line.strip())
+                 or _starts_loosely(line, _COVER_NAME_STOP_TH)), 0)
     if stop < 1:
         return ""
     candidate = lines[stop - 1]
@@ -5555,7 +5594,8 @@ def cover_printed_name(page_text, title=""):
 
 
 # ป้ายบทบาทที่ template พิมพ์ไว้ "ใต้ชื่อนักศึกษา" บนหน้าลงนามเสมอ
-_SIGNATURE_CANDIDATE_LABEL = re.compile(r'^(?:Candidate|ผู้วิจัย|ผู้เขียน)', re.I)
+_SIGNATURE_CANDIDATE_LABEL = re.compile(r'^Candidate', re.I)
+_SIGNATURE_CANDIDATE_LABEL_TH = _loose_keys('ผู้วิจัย', 'ผู้เขียน')
 
 
 def signature_printed_name(page_text):
@@ -5570,7 +5610,8 @@ def signature_printed_name(page_text):
     """
     lines = [soft(line) for line in (page_text or "").splitlines() if soft(line)]
     for i, line in enumerate(lines):
-        if i and _SIGNATURE_CANDIDATE_LABEL.match(line.strip()):
+        if i and (_SIGNATURE_CANDIDATE_LABEL.match(line.strip())
+                  or _starts_loosely(line, _SIGNATURE_CANDIDATE_LABEL_TH)):
             return _strip_student_title(lines[i - 1].split(",")[0].strip())
     return ""
 

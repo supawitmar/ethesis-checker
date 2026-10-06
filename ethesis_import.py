@@ -12,7 +12,7 @@
 import re
 import pdfplumber
 
-from thai_text import fold_sara_am
+from thai_text import fix_thai_pua, fold_sara_am
 
 THAI_PREFIX = re.compile(
     r'^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|'
@@ -76,30 +76,16 @@ DEGREE_ABBR_TH_STEM = {
 }
 
 
-# ฟอนต์ไทย Angsana/Cordia ใน eThesis PDF เก็บวรรณยุกต์/การันต์ไว้ใน
-# Private Use Area (U+F700-F70F): F700-F704 สระบน, F705-F709 วรรณยุกต์ตำแหน่งปกติ,
-# F70A-F70E วรรณยุกต์ยกเหนือสระบน, F70F นิคหิต
-# แมปกลับเป็นยูนิโค้ดปกติ ไม่งั้นชื่อ/หัวข้อภาษาไทยจะแสดงเป็นกล่องว่างในฟอร์ม
-_PUA_TONE = {
-    '\uf700': '\u0e31', '\uf701': '\u0e34', '\uf702': '\u0e35',
-    '\uf703': '\u0e36', '\uf704': '\u0e37',
-    '\uf705': '\u0e48', '\uf706': '\u0e49', '\uf707': '\u0e4a',
-    '\uf708': '\u0e4b', '\uf709': '\u0e4c',
-    '\uf70a': '\u0e48', '\uf70b': '\u0e49', '\uf70c': '\u0e4a',
-    '\uf70d': '\u0e4b', '\uf70e': '\u0e4c',
-    '\uf70f': '\u0e4d',
-    # F710+ = \u0e23\u0e39\u0e1b\u0e17\u0e35\u0e48\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e15\u0e33\u0e41\u0e2b\u0e19\u0e48\u0e07\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e1e\u0e22\u0e31\u0e0d\u0e0a\u0e19\u0e30\u0e17\u0e23\u0e07\u0e2a\u0e39\u0e07 (\u0e1b \u0e1d \u0e1f \u0e2c) \u2014 \u0e1e\u0e1a\u0e08\u0e32\u0e01\u0e44\u0e1f\u0e25\u0e4c\u0e08\u0e23\u0e34\u0e07
-    # \u0e16\u0e49\u0e32\u0e44\u0e21\u0e48\u0e41\u0e21\u0e1b _PUA_LEFTOVER \u0e08\u0e30\u0e25\u0e1a\u0e17\u0e34\u0e49\u0e07\u0e40\u0e07\u0e35\u0e22\u0e1a \u0e46 \u0e0a\u0e37\u0e48\u0e2d\u0e01\u0e23\u0e23\u0e21\u0e01\u0e32\u0e23 "\u0e1b\u0e31\u0e0d\u0e08\u0e21\u0e32" \u0e01\u0e25\u0e32\u0e22\u0e40\u0e1b\u0e47\u0e19 "\u0e1b\u0e0d\u0e08\u0e21\u0e32"
-    # \u0e41\u0e25\u0e49\u0e27\u0e23\u0e32\u0e22\u0e07\u0e32\u0e19\u0e42\u0e0a\u0e27\u0e4c\u0e0a\u0e37\u0e48\u0e2d\u0e17\u0e35\u0e48\u0e1c\u0e34\u0e14\u0e43\u0e2b\u0e49\u0e40\u0e08\u0e49\u0e32\u0e2b\u0e19\u0e49\u0e32\u0e17\u0e35\u0e48\u0e40\u0e17\u0e35\u0e22\u0e1a (\u0e40\u0e25\u0e48\u0e21\u0e17\u0e35\u0e48 6 + eThesis \u0e02\u0e2d\u0e07 6236350)
-    '\uf710': '\u0e31',                 # \u0e1b\u0e31\u0e0d\u0e08\u0e21\u0e32
-    '\uf712': '\u0e47',                 # \u0e40\u0e1b\u0e47\u0e19
-}
+# ไฟล์ eThesis (ฟอนต์ DTAC2013) เก็บสระ/วรรณยุกต์ที่ต้องขยับตำแหน่ง และ ญ ฐ ที่ตัดเชิง เป็นรหัส Private Use Area
+# ชุดเดียวกับฟอนต์ TH Sarabun ในเล่ม — แปลงกลับด้วยตารางเดียวกัน (thai_text.fix_thai_pua ซึ่งอ่านมาจากตัวฟอนต์)
+# ไม่งั้นชื่อ/หัวข้อภาษาไทยจะแสดงเป็นกล่องว่างในฟอร์ม หรือถูก _PUA_LEFTOVER ลบทิ้งเงียบ ๆ จนชื่อกรรมการขาดสระ
+# ตารางเดิมของไฟล์นี้เดา U+F70F เป็นนิคหิต แต่ในฟอนต์คือ ญ ตัดเชิง — ไฟล์ eThesis ทดสอบมีชื่อกรรมการที่สะกด "ญญู"
+# ญ ตัวที่สองจึงกลายเป็นนิคหิตในรายชื่อตาม บฑ. ที่รายงานพิมพ์ให้เจ้าหน้าที่ทาน (แก้ ต.ค. 2569)
 _PUA_LEFTOVER = re.compile('[\uf700-\uf71f]')
 
 
 def _fix_thai_pua(text):
-    for pua, real in _PUA_TONE.items():
-        text = text.replace(pua, real)
+    text = fix_thai_pua(text)
     # สระอำมักถูกแตกเป็น นิคหิต+สระอา (ํ + า) และเมื่อมีวรรณยุกต์เป็น นิคหิต+วรรณยุกต์+สระอา (นํ้า)
     # — รวมกลับเป็น ำ ทุกแบบ
     text = fold_sara_am(text)
