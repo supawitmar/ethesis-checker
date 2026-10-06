@@ -1577,14 +1577,20 @@ def _institution_mismatch(rep, loc, label, want, bottom_text, box, rule_id):
     สะกดผิด ต้องบอกว่าสะกดผิด และค่าที่ต้องแก้เป็นต้องใช้ตัวพิมพ์ตามที่เล่มพิมพ์
     """
     near = _closest_run(bottom_text, want)
+    misspelt = False
     if near:
         want = match_printed_case(want, near)
         analysis = analyze_diff(near, want)
+        misspelt = bool(analysis.text)
         found_msg = (found_with_diff(f'{box} สะกด{label}ผิด เขียนว่า "{near}"', analysis)
-                     if analysis.text else f'{box} เขียนว่า "{near}"')
+                     if misspelt else f'{box} เขียนว่า "{near}"')
     else:
         found_msg = f'ไม่พบ{label} "{want}" ใน{box}'
-    rep.add("ORANGE", "front_matter", loc, found_msg,
+    # สะกดผิด (เจอข้อความแล้ว ชี้จุดต่างได้) = แดง ตามกติกาตัวสะกดไทย "ต่างทุกตัว = สะกดผิด = แดง"
+    # (เจ้าหน้าที่ ต.ค. 2569: ช่องประธานหลักสูตรพิมพ์ "สาธารณสุขศาสตร์มหาบัณฑิต" (มีการันต์)
+    # "สะกดผิดแบบนี้ควรแดง") · หาข้อความไม่เจอเลย = ส้ม เพราะแยกไม่ออกว่าเล่มขาดหรือระบบอ่าน
+    # แถวล่างของตารางลายเซ็นมาไม่ครบ
+    rep.add("RED" if misspelt else "ORANGE", "front_matter", loc, found_msg,
             f'ข้อความใต้ลายเซ็นต้องมี{label} "{want}"',
             f"โปรดตรวจ{label}มุมล่างขวาให้ถูกต้อง", rule_id)
 
@@ -7595,8 +7601,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                                      else rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                      "" if compared['status'] == 'exact' else compared['actual'])
                 if compared['status'] != 'exact':
+                    # บอกภาษาตรง ๆ ไม่ใช่ "อีกภาษา" — เจ้าหน้าที่ (ต.ค. 2569): ควรเขียนว่า
+                    # "ชื่อเรื่องภาษาไทยไม่ตรงกับข้อมูลในระบบ" นักศึกษาอ่านแล้วรู้เลยว่าต้องแก้ชื่อไหน
+                    alt_word = "ชื่อเรื่องภาษาอังกฤษ" if thai_book else "ชื่อเรื่องภาษาไทย"
                     rep.add("RED", "front_matter", f"{alt_lbl} ({page_ref(alt_abs)})",
-                            title_mismatch_detail("ชื่อเรื่องอีกภาษา", compared, alt_title),
+                            title_mismatch_detail(alt_word, compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
                             "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
             else:
