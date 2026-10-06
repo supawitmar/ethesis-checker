@@ -31,6 +31,7 @@ from ethesis_rules import (
     rule_reference,
     rule_zone,
 )
+from thai_text import fold_sara_am, fold_sara_am_in
 
 FRONT_FAILURE_ZONE = FRONT_MATTER_RULES['failure_zone']
 BOLD_FAILURE_ZONE = rule_zone("FORMAT.BOLD", "ORANGE")
@@ -263,8 +264,9 @@ def _compose_thai_line(chars):
         prev = b
     line = re.sub(r' +', ' ', ''.join(parts))
     # นิคหิต + า = ำ  ส่วน นิคหิต + ำ เกิดจากไฟล์ที่มี ำ อยู่แล้วและยังใส่นิคหิตซ้ำมาให้
-    # (ถ้าไม่ยุบจะได้ "คํำสํำคัญ" แทน "คำสำคัญ")
-    return line.replace('ํำ', 'ำ').replace('ํา', 'ำ').strip()
+    # (ถ้าไม่ยุบจะได้ "คํำสํำคัญ" แทน "คำสำคัญ") และ นิคหิต + วรรณยุกต์ + า คือ "น้ำ" ที่ระบบอ่านจาก
+    # PDF ได้ลำดับ "นํ้า" — รวมทุกแบบเป็น ำ (ดู thai_text.fold_sara_am)
+    return fold_sara_am(line).strip()
 
 
 def top_lines(page_text, k=10):
@@ -435,8 +437,7 @@ def _sig_words(pdf_page):
             words = pdf_page.extract_words() or []
     words = _rejoin_thai_marks(words)
     # นิคหิตที่ซ่อมแล้วยังลอยอยู่หน้า "า" ต้องรวมเป็น "ำ" ตัวเดียวเหมือน _compose_thai_line
-    return [{**w, 'text': (w.get('text') or '').replace('ํา', 'ำ').replace('ํำ', 'ำ')}
-            for w in words]
+    return [{**w, 'text': fold_sara_am(w.get('text'))} for w in words]
 
 
 def _rejoin_thai_marks(words):
@@ -4656,15 +4657,6 @@ def _display_graphemes(text):
     return out
 
 
-def _fold_sara_am(text):
-    """รวมสระอำที่ถูกแตกเป็นนิคหิต + สระอา กลับเป็น ำ ตัวเดียว
-
-    ตาเห็นเหมือนกันทุกประการ แต่เป็นคนละอักขระ ถ้าปล่อยไว้จุดต่างจะอ่านออกมาว่า
-    'ต่างที่ "นํา" ต้องเป็น "นำ"' ซึ่งเจ้าหน้าที่และนักศึกษามองไม่เห็นว่าต่างตรงไหน
-    """
-    return (text or '').replace('ํำ', 'ำ').replace('ํา', 'ำ')
-
-
 def _is_latin(unit):
     return bool(unit) and unit[0].isascii() and unit[0].isalnum()
 
@@ -5015,7 +5007,9 @@ def _edit_steps(fg, edits):
 
 
 def _analyze_thai(found_s, expected_s, spaces):
-    result = _thai_edits(_fold_sara_am(found_s), _fold_sara_am(expected_s), spaces)
+    # สระอำทุกแบบ (ำ · ํา · นํ้า) ตาเห็นเหมือนกันทุกประการ ถ้าไม่รวมก่อนเทียบ จุดต่างจะอ่านออกมาว่า
+    # 'ต่างที่ "นํา" ต้องเป็น "นำ"' ซึ่งเจ้าหน้าที่และนักศึกษามองไม่เห็นว่าต่างตรงไหน (thai_text.fold_sara_am)
+    result = _thai_edits(fold_sara_am(found_s), fold_sara_am(expected_s), spaces)
     if result is None or not result[1]:
         return _NO_DIFF
     fg, edits = result
@@ -6445,6 +6439,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             except Exception:
                 pass
 
+    # ข้อมูลอนุมัติเข้าระบบทางนี้ทางเดียว (ไฟล์ eThesis หรือที่เจ้าหน้าที่พิมพ์/วางในฟอร์ม) คนเขียนสระอำได้
+    # หลายแบบ (ำ · ํา · นํ้า) จึงรวมเป็น ำ ที่นี่ ให้ตรงกับข้อความที่อ่านจากเล่มเสมอ
+    approved = fold_sara_am_in(approved)
     rep = Report()
     if not str(pdf_path).lower().endswith(".pdf"):
         rep.add("ORANGE", "-", Path(pdf_path).name, "ไม่ใช่ไฟล์ PDF", "ระบบตรวจ PDF เท่านั้น", "ส่งไฟล์ PDF")

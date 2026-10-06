@@ -12,6 +12,8 @@
 import re
 import pdfplumber
 
+from thai_text import fold_sara_am
+
 THAI_PREFIX = re.compile(
     r'^(?:นางสาว|นาย|นาง|น\.ส\.|ด\.ญ\.|ด\.ช\.|'
     r'ว่าที่\s*(?:ร|พ)\.?[ตทอ]\.?|ดร\.?|ผศ\.?|รศ\.?|ศ\.?)\s*'
@@ -98,8 +100,9 @@ _PUA_LEFTOVER = re.compile('[\uf700-\uf71f]')
 def _fix_thai_pua(text):
     for pua, real in _PUA_TONE.items():
         text = text.replace(pua, real)
-    # สระอำมักถูกแตกเป็น นิคหิต+สระอา (ํ + า) — รวมกลับเป็น ำ
-    text = text.replace('ํา', 'ำ')
+    # สระอำมักถูกแตกเป็น นิคหิต+สระอา (ํ + า) และเมื่อมีวรรณยุกต์เป็น นิคหิต+วรรณยุกต์+สระอา (นํ้า)
+    # — รวมกลับเป็น ำ ทุกแบบ
+    text = fold_sara_am(text)
     return _PUA_LEFTOVER.sub('', text)
 
 
