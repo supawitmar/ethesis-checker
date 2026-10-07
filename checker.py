@@ -172,7 +172,8 @@ def _page_text(page):
     if not chars:
         return page.extract_text() or ''
     out_lines = []
-    for row in _group_into_lines(_thai_chars(chars)):
+    for row in _group_into_lines(_thai_chars(chars,
+                                             _fonts_missing_sara_aa(page))):
         line = _compose_thai_line(row)
         if line:
             out_lines.append(line)
@@ -271,7 +272,72 @@ def font_damage_score(page, text=None):
     return bad + max(0, len(_CID_GLYPH.findall(text or '')) - formula_cids)
 
 
-def _thai_chars(chars):
+# ฟอนต์ไทยในเล่มที่ตาราง ToUnicode เหลื่อมช่อง ทำให้สระ า กลายเป็น ำ ทั้งเล่ม
+# เล่มจริงเล่มหนึ่ง (7 ต.ค. 2569) ฟอนต์ย่อย BrowalliaNew ที่ Word ฝังมาเขียนไว้ว่า
+#
+#     <00B3> <00B4> <0E30>            ะ ั                 <- ถูก
+#     <00B5> <0E33>                   า -> ำ              <- ผิด ต้องเป็น 0E32
+#     <00CD> <00CE> [<0E4C> <0020>]   ์ ํ -> ช่องว่าง      <- ผิด ต้องเป็น 0E4D
+#
+# (ลำดับจริงของฟอนต์คือ ะ ั า ำ ิ ... ตัวเขียนตารางข้ามช่องที่ไม่ได้ใช้แล้วเลื่อนค่าตามมา)
+# นิคหิตที่กลายเป็นช่องว่าง _thai_chars ซ่อมอยู่แล้ว ครึ่งบนของ ำ จึงยังมา ส่วนสระ า
+# ที่กลายเป็น ำ ยังไม่มีใครซ่อม ระบบจึงอ่าน "ทำนายการ" ได้ "ทำนำยกำร" และตัวตัดสิน
+# การสะกด (spelling_key 6 ต.ค. 2569) แยก ำ กับ า ออกจากกัน เล่มที่พิมพ์ถูกจึงถูกฟ้องว่า
+# ชื่อเรื่องและชื่อนักศึกษาไม่ตรงข้อมูลอนุมัติ
+_SARA_AA, _SARA_AM = 'า', 'ำ'
+# จำนวนอักษรไทยในตารางที่ถือว่า "ฟอนต์นี้ใช้พิมพ์ข้อความไทยจริง ไม่ใช่คำสองสามคำ"
+# ฟอนต์ย่อยมีแต่ glyph ที่เล่มใช้จริง เอกสารไทยที่ใช้อักษรไทยหลากหลายถึงขนาดนี้
+# แล้วไม่ใช้สระ า เลยไม่มี — ตารางที่ "ไม่มี า แต่มี ำ" จึงเป็นหลักฐานว่า map ผิด
+# ไม่ใช่การเดาจากสถิติของข้อความในหน้า
+_THAI_SUBSET_MIN = 20
+# อักษรไทยทุกชนิดรวมสระ วรรณยุกต์ เลขไทย — ใช้นับความกว้างของตารางฟอนต์เท่านั้น
+# ตั้งชื่อแยกจาก _THAI_LETTER และ _THAI_CONSONANT ที่ประกาศข้างล่าง ชื่อซ้ำกันตัวหลัง
+# จะทับตัวแรกเงียบ ๆ แล้วตัวที่เคยถูกใช้ไปตัดสินอย่างอื่นจะเปลี่ยนความหมายไป
+_THAI_IN_FONT_TABLE = re.compile('[ก-๙]')
+
+
+def _fonts_missing_sara_aa(page):
+    """ชื่อฟอนต์บนหน้านี้ที่ตาราง ToUnicode ไม่มีสระ า เลยแต่มี ำ (ดูหัวข้อข้างบน)
+
+    อ่านจากตารางของฟอนต์เอง ไม่ใช่จากข้อความที่อ่านได้ หน้าที่ข้อความสั้นจนไม่มี
+    สระ า จึงไม่ถูกตัดสินผิด และฟอนต์อื่นบนหน้าเดียวกันไม่ถูกแตะ
+
+    อ่านตารางไม่ได้ (pdfminer เปลี่ยน API / ฟอนต์ไม่มี ToUnicode) = คืนเซตว่าง
+    แล้วอ่านแบบเดิม ดีกว่าซ่อมด้วยข้อมูลที่ไม่ครบ
+    """
+    try:
+        from io import BytesIO
+        from pdfminer.cmapdb import CMapParser, FileUnicodeMap
+        from pdfminer.pdftypes import resolve1, stream_value
+        table = resolve1((getattr(page, 'page_obj', None).resources or {}).get('Font'))
+        items = list((table or {}).values())
+    except Exception:
+        return frozenset()
+    missing, fine = set(), set()
+    for ref in items:
+        try:
+            spec = resolve1(ref) or {}
+            name = getattr(resolve1(spec.get('BaseFont')), 'name', None)
+            if not name or 'ToUnicode' not in spec:
+                continue
+            table_map = FileUnicodeMap()
+            CMapParser(table_map,
+                       BytesIO(stream_value(spec['ToUnicode']).get_data())).run()
+            letters = {ch for value in table_map.cid2unichr.values() for ch in value
+                       if _THAI_IN_FONT_TABLE.match(ch)}
+        except Exception:
+            continue
+        if (len(letters) >= _THAI_SUBSET_MIN
+                and _SARA_AM in letters and _SARA_AA not in letters):
+            missing.add(name)
+        else:
+            fine.add(name)
+    # ชื่อฟอนต์ซ้ำกันสองตัวบนหน้าเดียว (map ต่างกัน) = พิสูจน์ไม่ได้ว่าตัวไหนเป็นตัวไหน
+    # จาก fontname ของ char จึงไม่แตะทั้งคู่
+    return frozenset(missing - fine)
+
+
+def _thai_chars(chars, missing_sara_aa=frozenset()):
     """แปลง "ช่องว่างกว้างศูนย์" ให้เป็นนิคหิต ก่อนประกอบข้อความ
 
     ฟอนต์ไทยบางตัวใน PDF map นิคหิต (ํ ซึ่งเป็นครึ่งบนของสระ ำ) ไปเป็นอักขระเว้นวรรค
@@ -288,11 +354,16 @@ def _thai_chars(chars):
     รหัส PUA ของฟอนต์ไทย (วรรณยุกต์ตัวต่ำ/เยื้องซ้าย พยัญชนะตัดเชิง) แปลงกลับเป็นอักษรจริงก่อนอย่างอื่น
     (thai_text.fix_thai_pua) ไม่งั้นวรรณยุกต์พวกนี้เป็น "อักขระกว้างศูนย์ที่ไม่ใช่สระ/วรรณยุกต์" แล้วถูกทิ้ง
     — เล่มจริง ต.ค. 2569 จึงอ่าน "ได้รับการพิจารณา" ได้ "ไดรับการพิจารณา" ทั้งเล่ม
+
+    missing_sara_aa = ชื่อฟอนต์ที่ตาราง ToUnicode ไม่มีสระ า (ดู _fonts_missing_sara_aa)
+    ของฟอนต์นั้น ำ ที่อ่านได้คือสระ า ตัวจริง ส่วน ำ ของเล่มมาจากนิคหิต + า อยู่แล้ว
     """
     out = []
     for c in chars:
         text = c.get('text') or ''
         real = fix_thai_pua(text)
+        if real == _SARA_AM and c.get('fontname') in missing_sara_aa:
+            real = _SARA_AA
         if real != text:
             c, text = {**c, 'text': real}, real
         zero_width = (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5
@@ -516,7 +587,8 @@ def _sig_words(pdf_page):
     "จำเนียร จวงตระกูล" จึงถูกอ่านเป็น "จ าเนียร จวงตระกูล" แล้วเทียบกับข้อมูลอนุมัติ
     ไม่ตรง ระบบฟ้องผิดว่า "ไม่พบกรรมการ" ทั้งที่ชื่ออยู่บนหน้าจริง (พบในเล่มที่ 9)
     """
-    chars = _thai_chars(getattr(pdf_page, 'chars', None) or [])
+    chars = _thai_chars(getattr(pdf_page, 'chars', None) or [],
+                        _fonts_missing_sara_aa(pdf_page))
     words = []
     if chars:
         try:
@@ -5707,7 +5779,8 @@ def _font_lines(pdf_page, tolerance=2.5):
     # ฟอนต์ map เป็นช่องว่าง ("จำลอง" -> "จา ลอง") ถ้าเอาไปแสดงในรายงานเจ้าหน้าที่จะ
     # อ่านไม่ออกว่าหมายถึงข้อความไหนของเล่ม จึงประกอบข้อความใหม่จาก chars ด้วยตัวเดียว
     # กับ _page_text ส่วนการนับตัวหนายังใช้ words ตามเดิม (chars ไม่มี fontname ที่เชื่อได้)
-    page_chars = _thai_chars(getattr(pdf_page, 'chars', None) or [])
+    page_chars = _thai_chars(getattr(pdf_page, 'chars', None) or [],
+                             _fonts_missing_sara_aa(pdf_page))
 
     results = []
     for group in grouped:

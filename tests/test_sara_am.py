@@ -123,6 +123,108 @@ class TheBookTextIsFoldedWhenItIsRead(unittest.TestCase):
         self.assertEqual(_compose_thai_line(chars), WATER_PLAIN_AA)
 
 
+def _cmap(pairs):
+    """ตาราง ToUnicode ของฟอนต์ตามรูปแบบจริงใน PDF — [(รหัสในฟอนต์, อักขระ), ...]"""
+    body = "\n".join("<%04X> <%04X>" % (code, ord(char)) for code, char in pairs)
+    return ("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+            "%d beginbfchar\n%s\nendbfchar\nendcmap\n"
+            "CMapName currentdict /CMap defineresource pop\nend\nend"
+            % (len(pairs), body)).encode("latin-1")
+
+
+def _font(name, letters):
+    from pdfminer.pdftypes import PDFStream
+    from pdfminer.psparser import PSLiteral
+    data = _cmap([(0x100 + i, char) for i, char in enumerate(letters)])
+    return {"BaseFont": PSLiteral(name), "ToUnicode": PDFStream({"Length": len(data)}, data)}
+
+
+def _page_with_fonts(fonts):
+    import types
+    return types.SimpleNamespace(
+        page_obj=types.SimpleNamespace(resources={"Font": fonts}), chars=[])
+
+
+# พยัญชนะไทย 22 ตัว = ตารางกว้างพอที่จะพิสูจน์ว่าเป็นฟอนต์ที่ใช้พิมพ์ข้อความไทยจริง
+THAI_WIDE = "กขคฆงจฉชซฌญฎฏฐฑฒณดตถทธ"
+
+
+class AFontTableThatHasNoSaraAaIsRepaired(unittest.TestCase):
+    """ฟอนต์ย่อยของเล่มจริง (7 ต.ค. 2569) เขียนตาราง ToUnicode เหลื่อมไปหนึ่งช่อง
+    สระ า จึงอ่านได้เป็น ำ ทั้งเล่ม ("ทำนายการ" -> "ทำนำยกำร")
+
+    ตัวตัดสินการสะกด (spelling_key) แยก ำ กับ า ออกจากกัน เล่มที่พิมพ์ถูกจึงถูกฟ้องแดงว่า
+    ชื่อเรื่องและชื่อนักศึกษาไม่ตรงข้อมูลอนุมัติ
+
+    ตัดสินจากตารางของฟอนต์เอง ไม่ใช่จากสถิติของข้อความ — ไม่มีฟอนต์ไทยตัวไหนมี ำ
+    แต่ไม่มี า
+    """
+
+    def test_a_table_with_sara_am_but_no_sara_aa_is_named(self):
+        page = _page_with_fonts({"F1": _font("AAAAAA+Thai", THAI_WIDE + AM)})
+        self.assertEqual(checker_module._fonts_missing_sara_aa(page),
+                         frozenset({"AAAAAA+Thai"}))
+
+    def test_a_table_that_has_both_is_left_alone(self):
+        """ควบคุมเชิงลบ — ฟอนต์ที่ map ถูก ห้ามถูกแตะ ไม่งั้น ำ จริงจะกลายเป็น า ทั้งเล่ม"""
+        page = _page_with_fonts({"F1": _font("BBBBBB+Thai", THAI_WIDE + AA + AM)})
+        self.assertEqual(checker_module._fonts_missing_sara_aa(page), frozenset())
+
+    def test_a_table_with_only_a_few_thai_letters_is_left_alone(self):
+        """ควบคุมเชิงลบ — เอกสารไทยสั้น ๆ ("คำนำ") อาจไม่มีสระ า จริง ๆ ห้ามเดา"""
+        page = _page_with_fonts({"F1": _font("CCCCCC+Thai", "กขคน" + AM)})
+        self.assertEqual(checker_module._fonts_missing_sara_aa(page), frozenset())
+
+    def test_a_font_without_a_table_is_left_alone(self):
+        from pdfminer.psparser import PSLiteral
+        page = _page_with_fonts({"F1": {"BaseFont": PSLiteral("DDDDDD+Thai")}})
+        self.assertEqual(checker_module._fonts_missing_sara_aa(page), frozenset())
+
+    def test_two_fonts_sharing_one_name_are_left_alone(self):
+        """ควบคุมเชิงลบ — char บอกแค่ชื่อฟอนต์ ถ้าชื่อซ้ำกันแต่ตารางต่างกัน พิสูจน์ไม่ได้
+        ว่าตัวอักษรตัวไหนมาจากตารางไหน จึงต้องไม่แตะทั้งคู่
+        """
+        page = _page_with_fonts({"F1": _font("EEEEEE+Thai", THAI_WIDE + AM),
+                                 "F2": _font("EEEEEE+Thai", THAI_WIDE + AA + AM)})
+        self.assertEqual(checker_module._fonts_missing_sara_aa(page), frozenset())
+
+    def test_a_page_the_font_table_cannot_be_read_from_reads_as_before(self):
+        import types
+        self.assertEqual(
+            checker_module._fonts_missing_sara_aa(types.SimpleNamespace()), frozenset())
+
+    def test_only_the_named_font_has_its_sara_am_read_back_as_sara_aa(self):
+        chars = [ch("น", 10.0, width=7.0), ch(AM, 17.0, width=5.3),
+                 ch("ย", 22.3, width=6.5)]
+        for c in chars:
+            c["fontname"] = "AAAAAA+Thai"
+        self.assertEqual("".join(c["text"] for c in
+                                 _thai_chars(chars, frozenset({"AAAAAA+Thai"}))), "นาย")
+        self.assertEqual("".join(c["text"] for c in _thai_chars(chars)), "น" + AM + "ย")
+
+    def test_a_whole_word_from_the_broken_font_reads_correctly(self):
+        """"ทำนาย" ในเล่มนั้น: ำ ของ ทำ มาจากนิคหิตที่ฟอนต์ map เป็นช่องว่างกว้างศูนย์
+        บวกกับ า  ส่วน า ของ นาย เป็นตัวเดียวกันแต่ไม่มีนิคหิต
+        """
+        chars = [ch("ท", 10.0, width=7.3), ch(AM, 17.3, width=5.3),
+                 {"text": " ", "x0": 17.4, "x1": 17.4, "top": 100.0},
+                 ch("น", 22.6, width=7.1), ch(AM, 29.7, width=5.3),
+                 ch("ย", 35.0, width=6.5)]
+        for c in chars:
+            c["fontname"] = "AAAAAA+Thai"
+        line = _compose_thai_line(_thai_chars(chars, frozenset({"AAAAAA+Thai"})))
+        self.assertEqual(line, "ทำนาย")
+
+    def test_the_page_reader_passes_the_font_names_through(self):
+        """_page_text ต้องส่งชื่อฟอนต์ที่เพี้ยนลงไปด้วย ไม่ใช่อ่าน chars เปล่า ๆ"""
+        page = _page_with_fonts({"F1": _font("AAAAAA+Thai", THAI_WIDE + AM)})
+        page.chars = [dict(c, fontname="AAAAAA+Thai") for c in
+                      (ch("น", 10.0, width=7.0), ch(AM, 17.0, width=5.3),
+                       ch("ย", 22.3, width=6.5))]
+        self.assertEqual(checker_module._page_text(page), "นาย")
+
+
 class TheApprovedDataIsFoldedWhenItEntersTheSystem(unittest.TestCase):
     def test_the_import_from_an_ethesis_file_folds_every_form(self):
         pua_tone = ""                    # ฟอนต์ที่ map ไม้โทเป็นอักขระส่วนบุคคล → ้
