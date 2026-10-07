@@ -127,15 +127,22 @@ def main():
     body = base.json()
     passed.append(check("ส่งตัวเลขสามกล่องกลับมา", isinstance(body.get("counts"), dict),
                         str(body.get("counts"))))
+    # เล่มที่ไม่ผ่านขึ้นต้นด้วย "กรุณาแก้ไขทั้งหมด N จุด" ไม่มีบรรทัดผลตรวจ (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+    first = body["plain"].split("\n")[0]
     passed.append(check("ผลตรวจตรงกับบรรทัดแรกของข้อความสรุป",
-                        body["plain"].split("\n")[0] == "ผลการตรวจ: " + body["verdict"],
-                        body["plain"].split("\n")[0]))
+                        first.startswith("กรุณาแก้ไขทั้งหมด ") if body["verdict"] == "ไม่ผ่าน"
+                        else first == "ผลการตรวจ: " + body["verdict"], first))
 
     pressed = client.post(f"/summary/{job}",
                           json={"failed": [], "passed": [],
                                 "staff": ["SIGNATURE_LAYOUT_WRONG"]}).json()
     passed.append(check("กดปุ่มเจ้าหน้าที่แล้วถ้อยคำเข้าข้อความสรุป",
                         "ในหน้าลงนาม" in pressed["plain"]))
+    passed.append(check("เล่มที่ต้องแก้ขึ้นต้นด้วย กรุณาแก้ไข ไม่มี ผลการตรวจ: ไม่ผ่าน",
+                        pressed["verdict"] == "ไม่ผ่าน"
+                        and pressed["plain"].startswith("กรุณาแก้ไขทั้งหมด ")
+                        and "ผลการตรวจ" not in pressed["plain"],
+                        pressed["plain"].split("\n")[0]))
     passed.append(check("กดปุ่มเจ้าหน้าที่แล้วตัวเลขต้องแก้เพิ่มขึ้น",
                         pressed["counts"]["RED"] > body["counts"]["RED"],
                         f'{body["counts"]["RED"]} -> {pressed["counts"]["RED"]}'))

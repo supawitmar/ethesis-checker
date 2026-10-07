@@ -117,7 +117,9 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
         for line in wording.split(chr(10)):
             if line.strip():
                 self.assertIn(line.strip(), text)
-        self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+        # เล่มที่ต้องแก้ขึ้นต้นด้วย "กรุณาแก้ไข" เลย ไม่มี "ผลการตรวจ: ไม่ผ่าน" (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+        self.assertTrue(text.startswith("กรุณาแก้ไขทั้งหมด 1 จุด"), text[:40])
+        self.assertNotIn("ผลการตรวจ", text)
 
     def test_the_fee_answer_is_appended_without_being_counted(self):
         """เล่มนี้ไม่มีจุดต้องแก้ ถ้อยคำที่ต่อท้ายจึงเป็นชุด "เสร็จสิ้นแล้ว"
@@ -144,8 +146,58 @@ class StaffButtonsReachTheSummaryEndpoint(unittest.TestCase):
                                               "staff": staff})
             self.assertEqual(response.status_code, 200, response.text)
             body = response.json()
-            self.assertEqual(body["plain"].split(chr(10))[0],
-                             "ผลการตรวจ: " + body["verdict"], staff)
+            first = body["plain"].split(chr(10))[0]
+            # เล่มที่ไม่ผ่านไม่มีบรรทัดผลตรวจ ขึ้นต้นด้วย "กรุณาแก้ไข" แทน (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+            if body["verdict"] == "ไม่ผ่าน":
+                self.assertTrue(first.startswith("กรุณาแก้ไขทั้งหมด "), staff)
+            else:
+                self.assertEqual(first, "ผลการตรวจ: " + body["verdict"], staff)
+
+    REPORT_VERDICT_RUNNER = r"""
+const source = require('fs').readFileSync(0, 'utf8');
+const cases = JSON.parse(process.argv[1]);
+console.log(JSON.stringify(cases.map(function (text) {
+  return new Function('PLAIN_TEXT', source + '\nreturn REPORT_VERDICT;')(text);
+})));
+"""
+
+    @unittest.skipUnless(shutil.which("node"), "ไม่มี node ในเครื่องนี้")
+    def test_the_page_reads_the_verdict_the_server_meant(self):
+        """สคริปต์จริงของหน้ารายงาน อ่านข้อความสรุปจริงจากเซิร์ฟเวอร์ ต้องได้ผลตรวจตรงกัน
+
+        หน้ารายงานเลือกหัวข้อค่าปรับตอนเปิดหน้าจากผลตรวจที่อ่านจากข้อความสรุป
+        (REPORT_VERDICT) เล่มที่ไม่ผ่านไม่มีบรรทัด "ผลการตรวจ: ไม่ผ่าน" แล้ว (เจ้าหน้าที่สั่ง
+        7 ต.ค. 2569) ถ้าสคริปต์อ่านไม่ออก หัวข้อค่าปรับของเล่มผ่านจะโชว์ปนกับของเล่มไม่ผ่าน
+        — ใช้ข้อความที่เซิร์ฟเวอร์สร้างจริง ไม่ใช่ข้อความที่พิมพ์เองในเทสต์
+        """
+        import checker
+        html = (Path(__file__).resolve().parents[1] / "templates" / "report.html").read_text(
+            encoding="utf-8")
+        start = html.index("var REPORT_VERDICT")
+        block = html[start:html.index("})();", start) + len("})();")]
+        pending = checker.Report()
+        pending.add("ORANGE", "front_matter", "หน้าปก", "อ่านไม่ออก", "ตรวจเอง", "", "FORMAT.BOLD")
+        with main.JOBS_LOCK:
+            main.JOBS["pending"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(pending),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        clean = self._seed_clean_report()
+        texts, wanted = [], []
+        for job, staff in ((clean, []), (clean, ["PASS_FEE_NONE"]),
+                           (clean, ["SIGNATURE_LAYOUT_WRONG", "LATE_FEE_NONE"]),
+                           ("pending", [])):
+            body = self.client.post(f"/summary/{job}", json={"staff": staff}).json()
+            texts.append(body["plain"])
+            wanted.append(body["verdict"])
+        # ครบทั้งสามผลตรวจ ไม่งั้นเทสต์นี้ไม่ได้คุมแบบที่ไม่มีบรรทัดผลตรวจ
+        self.assertEqual(set(wanted), {"ผ่าน", "ไม่ผ่าน", "รอยืนยัน"})
+        run = subprocess.run(["node", "-e", self.REPORT_VERDICT_RUNNER, json.dumps(texts)],
+                             input=block, capture_output=True, text=True, encoding="utf-8",
+                             timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout), wanted)
 
     def test_the_card_shows_the_steps_the_student_must_take_outside_the_book(self):
         """ขั้นตอนขอคงโครงบท (notice) ต้องขึ้นบนการ์ดด้วย แยกทีละบรรทัด
@@ -1562,7 +1614,11 @@ class SavingTheResultToTheSheet(unittest.TestCase):
         self.assertEqual(data["details"], checker.sheet_row(
             main.JOBS[job]["report"], [], [], staff)["details"])
         self.assertNotIn("ผลการตรวจ", data["details"])
-        self.assertIn("ผลการตรวจ", data["plain"])
+        # ข้อความที่ส่งนักศึกษาก็ไม่มี "ผลการตรวจ: ไม่ผ่าน" แล้ว (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+        # ต่างจากช่องในชีทแค่ย่อหน้าปิดท้าย (ค่าปรับ วิธีส่งกลับ ช่องทางติดต่อ)
+        self.assertNotIn("ผลการตรวจ", data["plain"])
+        self.assertTrue(data["plain"].startswith(data["details"] + chr(10)))
+        self.assertIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", data["plain"])
 
     def test_an_out_of_date_script_in_the_sheet_is_reported(self):
         """Apps Script ไม่อัปเดต URL เดิมให้เอง — ต้องบอกตอนกด ไม่ใช่ให้ไปเจอเอง

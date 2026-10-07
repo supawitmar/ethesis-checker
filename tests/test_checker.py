@@ -97,6 +97,18 @@ from ethesis_rules import (
 )
 
 
+def verdict_the_page_reads(text):
+    """ผลตรวจที่หน้ารายงานอ่านได้จากข้อความสรุป (REPORT_VERDICT ใน report.html)
+
+    เล่มที่ไม่ผ่านไม่มีบรรทัด "ผลการตรวจ: ไม่ผ่าน" แล้ว ขึ้นต้นด้วย "กรุณาแก้ไขทั้งหมด N จุด"
+    (เจ้าหน้าที่สั่ง 7 ต.ค. 2569) — สคริปต์จริงของหน้ามีเทสต์ของมันเองใน test_web.py
+    """
+    first = text.split(NEWLINE)[0]
+    if first.startswith("ผลการตรวจ: "):
+        return first[len("ผลการตรวจ: "):]
+    return "ไม่ผ่าน" if re.match(r"กรุณาแก้ไขทั้งหมด \d+ จุด", first) else ""
+
+
 class NormalizationTests(unittest.TestCase):
     def test_thai_combining_mark_reordering_is_normalized(self):
         self.assertEqual(norm("บทคัดย่อ"), norm("บทคดัยอ่"))
@@ -2555,6 +2567,32 @@ class PlainSummaryProseTests(unittest.TestCase):
         text = plain_summary({"verdict": "ผ่าน", "issues_by_zone": {"RED": []}})
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
 
+    def test_a_book_to_fix_opens_with_the_fix_line_not_the_result_line(self):
+        """เจ้าหน้าที่สั่ง (7 ต.ค. 2569) กรณีไม่ผ่าน "ตัดคำว่า ผลการตรวจ ไม่ผ่าน ออก
+        ให้ขึ้นว่า กรุณาแก้ไข.... ไปเลย" — ส่วนอื่นของข้อความเหมือนเดิมทุกบรรทัด
+        """
+        items = [{"part": "cover", "location": "หน้าปก", "found": "ชื่อเรื่องไม่ตรง",
+                  "expected": "", "fix": ""}]
+        text = plain_summary(self._report(items))
+        self.assertEqual(text.split(NEWLINE)[:2], ["กรุณาแก้ไขทั้งหมด 1 จุด ดังต่อไปนี้", ""])
+        self.assertNotIn("ผลการตรวจ", text)
+        self.assertNotIn("ไม่ผ่าน", text)
+
+    def test_the_result_line_goes_only_when_the_fix_line_replaces_it(self):
+        """ผลตรวจ "ไม่ผ่าน" ที่ไม่มีจุดให้แก้สักจุด (report ที่ส่งมาพร้อม verdict ของตัวเอง
+        ไม่เกิดกับเล่มจริง) ยังต้องมีบรรทัดผลตรวจ ถ้าตัดตามผลตรวจอย่างเดียว ข้อความจะเหลือแค่
+        "ไม่พบจุดที่ต้องแก้ไข" ซึ่งอ่านว่าจบแล้ว ทั้งที่ผลตรวจคือไม่ผ่าน
+        """
+        report = {"verdict": "ไม่ผ่าน",
+                  "issues_by_zone": {"RED": [], "ORANGE": [], "YELLOW": []}}
+        self.assertEqual(plain_summary(report),
+                         "ผลการตรวจ: ไม่ผ่าน" + NEWLINE + NEWLINE + "ไม่พบจุดที่ต้องแก้ไข")
+        # เล่มที่ยังรอยืนยันก็ยังขึ้นต้นด้วยบรรทัดผลตรวจเหมือนเดิม
+        pending = {"verdict": "รอยืนยัน", "issues_by_zone": {"RED": [], "ORANGE": [{
+            "part": "front_matter", "location": "สารบัญ (หน้า ฉ)", "found": "อ่านไม่ออก",
+            "expected": "", "fix": ""}], "YELLOW": []}}
+        self.assertTrue(plain_summary(pending).startswith("ผลการตรวจ: รอยืนยัน" + NEWLINE))
+
     def test_an_unpressed_orange_is_listed_as_pending_not_as_a_fix(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569): "สีส้มที่ยังไม่ได้กด จะเข้าว่ารอยืนยัน"
 
@@ -3586,14 +3624,17 @@ class StaffDecisionsMoveTheNumbersOnTheReportHead(unittest.TestCase):
     def test_the_verdict_still_matches_the_first_line_of_the_summary(self):
         """สองค่านี้คำนวณคนละรอบ ถ้าเพี้ยนจากกันเจ้าหน้าที่จะเห็นหัวข้อที่กดแล้วไม่มีผล"""
         report = self._report(orange=2, yellow=1)
+        seen = set()
         for failed, passed in (([], []), (["YELLOW:0"], []), ([], ["ORANGE:0"]),
                                ([], ["ORANGE:0", "ORANGE:1"]),
                                (["ORANGE:0"], ["ORANGE:1"])):
             text = checker_module.plain_summary(report, failed, passed)
             verdict = checker_module.summary_verdict(report, failed=failed,
                                                      passed=passed)
-            self.assertEqual(text.split(NEWLINE)[0], "ผลการตรวจ: " + verdict,
-                             (failed, passed))
+            self.assertEqual(verdict_the_page_reads(text), verdict, (failed, passed))
+            seen.add(verdict)
+        # ครบทั้งสามผลตรวจ ไม่งั้นเทสต์นี้ไม่ได้คุมแบบที่ไม่มีบรรทัดผลตรวจ
+        self.assertEqual(seen, {"ผ่าน", "ไม่ผ่าน", "รอยืนยัน"})
 
 
 class AbstractHeadingsWrittenInEnglishAreRecognised(unittest.TestCase):
@@ -5858,7 +5899,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         for report, staff, _ in cases:
             text = checker_module.plain_summary(report, staff=staff)
             verdict = checker_module.summary_verdict(report, staff=staff)
-            self.assertEqual(text.split(NEWLINE)[0], "ผลการตรวจ: " + verdict,
+            self.assertEqual(verdict_the_page_reads(text), verdict,
                              (report.get("verdict"), staff))
 
     def test_no_english_wording_leaks_thai_letters(self):
@@ -5933,7 +5974,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                  (self._clean_report(), [self.WRONG, self.FEE_NONE])]
         for report, staff in cases:
             text = checker_module.plain_summary(report, staff=staff)
-            self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+            self.assertTrue(text.startswith("กรุณาแก้ไขทั้งหมด"), text[:40])
             self.assertNotIn("การส่ง E-thesis ในระบบเสร็จสิ้นแล้ว", text)
             self.assertIn("กรุณาส่งกลับเข้าสู่ระบบอีกครั้ง", text)
 
@@ -6224,10 +6265,12 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
     def test_the_result_line_stops_saying_passed(self):
         """ควบคุมเชิงลบ: ถ้าไม่แก้บรรทัดผลตรวจ ข้อความจะขัดกันเองต่อหน้านักศึกษา
 
-        "ผลการตรวจ: ผ่าน" แล้วบรรทัดถัดมา "กรุณาแก้ไขทั้งหมด 1 จุด"
+        "ผลการตรวจ: ผ่าน" แล้วบรรทัดถัดมา "กรุณาแก้ไขทั้งหมด 1 จุด" — ตั้งแต่ 7 ต.ค. 2569
+        เล่มที่ต้องแก้ไม่มีบรรทัดผลตรวจเลย ขึ้นต้นด้วยบรรทัด "กรุณาแก้ไข" ทันที
         """
         text = checker_module.plain_summary(self._clean_report(), staff=[self.WRONG])
-        self.assertTrue(text.startswith("ผลการตรวจ: ไม่ผ่าน"), text[:40])
+        self.assertTrue(text.startswith("กรุณาแก้ไขทั้งหมด 1 จุด"), text[:40])
+        self.assertNotIn("ผ่าน", text.split(NEWLINE)[0])
 
     def test_a_passing_book_with_nothing_added_still_says_passed(self):
         self.assertTrue(checker_module.plain_summary(self._clean_report())
@@ -6619,7 +6662,9 @@ class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
         for name, context in self.CONTEXTS.items():
             report = self._report(context)
             self.assertIn("plain_summary", report, name)
-            self.assertIn("ผลการตรวจ:", report["plain_summary"], name)
+            # เล่มนี้ไม่ผ่าน ข้อความจึงขึ้นต้นด้วยบรรทัด "กรุณาแก้ไข" (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+            self.assertTrue(report["plain_summary"].startswith("กรุณาแก้ไขทั้งหมด 1 จุด"),
+                            name)
 
     def test_the_copy_box_already_holds_the_text_before_any_script_runs(self):
         """กล่องคัดลอกต้องไม่ว่างรอ JS เติม
@@ -6632,7 +6677,7 @@ class EveryWayOutOfRunCheckRendersTheReportPage(unittest.TestCase):
         found = re.search(r'<textarea class="copy-text"[^>]*>([\s\S]*?)</textarea>', html)
         self.assertIsNotNone(found, "หา textarea ของกล่องคัดลอกไม่เจอ")
         inside = found.group(1)
-        self.assertIn("ผลการตรวจ:", inside)
+        self.assertIn("กรุณาแก้ไขทั้งหมด 1 จุด", inside)
         self.assertIn("ภาษาในไฟล์รูปเล่มไม่ตรงกับที่ได้รับอนุมัติ", inside)
 
     def test_dropping_a_key_really_breaks_the_page(self):
@@ -9421,10 +9466,14 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
             self.assertNotIn("ค่าปรับ", details)
             self.assertNotIn("Line Official Account", details)
             self.assertIn("ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ", details)
-        # ข้อความที่ส่งนักศึกษา (ปุ่ม "คัดลอก") ยังต้องมีครบเหมือนเดิม
+        # ข้อความที่ส่งนักศึกษา (ปุ่ม "คัดลอก") ยังมีย่อหน้าค่าปรับครบ ส่วนหัวเรื่อง
+        # "ผลการตรวจ: ไม่ผ่าน" ถูกตัดออกจากข้อความนั้นด้วยแล้ว (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+        # ช่องในชีทจึงเป็นข้อความเดียวกันตัดย่อหน้าปิดท้ายพอดี
         full = checker_module.plain_summary(report, staff=["LATE_FEE_YES"])
-        self.assertTrue(full.startswith("ผลการตรวจ: ไม่ผ่าน"))
         self.assertIn("ค่าปรับ", full)
+        self.assertNotIn("ผลการตรวจ", full)
+        self.assertTrue(full.startswith(checker_module.sheet_row(
+            report, staff=["LATE_FEE_YES"])["details"] + NEWLINE))
 
     def test_the_details_follow_what_the_staff_pressed(self):
         """ข้อสีส้มที่เจ้าหน้าที่กด "ไม่ผ่าน" ต้องอยู่ในข้อความที่เก็บลงชีทด้วย"""

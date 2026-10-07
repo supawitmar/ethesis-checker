@@ -166,10 +166,25 @@ function load(cards, summaryText) {
   check('ผลตรวจที่อ่านไม่ได้ ปล่อยป้ายเดิมไว้', pill.textContent, 'ผ่าน (Passed)');
 }
 
-// ---- ผลตรวจอ่านจากบรรทัดแรกของข้อความสรุป ----
+// ---- ผลตรวจอ่านจากข้อความสรุป ----
+// เล่มที่ไม่ผ่านไม่มีบรรทัด "ผลการตรวจ: ไม่ผ่าน" แล้ว (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
+// ข้อความขึ้นต้นด้วย "กรุณาแก้ไขทั้งหมด N จุด" เลย ซึ่งมีเฉพาะเล่มที่ไม่ผ่าน
 {
-  const { sandbox } = load([], 'ผลการตรวจ: ไม่ผ่าน\n\nกรุณาแก้ไขทั้งหมด 2 จุด ดังต่อไปนี้');
-  check('อ่านผลตรวจจากข้อความสรุป', sandbox.REPORT_VERDICT, 'ไม่ผ่าน');
+  const cases = [
+    ['กรุณาแก้ไขทั้งหมด 2 จุด ดังต่อไปนี้\n\nหน้าปก\n1. ชื่อเรื่องไม่ตรง', 'ไม่ผ่าน'],
+    ['ผลการตรวจ: ผ่าน\n\nไม่พบจุดที่ต้องแก้ไข', 'ผ่าน'],
+    ['ผลการตรวจ: รอยืนยัน\n\nรอยืนยัน 1 จุด ดังต่อไปนี้', 'รอยืนยัน'],
+    // เล่มไม่ผ่านที่ไม่มีจุดให้แก้ (ไม่เกิดกับเล่มจริง) ยังมีบรรทัดผลตรวจ ต้องอ่านได้เหมือนเดิม
+    ['ผลการตรวจ: ไม่ผ่าน\n\nไม่พบจุดที่ต้องแก้ไข', 'ไม่ผ่าน'],
+    // ต้องเป็นบรรทัดแรกของข้อความเท่านั้น ไม่ใช่เจอคำนี้ที่ไหนก็ได้
+    ['ไม่พบจุดที่ต้องแก้ไข\nกรุณาแก้ไขทั้งหมด 2 จุด', ''],
+    ['', ''],
+  ];
+  cases.forEach(([text, wanted]) => {
+    const { sandbox } = load([], text);
+    check('อ่านผลตรวจจากข้อความสรุป: ' + JSON.stringify(text.split('\n')[0]),
+          sandbox.REPORT_VERDICT, wanted);
+  });
 }
 
 // ---- ถ้อยคำปิดท้ายต้องถูกแปลทั้งก้อน ----
@@ -185,9 +200,12 @@ function load(cards, summaryText) {
         (en.match(/https:\/\/bit\.ly\/4cwqxAd/g) || []).length, 1);
 
   // ถ้อยคำของเล่มไม่ผ่านมีบรรทัดไทยที่ซ้ำกับชุดผ่านได้ จับทั้งก้อนจึงไม่ปนกัน
+  // เล่มไม่ผ่านขึ้นต้นด้วยบรรทัด "กรุณาแก้ไข" ไม่มีบรรทัดผลตรวจ (เจ้าหน้าที่สั่ง 7 ต.ค. 2569)
   const failWording = REGISTRY[1].choices[0];
-  const failSummary = 'ผลการตรวจ: ไม่ผ่าน\n\n' + failWording.text;
+  const failSummary = 'กรุณาแก้ไขทั้งหมด 1 จุด ดังต่อไปนี้\n\n' + failWording.text;
   const failEn = sandbox.trSummary(failSummary);
+  check('ฉบับอังกฤษของเล่มไม่ผ่านขึ้นต้นด้วยบรรทัดให้แก้ไข',
+        failEn.split('\n')[0], 'Please fix all 1 item(s) as follows');
   check('ชุดไม่ผ่านแปลถูกก้อนของตัวเอง',
         failEn.indexOf(failWording.text_en) !== -1, true);
   check('ชุดไม่ผ่านไม่ปนถ้อยคำของชุดผ่าน',
@@ -199,7 +217,7 @@ function load(cards, summaryText) {
 async function sheetLanguage() {
   const details = 'กรุณาแก้ไขทั้งหมด 1 จุด ดังต่อไปนี้\n\nหน้าลงนาม\n1. '
     + REGISTRY[0].choices[0].text.split('\n').join('\n   ');
-  const { sandbox } = load([], 'ผลการตรวจ: ไม่ผ่าน\n\n' + details);
+  const { sandbox } = load([], details);
   const asked = [];
   sandbox.fetch = (url, options) => {
     asked.push([url, JSON.parse(options.body)]);
