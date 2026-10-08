@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 E-Thesis Staff Checker — standalone web app (no Claude/LLM required).
-Run:  uvicorn main:app --host 0.0.0.0 --port 8000
+Run:  ดับเบิลคลิก เปิดระบบตรวจเล่ม.bat (หรือ uvicorn main:app --host 127.0.0.1 --port 8000)
 """
 import atexit
 import json

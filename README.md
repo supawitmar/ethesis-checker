@@ -54,12 +54,15 @@ python -m unittest discover -s tests
 
 ## รันในเครื่อง
 
+ใช้งานประจำ: ดับเบิลคลิก `เปิดระบบตรวจเล่ม.bat` (อัปเดตด้วย `อัปเดตระบบตรวจเล่ม.bat`)
+— รายละเอียดและเหตุผล (PDPA) อยู่ที่ `DEPLOY.md` หัวข้อ 4 · ตอนพัฒนา:
+
 ```bash
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-เปิด http://localhost:8000
+เปิด http://127.0.0.1:8000
 
 ค่าควบคุมการใช้งาน (environment variables):
 
