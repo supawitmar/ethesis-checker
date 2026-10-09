@@ -182,7 +182,7 @@ deploy เมื่อไหร่ ท้ายรายงานจะเปล
 | `templates/` | `index.html` (ฟอร์ม), `report.html` (รายงาน + ตารางแปล `TR`), `login.html` |
 | `tests/` | unittest + สคริปต์ JS (ไม่ต้องใช้ PDF) |
 | `tools/` | ด่านตรวจ (`regress_books.py`, `check_i18n.py`, `smoke_web.py`, `baseline.json`) · สคริปต์ชีท (`sheet_webhook.gs`) · เอกสารแท็บผิดซ้ำ |
-| `เปิดระบบตรวจเล่ม.bat`, `อัปเดตระบบตรวจเล่ม.bat`, `tools/run_local.py` | เปิด/อัปเดตระบบในเครื่อง (ฟังแค่ 127.0.0.1) — .bat ต้องเป็น CRLF (`.gitattributes`) |
+| `เปิดระบบตรวจเล่ม.bat`, `อัปเดตระบบตรวจเล่ม.bat`, `tools/run_local.py` | เปิด/อัปเดตระบบในเครื่อง (ฟังแค่ 127.0.0.1) — .bat ต้องเป็น CRLF (`.gitattributes`) · ไอคอนทางลัด `tools/ethesis-checker.ico` |
 | `DEPLOY.md` | รันในเครื่อง (หัวข้อ 4)/ติดตั้งชีท/Render/CI/เวอร์ชัน · `README.md` ภาพรวมและด่านก่อน commit · `RULES_AND_SOURCES.md` นโยบายกติกา |
 | `.github/workflows/ci.yml`, `Dockerfile` | CI บน GitHub · image (ส่ง `GIT_COMMIT` ตอน build) |
 | `.claude/` | คู่มือสำหรับ Claude Code (`skills/ethesis-check/`) และ `launch.json` — เปิด Claude Code ที่โฟลเดอร์ `code/` |
