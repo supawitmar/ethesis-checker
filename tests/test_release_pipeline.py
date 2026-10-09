@@ -165,6 +165,17 @@ class VersionFooterTests(unittest.TestCase):
         self.assertIn(f"<b>{main.APP_VERSION}</b>", html)
         self.assertIn(main.APP_STARTED_AT.strftime("%d/%m/%Y %H:%M"), html)
 
+    def test_the_release_number_shows_next_to_the_commit_when_there_is_one(self):
+        """เจ้าของขอ 9 ต.ค. 2569: อัปเดตมีเลขรุ่น (แท็ก v*) — สองเครื่องเทียบกันที่ "อัปเดต 1.0" ได้ทันที"""
+        with mock.patch.dict(main.templates.env.globals, {"app_release": "9.9"}):
+            upload = self.client.get("/").text
+            report = self.client.get(f"/result/{self._seed_clean_report()}").text
+        self.assertIn("<b>อัปเดต 9.9</b>", upload)
+        self.assertIn('<span data-th="อัปเดต" data-en="Update">อัปเดต</span> 9.9</b>', report)
+        with mock.patch.dict(main.templates.env.globals, {"app_release": ""}):
+            self.assertNotIn("อัปเดต", self.client.get("/").text.split('class="appver"')[1][:200])
+        self.assertIn("release", self.client.get("/health").json())
+
     def test_the_login_page_does_not_show_it(self):
         """ตั้งใจให้เหลือที่เดียวที่เปิดดูได้โดยไม่ล็อกอิน คือ /health (รหัส 7 ตัว ไว้เทียบ commit)"""
         html = TestClient(main.app).get("/login").text

@@ -12,7 +12,8 @@ SHEET_WEBHOOK_URL/SHEET_WEBHOOK_TOKEN ใน .env ของเครื่อง
   2. ยังไม่มีรหัสผ่านใน .env ให้ตั้ง (ถามในหน้าต่าง) และเติม SESSION_SECRET แบบสุ่มให้
   3. รัน uvicorn ที่ 127.0.0.1 เท่านั้น — เครื่องอื่นในเครือข่ายเข้าไม่ได้ (ห้ามเปลี่ยนเป็น 0.0.0.0)
   4. เปิดเบราว์เซอร์เมื่อระบบพร้อม · ถ้าเปิดค้างอยู่แล้วจากหน้าต่างอื่น แค่เปิดเบราว์เซอร์ให้
---update: git pull --ff-only แล้วติดตั้งแพ็กเกจใหม่ถ้ามี (ไม่แตะเครื่องที่มีไฟล์แก้ค้างอยู่)
+--update: ติดตั้งรุ่นล่าสุดที่ออกแล้ว (แท็ก v*) ด้วย fast-forward แล้วแสดงว่าเปลี่ยนอะไร
+          จาก CHANGELOG.md (ไม่แตะเครื่องที่มีไฟล์แก้ค้างอยู่)
 """
 import argparse
 import getpass
@@ -273,6 +274,50 @@ def _git(git, *args):
                           encoding="utf-8", errors="replace")
 
 
+# รุ่นที่ออกให้เครื่องอื่นติดตั้ง = git tag ชื่อ v<หลัก>.<รอง> คู่กับหัวข้อใน CHANGELOG.md
+# "## อัปเดต 1.1 — 10 ต.ค. 2569" (เจ้าของขอ 9 ต.ค. 2569 ให้ปรับกฎแล้วออกเป็นอัปเดตมีเลขรุ่นและวันที่)
+# ตัวอัปเดตดึงเฉพาะรุ่นที่ออกแล้ว — งานที่ push ขึ้น main แต่ยังไม่ออกรุ่นไม่ลงเครื่องที่ใช้งาน
+RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)$")
+CHANGELOG_HEADING = re.compile(r"(?m)^## อัปเดต (\d+)\.(\d+)\s*[—-]\s*(.+?)\s*$")
+
+
+def release_tags(git_run):
+    """รุ่นทั้งหมดที่มี เรียงจากเก่าไปใหม่: [((หลัก, รอง), "v1.0"), ...]"""
+    listed = git_run("tag", "--list", "v*")
+    found = []
+    for name in listed.stdout.split():
+        match = RELEASE_TAG.match(name.strip())
+        if match:
+            found.append(((int(match.group(1)), int(match.group(2))), name.strip()))
+    return sorted(found)
+
+
+def changelog_entries(text):
+    """[((หลัก, รอง), "วันที่", "เนื้อหา"), ...] ตามลำดับในไฟล์"""
+    heads = list(CHANGELOG_HEADING.finditer(text))
+    entries = []
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        entries.append(((int(head.group(1)), int(head.group(2))), head.group(3),
+                        text[head.end():end].strip()))
+    return entries
+
+
+def _label(version):
+    return f"{version[0]}.{version[1]}"
+
+
+def _say_notes(after, upto, path=None):
+    try:
+        text = Path(path or CODE / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return
+    for version, date, body in changelog_entries(text):
+        if (after is None or version > after) and version <= upto:
+            say(f"\n=== อัปเดต {_label(version)} — {date} ===")
+            say(body)
+
+
 def update(which=shutil.which, git_run=None):
     git = which("git")
     if not git or not (CODE / ".git").exists():
@@ -287,20 +332,38 @@ def update(which=shutil.which, git_run=None):
         say("ไม่อัปเดตให้ เพราะมีไฟล์ในโฟลเดอร์ถูกแก้ค้างอยู่ (กันงานที่แก้ไว้หาย):")
         say(status.stdout.rstrip())
         return 1
-    pulled = git_run("pull", "--ff-only")
-    if pulled.returncode != 0:
-        say("ดึงรุ่นใหม่ไม่สำเร็จ — ตรวจอินเทอร์เน็ต หรือเครื่องนี้มี commit ที่ยังไม่ขึ้น GitHub")
-        say((pulled.stdout + pulled.stderr).strip())
+    fetched = git_run("fetch", "--tags", "origin")
+    if fetched.returncode != 0:
+        say("ดึงรุ่นใหม่ไม่สำเร็จ — ตรวจอินเทอร์เน็ต หรือการล็อกอิน GitHub ของเครื่องนี้")
+        say((fetched.stdout + fetched.stderr).strip())
         return 1
-    say(pulled.stdout.strip())
+    releases = release_tags(git_run)
+    if not releases:
+        say("ยังไม่มีอัปเดตใหม่ — เครื่องนี้ใช้รุ่นปัจจุบันต่อได้เลย (ยังไม่เคยออกอัปเดต ดู CHANGELOG.md)")
+        return 0
+    newest, tag = releases[-1]
+    have = None
+    for version, name in reversed(releases):
+        if git_run("merge-base", "--is-ancestor", name, "HEAD").returncode == 0:
+            have = version
+            break
+    if have == newest:
+        say(f"เครื่องนี้เป็นรุ่นล่าสุดแล้ว: อัปเดต {_label(newest)}")
+        return 0
+    merged = git_run("merge", "--ff-only", tag)
+    if merged.returncode != 0:
+        say(f"ติดตั้งอัปเดต {_label(newest)} ไม่ได้ — เครื่องนี้มี commit ของตัวเองที่ไม่อยู่ในรุ่นที่ออก")
+        say((merged.stdout + merged.stderr).strip())
+        return 1
     try:
         ensure_venv()
     except (subprocess.CalledProcessError, OSError):
-        say("ดึงโค้ดแล้ว แต่ติดตั้งแพ็กเกจไม่สำเร็จ — เปิดระบบอีกครั้งตอนต่ออินเทอร์เน็ต")
+        say("ติดตั้งโค้ดแล้ว แต่ติดตั้งแพ็กเกจไม่สำเร็จ — เปิดระบบอีกครั้งตอนต่ออินเทอร์เน็ต")
         return 1
     head = git_run("rev-parse", "--short=7", "HEAD").stdout.strip()
-    say(f"อัปเดตแล้ว เป็นรุ่น {head} (ตรงกับรหัสท้ายหน้าเว็บ)")
-    say("ถ้าระบบเปิดค้างอยู่ ให้ปิดหน้าต่างของระบบแล้วเปิดใหม่ จึงจะใช้รุ่นใหม่")
+    say(f"ติดตั้งอัปเดต {_label(newest)} แล้ว (รหัส {head} ตรงกับท้ายหน้าเว็บ)")
+    _say_notes(have, newest)
+    say("\nถ้าระบบเปิดค้างอยู่ ให้ปิดหน้าต่างของระบบแล้วเปิดใหม่ จึงจะใช้รุ่นใหม่")
     return 0
 
 

@@ -678,7 +678,7 @@
   </div>
   {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง")
      อยู่นอกสคริปต์และนอกกล่องรายงาน — รายงานที่บันทึกเป็นไฟล์ไว้ก็ยังบอกได้ว่าสร้างจากโค้ดรุ่นไหน #}
-  <p class="appver"><span data-th="เวอร์ชันระบบ" data-en="System version">เวอร์ชันระบบ</span> <b>{{ app_version }}</b> ·
+  <p class="appver"><span data-th="เวอร์ชันระบบ" data-en="System version">เวอร์ชันระบบ</span> {% if app_release %}<b><span data-th="อัปเดต" data-en="Update">อัปเดต</span> {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b> ·
     <span data-th="เริ่มทำงาน" data-en="running since">เริ่มทำงาน</span> {{ app_started }}</p>
 </main>
 

@@ -6,6 +6,7 @@
 และรหัสผ่านที่ตั้งผ่านตัวเปิด ต้องอ่านกลับใน uvicorn ได้ค่าเดียวกับที่พิมพ์
 """
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from unittest import mock
 CODE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE / "tools"))
 
+import release  # noqa: E402
 import run_local  # noqa: E402
 
 try:
@@ -182,7 +184,7 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(run_local.checker_running(1, timeout=0.2))
 
 
-class UpdateTests(unittest.TestCase):
+class UpdateGuardTests(unittest.TestCase):
     def setUp(self):
         # ไม่พึ่งว่าโฟลเดอร์ที่รันเทสต์มาจาก git clone หรือไม่ (สำเนาโค้ดที่ใช้ทดสอบไม่มี .git)
         folder = tempfile.TemporaryDirectory()
@@ -192,34 +194,205 @@ class UpdateTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def result(self, out="", code=0):
-        return subprocess.CompletedProcess([], code, stdout=out, stderr="")
-
-    def test_does_not_pull_over_local_edits(self):
+    def test_does_not_touch_a_folder_with_local_edits(self):
         calls = []
 
         def git(*args):
             calls.append(args)
-            return self.result(" M checker.py\n")
+            return subprocess.CompletedProcess([], 0, stdout=" M checker.py\n", stderr="")
         with mock.patch.object(run_local, "say"):
             self.assertEqual(run_local.update(which=lambda _: "git", git_run=git), 1)
-        self.assertNotIn(("pull", "--ff-only"), calls)
-
-    def test_pulls_fast_forward_only_then_installs(self):
-        calls = []
-
-        def git(*args):
-            calls.append(args)
-            return self.result("abc1234\n" if args[0] == "rev-parse" else "")
-        with mock.patch.object(run_local, "say"), \
-                mock.patch.object(run_local, "ensure_venv") as installed:
-            self.assertEqual(run_local.update(which=lambda _: "git", git_run=git), 0)
-        self.assertIn(("pull", "--ff-only"), calls)
-        self.assertTrue(installed.called)
+        self.assertEqual([c[0] for c in calls], ["status"])
 
     def test_without_git_it_explains_instead_of_crashing(self):
         with mock.patch.object(run_local, "say"):
             self.assertEqual(run_local.update(which=lambda _: None), 1)
+
+
+CHANGELOG_10 = "# บันทึก\n\n## อัปเดต 1.0 — 9 ต.ค. 2569\n\n- รุ่นแรก\n"
+
+
+def changelog_with(version, note):
+    return f"# บันทึก\n\n## อัปเดต {version} — 10 ต.ค. 2569\n\n- {note}\n\n" + CHANGELOG_10.split("\n\n", 1)[1]
+
+
+def main_release(repo):
+    os.environ.setdefault("APP_PASSWORD", "test-password")
+    import main
+    return main._resolve_app_release(repo)
+
+
+class GitRepos(unittest.TestCase):
+    """repo git จริงในโฟลเดอร์ชั่วคราว: origin (GitHub) · dev (เครื่องพัฒนา) · machine (เครื่องที่ใช้งาน)"""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = Path(folder.name)
+        self.origin, self.dev, self.machine = root / "origin.git", root / "dev", root / "machine"
+        self.git(root, "init", "--bare", "-q", str(self.origin))
+        self.git(root, "clone", "-q", str(self.origin), str(self.dev))
+        for key, value in (("user.name", "test"), ("user.email", "test@example.com"),
+                           ("commit.gpgsign", "false"), ("tag.gpgsign", "false")):
+            self.git(self.dev, "config", key, value)
+        self.commit("CHANGELOG.md", CHANGELOG_10, "first")
+        self.git(self.dev, "push", "-q", "origin", "HEAD:main")
+        self.git(self.origin, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.git(root, "clone", "-q", str(self.origin), str(self.machine))
+
+    def git(self, repo, *args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
+                              text=True, encoding="utf-8").stdout.strip()
+
+    def commit(self, name, text, message):
+        (self.dev / name).write_text(text, encoding="utf-8", newline="\n")
+        self.git(self.dev, "add", name)
+        self.git(self.dev, "commit", "-q", "-m", message)
+
+    def release(self, version):
+        self.assertEqual(release.release(version, code=self.dev, say=lambda *_: None), 0)
+        self.git(self.dev, "push", "-q", "origin", "HEAD:main", f"v{version}")
+
+    def update_machine(self):
+        said = []
+        with mock.patch.object(run_local, "CODE", self.machine), \
+                mock.patch.object(run_local, "say", side_effect=lambda t="": said.append(str(t))), \
+                mock.patch.object(run_local, "ensure_venv") as installed:
+            code = run_local.update()
+        return code, "\n".join(said), installed.called
+
+    def head(self, repo):
+        return self.git(repo, "rev-parse", "HEAD")
+
+    def tagged(self, version):
+        return self.git(self.dev, "rev-parse", f"v{version}^{{commit}}")
+
+
+@unittest.skipIf(shutil.which("git") is None, "ไม่มี git")
+class ReleaseFlowTests(GitRepos):
+    """ออกรุ่นบนเครื่องพัฒนา → push → เครื่องที่ใช้งานกดอัปเดต"""
+
+    def test_nothing_is_installed_before_the_first_release(self):
+        self.commit("rules.txt", "new rule\n", "unreleased work")
+        self.git(self.dev, "push", "-q", "origin", "HEAD:main")
+        before = self.head(self.machine)
+        code, said, installed = self.update_machine()
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self.head(self.machine), before)
+        self.assertFalse(installed)
+
+    def test_installs_the_release_and_shows_what_changed(self):
+        self.commit("rules.txt", "rule 1\n", "rules")
+        self.release("1.0")
+        code, said, installed = self.update_machine()
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self.head(self.machine), self.tagged("1.0"))
+        self.assertIn("อัปเดต 1.0 — 9 ต.ค. 2569", said)
+        self.assertIn("รุ่นแรก", said)
+        self.assertTrue(installed)
+
+    def test_work_pushed_after_a_release_waits_for_the_next_release(self):
+        self.release("1.0")
+        self.update_machine()
+        released = self.head(self.machine)
+        self.commit("rules.txt", "half done\n", "unreleased work")
+        self.git(self.dev, "push", "-q", "origin", "HEAD:main")
+        code, said, _ = self.update_machine()
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self.head(self.machine), released)
+        self.assertIn("รุ่นล่าสุดแล้ว: อัปเดต 1.0", said)
+
+    def test_a_machine_several_releases_behind_gets_every_note_it_missed(self):
+        self.release("1.0")
+        self.update_machine()
+        self.commit("CHANGELOG.md", changelog_with("1.1", "กฎข้อ ก"), "release 1.1")
+        self.release("1.1")
+        text = changelog_with("1.2", "กฎข้อ ข").replace("# บันทึก\n\n", "# บันทึก\n\n", 1)
+        text = text.replace("## อัปเดต 1.0", "## อัปเดต 1.1 — 10 ต.ค. 2569\n\n- กฎข้อ ก\n\n## อัปเดต 1.0", 1)
+        self.commit("CHANGELOG.md", text, "release 1.2")
+        self.release("1.2")
+        code, said, _ = self.update_machine()
+        self.assertEqual(code, 0, said)
+        self.assertIn("กฎข้อ ก", said)
+        self.assertIn("กฎข้อ ข", said)
+        self.assertNotIn("รุ่นแรก", said)              # 1.0 ติดตั้งไปแล้ว ไม่ต้องบอกซ้ำ
+        self.assertEqual(self.head(self.machine), self.tagged("1.2"))
+
+    def test_a_machine_with_its_own_commits_is_left_alone(self):
+        for key, value in (("user.name", "m"), ("user.email", "m@example.com"),
+                           ("commit.gpgsign", "false")):
+            self.git(self.machine, "config", key, value)
+        (self.machine / "local.txt").write_text("x\n", encoding="utf-8")
+        self.git(self.machine, "add", "local.txt")
+        self.git(self.machine, "commit", "-q", "-m", "local")
+        mine = self.head(self.machine)
+        self.commit("CHANGELOG.md", changelog_with("1.1", "x"), "1.1")
+        self.release("1.1")
+        code, said, installed = self.update_machine()
+        self.assertEqual(code, 1, said)
+        self.assertEqual(self.head(self.machine), mine)
+        self.assertFalse(installed)
+
+    def test_the_footer_reads_the_release_from_the_tag(self):
+        self.assertEqual(main_release(self.dev), "")
+        self.release("1.0")
+        self.assertEqual(main_release(self.dev), "1.0")
+        self.commit("rules.txt", "after\n", "after the release")
+        self.assertEqual(main_release(self.dev), "1.0")
+        self.git(self.dev, "tag", "backup-before-cleanup")             # แท็กอื่นที่ไม่ใช่รุ่น
+        self.assertEqual(main_release(self.dev), "1.0")
+        self.assertEqual(main_release(self.origin.parent), "")      # ไม่มี .git
+
+
+@unittest.skipIf(shutil.which("git") is None, "ไม่มี git")
+class ReleaseToolGuardTests(GitRepos):
+    """ตัวออกรุ่นปฏิเสธทุกกรณีที่จะได้รุ่นที่เลข วันที่ หรือรายการไม่ตรงกับโค้ด"""
+
+    def refused(self, version):
+        before = self.git(self.dev, "tag", "--list")
+        self.assertEqual(release.release(version, code=self.dev, say=lambda *_: None), 1)
+        self.assertEqual(self.git(self.dev, "tag", "--list"), before)
+
+    def test_refuses_a_bad_number(self):
+        for bad in ("1", "v1.0", "1.0.1", "หนึ่ง"):
+            with self.subTest(bad=bad):
+                self.refused(bad)
+
+    def test_refuses_when_the_changelog_top_is_another_version(self):
+        self.refused("1.1")
+
+    def test_refuses_uncommitted_files(self):
+        (self.dev / "CHANGELOG.md").write_text(CHANGELOG_10 + "แก้ค้าง\n", encoding="utf-8")
+        self.refused("1.0")
+
+    def test_refuses_an_entry_with_no_notes(self):
+        self.commit("CHANGELOG.md", "## อัปเดต 1.0 — 9 ต.ค. 2569\n", "empty")
+        self.refused("1.0")
+
+    def test_refuses_reusing_or_going_back(self):
+        self.release("1.0")
+        self.refused("1.0")
+        self.commit("CHANGELOG.md", "## อัปเดต 0.9 — 9 ต.ค. 2569\n\n- x\n", "back")
+        self.refused("0.9")
+
+
+class ChangelogFileTests(unittest.TestCase):
+    def test_the_example_in_the_instructions_is_not_read_as_a_release(self):
+        """ตัวอย่างหัวข้อในวิธีออกอัปเดตเยื้องไว้ — ถ้าชิดซ้ายจะกลายเป็น "อัปเดต 1.0" ที่ไม่เคยออก"""
+        text = (CODE / "CHANGELOG.md").read_text(encoding="utf-8")
+        instructions = text[:text.rindex("</details>")]
+        self.assertIn("## อัปเดต 1.0", instructions)
+        self.assertEqual(run_local.changelog_entries(instructions), [])
+
+    def test_the_real_changelog_parses_newest_first_with_notes(self):
+        entries = run_local.changelog_entries((CODE / "CHANGELOG.md").read_text(encoding="utf-8"))
+        versions = [version for version, _, _ in entries]
+        self.assertEqual(versions, sorted(versions, reverse=True))
+        self.assertEqual(len(set(versions)), len(versions))
+        for version, date, body in entries:
+            with self.subTest(version=version):
+                self.assertRegex(date, r"\d{1,2} \S+ \d{4}")
+                self.assertTrue(body)
 
 
 class PipedOutputTests(unittest.TestCase):

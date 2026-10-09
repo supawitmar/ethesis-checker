@@ -434,7 +434,7 @@
   </div>
   </form>
   {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง") #}
-  <p class="appver">เวอร์ชันระบบ <b>{{ app_version }}</b> · เริ่มทำงาน {{ app_started }}</p>
+  <p class="appver">เวอร์ชันระบบ {% if app_release %}<b>อัปเดต {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b> · เริ่มทำงาน {{ app_started }}</p>
 </main>
 
 <div id="overlay" style="display:none;">

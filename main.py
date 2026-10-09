@@ -85,13 +85,33 @@ def _resolve_app_version(environ=None, repo_dir=None):
     return APP_VERSION_UNKNOWN
 
 
+
+# เลขอัปเดตที่เจ้าหน้าที่เห็น (เช่น "1.0") = แท็ก v<หลัก>.<รอง> ล่าสุดที่โค้ดนี้มีอยู่ — ออกรุ่นด้วย
+# tools/release.py (เจ้าของขอ 9 ต.ค. 2569 ให้อัปเดตมีเลขรุ่นและวันที่) · ไม่มี git/แท็ก = "" ไม่แสดง
+_RELEASE_TAG = re.compile(r"^v(\d+\.\d+)$")
+
+
+def _resolve_app_release(repo_dir=None):
+    repo_dir = Path(repo_dir or BASE)
+    if not (repo_dir / ".git").exists():
+        return ""
+    try:
+        run = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
+                             cwd=repo_dir, capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = _RELEASE_TAG.match(run.stdout.strip()) if run.returncode == 0 else None
+    return match.group(1) if match else ""
+
 # เวลาไทย (UTC+7 ไม่มีเวลาออมแสง) — เซิร์ฟเวอร์ Render ใช้ UTC แต่คนอ่านหน้านี้อยู่เมืองไทย
 # เวลาที่ process นี้เริ่มทำงานบอกด้วย เพราะ deploy/restart/cold start ทุกครั้งทำให้ผลตรวจที่
 # อยู่ในหน่วยความจำหายหมด เจ้าหน้าที่เห็นเวลานี้ก็รู้ว่าทำไมรายงานที่เปิดค้างไว้ถึงหาย
 _BANGKOK = timezone(timedelta(hours=7))
 APP_STARTED_AT = datetime.now(_BANGKOK)
 APP_VERSION = _resolve_app_version()
+APP_RELEASE = _resolve_app_release()
 templates.env.globals["app_version"] = APP_VERSION
+templates.env.globals["app_release"] = APP_RELEASE
 templates.env.globals["app_started"] = APP_STARTED_AT.strftime("%d/%m/%Y %H:%M")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
@@ -988,5 +1008,7 @@ def health():
     # เปิดได้โดยไม่ต้องล็อกอิน — Render ใช้เช็กว่าบริการขึ้น และหลัง deploy เปิดดูเองได้เลย
     # version คือรหัส commit 7 ตัว (ไม่ใช่ความลับ) ไว้เทียบกับ commit ที่ push · python คือเวอร์ชัน
     # ที่เครื่องจริงใช้รันอยู่ ไว้เทียบกับที่ CI ทดสอบ · started คือเวลาที่ process นี้เริ่มทำงาน
-    return {"status": "ok", "version": APP_VERSION, "python": platform.python_version(),
+    # release คือเลขอัปเดตที่ติดตั้งอยู่ ("1.0" · ว่าง = ไม่มีแท็ก v*) ไว้เทียบระหว่างเครื่อง
+    return {"status": "ok", "version": APP_VERSION, "release": APP_RELEASE,
+            "python": platform.python_version(),
             "started": APP_STARTED_AT.isoformat(timespec="seconds")}
