@@ -5433,7 +5433,8 @@ class DecisionsThatDeliberatelyChangeNothing(unittest.TestCase):
         (เล่มจริงหน้า 38 วางชื่อรูปที่ top 48.6 ซึ่งอยู่ในขอบบน 72 pt)
         """
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("for part, label, span, front, found, expected, fix in header_spans:", 1)[1][:800]
+        block = source.split("for part, label, span, front, found, expected, fix in header_spans:", 1)[1]
+        block = block.split('"PAGE.HEADER")', 1)[0]
         self.assertIn('rep.add("ORANGE"', block)
 
 

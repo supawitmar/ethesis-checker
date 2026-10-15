@@ -7383,22 +7383,28 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
              "พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ",
              f"หัวกระดาษส่วนนำต้องมีเพียงเลขหน้า ({front_labels}) เท่านั้น",
              f"ลบข้อความอื่นออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า ({front_labels})"),
-            # ถ้อยคำของเจ้าหน้าที่ (15 ต.ค. 2569) พิมพ์ตรงตัว รวมการสะกด "อาราบิก"
+            # ถ้อยคำของเจ้าหน้าที่ (15 ต.ค. 2569) พิมพ์ตรงตัว — สะกด "อารบิก" ตามราชบัณฑิตฯ (เจ้าหน้าที่ยืนยัน)
             ("body/end", "หัวกระดาษส่วนเนื้อหา และส่วนท้าย",
              range(end_scan_start, len(pages)), False,
              "พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนเนื้อหา และส่วนท้าย",
-             "หัวกระดาษส่วนเนื้อหา และส่วนท้าย ต้องมีเพียงเลขหน้าอาราบิก เท่านั้น",
+             "หัวกระดาษส่วนเนื้อหา และส่วนท้าย ต้องมีเพียงเลขหน้าอารบิก เท่านั้น",
              "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้าอารบิก"),
         )
         for part, label, span, front, found, expected, fix in header_spans:
             header_bad = [i for i in span if header_extra_at(i, front)]
             if not header_bad:
                 continue
-            shown = ", ".join(page_ref(i) for i in header_bad[:5])
-            more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
+            # ส่วนนำมีไม่กี่หน้า บอกเลขหน้าในวงเล็บได้ ส่วนเนื้อหา/ส่วนท้ายบางเล่มเป็นร้อยหน้า
+            # บอกแค่จำนวนหน้าที่ระบบนับได้ในบรรทัดถัดไปพอ (เจ้าหน้าที่สั่ง 15 ต.ค. 2569)
+            if front:
+                shown = ", ".join(page_ref(i) for i in header_bad[:5])
+                more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
+                location = f"{label} ({shown}{more})"
+            else:
+                location = label
             # ไม่ยกตัวอย่างข้อความที่พบ (เจ้าหน้าที่สั่ง 15 ต.ค. 2569) — ระบบอาจอ่านหัวกระดาษ
             # ได้ไม่ครบ/เพี้ยน ข้อความที่ยกมาจะอ่านไม่รู้เรื่อง บอกแค่หน้าและจำนวนหน้าพอ
-            rep.add("ORANGE", part, f"{label} ({shown}{more})",
+            rep.add("ORANGE", part, location,
                     f'{found} {len(header_bad)} หน้า',
                     expected, fix, "PAGE.HEADER")
 

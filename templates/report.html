@@ -1318,8 +1318,9 @@ var TR = [
   [/ต้องแก้เป็น /g, 'Must be changed to '],
   // หัวกระดาษส่วนนำ (PAGE.HEADER) ต้องมาก่อนกฎเศษคำ "ส่วนนำ" ด้านล่าง
   [/พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนเนื้อหา และส่วนท้าย (\d+) หน้า/g, 'Found text other than the page number in the content and end-matter header on $1 page(s)'],
-  [/หัวกระดาษส่วนเนื้อหา และส่วนท้าย ต้องมีเพียงเลขหน้าอาราบิก เท่านั้น/g, 'Headers in the content and end matter must contain only the Arabic page number'],
+  [/หัวกระดาษส่วนเนื้อหา และส่วนท้าย ต้องมีเพียงเลขหน้าอารบิก เท่านั้น/g, 'Headers in the content and end matter must contain only the Arabic page number'],
   [/หัวกระดาษส่วนเนื้อหา และส่วนท้าย /g, 'Content and end-matter header '],
+  [/^หัวกระดาษส่วนเนื้อหา และส่วนท้าย$/g, 'Content and end-matter header'],
   [/พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ (\d+) หน้า/g, 'Found text other than the page number in the front-matter header on $1 page(s)'],
   [/หัวกระดาษส่วนนำ /g, 'Front-matter header '],
   // "ส่วนนำ" ยืนเดี่ยวเป็นหัวข้อกลุ่มและเป็นตำแหน่ง ต้องขึ้นต้นด้วยตัวใหญ่
