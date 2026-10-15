@@ -1021,24 +1021,37 @@ def local_stop(request: Request):
     return {"stopping": True}
 
 
-# ปิดตัวเองเมื่อไม่มีใครใช้ (เจ้าของตกลง 15 ต.ค. 2569) — ผู้ใช้ปิดเบราว์เซอร์แล้วนึกว่าระบบปิดแล้ว
-# ไฟล์เล่มจึงค้างอยู่ในเครื่อง · ทุกหน้าของระบบยิง /alive เป็นระยะ (templates/_alive.html) และคำขอใด ๆ
-# ก็นับเป็นการใช้งาน · เงียบเกิน IDLE_STOP_SECONDS = ปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มก่อนออก)
+# ปิดตัวเองเมื่อปิดหน้าระบบหมดแล้ว (เจ้าของตกลง 15 ต.ค. 2569 · ปิดหน้าแล้ว 1 นาที) — ผู้ใช้ปิดเบราว์เซอร์แล้ว
+# นึกว่าระบบปิดแล้ว ไฟล์เล่มจึงค้างอยู่ในเครื่อง · ปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มก่อนออก)
+# ทุกหน้าของระบบ (templates/_alive.html) มีรหัสหน้าของตัวเอง ยิง /alive?page=<รหัส> ทุก 60 วินาที และตอนปิด/ออก
+# จากหน้ายิง /alive?page=<รหัส>&bye=1 · ระบบจำว่าหน้าไหนยังเปิดอยู่ — ยังมีหน้าเปิด = ไม่ปิด ไม่มีหน้าเปิดแล้ว
+# และไม่มีคำขอใดเข้ามาครบ IDLE_STOP_SECONDS = ปิด
+# ทำไมไม่ใช้แค่ "เงียบครบ 1 นาที": แท็บที่ซ่อนอยู่นาน เบราว์เซอร์หน่วงตัวจับเวลาเหลือนาทีละครั้ง สัญญาณช้าไม่กี่วินาที
+# ระบบจะปิดใส่เจ้าหน้าที่ที่แค่สลับไปทำงานแท็บอื่น จึงนับ "หน้าที่ยังเปิด" แทน · หน้าที่หายไปโดยไม่บอกลา
+# (เบราว์เซอร์ค้าง/ถูกฆ่า แท็บถูกพัก) ถือว่าปิดแล้วเมื่อเงียบเกิน PAGE_LOST_SECONDS
 # ห้ามปิดระหว่างตรวจ/อัปโหลด: งานที่ยังตรวจไม่เสร็จหรือคำขอที่ยังไม่จบ นับเป็นการใช้งานตลอด
 # ทำงานเฉพาะตอนรันเบื้องหลังจากตัวเปิดระบบ (มี ETHESIS_STOP_TOKEN) — แบบ --foreground ปิดที่หน้าต่างเหมือนเดิม
-IDLE_STOP_SECONDS = _positive_env_int("ETHESIS_IDLE_MINUTES", 10) * 60
-IDLE_CHECK_SECONDS = 30
+IDLE_STOP_SECONDS = _positive_env_int("ETHESIS_IDLE_MINUTES", 1) * 60
+PAGE_LOST_SECONDS = 10 * 60
+IDLE_CHECK_SECONDS = 10
 # รอบตรวจห่างกันเกินนี้ = เครื่องเพิ่งตื่นจาก sleep ให้นับใหม่ ไม่ปิดใส่หน้าเว็บที่ยังไม่ทันส่งสัญญาณ
-IDLE_WAKE_GAP_SECONDS = IDLE_CHECK_SECONDS * 4
+IDLE_WAKE_GAP_SECONDS = 60
 # /health ตัวเปิดระบบใช้เช็กว่าระบบขึ้นหรือยัง ไม่ใช่คนใช้งาน
 IDLE_QUIET_PATHS = {"/health", "/local-stop"}
+MAX_OPEN_PAGES = 200
+_PAGE_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _ACTIVITY_LOCK = threading.Lock()
 _activity = {"last": time.monotonic(), "in_flight": 0}
+_open_pages = {}      # รหัสหน้า -> เวลาที่ส่งสัญญาณล่าสุด
 
 
 def _mark_alive(now=None):
+    """เริ่มนับใหม่ทั้งหมด — หน้าที่เปิดอยู่ทุกหน้านับว่าเพิ่งส่งสัญญาณ"""
+    now = time.monotonic() if now is None else now
     with _ACTIVITY_LOCK:
-        _activity["last"] = time.monotonic() if now is None else now
+        _activity["last"] = now
+        for page in _open_pages:
+            _open_pages[page] = now
 
 
 @app.middleware("http")
@@ -1057,8 +1070,16 @@ async def track_activity(request: Request, call_next):
 
 
 @app.post("/alive")
-def alive():
-    """หน้าเว็บบอกว่ายังเปิดอยู่ — ไม่ต้องล็อกอิน (หน้าล็อกอินก็ต้องส่งได้) และไม่บอกอะไรเกี่ยวกับเล่ม"""
+def alive(page: str = "", bye: str = ""):
+    """หน้าเว็บบอกว่ายังเปิดอยู่ (หรือกำลังปิด เมื่อ bye=1) — ไม่ต้องล็อกอิน (หน้าล็อกอินก็ต้องส่งได้)
+    และไม่บอกอะไรเกี่ยวกับเล่ม"""
+    if _PAGE_ID.fullmatch(page):
+        now = time.monotonic()
+        with _ACTIVITY_LOCK:
+            if bye:
+                _open_pages.pop(page, None)
+            elif page in _open_pages or len(_open_pages) < MAX_OPEN_PAGES:
+                _open_pages[page] = now
     return {"alive": True}
 
 
@@ -1068,11 +1089,16 @@ def _checks_running():
 
 
 def _idle_should_stop(now):
-    """เงียบครบ IDLE_STOP_SECONDS แล้วหรือยัง — ระหว่างตรวจ/อัปโหลดนับเป็นการใช้งานตลอด
-    ปิดหน้าเว็บตอนเล่มยังตรวจอยู่ จึงนับ 10 นาทีหลังตรวจเสร็จ ไม่ใช่ปิดทันทีที่เสร็จ"""
+    """ถึงเวลาปิดหรือยัง: ไม่มีหน้าเปิดอยู่ และไม่มีคำขอใดเข้ามาครบ IDLE_STOP_SECONDS
+    ระหว่างตรวจ/อัปโหลดนับเป็นการใช้งานตลอด จึงนับเวลาต่อจากตรวจเสร็จ ไม่ใช่ปิดทันทีที่เสร็จ"""
     with _ACTIVITY_LOCK:
+        for page, seen in list(_open_pages.items()):
+            if now - seen > PAGE_LOST_SECONDS:
+                del _open_pages[page]
         if _activity["in_flight"] > 0 or _checks_running():
             _activity["last"] = now
+            return False
+        if _open_pages:
             return False
         return now - _activity["last"] >= IDLE_STOP_SECONDS
 
@@ -1086,7 +1112,7 @@ def _idle_tick(previous, now):
 
 
 def _stop_when_idle():
-    print(f"ปิดระบบอัตโนมัติ: ไม่มีหน้าเว็บของระบบเปิดอยู่เกิน {IDLE_STOP_SECONDS // 60} นาที", flush=True)
+    print("ปิดระบบอัตโนมัติ: ไม่มีหน้าเว็บของระบบเปิดอยู่", flush=True)
     _remove_book_folder(BOOKS_DIR)
     os._exit(0)
 

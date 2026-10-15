@@ -1,11 +1,12 @@
-{#- ส่งสัญญาณว่าหน้านี้ยังเปิดอยู่ — ระบบที่รันเบื้องหลังปิดตัวเองเมื่อไม่มีหน้าไหนของระบบเปิดอยู่เกิน 10 นาที
+{#- บอกระบบว่าหน้านี้ยังเปิดอยู่ / ปิดแล้ว — ระบบที่รันเบื้องหลังปิดตัวเองเมื่อปิดหน้าระบบหมดแล้ว 1 นาที
     (main.py IDLE_STOP_SECONDS, เจ้าของตกลง 15 ต.ค. 2569) ทุกหน้า include ไฟล์นี้ไว้ท้าย <body>
-    ส่งทุก 60 วินาที — เบราว์เซอร์หน่วงตัวจับเวลาของแท็บที่ซ่อนอยู่ได้ถึงนาทีละครั้ง ยังห่างจาก 10 นาทีมาก
+    แต่ละหน้ามีรหัสของตัวเอง ส่งสัญญาณทุก 60 วินาที และตอนปิด/ออกจากหน้า (pagehide) ส่ง bye=1 ด้วย sendBeacon
+    แท็บที่ซ่อนอยู่ส่งช้าได้ (เบราว์เซอร์หน่วงเหลือนาทีละครั้ง) ไม่เป็นไร เพราะระบบนับหน้าที่ยังไม่บอกลาว่าเปิดอยู่
     ระบบไม่ตอบสองครั้งติดกัน = ระบบปิดไปแล้ว ขึ้นแถบบอกวิธีเปิดใหม่ แทนที่ปุ่มต่าง ๆ จะพังเงียบ ๆ
     รายงานที่บันทึกเป็นไฟล์ (file://) ไม่มีระบบให้ส่ง จึงไม่ทำอะไรเลย -#}
 <div id="alive-gone" class="alive-gone" role="alert" hidden>
-  <span data-th="ระบบตรวจเล่มปิดแล้ว (ไม่มีหน้าไหนของระบบเปิดอยู่ 10 นาที หรือกดปิดระบบ) — เปิดใหม่ด้วยทางลัดระบบตรวจเล่มหรือ เปิดระบบตรวจเล่ม.bat แล้วตรวจเล่มใหม่"
-        data-en="The checker has stopped (no checker page was open for 10 minutes, or it was shut down) — start it again with the checker shortcut or เปิดระบบตรวจเล่ม.bat, then check the thesis again">ระบบตรวจเล่มปิดแล้ว (ไม่มีหน้าไหนของระบบเปิดอยู่ 10 นาที หรือกดปิดระบบ) — เปิดใหม่ด้วยทางลัดระบบตรวจเล่มหรือ เปิดระบบตรวจเล่ม.bat แล้วตรวจเล่มใหม่</span>
+  <span data-th="ระบบตรวจเล่มปิดแล้ว — เปิดใหม่ด้วยทางลัดระบบตรวจเล่มหรือ เปิดระบบตรวจเล่ม.bat แล้วตรวจเล่มใหม่"
+        data-en="The checker has stopped — start it again with the checker shortcut or เปิดระบบตรวจเล่ม.bat, then check the thesis again">ระบบตรวจเล่มปิดแล้ว — เปิดใหม่ด้วยทางลัดระบบตรวจเล่มหรือ เปิดระบบตรวจเล่ม.bat แล้วตรวจเล่มใหม่</span>
 </div>
 <style>
   .alive-gone { position:fixed; left:0; right:0; bottom:0; z-index:9999; padding:12px 16px;
@@ -18,10 +19,11 @@
 (function(){
   var gone = document.getElementById('alive-gone');
   if (!/^https?:$/.test(location.protocol)) { if (gone) gone.hidden = true; return; }
+  var page = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
   var misses = 0, retry = null;
   function ping(){
     retry = null;
-    fetch('/alive', {method:'POST', cache:'no-store', credentials:'same-origin'})
+    fetch('/alive?page=' + page, {method:'POST', cache:'no-store', credentials:'same-origin'})
       .then(function(r){
         if (!r.ok) throw new Error('alive ' + r.status);
         misses = 0;
@@ -36,6 +38,12 @@
   function pingNow(){ if (retry) { clearTimeout(retry); retry = null; } ping(); }
   setInterval(pingNow, 60000);
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) pingNow(); });
+  // ปิดแท็บ/ปิดเบราว์เซอร์/ไปหน้าอื่น — บอกลา ระบบเริ่มนับ 1 นาที (หน้าถัดไปของระบบจะส่งสัญญาณของตัวเองเอง)
+  window.addEventListener('pagehide', function(){
+    try { navigator.sendBeacon('/alive?page=' + page + '&bye=1'); } catch (e) {}
+  });
+  // กลับมาหน้านี้ด้วยปุ่มย้อนกลับ (หน้าที่เบราว์เซอร์เก็บไว้) — ลงชื่อใหม่
+  window.addEventListener('pageshow', function(e){ if (e.persisted) pingNow(); });
   ping();
 })();
 </script>

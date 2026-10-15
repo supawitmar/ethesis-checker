@@ -601,8 +601,10 @@ class LocalStopEndpointTests(unittest.TestCase):
 
 
 class IdleStopTests(unittest.TestCase):
-    """เจ้าของตกลง 15 ต.ค. 2569: ระบบปิดเองเมื่อไม่มีหน้าไหนของระบบเปิดอยู่ ~10 นาที
-    แต่ห้ามปิดระหว่างตรวจ และปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มที่เก็บไว้ก่อนออก)"""
+    """เจ้าของตกลง 15 ต.ค. 2569: ปิดหน้าระบบหมดแล้ว 1 นาที ระบบปิดเอง · เปิดหน้าค้างไว้ (สลับแท็บได้)
+    ไม่ปิด · ห้ามปิดระหว่างตรวจ · ปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มที่เก็บไว้ก่อนออก)"""
+
+    PAGE = "pageAAAA1111"
 
     @classmethod
     def setUpClass(cls):
@@ -614,50 +616,92 @@ class IdleStopTests(unittest.TestCase):
 
     def setUp(self):
         for target in (mock.patch.dict(self.main._activity, {"last": 1000.0, "in_flight": 0}),
+                       mock.patch.dict(self.main._open_pages, {}, clear=True),
                        mock.patch.dict(self.main.JOBS, {}, clear=True)):
             target.start()
             self.addCleanup(target.stop)
         self.limit = self.main.IDLE_STOP_SECONDS
+        self.lost = self.main.PAGE_LOST_SECONDS
 
-    def test_waits_ten_minutes_by_default(self):
-        self.assertEqual(self.limit, 10 * 60)
+    def open_page(self, page=PAGE, bye=False):
+        url = f"/alive?page={page}" + ("&bye=1" if bye else "")
+        self.assertEqual(self.client.post(url).status_code, 200)
+
+    def test_stops_one_minute_after_the_last_page_closes(self):
+        self.assertEqual(self.limit, 60)
+        self.assertLess(self.limit, self.lost)
 
     def test_stops_only_after_the_whole_quiet_period(self):
         self.assertFalse(self.main._idle_should_stop(1000.0 + self.limit - 1))
         self.assertTrue(self.main._idle_should_stop(1000.0 + self.limit))
 
+    def test_an_open_page_in_a_background_tab_keeps_it_running(self):
+        """แท็บที่ซ่อนอยู่ เบราว์เซอร์หน่วงสัญญาณเหลือนาทีละครั้ง — ยังไม่บอกลา = ยังเปิดอยู่ ห้ามปิด"""
+        self.open_page()
+        seen = self.main._open_pages[self.PAGE]
+        self.assertFalse(self.main._idle_should_stop(seen + self.limit * 5))
+        self.assertFalse(self.main._idle_should_stop(seen + self.lost - 1))
+
+    def test_closing_the_page_starts_the_one_minute_count(self):
+        self.open_page()
+        self.open_page(bye=True)
+        self.assertEqual(self.main._open_pages, {})
+        closed = self.main._activity["last"]
+        self.assertFalse(self.main._idle_should_stop(closed + self.limit - 1))
+        self.assertTrue(self.main._idle_should_stop(closed + self.limit))
+
+    def test_one_page_closing_while_another_is_open_does_not_stop_it(self):
+        self.open_page()
+        self.open_page("pageBBBB2222")
+        self.open_page(bye=True)
+        last = self.main._activity["last"]
+        self.assertFalse(self.main._idle_should_stop(last + self.limit * 3))
+
+    def test_a_page_that_vanished_without_saying_goodbye_is_given_up_on(self):
+        """เบราว์เซอร์ถูกฆ่า/ค้าง ส่งลาไม่ทัน — เงียบเกิน PAGE_LOST_SECONDS ถือว่าปิดแล้ว"""
+        self.open_page()
+        seen = self.main._open_pages[self.PAGE]
+        self.assertTrue(self.main._idle_should_stop(seen + self.lost + 1))
+        self.assertEqual(self.main._open_pages, {})
+
     def test_never_stops_while_a_book_is_being_checked(self):
         self.main.JOBS["job"] = {"done": False}
-        later = 1000.0 + self.limit * 5
+        later = 1000.0 + self.lost * 5
         self.assertFalse(self.main._idle_should_stop(later))
-        # ปิดหน้าเว็บระหว่างตรวจ: นับ 10 นาทีหลังตรวจเสร็จ ไม่ใช่ปิดทันทีที่เสร็จ
         self.main.JOBS["job"]["done"] = True
         self.assertFalse(self.main._idle_should_stop(later + 1))
         self.assertTrue(self.main._idle_should_stop(later + self.limit))
 
     def test_never_stops_during_an_upload_or_any_unfinished_request(self):
         self.main._activity["in_flight"] = 1
-        self.assertFalse(self.main._idle_should_stop(1000.0 + self.limit * 5))
+        self.assertFalse(self.main._idle_should_stop(1000.0 + self.lost * 5))
 
-    def test_the_page_heartbeat_needs_no_login_and_counts_as_use(self):
+    def test_the_page_signal_needs_no_login_and_counts_as_use(self):
         self.main._activity["last"] = 0.0
-        response = self.client.post("/alive")
-        self.assertEqual(response.status_code, 200)
+        self.open_page()
         self.assertGreater(self.main._activity["last"], 0.0)
         self.assertEqual(self.main._activity["in_flight"], 0)
+        self.assertIn(self.PAGE, self.main._open_pages)
+
+    def test_odd_page_codes_are_ignored(self):
+        for page in ("", "short", "has space here", "x" * 65, "<script>alert(1)"):
+            with self.subTest(page=page):
+                self.assertEqual(self.client.post("/alive", params={"page": page}).status_code, 200)
+        self.assertEqual(self.main._open_pages, {})
 
     def test_the_launchers_health_probe_is_not_use(self):
         self.client.get("/health")
         self.assertEqual(self.main._activity["last"], 1000.0)
 
     def test_waking_the_computer_from_sleep_starts_the_count_again(self):
-        """เครื่อง sleep นานกว่า 10 นาที ตื่นมาแล้วต้องไม่ปิดใส่หน้าเว็บที่ยังไม่ทันส่งสัญญาณ"""
+        """เครื่อง sleep นาน ตื่นมาแล้วต้องไม่ปิดใส่หน้าเว็บที่ยังไม่ทันส่งสัญญาณ"""
+        self.main._open_pages[self.PAGE] = 1000.0
         before = 1000.0 + 5
-        after = before + self.limit * 6
+        after = before + self.lost * 3
         self.assertFalse(self.main._idle_tick(before, after))
         self.assertEqual(self.main._activity["last"], after)
-        step = self.main.IDLE_CHECK_SECONDS
-        self.assertFalse(self.main._idle_tick(after, after + step))
+        self.assertEqual(self.main._open_pages[self.PAGE], after)
+        self.assertFalse(self.main._idle_tick(after, after + self.main.IDLE_CHECK_SECONDS))
 
     def test_the_watcher_stops_the_checker_once_it_has_been_quiet(self):
         step = self.main.IDLE_CHECK_SECONDS
@@ -665,7 +709,6 @@ class IdleStopTests(unittest.TestCase):
         stop = mock.Mock()
         self.main._watch_idle_forever(sleep=lambda _s: None, clock=lambda: next(times), stop=stop)
         stop.assert_called_once_with()
-        self.assertGreaterEqual(self.main._activity["last"], 1000.0)
 
     def test_stopping_removes_kept_books_like_the_stop_button(self):
         with mock.patch.object(self.main, "_remove_book_folder") as removed,                 mock.patch.object(self.main.os, "_exit") as exited,                 mock.patch("builtins.print"):
@@ -673,8 +716,10 @@ class IdleStopTests(unittest.TestCase):
         removed.assert_called_once_with(self.main.BOOKS_DIR)
         exited.assert_called_once_with(0)
 
-    def test_every_page_sends_the_heartbeat(self):
-        self.assertIn("fetch('/alive'", self.client.get("/login").text)
+    def test_every_page_says_hello_and_goodbye(self):
+        page = self.client.get("/login").text
+        self.assertIn("fetch('/alive?page='", page)
+        self.assertIn("sendBeacon('/alive?page=' + page + '&bye=1')", page)
         for name in ("index.html", "login.html", "report.html"):
             with self.subTest(page=name):
                 text = (CODE / "templates" / name).read_text(encoding="utf-8")
