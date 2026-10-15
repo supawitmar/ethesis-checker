@@ -2450,6 +2450,22 @@ class HeaderOnlyPageNumberTests(unittest.TestCase):
                 page = self._Page(841.9, [{"text": label, "top": 48.7}])
                 self.assertEqual(header_extra_text(page), label)
 
+    def test_front_matter_header_allows_only_its_page_label(self):
+        """ส่วนนำ: เลขหน้าต้องเป็น ก ข ค หรือ i ii iii ข้อความอื่นที่ปนมาต้องแจ้ง
+        (เจ้าหน้าที่สั่ง 15 ต.ค. 2569)"""
+        for label in ("ii", "IV", "ค"):
+            with self.subTest(label=label):
+                page = self._Page(841.9, [{"text": label, "top": 36.8}])
+                self.assertEqual(header_extra_text(page, front=True), "")
+        page = self._Page(841.9, [
+            {"text": "บัณฑิตวิทยาลัย", "top": 36.8}, {"text": "ค", "top": 36.8},
+            {"text": "บทคัดย่อ", "top": 120},   # เนื้อความต่ำกว่าแถบหัวกระดาษ
+        ])
+        self.assertEqual(header_extra_text(page, front=True), "บัณฑิตวิทยาลัย")
+        # เลขอารบิกไม่ใช่เลขหน้าของส่วนนำ
+        page = self._Page(841.9, [{"text": "3", "top": 36.8}])
+        self.assertEqual(header_extra_text(page, front=True), "3")
+
     def test_arabic_page_number_alone_is_clean(self):
         for label in ("1", "57", "1024"):
             with self.subTest(label=label):
@@ -5401,7 +5417,7 @@ class DecisionsThatDeliberatelyChangeNothing(unittest.TestCase):
         (เล่มจริงหน้า 38 วางชื่อรูปที่ top 48.6 ซึ่งอยู่ในขอบบน 72 pt)
         """
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("พบข้อความอื่นนอกจากเลขหน้าอารบิกในหัวกระดาษ", 1)[0][-400:]
+        block = source.split("for part, label, span, front, found, expected, fix in header_spans:", 1)[1][:800]
         self.assertIn('rep.add("ORANGE"', block)
 
 

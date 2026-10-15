@@ -1316,6 +1316,9 @@ var TR = [
   // ข้อความสรุปที่คัดลอกส่งนักศึกษา: บรรทัดที่สองของแต่ละข้อ
   [/^ต้องแก้เป็น ("[^"]+")$/g, 'Must be changed to $1'],
   [/ต้องแก้เป็น /g, 'Must be changed to '],
+  // หัวกระดาษส่วนนำ (PAGE.HEADER) ต้องมาก่อนกฎเศษคำ "ส่วนนำ" ด้านล่าง
+  [/พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ (\d+) หน้า เช่น/g, 'Found text other than the page number in the front-matter header on $1 page(s), e.g.'],
+  [/หัวกระดาษส่วนนำ /g, 'Front-matter header '],
   // "ส่วนนำ" ยืนเดี่ยวเป็นหัวข้อกลุ่มและเป็นตำแหน่ง ต้องขึ้นต้นด้วยตัวใหญ่
   // (กฎเศษคำด้านล่างแปลเป็น 'the front matter' ไว้ใช้กลางประโยค)
   [/^ส่วนนำ$/g, 'Front matter'],
@@ -1634,6 +1637,8 @@ var TR = [
   [/ที่ถูกต้องตามระบบคือ /g, 'The correct value per the system is '],
   [/แก้วันที่บนหน้าลงนามให้ตรงข้อมูลในระบบ/g, 'Correct the approval-page date to match the system'],
   [/แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ/g, 'Correct the title to match the system'],
+  [/หัวกระดาษส่วนนำต้องมีเพียงเลขหน้า \(ก ข ค หรือ i ii iii\) เท่านั้น/g, 'Front-matter headers must contain only the page number (ก ข ค or i ii iii)'],
+  [/ลบข้อความอื่นออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า \(ก ข ค หรือ i ii iii\)/g, 'Remove other text from the header, leaving only the page number (ก ข ค or i ii iii)'],
   [/พบข้อความอื่นนอกจากเลขหน้าอารบิกในหัวกระดาษ (\d+) หน้า เช่น/g, 'Found text other than the Arabic page number in the header on $1 page(s), e.g.'],
   [/หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าอารบิกเท่านั้น/g, 'Headers in the content and end matter must contain only the Arabic page number'],
   [/ลบข้อความอื่น \(เช่น ชื่อบท\/running head\) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้าอารบิก/g, 'Remove other text (e.g. chapter title/running head) from the header, leaving only the Arabic page number'],
