@@ -492,14 +492,20 @@ def _page_label_order(label):
     return ("roman", value) if value else (None, None)
 
 
-def _is_header_page_label(token, front=False):
-    """เลขหน้าที่ยอมให้อยู่ในหัวกระดาษได้ ตามส่วนของเล่ม
+def _is_header_page_label(token, front=False, front_style=None):
+    """เลขหน้าที่ยอมให้อยู่ในหัวกระดาษได้ ตามส่วนของเล่มและภาษาของเล่ม
 
-    ส่วนนำ: พยัญชนะไทย (ก ข ค) หรือเลขโรมัน (i ii iii) · ส่วนเนื้อหา/ส่วนท้าย: เลขอารบิกเท่านั้น
+    ส่วนนำ: เล่มหลักสูตรไทย ("thai") พยัญชนะไทย (ก ข ค) · เล่มอังกฤษ ("roman") เลขโรมัน
+    (i ii iii) · ยังไม่รู้ภาษาเล่ม (None) รับได้ทั้งสองแบบ · ส่วนเนื้อหา/ส่วนท้าย: เลขอารบิกเท่านั้น
     """
     if front:
-        return bool(re.fullmatch(r'[ivxlcdm]{1,10}', token, re.I)
-                    or re.fullmatch(r'[ก-ฮ]', token))
+        roman = bool(re.fullmatch(r'[ivxlcdm]{1,10}', token, re.I))
+        thai = bool(re.fullmatch(r'[ก-ฮ]', token))
+        if front_style == "thai":
+            return thai
+        if front_style == "roman":
+            return roman
+        return roman or thai
     return bool(re.fullmatch(r'\d{1,4}', token))
 
 
@@ -524,17 +530,20 @@ def header_tokens(pdf_page):
     return tokens
 
 
-def header_extra_text(pdf_page, front=False, tokens=None):
+def header_extra_text(pdf_page, front=False, tokens=None, front_style=None):
     """ข้อความในแถบหัวกระดาษที่ไม่ใช่เลขหน้าตามกฎของส่วนนั้น คืน '' ถ้ามีแต่เลขหน้า/ว่าง
 
     หัวกระดาษมีได้เพียงเลขหน้าเท่านั้น (ห้ามมี running head หรือชื่อบท) — ส่วนเนื้อหา/
-    ส่วนท้ายเป็นเลขอารบิก ส่วนนำเป็น ก ข ค หรือ i ii iii (เจ้าหน้าที่สั่ง 15 ต.ค. 2569
-    "เลขหน้าในส่วนนำต้องเป็นตามกฎ คือ ก หรือ i แต่ถ้ามีข้อความอื่นปนด้วยก็ให้แจ้ง")
-    เลขโรมัน/พยัญชนะไทยในหัวกระดาษของบทจึงนับเป็นข้อความอื่น และเลขอารบิกในส่วนนำก็เช่นกัน
+    ส่วนท้ายเป็นเลขอารบิก ส่วนนำเป็นตามภาษาเล่ม — ก ข ค (หลักสูตรไทย) หรือ i ii iii (อังกฤษ)
+    (เจ้าหน้าที่สั่ง 15 ต.ค. 2569 "เลขหน้าในส่วนนำต้องเป็นตามกฎ คือ ก หรือ i แต่ถ้ามีข้อความอื่น
+    ปนด้วยก็ให้แจ้ง" และ "หัวกระดาษให้เฉพาะของแต่ละภาษา") เลขโรมัน/พยัญชนะไทยในหัวกระดาษ
+    ของบทจึงนับเป็นข้อความอื่น เลขอารบิกในส่วนนำก็เช่นกัน และเลขหน้าของอีกภาษาในส่วนนำด้วย
+    front_style = "thai" / "roman" / None (ไม่รู้ภาษาเล่ม รับทั้งสองแบบ)
     """
     if tokens is None:
         tokens = header_tokens(pdf_page)
-    return ' '.join(t for t in tokens if not _is_header_page_label(t, front)).strip()
+    return ' '.join(t for t in tokens
+                    if not _is_header_page_label(t, front, front_style)).strip()
 
 
 # หน้าลงนามเป็นตารางตายตัวตาม template ส่วนนำ (2 คอลัมน์ × 6 แถวกรรมการ)
@@ -7362,13 +7371,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if body_ch:
         def header_extra_at(i, front):
             words = header_words[i] if i < len(header_words) else []
-            return header_extra_text(None, front=front, tokens=words)
+            return header_extra_text(None, front=front, tokens=words,
+                                     front_style=front_label_style)
+
+        # เลขหน้าส่วนนำที่บอกในข้อความ ให้ตรงภาษาของเล่ม (ไม่รู้ภาษาเล่ม = บอกทั้งสองแบบ)
+        front_labels = {"thai": "ก ข ค", "roman": "i ii iii"}.get(
+            front_label_style, "ก ข ค หรือ i ii iii")
 
         header_spans = (
             ("front_matter", "หัวกระดาษส่วนนำ", range(0, end_scan_start), True,
              "พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ",
-             "หัวกระดาษส่วนนำต้องมีเพียงเลขหน้า (ก ข ค หรือ i ii iii) เท่านั้น",
-             "ลบข้อความอื่นออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า (ก ข ค หรือ i ii iii)"),
+             f"หัวกระดาษส่วนนำต้องมีเพียงเลขหน้า ({front_labels}) เท่านั้น",
+             f"ลบข้อความอื่นออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า ({front_labels})"),
             ("body/end", "หัวกระดาษ", range(end_scan_start, len(pages)), False,
              "พบข้อความอื่นนอกจากเลขหน้าอารบิกในหัวกระดาษ",
              "หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าอารบิกเท่านั้น",

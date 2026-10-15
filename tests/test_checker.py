@@ -2466,6 +2466,22 @@ class HeaderOnlyPageNumberTests(unittest.TestCase):
         page = self._Page(841.9, [{"text": "3", "top": 36.8}])
         self.assertEqual(header_extra_text(page, front=True), "3")
 
+    def test_front_matter_header_follows_book_language(self):
+        """เล่มหลักสูตรไทยรับเฉพาะ ก ข ค เล่มอังกฤษรับเฉพาะ i ii iii
+        (เจ้าหน้าที่สั่ง 15 ต.ค. 2569 "หัวกระดาษให้เฉพาะของแต่ละภาษา")"""
+        cases = (("thai", "ค", ""), ("thai", "iii", "iii"),
+                 ("roman", "iii", ""), ("roman", "ค", "ค"))
+        for style, label, extra in cases:
+            with self.subTest(style=style, label=label):
+                page = self._Page(841.9, [{"text": label, "top": 36.8}])
+                self.assertEqual(
+                    header_extra_text(page, front=True, front_style=style), extra)
+
+    def test_front_matter_message_names_only_the_books_labels(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("header_spans = (", 1)[0][-900:]
+        self.assertIn('{"thai": "ก ข ค", "roman": "i ii iii"}', block)
+
     def test_arabic_page_number_alone_is_clean(self):
         for label in ("1", "57", "1024"):
             with self.subTest(label=label):
