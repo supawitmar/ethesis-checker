@@ -647,8 +647,9 @@ class IdleStopTests(unittest.TestCase):
         self.open_page(bye=True)
         self.assertEqual(self.main._open_pages, {})
         closed = self.main._activity["last"]
+        # เวลาจริงของเครื่อง + 60 แล้วลบกลับได้ 59.999... บางค่า (CI Linux ตก 15 ต.ค. 2569) — ห่างจากขอบ 1 วินาที
         self.assertFalse(self.main._idle_should_stop(closed + self.limit - 1))
-        self.assertTrue(self.main._idle_should_stop(closed + self.limit))
+        self.assertTrue(self.main._idle_should_stop(closed + self.limit + 1))
 
     def test_one_page_closing_while_another_is_open_does_not_stop_it(self):
         self.open_page()
