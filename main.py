@@ -384,7 +384,7 @@ def _wants_json(request):
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
-    if path in {"/health", "/login", "/local-stop"} or path.startswith("/static/"):
+    if path in {"/health", "/login", "/local-stop", "/alive"} or path.startswith("/static/"):
         return await call_next(request)
     if not APP_PASSWORD:
         return HTMLResponse(
@@ -1019,6 +1019,94 @@ def local_stop(request: Request):
     _remove_book_folder(BOOKS_DIR)
     threading.Timer(0.3, os._exit, args=(0,)).start()
     return {"stopping": True}
+
+
+# ปิดตัวเองเมื่อไม่มีใครใช้ (เจ้าของตกลง 15 ต.ค. 2569) — ผู้ใช้ปิดเบราว์เซอร์แล้วนึกว่าระบบปิดแล้ว
+# ไฟล์เล่มจึงค้างอยู่ในเครื่อง · ทุกหน้าของระบบยิง /alive เป็นระยะ (templates/_alive.html) และคำขอใด ๆ
+# ก็นับเป็นการใช้งาน · เงียบเกิน IDLE_STOP_SECONDS = ปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มก่อนออก)
+# ห้ามปิดระหว่างตรวจ/อัปโหลด: งานที่ยังตรวจไม่เสร็จหรือคำขอที่ยังไม่จบ นับเป็นการใช้งานตลอด
+# ทำงานเฉพาะตอนรันเบื้องหลังจากตัวเปิดระบบ (มี ETHESIS_STOP_TOKEN) — แบบ --foreground ปิดที่หน้าต่างเหมือนเดิม
+IDLE_STOP_SECONDS = _positive_env_int("ETHESIS_IDLE_MINUTES", 10) * 60
+IDLE_CHECK_SECONDS = 30
+# รอบตรวจห่างกันเกินนี้ = เครื่องเพิ่งตื่นจาก sleep ให้นับใหม่ ไม่ปิดใส่หน้าเว็บที่ยังไม่ทันส่งสัญญาณ
+IDLE_WAKE_GAP_SECONDS = IDLE_CHECK_SECONDS * 4
+# /health ตัวเปิดระบบใช้เช็กว่าระบบขึ้นหรือยัง ไม่ใช่คนใช้งาน
+IDLE_QUIET_PATHS = {"/health", "/local-stop"}
+_ACTIVITY_LOCK = threading.Lock()
+_activity = {"last": time.monotonic(), "in_flight": 0}
+
+
+def _mark_alive(now=None):
+    with _ACTIVITY_LOCK:
+        _activity["last"] = time.monotonic() if now is None else now
+
+
+@app.middleware("http")
+async def track_activity(request: Request, call_next):
+    if request.url.path in IDLE_QUIET_PATHS:
+        return await call_next(request)
+    with _ACTIVITY_LOCK:
+        _activity["in_flight"] += 1
+        _activity["last"] = time.monotonic()
+    try:
+        return await call_next(request)
+    finally:
+        with _ACTIVITY_LOCK:
+            _activity["in_flight"] -= 1
+            _activity["last"] = time.monotonic()
+
+
+@app.post("/alive")
+def alive():
+    """หน้าเว็บบอกว่ายังเปิดอยู่ — ไม่ต้องล็อกอิน (หน้าล็อกอินก็ต้องส่งได้) และไม่บอกอะไรเกี่ยวกับเล่ม"""
+    return {"alive": True}
+
+
+def _checks_running():
+    with JOBS_LOCK:
+        return any(not job.get("done") for job in JOBS.values())
+
+
+def _idle_should_stop(now):
+    """เงียบครบ IDLE_STOP_SECONDS แล้วหรือยัง — ระหว่างตรวจ/อัปโหลดนับเป็นการใช้งานตลอด
+    ปิดหน้าเว็บตอนเล่มยังตรวจอยู่ จึงนับ 10 นาทีหลังตรวจเสร็จ ไม่ใช่ปิดทันทีที่เสร็จ"""
+    with _ACTIVITY_LOCK:
+        if _activity["in_flight"] > 0 or _checks_running():
+            _activity["last"] = now
+            return False
+        return now - _activity["last"] >= IDLE_STOP_SECONDS
+
+
+def _idle_tick(previous, now):
+    """หนึ่งรอบของตัวเฝ้า: คืน True เมื่อถึงเวลาปิด"""
+    if now - previous > IDLE_WAKE_GAP_SECONDS:
+        _mark_alive(now)
+        return False
+    return _idle_should_stop(now)
+
+
+def _stop_when_idle():
+    print(f"ปิดระบบอัตโนมัติ: ไม่มีหน้าเว็บของระบบเปิดอยู่เกิน {IDLE_STOP_SECONDS // 60} นาที", flush=True)
+    _remove_book_folder(BOOKS_DIR)
+    os._exit(0)
+
+
+def _watch_idle_forever(sleep=time.sleep, clock=time.monotonic, stop=_stop_when_idle):
+    previous = clock()
+    while True:
+        sleep(IDLE_CHECK_SECONDS)
+        now = clock()
+        try:
+            if _idle_tick(previous, now):
+                stop()
+                return
+        except Exception:
+            traceback.print_exc()
+        previous = now
+
+
+if LOCAL_STOP_TOKEN:
+    threading.Thread(target=_watch_idle_forever, name="idle-stop", daemon=True).start()
 
 
 @app.get("/health")

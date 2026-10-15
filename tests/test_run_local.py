@@ -600,6 +600,99 @@ class LocalStopEndpointTests(unittest.TestCase):
         self.assertFalse(timer.called)
 
 
+class IdleStopTests(unittest.TestCase):
+    """เจ้าของตกลง 15 ต.ค. 2569: ระบบปิดเองเมื่อไม่มีหน้าไหนของระบบเปิดอยู่ ~10 นาที
+    แต่ห้ามปิดระหว่างตรวจ และปิดแบบเดียวกับ /local-stop (ลบไฟล์เล่มที่เก็บไว้ก่อนออก)"""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("APP_PASSWORD", "test-password")
+        import main
+        from fastapi.testclient import TestClient
+        cls.main = main
+        cls.client = TestClient(main.app)                 # ไม่ได้ล็อกอิน — หน้าล็อกอินก็ต้องส่งสัญญาณได้
+
+    def setUp(self):
+        for target in (mock.patch.dict(self.main._activity, {"last": 1000.0, "in_flight": 0}),
+                       mock.patch.dict(self.main.JOBS, {}, clear=True)):
+            target.start()
+            self.addCleanup(target.stop)
+        self.limit = self.main.IDLE_STOP_SECONDS
+
+    def test_waits_ten_minutes_by_default(self):
+        self.assertEqual(self.limit, 10 * 60)
+
+    def test_stops_only_after_the_whole_quiet_period(self):
+        self.assertFalse(self.main._idle_should_stop(1000.0 + self.limit - 1))
+        self.assertTrue(self.main._idle_should_stop(1000.0 + self.limit))
+
+    def test_never_stops_while_a_book_is_being_checked(self):
+        self.main.JOBS["job"] = {"done": False}
+        later = 1000.0 + self.limit * 5
+        self.assertFalse(self.main._idle_should_stop(later))
+        # ปิดหน้าเว็บระหว่างตรวจ: นับ 10 นาทีหลังตรวจเสร็จ ไม่ใช่ปิดทันทีที่เสร็จ
+        self.main.JOBS["job"]["done"] = True
+        self.assertFalse(self.main._idle_should_stop(later + 1))
+        self.assertTrue(self.main._idle_should_stop(later + self.limit))
+
+    def test_never_stops_during_an_upload_or_any_unfinished_request(self):
+        self.main._activity["in_flight"] = 1
+        self.assertFalse(self.main._idle_should_stop(1000.0 + self.limit * 5))
+
+    def test_the_page_heartbeat_needs_no_login_and_counts_as_use(self):
+        self.main._activity["last"] = 0.0
+        response = self.client.post("/alive")
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(self.main._activity["last"], 0.0)
+        self.assertEqual(self.main._activity["in_flight"], 0)
+
+    def test_the_launchers_health_probe_is_not_use(self):
+        self.client.get("/health")
+        self.assertEqual(self.main._activity["last"], 1000.0)
+
+    def test_waking_the_computer_from_sleep_starts_the_count_again(self):
+        """เครื่อง sleep นานกว่า 10 นาที ตื่นมาแล้วต้องไม่ปิดใส่หน้าเว็บที่ยังไม่ทันส่งสัญญาณ"""
+        before = 1000.0 + 5
+        after = before + self.limit * 6
+        self.assertFalse(self.main._idle_tick(before, after))
+        self.assertEqual(self.main._activity["last"], after)
+        step = self.main.IDLE_CHECK_SECONDS
+        self.assertFalse(self.main._idle_tick(after, after + step))
+
+    def test_the_watcher_stops_the_checker_once_it_has_been_quiet(self):
+        step = self.main.IDLE_CHECK_SECONDS
+        times = iter(1000.0 + step * n for n in range(1000))
+        stop = mock.Mock()
+        self.main._watch_idle_forever(sleep=lambda _s: None, clock=lambda: next(times), stop=stop)
+        stop.assert_called_once_with()
+        self.assertGreaterEqual(self.main._activity["last"], 1000.0)
+
+    def test_stopping_removes_kept_books_like_the_stop_button(self):
+        with mock.patch.object(self.main, "_remove_book_folder") as removed,                 mock.patch.object(self.main.os, "_exit") as exited,                 mock.patch("builtins.print"):
+            self.main._stop_when_idle()
+        removed.assert_called_once_with(self.main.BOOKS_DIR)
+        exited.assert_called_once_with(0)
+
+    def test_every_page_sends_the_heartbeat(self):
+        self.assertIn("fetch('/alive'", self.client.get("/login").text)
+        for name in ("index.html", "login.html", "report.html"):
+            with self.subTest(page=name):
+                text = (CODE / "templates" / name).read_text(encoding="utf-8")
+                self.assertIn('{% include "_alive.html" %}', text)
+
+    def test_only_the_background_launcher_turns_it_on(self):
+        """แบบ --foreground / รันเอง ไม่มีกุญแจ = ไม่ปิดเอง (ปิดที่หน้าต่างเหมือนเดิม)"""
+        script = ("import threading, main; "
+                  "print(any(t.name == 'idle-stop' for t in threading.enumerate()))")
+        for token, expected in (("", "False"), ("some-key", "True")):
+            with self.subTest(token=bool(token)):
+                env = dict(os.environ, APP_PASSWORD="test-password", ETHESIS_STOP_TOKEN=token)
+                run = subprocess.run([sys.executable, "-c", script], cwd=CODE, env=env,
+                                     capture_output=True, text=True, timeout=120)
+                self.assertEqual(run.returncode, 0, run.stderr[-500:])
+                self.assertEqual(run.stdout.strip().splitlines()[-1], expected)
+
+
 class PipedOutputTests(unittest.TestCase):
     def test_thai_messages_do_not_crash_when_output_is_piped(self):
         """เดิมพังด้วย UnicodeEncodeError (cp1252) ทันทีที่พิมพ์ข้อความไทยลงท่อบน Windows"""
