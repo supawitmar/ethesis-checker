@@ -384,7 +384,7 @@ def _wants_json(request):
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
-    if path in {"/health", "/login"} or path.startswith("/static/"):
+    if path in {"/health", "/login", "/local-stop"} or path.startswith("/static/"):
         return await call_next(request)
     if not APP_PASSWORD:
         return HTMLResponse(
@@ -1001,6 +1001,24 @@ def book_file(job_id: str):
         path, media_type="application/pdf",
         filename=job.get("pdf_name") or "book.pdf", content_disposition_type="inline",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+# ปิดระบบที่รันเบื้องหลังในเครื่อง (ปิดระบบตรวจเล่ม.bat → tools/run_local.py --stop) — เจ้าของขอ 15 ต.ค. 2569
+# ให้ระบบรันโดยไม่มีหน้าต่างดำ จึงไม่มีหน้าต่างให้ปิด · เปิดใช้เฉพาะเมื่อตัวเปิดระบบส่ง ETHESIS_STOP_TOKEN
+# (สุ่มใหม่ทุกครั้งที่เปิด เก็บใน .run/server.json ของเครื่องนั้น) ไม่มีค่านี้ = 404 เหมือนไม่มีเส้นทางนี้
+# ลบไฟล์เล่มที่เก็บไว้ก่อนออกทันที — os._exit ข้าม atexit จึงต้องลบเอง
+LOCAL_STOP_TOKEN = os.getenv("ETHESIS_STOP_TOKEN", "")
+
+
+@app.post("/local-stop")
+def local_stop(request: Request):
+    if not LOCAL_STOP_TOKEN:
+        raise HTTPException(status_code=404)
+    if not hmac.compare_digest(request.headers.get("X-Stop-Token", ""), LOCAL_STOP_TOKEN):
+        raise HTTPException(status_code=403)
+    _remove_book_folder(BOOKS_DIR)
+    threading.Timer(0.3, os._exit, args=(0,)).start()
+    return {"stopping": True}
 
 
 @app.get("/health")

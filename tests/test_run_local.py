@@ -5,6 +5,7 @@
 2 เครื่อง — สิ่งที่ห้ามพลาดคือระบบต้องฟังแค่ 127.0.0.1 (เครื่องอื่นในเครือข่ายเข้าไม่ได้)
 และรหัสผ่านที่ตั้งผ่านตัวเปิด ต้องอ่านกลับใน uvicorn ได้ค่าเดียวกับที่พิมพ์
 """
+import json
 import os
 import shutil
 import socket
@@ -333,6 +334,20 @@ class ReleaseFlowTests(GitRepos):
         self.assertEqual(self.head(self.machine), mine)
         self.assertFalse(installed)
 
+    def test_a_running_background_server_is_restarted_on_the_new_release(self):
+        self.commit("rules.txt", "rule\n", "rules")
+        self.release("1.0")
+        (self.machine / ".run").mkdir()
+        (self.machine / ".run" / "server.json").write_text(
+            json.dumps({"pid": 1, "port": 8123, "stop_token": "k"}), encoding="utf-8")
+        with mock.patch.object(run_local, "checker_running", return_value=True), \
+                mock.patch.object(run_local, "stop", return_value=0) as stopped, \
+                mock.patch.object(run_local, "start", return_value=0) as started:
+            code, said, _ = self.update_machine()
+        self.assertEqual(code, 0, said)
+        self.assertTrue(stopped.called)
+        started.assert_called_once_with(open_browser=False)
+
     def test_the_footer_reads_the_release_from_the_tag(self):
         self.assertEqual(main_release(self.dev), "")
         self.release("1.0")
@@ -395,6 +410,196 @@ class ChangelogFileTests(unittest.TestCase):
                 self.assertTrue(body)
 
 
+class FakeProcess:
+    def __init__(self, pid=4321, exited=False):
+        self.pid, self.exited, self.killed = pid, exited, False
+
+    def poll(self):
+        return 1 if self.exited else None
+
+    def kill(self):
+        self.killed = True
+
+
+class BackgroundTests(unittest.TestCase):
+    """เจ้าของขอ 15 ต.ค. 2569: ระบบรันเบื้องหลังโดยไม่มีหน้าต่างดำ — รหัสผ่านยังต้องมีเหมือนเดิม"""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.dir = Path(folder.name)
+        patcher = mock.patch.object(run_local, "CODE", self.dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        said = mock.patch.object(run_local, "say")
+        self.said = said.start()
+        self.addCleanup(said.stop)
+
+    def told(self):
+        return " ".join(str(c.args[0]) for c in self.said.call_args_list if c.args)
+
+    def write_state(self, port=8123, token="key", pid=4321):
+        (self.dir / ".run").mkdir(exist_ok=True)
+        (self.dir / ".run" / "server.json").write_text(
+            json.dumps({"pid": pid, "port": port, "stop_token": token}), encoding="utf-8")
+
+    def test_starts_without_a_window_and_remembers_how_to_stop_it(self):
+        seen = {}
+
+        def popen(command, **kwargs):
+            seen["command"], seen["kwargs"] = command, kwargs
+            return FakeProcess(pid=999)
+        run_local.start_background(Path("py"), 8123, popen=popen)
+        kwargs = seen["kwargs"]
+        if os.name == "nt":
+            self.assertTrue(kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW)
+        else:
+            self.assertTrue(kwargs["start_new_session"])
+        self.assertEqual(seen["command"][seen["command"].index("--host") + 1], "127.0.0.1")
+        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+        state = run_local.read_state()
+        self.assertEqual((state["pid"], state["port"]), (999, 8123))
+        self.assertGreaterEqual(len(state["stop_token"]), 32)
+        self.assertEqual(kwargs["env"]["ETHESIS_STOP_TOKEN"], state["stop_token"])
+        self.assertTrue((self.dir / ".run" / "server.log").exists())
+
+    def test_a_new_stop_key_every_start(self):
+        popen = lambda command, **kwargs: FakeProcess()           # noqa: E731
+        run_local.start_background(Path("py"), 8123, popen=popen)
+        first = run_local.read_state()["stop_token"]
+        run_local.start_background(Path("py"), 8123, popen=popen)
+        self.assertNotEqual(run_local.read_state()["stop_token"], first)
+
+    def test_wait_ready_gives_up_when_the_server_dies(self):
+        self.assertFalse(run_local.wait_ready(8123, FakeProcess(exited=True), seconds=5,
+                                              running=lambda p: False))
+        self.assertTrue(run_local.wait_ready(8123, FakeProcess(), seconds=5, running=lambda p: True))
+
+    def start_with(self, ready):
+        process = FakeProcess()
+        with mock.patch.object(run_local, "ensure_env"), \
+                mock.patch.object(run_local, "ensure_venv", return_value=Path("py")), \
+                mock.patch.object(run_local, "choose_port", return_value=("free", 8123)), \
+                mock.patch.object(run_local, "start_background",
+                                  side_effect=lambda *a: (self.write_state(), process)[1]), \
+                mock.patch.object(run_local, "wait_ready", return_value=ready), \
+                mock.patch.object(run_local.webbrowser, "open") as opened:
+            code = run_local.start()
+        return code, process, opened
+
+    def test_start_returns_once_the_page_is_ready_and_opens_the_browser(self):
+        code, process, opened = self.start_with(ready=True)
+        self.assertEqual(code, 0)
+        opened.assert_called_once_with("http://127.0.0.1:8123/")
+        self.assertIn("ปิดระบบตรวจเล่ม.bat", self.told())
+        self.assertIsNotNone(run_local.read_state())
+
+    def test_a_server_that_never_comes_up_shows_its_log_and_cleans_up(self):
+        (self.dir / ".run").mkdir()
+        (self.dir / ".run" / "server.log").write_text("Traceback: something broke\n", encoding="utf-8")
+        code, process, opened = self.start_with(ready=False)
+        self.assertEqual(code, 1)
+        self.assertIn("something broke", self.told())
+        self.assertTrue(process.killed)
+        self.assertFalse(opened.called)
+        self.assertIsNone(run_local.read_state())
+
+    def test_stop_asks_the_server_with_its_key(self):
+        self.write_state(token="secret-key")
+        alive = {8123: True}
+        asked = []
+
+        def request_stop(port, token):
+            asked.append((port, token))
+            alive[port] = False
+        kill = mock.Mock()
+        code = run_local.stop(request_stop=request_stop, kill=kill,
+                              running=lambda p: alive.get(p, False), seconds=2)
+        self.assertEqual(code, 0)
+        self.assertEqual(asked, [(8123, "secret-key")])
+        self.assertFalse(kill.called)
+        self.assertIsNone(run_local.read_state())
+
+    def test_stop_falls_back_to_killing_its_own_process(self):
+        self.write_state(pid=777)
+        alive = {8123: True}
+        kill = mock.Mock(side_effect=lambda pid: alive.update({8123: False}))
+        code = run_local.stop(request_stop=lambda *a: False, kill=kill,
+                              running=lambda p: alive.get(p, False), seconds=0.5)
+        self.assertEqual(code, 0)
+        kill.assert_called_once_with(777)
+
+    def test_stop_reports_when_nothing_helped(self):
+        self.write_state()
+        code = run_local.stop(request_stop=lambda *a: False, kill=lambda pid: None,
+                              running=lambda p: p == 8123, seconds=0.3)
+        self.assertEqual(code, 1)
+
+    def test_stop_with_nothing_running(self):
+        self.assertEqual(run_local.stop(running=lambda p: False), 0)
+        self.assertIn("ไม่ได้เปิดอยู่", self.told())
+
+    def test_stop_does_not_touch_a_server_it_did_not_start(self):
+        kill = mock.Mock()
+        request_stop = mock.Mock()
+        code = run_local.stop(request_stop=request_stop, kill=kill, running=lambda p: p == 8000)
+        self.assertEqual(code, 1)
+        self.assertFalse(kill.called or request_stop.called)
+
+    def test_a_broken_state_file_counts_as_not_running(self):
+        (self.dir / ".run").mkdir()
+        (self.dir / ".run" / "server.json").write_text("{not json", encoding="utf-8")
+        self.assertIsNone(run_local.read_state())
+
+
+class LocalStopEndpointTests(unittest.TestCase):
+    """/local-stop ปิดระบบได้เฉพาะเมื่อตัวเปิดระบบส่งกุญแจมา และลบไฟล์เล่มที่เก็บไว้ก่อนออก"""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("APP_PASSWORD", "test-password")
+        import main
+        from fastapi.testclient import TestClient
+        cls.main = main
+        cls.client = TestClient(main.app)                 # ไม่ได้ล็อกอิน — ตัวปิดระบบไม่มีคุกกี้
+
+    def post(self, token=None):
+        headers = {} if token is None else {"X-Stop-Token": token}
+        return self.client.post("/local-stop", headers=headers)
+
+    def test_does_not_exist_unless_the_launcher_set_a_key(self):
+        with mock.patch.object(self.main, "LOCAL_STOP_TOKEN", ""), \
+                mock.patch.object(self.main.threading, "Timer") as timer:
+            self.assertEqual(self.post("anything").status_code, 404)
+            self.assertEqual(self.post("").status_code, 404)
+        self.assertFalse(timer.called)
+
+    def test_a_wrong_or_missing_key_is_refused(self):
+        with mock.patch.object(self.main, "LOCAL_STOP_TOKEN", "right-key"), \
+                mock.patch.object(self.main.threading, "Timer") as timer, \
+                mock.patch.object(self.main, "_remove_book_folder") as removed:
+            self.assertEqual(self.post("wrong-key").status_code, 403)
+            self.assertEqual(self.post().status_code, 403)
+        self.assertFalse(timer.called or removed.called)
+
+    def test_the_right_key_removes_kept_books_then_exits(self):
+        with mock.patch.object(self.main, "LOCAL_STOP_TOKEN", "right-key"), \
+                mock.patch.object(self.main.threading, "Timer") as timer, \
+                mock.patch.object(self.main, "_remove_book_folder") as removed:
+            response = self.post("right-key")
+        self.assertEqual(response.status_code, 200)
+        removed.assert_called_once_with(self.main.BOOKS_DIR)
+        timer.assert_called_once()
+        self.assertIs(timer.call_args.args[1], self.main.os._exit)
+
+    def test_a_get_cannot_stop_it(self):
+        with mock.patch.object(self.main, "LOCAL_STOP_TOKEN", "right-key"), \
+                mock.patch.object(self.main.threading, "Timer") as timer:
+            self.assertNotEqual(self.client.get("/local-stop").status_code, 200)
+        self.assertFalse(timer.called)
+
+
 class PipedOutputTests(unittest.TestCase):
     def test_thai_messages_do_not_crash_when_output_is_piped(self):
         """เดิมพังด้วย UnicodeEncodeError (cp1252) ทันทีที่พิมพ์ข้อความไทยลงท่อบน Windows"""
@@ -407,7 +612,8 @@ class PipedOutputTests(unittest.TestCase):
 
 class BatchFileTests(unittest.TestCase):
     FILES = {"เปิดระบบตรวจเล่ม.bat": "tools\\run_local.py %*",
-             "อัปเดตระบบตรวจเล่ม.bat": "tools\\run_local.py --update"}
+             "อัปเดตระบบตรวจเล่ม.bat": "tools\\run_local.py --update",
+             "ปิดระบบตรวจเล่ม.bat": "tools\\run_local.py --stop"}
 
     def test_call_the_launcher_with_crlf_and_utf8(self):
         for name, call in self.FILES.items():

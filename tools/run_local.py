@@ -10,8 +10,10 @@ SHEET_WEBHOOK_URL/SHEET_WEBHOOK_TOKEN ใน .env ของเครื่อง
 เปิดระบบ (ไม่มีอาร์กิวเมนต์):
   1. สร้าง .venv และติดตั้งแพ็กเกจ — ครั้งแรก และทุกครั้งที่ requirements.txt เปลี่ยน
   2. ยังไม่มีรหัสผ่านใน .env ให้ตั้ง (ถามในหน้าต่าง) และเติม SESSION_SECRET แบบสุ่มให้
-  3. รัน uvicorn ที่ 127.0.0.1 เท่านั้น — เครื่องอื่นในเครือข่ายเข้าไม่ได้ (ห้ามเปลี่ยนเป็น 0.0.0.0)
-  4. เปิดเบราว์เซอร์เมื่อระบบพร้อม · ถ้าเปิดค้างอยู่แล้วจากหน้าต่างอื่น แค่เปิดเบราว์เซอร์ให้
+  3. รัน uvicorn ที่ 127.0.0.1 เท่านั้น เป็น process เบื้องหลังที่ไม่มีหน้าต่าง — เครื่องอื่นในเครือข่าย
+     เข้าไม่ได้ (ห้ามเปลี่ยนเป็น 0.0.0.0) · --foreground = รันในหน้าต่างแบบเดิม
+  4. เปิดเบราว์เซอร์เมื่อระบบพร้อม · ถ้าเปิดอยู่แล้ว แค่เปิดเบราว์เซอร์ให้
+--stop: ปิดระบบที่รันเบื้องหลัง (ปิดระบบตรวจเล่ม.bat)
 --update: ติดตั้งรุ่นล่าสุดที่ออกแล้ว (แท็ก v*) ด้วย fast-forward แล้วแสดงว่าเปลี่ยนอะไร
           จาก CHANGELOG.md (ไม่แตะเครื่องที่มีไฟล์แก้ค้างอยู่)
 """
@@ -220,22 +222,86 @@ def server_command(python, port, env_file=ENV_FILE):
             "--env-file", str(env_file)]
 
 
-def _open_when_ready(url, port, process):
-    deadline = time.monotonic() + READY_SECONDS
-    while time.monotonic() < deadline and process.poll() is None:
-        if checker_running(port, timeout=1):
-            say(f"\nระบบพร้อมแล้ว: {url}")
-            say("ปิดหน้าต่างนี้ = ปิดระบบ (ไฟล์เล่มที่ตรวจไว้อยู่ในเครื่องนี้เท่านั้น)\n")
-            webbrowser.open(url)
-            return
+# รันเบื้องหลัง (เจ้าของขอ 15 ต.ค. 2569 "ให้ระบบรันเบื้องหลังโดยไม่มีหน้าต่างดำ" — รหัสผ่านยังต้องมี)
+# ระบบรันเป็น process ที่ไม่มีหน้าต่าง หน้าต่างของ .bat ปิดเองเมื่อเบราว์เซอร์เปิด · ปิดระบบด้วย
+# ปิดระบบตรวจเล่ม.bat ซึ่งยิง /local-stop พร้อมกุญแจที่สุ่มตอนเปิด (main.py ลบไฟล์เล่มที่เก็บไว้ก่อนปิด)
+# ข้อมูลของรอบที่เปิดอยู่เก็บใน .run/ (ไม่เข้า git): server.json = pid พอร์ต กุญแจปิด · server.log = ข้อความของระบบ
+STATE_NAME = "server.json"
+LOG_NAME = "server.log"
+STOP_SECONDS = 15
+
+
+def run_dir():
+    return CODE / ".run"
+
+
+def read_state():
+    try:
+        data = json.loads((run_dir() / STATE_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("port"), int) and data.get("stop_token"):
+        return data
+    return None
+
+
+def _forget_state():
+    try:
+        (run_dir() / STATE_NAME).unlink()
+    except OSError:
+        pass
+
+
+def _no_window_flags():
+    if os.name != "nt":
+        return {"start_new_session": True}
+    return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+
+
+def start_background(python, port, popen=subprocess.Popen):
+    """เปิดระบบเป็น process ที่ไม่มีหน้าต่าง ข้อความของระบบลง .run/server.log"""
+    folder = run_dir()
+    folder.mkdir(exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    env = dict(os.environ, ETHESIS_STOP_TOKEN=token)
+    with open(folder / LOG_NAME, "w", encoding="utf-8") as log:
+        process = popen(server_command(python, port), cwd=CODE, env=env, stdin=subprocess.DEVNULL,
+                        stdout=log, stderr=subprocess.STDOUT, close_fds=True, **_no_window_flags())
+    (folder / STATE_NAME).write_text(json.dumps({"pid": process.pid, "port": port, "stop_token": token}),
+                                     encoding="utf-8")
+    return process
+
+
+def wait_ready(port, process, seconds=READY_SECONDS, running=None):
+    running = running or (lambda p: checker_running(p, timeout=1))
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        if running(port):
+            return True
         time.sleep(0.5)
+    return False
+
+
+def _log_tail(lines=25):
+    try:
+        text = (run_dir() / LOG_NAME).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "(ไม่มีข้อความจากระบบ)"
+    return "\n".join(text.strip().splitlines()[-lines:]) or "(ไม่มีข้อความจากระบบ)"
 
 
 def serve(python, port, open_browser=True):
+    """แบบเดิม (--foreground): รันในหน้าต่างนี้ ปิดหน้าต่าง = ปิดระบบ — ไว้ดูข้อความตอนแก้ปัญหา"""
     url = f"http://{HOST}:{port}/"
     process = subprocess.Popen(server_command(python, port), cwd=CODE)
     if open_browser:
-        threading.Thread(target=_open_when_ready, args=(url, port, process), daemon=True).start()
+        def _open():
+            if wait_ready(port, process):
+                say(f"\nระบบพร้อมแล้ว: {url} (ปิดหน้าต่างนี้ = ปิดระบบ)\n")
+                webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
     try:
         return process.wait()
     except KeyboardInterrupt:
@@ -247,7 +313,7 @@ def serve(python, port, open_browser=True):
         return 0
 
 
-def start(open_browser=True, prompt=getpass.getpass):
+def start(open_browser=True, prompt=getpass.getpass, foreground=False):
     ensure_env(prompt=prompt)
     try:
         python = ensure_venv()
@@ -261,12 +327,75 @@ def start(open_browser=True, prompt=getpass.getpass):
     state, port = found
     url = f"http://{HOST}:{port}/"
     if state == "running":
-        say(f"ระบบเปิดอยู่แล้วในอีกหน้าต่างหนึ่ง: {url}")
+        say(f"ระบบเปิดอยู่แล้ว: {url}")
         if open_browser:
             webbrowser.open(url)
         return 0
-    say(f"กำลังเปิดระบบที่ {url} ...")
-    return serve(python, port, open_browser)
+    if foreground:
+        say(f"กำลังเปิดระบบที่ {url} ...")
+        return serve(python, port, open_browser)
+    say("กำลังเปิดระบบ ...")
+    process = start_background(python, port)
+    if not wait_ready(port, process):
+        say("เปิดระบบไม่สำเร็จ — ข้อความจากระบบ:\n")
+        say(_log_tail())
+        if process.poll() is None:
+            process.kill()
+        _forget_state()
+        return 1
+    say(f"ระบบพร้อมแล้ว: {url}")
+    say("ระบบทำงานอยู่เบื้องหลัง (ไม่มีหน้าต่าง) · ปิดระบบด้วย ปิดระบบตรวจเล่ม.bat")
+    if open_browser:
+        webbrowser.open(url)
+    return 0
+
+
+def _request_stop(port, token, timeout=5):
+    request = urllib.request.Request(f"http://{HOST}:{port}/local-stop", data=b"", method="POST",
+                                     headers={"X-Stop-Token": token})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except OSError:
+        return False
+
+
+def _kill(pid):
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    else:
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+
+
+def stop(request_stop=_request_stop, kill=_kill, running=None, seconds=STOP_SECONDS):
+    running = running or (lambda p: checker_running(p, timeout=1))
+    state = read_state()
+    if state is None or not running(state["port"]):
+        _forget_state()
+        open_ports = [p for p in range(FIRST_PORT, FIRST_PORT + PORT_TRIES) if running(p)]
+        if open_ports:
+            say(f"มีระบบเปิดอยู่ที่พอร์ต {open_ports[0]} แต่ไม่ได้เปิดด้วยตัวเปิดแบบเบื้องหลัง "
+                "— ปิดหน้าต่างดำของระบบนั้นแทน")
+            return 1
+        say("ระบบไม่ได้เปิดอยู่")
+        return 0
+    port = state["port"]
+    request_stop(port, state["stop_token"])
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and running(port):
+        time.sleep(0.3)
+    if running(port) and state.get("pid"):
+        kill(state["pid"])
+        time.sleep(1)
+    if running(port):
+        say(f"ปิดระบบไม่สำเร็จ — ระบบยังตอบอยู่ที่พอร์ต {port} (ลองรีสตาร์ทเครื่อง)")
+        return 1
+    _forget_state()
+    say("ปิดระบบแล้ว · ผลตรวจที่เปิดค้างไว้และไฟล์เล่มที่ระบบเก็บไว้ถูกลบแล้ว")
+    return 0
 
 
 def _git(git, *args):
@@ -363,7 +492,14 @@ def update(which=shutil.which, git_run=None):
     head = git_run("rev-parse", "--short=7", "HEAD").stdout.strip()
     say(f"ติดตั้งอัปเดต {_label(newest)} แล้ว (รหัส {head} ตรงกับท้ายหน้าเว็บ)")
     _say_notes(have, newest)
-    say("\nถ้าระบบเปิดค้างอยู่ ให้ปิดหน้าต่างของระบบแล้วเปิดใหม่ จึงจะใช้รุ่นใหม่")
+    state = read_state()
+    if state and checker_running(state["port"]):
+        say("\nระบบที่เปิดอยู่ยังเป็นรุ่นเก่า — ปิดแล้วเปิดรุ่นใหม่ให้ (ผลตรวจที่เปิดค้างไว้จะหาย)")
+        if stop() != 0 or start(open_browser=False) != 0:
+            say("เปิดรุ่นใหม่ไม่สำเร็จ — ดับเบิลคลิกทางลัดระบบตรวจเล่มอีกครั้ง")
+            return 1
+    else:
+        say("\nเปิดระบบครั้งถัดไปจะได้รุ่นใหม่ (ถ้ามีหน้าต่างดำของระบบเปิดอยู่ ให้ปิดแล้วเปิดใหม่)")
     return 0
 
 
@@ -383,6 +519,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="เปิด/อัปเดตระบบตรวจเล่มในเครื่องนี้")
     parser.add_argument("--update", action="store_true", help="ดึงรุ่นใหม่จาก GitHub")
     parser.add_argument("--no-browser", action="store_true", help="ไม่เปิดเบราว์เซอร์ให้")
+    parser.add_argument("--stop", action="store_true", help="ปิดระบบที่รันเบื้องหลังอยู่")
+    parser.add_argument("--foreground", action="store_true",
+                        help="รันในหน้าต่างนี้แบบเดิม (ไว้ดูข้อความตอนแก้ปัญหา)")
     args = parser.parse_args(argv)
     if sys.version_info < MIN_PYTHON:
         say("ต้องใช้ Python {}.{} ขึ้นไป (เครื่องนี้เป็น {}) — ติดตั้งจาก python.org".format(
@@ -390,7 +529,9 @@ def main(argv=None):
         return 1
     if args.update:
         return update()
-    return start(open_browser=not args.no_browser)
+    if args.stop:
+        return stop()
+    return start(open_browser=not args.no_browser, foreground=args.foreground)
 
 
 if __name__ == "__main__":
