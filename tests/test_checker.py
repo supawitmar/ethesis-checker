@@ -2410,7 +2410,7 @@ class CoverYearLineTests(unittest.TestCase):
 
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
-    """หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้า ไม่มี running head/ชื่อบท"""
+    """หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าอารบิก ไม่มี running head/ชื่อบท"""
 
     class _Page:
         def __init__(self, height, words):
@@ -2441,6 +2441,20 @@ class HeaderOnlyPageNumberTests(unittest.TestCase):
     def test_body_text_below_header_band_is_ignored(self):
         page = self._Page(841.9, [{"text": "Introduction", "top": 90}])
         self.assertEqual(header_extra_text(page), "")
+
+    def test_front_matter_page_labels_count_as_other_text(self):
+        """หัวกระดาษส่วนเนื้อหา/ส่วนท้ายรับเฉพาะเลขอารบิก — เลขโรมัน/พยัญชนะไทยไม่ใช่
+        (เจ้าหน้าที่สั่ง 15 ต.ค. 2569)"""
+        for label in ("iv", "XII", "ก", "ฉ"):
+            with self.subTest(label=label):
+                page = self._Page(841.9, [{"text": label, "top": 48.7}])
+                self.assertEqual(header_extra_text(page), label)
+
+    def test_arabic_page_number_alone_is_clean(self):
+        for label in ("1", "57", "1024"):
+            with self.subTest(label=label):
+                page = self._Page(841.9, [{"text": label, "top": 48.7}])
+                self.assertEqual(header_extra_text(page), "")
 
 
 class SignatureDateTests(unittest.TestCase):
@@ -5387,7 +5401,7 @@ class DecisionsThatDeliberatelyChangeNothing(unittest.TestCase):
         (เล่มจริงหน้า 38 วางชื่อรูปที่ top 48.6 ซึ่งอยู่ในขอบบน 72 pt)
         """
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ", 1)[0][-400:]
+        block = source.split("พบข้อความอื่นนอกจากเลขหน้าอารบิกในหัวกระดาษ", 1)[0][-400:]
         self.assertIn('rep.add("ORANGE"', block)
 
 

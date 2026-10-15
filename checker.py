@@ -492,19 +492,16 @@ def _page_label_order(label):
     return ("roman", value) if value else (None, None)
 
 
-def _is_page_number_token(token):
-    token = (token or '').strip()
-    return bool(re.fullmatch(r'\d{1,4}', token)
-                or re.fullmatch(r'[ivxlcdm]{1,10}', token, re.I)
-                or re.fullmatch(r'[ก-ฮ]', token))
-
-
 def header_extra_text(pdf_page):
-    """ข้อความในแถบหัวกระดาษ (บนสุดของหน้า) ที่ไม่ใช่เลขหน้า
+    """ข้อความในแถบหัวกระดาษ (บนสุดของหน้า) ที่ไม่ใช่เลขหน้าอารบิก
 
-    หัวกระดาษของส่วนเนื้อหา/ส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น (ห้ามมี running head
+    หัวกระดาษของส่วนเนื้อหา/ส่วนท้ายต้องมีเพียงเลขหน้าอารบิกเท่านั้น (ห้ามมี running head
     หรือชื่อบท) เลขหน้าอยู่ในระยะขอบบน (~5-6% ของความสูง) ส่วนเนื้อความเริ่ม ~9%+
-    จึงตัดที่ 8% เพื่อดูเฉพาะแถบหัวกระดาษ คืน '' ถ้าหัวกระดาษมีแต่เลขหน้า/ว่าง
+    จึงตัดที่ 8% เพื่อดูเฉพาะแถบหัวกระดาษ คืน '' ถ้าหัวกระดาษมีแต่เลขหน้าอารบิก/ว่าง
+
+    เลขโรมัน (iv) และพยัญชนะไทย (ก) เป็นเลขหน้าของส่วนนำ ถ้าไปอยู่ในหัวกระดาษของ
+    ส่วนเนื้อหา/ส่วนท้ายก็นับเป็นข้อความอื่นด้วย (เจ้าหน้าที่สั่ง 15 ต.ค. 2569) — ผลนี้ใช้
+    เฉพาะหน้าตั้งแต่บทแรกเป็นต้นไป (ดู run_check) หน้าส่วนนำจึงไม่โดน
     """
     height = float(getattr(pdf_page, 'height', 0) or 0)
     if not height:
@@ -516,7 +513,7 @@ def header_extra_text(pdf_page):
             continue
         # รหัส PUA ของฟอนต์ไทยที่ดึงมาเป็นกล่อง แปลงกลับเป็นอักษรจริงก่อน (thai_text.fix_thai_pua)
         token = fix_thai_pua(word.get('text', '') or '').strip()
-        if token and not _is_page_number_token(token):
+        if token and not re.fullmatch(r'\d{1,4}', token):
             extras.append(token)
     return ' '.join(extras).strip()
 
@@ -6772,7 +6769,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     _p("เปิดไฟล์ PDF")
     pages = []
-    header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้า)
+    header_extras = []   # ข้อความอื่นในหัวกระดาษต่อหน้า (นอกจากเลขหน้าอารบิก)
     font_damaged = []          # ดัชนีหน้าที่ฟอนต์ในไฟล์ทำให้อ่านข้อความเพี้ยน
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
@@ -7339,7 +7336,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # ภาคผนวกกลายเป็นหน้าส่วนนำ (เช่น "x") แล้วฟ้องเลขหน้าผิดทั้งที่เล่มถูก
     end_scan_start = min((c[2] for c in body_ch), default=0)
 
-    # หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าเท่านั้น (ไม่มี running head/ชื่อบท)
+    # หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าอารบิกเท่านั้น (ไม่มี running head/ชื่อบท
+    # และไม่มีเลขหน้าแบบส่วนนำ เช่น iv หรือ ก)
     # รวมทุกหน้าที่พบข้อความอื่นในหัวกระดาษเป็นรายการเดียว ให้เจ้าหน้าที่ยืนยัน (ส้ม)
     if body_ch:
         header_bad = [i for i in range(end_scan_start, len(pages))
@@ -7349,10 +7347,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
             sample = header_extras[header_bad[0]]
             rep.add("ORANGE", "body/end", f"หัวกระดาษ ({shown}{more})",
-                    f'พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษ {len(header_bad)} หน้า '
+                    f'พบข้อความอื่นนอกจากเลขหน้าอารบิกในหัวกระดาษ {len(header_bad)} หน้า '
                     f'เช่น "{sample[:60]}"',
-                    "หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าเท่านั้น",
-                    "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า",
+                    "หัวกระดาษส่วนเนื้อหาและส่วนท้ายต้องมีเพียงเลขหน้าอารบิกเท่านั้น",
+                    "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้าอารบิก",
                     "PAGE.HEADER")
 
     for i, t in enumerate(pages):
