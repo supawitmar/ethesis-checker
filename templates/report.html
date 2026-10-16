@@ -40,6 +40,8 @@
        font-size:1.2rem; color:#fff; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%);
        box-shadow:0 6px 14px -6px rgba(22,54,90,.6); }
   .brand-name { font-weight:700; font-size:1.02rem; color:var(--navy); line-height:1.2; }
+  .ver-badge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:99px; vertical-align:2px;
+       font-size:.7rem; font-weight:600; color:var(--navy); background:#e6eef8; border:1px solid #cddcee; }
   .brand-sub { font-size:.78rem; color:var(--ink-3); }
   .top-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
   .top-new { text-decoration:none; font-size:.82rem; font-weight:700; color:#fff; white-space:nowrap;
@@ -359,7 +361,7 @@
   <div class="topbar-in">
     <div class="brand-mark" aria-hidden="true">📋</div>
     <div>
-      <div class="brand-name">E-Thesis Staff Checker</div>
+      <div class="brand-name">E-Thesis Staff Checker{% if app_release %}<span class="ver-badge" title="อัปเดต {{ app_release }}">v{{ app_release }}</span>{% endif %}</div>
       <div class="brand-sub" data-th="ตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ · บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล"
            data-en="Electronic thesis format check · Faculty of Graduate Studies, Mahidol University">ตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ · บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล</div>
     </div>
@@ -678,8 +680,7 @@
   </div>
   {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง")
      อยู่นอกสคริปต์และนอกกล่องรายงาน — รายงานที่บันทึกเป็นไฟล์ไว้ก็ยังบอกได้ว่าสร้างจากโค้ดรุ่นไหน #}
-  <p class="appver"><span data-th="เวอร์ชันระบบ" data-en="System version">เวอร์ชันระบบ</span> {% if app_release %}<b><span data-th="อัปเดต" data-en="Update">อัปเดต</span> {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b> ·
-    <span data-th="เริ่มทำงาน" data-en="running since">เริ่มทำงาน</span> {{ app_started }}</p>
+  <p class="appver"><span data-th="เวอร์ชันระบบ" data-en="System version">เวอร์ชันระบบ</span> {% if app_release %}<b><span data-th="อัปเดต" data-en="Update">อัปเดต</span> {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b></p>
 </main>
 
 <script>

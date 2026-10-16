@@ -36,6 +36,20 @@
        box-shadow:0 6px 14px -6px rgba(22,54,90,.6); }
   .brand-name { font-weight:700; font-size:1.02rem; color:var(--navy); line-height:1.2; }
   .brand-sub { font-size:.78rem; color:var(--ink-3); }
+  .ver-badge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:99px; vertical-align:2px;
+       font-size:.7rem; font-weight:600; color:var(--navy); background:#e6eef8; border:1px solid #cddcee; }
+  /* ---- แถบมีอัปเดตใหม่ (เจ้าของขอ 16 ต.ค. 2569 ให้เหมือนระบบปรับเอกสาร) ---- */
+  .update-bar { display:flex; align-items:center; gap:14px; margin:0 0 18px; padding:14px 18px; border-radius:var(--radius);
+       background:#fff; border:1px solid var(--navy-3); box-shadow:var(--shadow); }
+  .update-bar[hidden] { display:none; }
+  .update-bar .ut { min-width:0; flex:1; }
+  .update-bar b { display:block; font-size:.95rem; color:var(--navy); }
+  .update-bar ul { margin:4px 0 0; padding-left:18px; font-size:.84rem; color:var(--ink-2); }
+  .update-bar .umsg { margin-top:4px; font-size:.84rem; color:#a12626; }
+  .update-bar button { flex:none; border:0; border-radius:99px; padding:9px 18px; font-size:.88rem; font-weight:600;
+       color:#fff; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); cursor:pointer; white-space:nowrap; }
+  .update-bar button[disabled] { opacity:.6; cursor:default; }
+  @media (max-width:640px) { .update-bar { flex-wrap:wrap; } .update-bar button { width:100%; } }
   .logout { margin:0 0 0 auto; }
   .logout button { background:#fff; color:var(--ink-2); border:1px solid var(--line-2); border-radius:99px;
        padding:7px 16px; font-size:.82rem; cursor:pointer; transition:all .15s; white-space:nowrap; }
@@ -245,7 +259,7 @@
   <div class="topbar-in">
     <div class="brand-mark" aria-hidden="true">📋</div>
     <div>
-      <div class="brand-name">E-Thesis Staff Checker</div>
+      <div class="brand-name">E-Thesis Staff Checker{% if app_release %}<span class="ver-badge" title="อัปเดต {{ app_release }}">v{{ app_release }}</span>{% endif %}</div>
       <div class="brand-sub">ตรวจรูปเล่มวิทยานิพนธ์อิเล็กทรอนิกส์ · บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล</div>
     </div>
     <form class="logout" action="/logout" method="post"><button type="submit">ออกจากระบบ</button></form>
@@ -253,6 +267,11 @@
 </header>
 
 <main class="page">
+  {# แถบมีอัปเดตใหม่ — ซ่อนไว้ก่อน สคริปต์ท้ายหน้าถาม /update/check แล้วค่อยแสดง (ไม่มีเน็ต = ไม่แสดง ใช้งานต่อได้ปกติ) #}
+  <section class="update-bar" id="update-bar" hidden>
+    <div class="ut"><b id="update-title">มีอัปเดตใหม่</b><ul id="update-notes"></ul><div class="umsg" id="update-msg" hidden></div></div>
+    <button type="button" id="update-btn">อัปเดตเลย</button>
+  </section>
   <div class="hero">
     <h1>ตรวจเล่มใหม่</h1>
     <p>แนบไฟล์ eThesis เพื่อเติมข้อมูลอนุมัติให้อัตโนมัติ แนบไฟล์เล่ม ตรวจทานข้อมูล แล้วกดตรวจเล่ม</p>
@@ -434,7 +453,7 @@
   </div>
   </form>
   {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง") #}
-  <p class="appver">เวอร์ชันระบบ {% if app_release %}<b>อัปเดต {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b> · เริ่มทำงาน {{ app_started }}</p>
+  <p class="appver">เวอร์ชันระบบ {% if app_release %}<b>อัปเดต {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b></p>
 </main>
 
 <div id="overlay" style="display:none;">
@@ -900,6 +919,69 @@ document.querySelectorAll('#progress li').forEach(function(li){
     if (sec) sec.scrollIntoView({behavior: 'smooth', block: 'start'});
   });
 });
+</script>
+<script>
+// แถบมีอัปเดตใหม่ / อัปเดตเลย (เจ้าของขอ 16 ต.ค. 2569 ให้เหมือนระบบปรับเอกสาร) — main.py /update/*
+(function(){
+  var bar = document.getElementById('update-bar');
+  var title = document.getElementById('update-title');
+  var notes = document.getElementById('update-notes');
+  var msg = document.getElementById('update-msg');
+  var btn = document.getElementById('update-btn');
+  var latest = '';
+  function esc(t){ var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+  function say(text){ msg.textContent = text; msg.hidden = !text; }
+  fetch('/update/check', {cache:'no-store'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(u){
+    if (!u || !u.available) return;
+    latest = u.latest;
+    title.textContent = 'มีอัปเดตใหม่: อัปเดต ' + u.latest + (u.current ? ' (ตอนนี้ใช้ ' + u.current + ')' : '') +
+      (u.can_apply ? ' — กดอัปเดตแล้วระบบจะเปิดใหม่เอง' : '');
+    notes.innerHTML = (u.notes || []).map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('');
+    if (!u.can_apply) { btn.hidden = true; say('ดับเบิลคลิก อัปเดตระบบตรวจเล่ม.bat ในโฟลเดอร์ระบบเพื่ออัปเดต'); }
+    bar.hidden = false;
+  }).catch(function(){});
+
+  function waitForNewRelease(){
+    var deadline = Date.now() + 5 * 60 * 1000;
+    function tick(){
+      if (Date.now() > deadline) {
+        window.ETHESIS_UPDATING = false;
+        btn.disabled = false; btn.textContent = 'อัปเดตเลย';
+        say('ระบบยังไม่กลับมา — ดับเบิลคลิกทางลัดระบบตรวจเล่มเพื่อเปิดใหม่ หรือกด อัปเดตระบบตรวจเล่ม.bat');
+        return;
+      }
+      fetch('/update/status', {cache:'no-store'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(s){
+        if (s && s.state === 'failed') {
+          window.ETHESIS_UPDATING = false;
+          btn.disabled = false; btn.textContent = 'อัปเดตเลย';
+          say(s.message || 'อัปเดตไม่สำเร็จ');
+          return;
+        }
+        return fetch('/health', {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(h){
+          if (h && h.release === latest) { location.reload(); return; }
+          setTimeout(tick, 2000);
+        });
+      }).catch(function(){ setTimeout(tick, 2000); });   // ระหว่างปิด-เปิดใหม่ ระบบไม่ตอบ — รอต่อ
+    }
+    setTimeout(tick, 2000);
+  }
+
+  btn.addEventListener('click', function(){
+    btn.disabled = true; btn.textContent = 'กำลังอัปเดต…'; say('');
+    fetch('/update/apply', {method:'POST'}).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(d){
+        if (!r.ok) throw new Error(d.detail || ('รหัส ' + r.status));
+        // ระบบจะปิดแล้วเปิดใหม่ — แถบแดง "ระบบปิดแล้ว" (_alive.html) ไม่ต้องขึ้นระหว่างนี้
+        window.ETHESIS_UPDATING = true;
+        title.textContent = 'กำลังอัปเดตเป็นอัปเดต ' + latest + ' — ระบบจะปิดแล้วเปิดใหม่ หน้านี้จะโหลดใหม่เองเมื่อเสร็จ';
+        waitForNewRelease();
+      });
+    }).catch(function(e){
+      btn.disabled = false; btn.textContent = 'อัปเดตเลย';
+      say('อัปเดตไม่สำเร็จ: ' + e.message);
+    });
+  });
+})();
 </script>
 {% include "_alive.html" %}
 </body>

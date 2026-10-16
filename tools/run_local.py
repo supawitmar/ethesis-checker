@@ -361,9 +361,10 @@ def _request_stop(port, token, timeout=5):
         return False
 
 
-def _kill(pid):
+def _kill(pid, tree=True):
+    # tree=False เมื่อตัวอัปเดตถูกเปิดจากหน้าเว็บ — ตัวอัปเดตเป็นลูกของระบบ /T จะฆ่าตัวเองไปด้วย
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        subprocess.run(["taskkill", "/PID", str(pid), *(["/T"] if tree else []), "/F"], capture_output=True)
     else:
         try:
             os.kill(pid, 9)
@@ -448,7 +449,7 @@ def _say_notes(after, upto, path=None):
             say(body)
 
 
-def update(which=shutil.which, git_run=None):
+def update(which=shutil.which, git_run=None, kill=_kill):
     git = which("git")
     if not git or not (CODE / ".git").exists():
         say("อัปเดตไม่ได้: ไม่พบ git หรือโฟลเดอร์นี้ไม่ได้มาจาก git clone (ดู DEPLOY.md หัวข้อ 4)")
@@ -496,12 +497,46 @@ def update(which=shutil.which, git_run=None):
     state = read_state()
     if state and checker_running(state["port"]):
         say("\nระบบที่เปิดอยู่ยังเป็นรุ่นเก่า — ปิดแล้วเปิดรุ่นใหม่ให้ (ผลตรวจที่เปิดค้างไว้จะหาย)")
-        if stop() != 0 or start(open_browser=False) != 0:
+        if stop(kill=kill) != 0 or start(open_browser=False) != 0:
             say("เปิดรุ่นใหม่ไม่สำเร็จ — ดับเบิลคลิกทางลัดระบบตรวจเล่มอีกครั้ง")
             return 1
     else:
         say("\nเปิดระบบครั้งถัดไปจะได้รุ่นใหม่ (ถ้ามีหน้าต่างดำของระบบเปิดอยู่ ให้ปิดแล้วเปิดใหม่)")
     return 0
+
+
+# ตัวอัปเดตที่หน้าเว็บเปิด (ปุ่ม "อัปเดตเลย" — เจ้าของขอ 16 ต.ค. 2569) ไม่มีหน้าต่างให้อ่าน จึงเขียนผลลง
+# .run/update.json ให้หน้าเว็บ (main.py /update/status) อ่าน: running → done / failed + ข้อความที่ตัวอัปเดตพูด
+UPDATE_STATE_NAME = "update.json"
+
+
+def _write_update_state(state, message=""):
+    folder = run_dir()
+    folder.mkdir(exist_ok=True)
+    (folder / UPDATE_STATE_NAME).write_text(json.dumps({"state": state, "message": message}, ensure_ascii=False),
+                                            encoding="utf-8")
+
+
+def update_from_app():
+    global say
+    spoken, plain = [], say
+
+    def say(text=""):                       # noqa: F811 — เก็บทุกข้อความไว้บอกหน้าเว็บด้วย
+        spoken.append(str(text))
+        plain(text)
+    try:
+        code = update(kill=lambda pid: _kill(pid, tree=False))
+    except Exception as error:              # อะไรก็ตามที่พัง หน้าเว็บต้องได้รู้ ไม่ใช่รอจนหมดเวลา
+        spoken.append(f"อัปเดตไม่สำเร็จ: {error}")
+        code = 1
+    finally:
+        say = plain
+    lines = [line.strip() for line in spoken if line.strip()]
+    if code == 0:
+        _write_update_state("done", lines[0] if lines else "")
+    else:
+        _write_update_state("failed", " ".join(lines[:3]) or "อัปเดตไม่สำเร็จ")
+    return code
 
 
 def _utf8_output():
@@ -519,6 +554,7 @@ def main(argv=None):
     _utf8_output()
     parser = argparse.ArgumentParser(description="เปิด/อัปเดตระบบตรวจเล่มในเครื่องนี้")
     parser.add_argument("--update", action="store_true", help="ดึงรุ่นใหม่จาก GitHub")
+    parser.add_argument("--from-app", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-browser", action="store_true", help="ไม่เปิดเบราว์เซอร์ให้")
     parser.add_argument("--stop", action="store_true", help="ปิดระบบที่รันเบื้องหลังอยู่")
     parser.add_argument("--foreground", action="store_true",
@@ -529,7 +565,7 @@ def main(argv=None):
             *MIN_PYTHON, sys.version.split()[0]))
         return 1
     if args.update:
-        return update()
+        return update_from_app() if args.from_app else update()
     if args.stop:
         return stop()
     return start(open_browser=not args.no_browser, foreground=args.foreground)

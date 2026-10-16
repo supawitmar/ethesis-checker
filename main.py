@@ -8,6 +8,7 @@ import atexit
 import json
 import platform
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -42,6 +43,7 @@ from checker import (
 )
 from ethesis_import import parse_ethesis_pdf
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
+import release_check
 
 BASE = Path(__file__).parent
 app = FastAPI(title="E-Thesis Staff Checker")
@@ -103,16 +105,14 @@ def _resolve_app_release(repo_dir=None):
     match = _RELEASE_TAG.match(run.stdout.strip()) if run.returncode == 0 else None
     return match.group(1) if match else ""
 
-# เวลาไทย (UTC+7 ไม่มีเวลาออมแสง) — เซิร์ฟเวอร์ Render ใช้ UTC แต่คนอ่านหน้านี้อยู่เมืองไทย
-# เวลาที่ process นี้เริ่มทำงานบอกด้วย เพราะ deploy/restart/cold start ทุกครั้งทำให้ผลตรวจที่
-# อยู่ในหน่วยความจำหายหมด เจ้าหน้าที่เห็นเวลานี้ก็รู้ว่าทำไมรายงานที่เปิดค้างไว้ถึงหาย
+# เวลาไทย (UTC+7 ไม่มีเวลาออมแสง) — เวลาที่ process นี้เริ่มทำงาน บอกใน /health เท่านั้น
+# (เดิมขึ้นท้ายหน้าเว็บด้วย เจ้าของให้เอาออก 16 ต.ค. 2569 — ระบบเปิด/ปิดเองบ่อยจนเวลานี้ไม่มีความหมายกับเจ้าหน้าที่)
 _BANGKOK = timezone(timedelta(hours=7))
 APP_STARTED_AT = datetime.now(_BANGKOK)
 APP_VERSION = _resolve_app_version()
 APP_RELEASE = _resolve_app_release()
 templates.env.globals["app_version"] = APP_VERSION
 templates.env.globals["app_release"] = APP_RELEASE
-templates.env.globals["app_started"] = APP_STARTED_AT.strftime("%d/%m/%Y %H:%M")
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 SESSION_COOKIE = "ethesis_session"
@@ -371,7 +371,7 @@ def _safe_next(path):
 
 
 # ปลายทางที่หน้าเว็บเรียกด้วย fetch เท่านั้น (ไม่ใช่การเปิดหน้าเว็บตรง ๆ)
-JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/", "/sheet/")
+JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/", "/sheet/", "/update/")
 
 
 def _wants_json(request):
@@ -1133,6 +1133,61 @@ def _watch_idle_forever(sleep=time.sleep, clock=time.monotonic, stop=_stop_when_
 
 if LOCAL_STOP_TOKEN:
     threading.Thread(target=_watch_idle_forever, name="idle-stop", daemon=True).start()
+
+
+# อัปเดตจากหน้าเว็บ (เจ้าของขอ 16 ต.ค. 2569 ให้เหมือนระบบปรับเอกสาร): หน้าแรกถาม /update/check ว่ามีรุ่นที่ออกแล้ว
+# แต่เครื่องนี้ยังไม่มีไหม (release_check.py · git fetch แท็กจาก GitHub · จำผลไว้ UPDATE_CHECK_SECONDS)
+# กด "อัปเดตเลย" = /update/apply เปิดตัวอัปเดตตัวเดียวกับ อัปเดตระบบตรวจเล่ม.bat (tools/run_local.py --update
+# --from-app) เป็น process ไม่มีหน้าต่าง — ตัวอัปเดตปิดระบบนี้ (/local-stop) ติดตั้ง แล้วเปิดรุ่นใหม่เอง
+# หน้าเว็บรอจน /health บอกเลขรุ่นใหม่แล้วโหลดหน้าใหม่ · ผลของตัวอัปเดตอยู่ที่ .run/update.json (/update/status)
+# สั่งอัปเดตได้เฉพาะตอนรันเบื้องหลังจากตัวเปิดระบบ (มี LOCAL_STOP_TOKEN) และไม่มีเล่มกำลังตรวจอยู่
+UPDATE_CHECK_SECONDS = 30 * 60
+UPDATE_STATE = BASE / ".run" / "update.json"
+_update_cache = {"at": None, "result": None}
+_UPDATE_LOCK = threading.Lock()
+
+
+def _update_flags():
+    """ตัวอัปเดตไม่มีหน้าต่าง และไม่อยู่กลุ่มเดียวกับระบบ — ระบบปิดแล้วตัวอัปเดตยังทำงานต่อได้"""
+    if os.name != "nt":
+        return {"start_new_session": True}
+    return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+
+
+@app.get("/update/check")
+def update_check():
+    now = time.monotonic()
+    with _UPDATE_LOCK:
+        cached = _update_cache["result"]
+        if cached is None or now - _update_cache["at"] > UPDATE_CHECK_SECONDS:
+            cached = release_check.check(BASE)
+            _update_cache.update(at=now, result=cached)
+    return {**cached, "can_apply": bool(LOCAL_STOP_TOKEN)}
+
+
+@app.post("/update/apply")
+def update_apply():
+    if not LOCAL_STOP_TOKEN:
+        raise HTTPException(status_code=409,
+                            detail="ระบบนี้ไม่ได้เปิดด้วยตัวเปิดระบบ — ดับเบิลคลิก อัปเดตระบบตรวจเล่ม.bat เพื่ออัปเดต")
+    if _checks_running():
+        raise HTTPException(status_code=409, detail="มีเล่มกำลังตรวจอยู่ รอตรวจเสร็จก่อนแล้วกดอัปเดตอีกครั้ง")
+    UPDATE_STATE.parent.mkdir(exist_ok=True)
+    UPDATE_STATE.write_text(json.dumps({"state": "running", "message": ""}), encoding="utf-8")
+    with open(UPDATE_STATE.parent / "update.log", "w", encoding="utf-8") as log:
+        subprocess.Popen([sys.executable, str(BASE / "tools" / "run_local.py"), "--update", "--from-app"],
+                         cwd=BASE, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                         close_fds=True, **_update_flags())
+    return {"started": True}
+
+
+@app.get("/update/status")
+def update_status():
+    try:
+        data = json.loads(UPDATE_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"state": "", "message": ""}
+    return {"state": str(data.get("state", "")), "message": str(data.get("message", ""))}
 
 
 @app.get("/health")

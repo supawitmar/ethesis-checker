@@ -20,6 +20,8 @@ CODE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE / "tools"))
 
 import release  # noqa: E402
+sys.path.insert(0, str(CODE))
+import release_check  # noqa: E402
 import run_local  # noqa: E402
 
 try:
@@ -598,6 +600,117 @@ class LocalStopEndpointTests(unittest.TestCase):
                 mock.patch.object(self.main.threading, "Timer") as timer:
             self.assertNotEqual(self.client.get("/local-stop").status_code, 200)
         self.assertFalse(timer.called)
+
+
+@unittest.skipIf(shutil.which("git") is None, "ไม่มี git")
+class ReleaseCheckTests(GitRepos):
+    """แถบ "มีอัปเดตใหม่" ถาม release_check ว่ามีรุ่นที่ออกแล้วแต่เครื่องนี้ยังไม่มีไหม (เจ้าของขอ 16 ต.ค. 2569)"""
+
+    def check(self):
+        return release_check.check(self.machine)
+
+    def test_nothing_to_offer_before_any_release(self):
+        self.assertFalse(self.check()["available"])
+
+    def test_offers_a_release_the_machine_does_not_have_with_its_notes(self):
+        self.commit("rules.txt", "rule 1\n", "rules")
+        self.release("1.0")
+        found = self.check()
+        self.assertTrue(found["available"])
+        self.assertEqual((found["current"], found["latest"]), ("", "1.0"))
+        self.assertEqual(found["notes"], ["รุ่นแรก"])
+
+    def test_nothing_to_offer_once_installed(self):
+        self.release("1.0")
+        self.update_machine()
+        found = self.check()
+        self.assertFalse(found["available"])
+        self.assertEqual(found["current"], "1.0")
+
+    def test_only_the_notes_the_machine_has_not_seen(self):
+        self.release("1.0")
+        self.update_machine()
+        self.commit("CHANGELOG.md", changelog_with("1.1", "กฎข้อ ก"), "release 1.1")
+        self.release("1.1")
+        found = self.check()
+        self.assertEqual((found["current"], found["latest"]), ("1.0", "1.1"))
+        self.assertEqual(found["notes"], ["กฎข้อ ก"])
+
+    def test_unreleased_work_on_main_is_never_offered(self):
+        self.release("1.0")
+        self.update_machine()
+        self.commit("rules.txt", "half done\n", "unreleased work")
+        self.git(self.dev, "push", "-q", "origin", "HEAD:main")
+        self.assertFalse(self.check()["available"])
+
+    def test_no_internet_means_no_bar_and_no_crash(self):
+        self.git(self.machine, "remote", "set-url", "origin", str(self.machine.parent / "gone.git"))
+        found = self.check()
+        self.assertFalse(found["available"])
+        self.assertTrue(found["error"])
+
+    def test_a_folder_without_git_has_nothing_to_offer(self):
+        self.assertFalse(release_check.check(self.machine.parent)["available"])
+
+
+class ReleaseCheckFormatTests(unittest.TestCase):
+    def test_reads_tags_and_changelog_the_same_way_as_the_updater(self):
+        self.assertEqual(release_check.RELEASE_TAG.pattern, run_local.RELEASE_TAG.pattern)
+        self.assertEqual(release_check.CHANGELOG_HEADING.pattern, run_local.CHANGELOG_HEADING.pattern)
+
+    def test_a_wrapped_item_is_read_as_one_note(self):
+        text = "## อัปเดต 1.2 — 16 ต.ค. 2569\n\n- บรรทัดแรก\n  ต่อบรรทัดสอง\n- ข้อสอง\n\n## อัปเดต 1.1 — 15 ต.ค. 2569\n\n- เก่า\n"
+        self.assertEqual(release_check.changelog_notes(text, (1, 1), (1, 2)), ["บรรทัดแรก ต่อบรรทัดสอง", "ข้อสอง"])
+
+
+class UpdateFromTheAppTests(unittest.TestCase):
+    """ตัวอัปเดตที่ปุ่ม "อัปเดตเลย" เปิด ไม่มีหน้าต่าง — ผลต้องไปถึงหน้าเว็บทาง .run/update.json"""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        for target in (mock.patch.object(run_local, "CODE", Path(folder.name)),
+                       mock.patch.object(run_local, "say")):
+            target.start()
+            self.addCleanup(target.stop)
+
+    def state(self):
+        return json.loads((run_local.run_dir() / "update.json").read_text(encoding="utf-8"))
+
+    def test_a_failure_is_written_with_what_the_updater_said(self):
+        def failing(**_):
+            run_local.say("ดึงรุ่นใหม่ไม่สำเร็จ — ตรวจอินเทอร์เน็ต")
+            return 1
+        with mock.patch.object(run_local, "update", side_effect=failing):
+            self.assertEqual(run_local.update_from_app(), 1)
+        self.assertEqual(self.state()["state"], "failed")
+        self.assertIn("ตรวจอินเทอร์เน็ต", self.state()["message"])
+
+    def test_success_is_written_as_done(self):
+        with mock.patch.object(run_local, "update", return_value=0):
+            self.assertEqual(run_local.update_from_app(), 0)
+        self.assertEqual(self.state()["state"], "done")
+
+    def test_a_crash_still_reaches_the_page(self):
+        with mock.patch.object(run_local, "update", side_effect=RuntimeError("boom")):
+            self.assertEqual(run_local.update_from_app(), 1)
+        self.assertEqual(self.state()["state"], "failed")
+        self.assertIn("boom", self.state()["message"])
+
+    def test_the_fallback_kill_spares_the_updater_itself(self):
+        """ตัวอัปเดตเป็นลูกของระบบ — taskkill /T ฆ่าทั้งต้นจะฆ่าตัวอัปเดตไปด้วย"""
+        with mock.patch.object(run_local, "update", return_value=0) as updated:
+            run_local.update_from_app()
+        kill = updated.call_args.kwargs["kill"]
+        with mock.patch.object(run_local.os, "name", "nt"), \
+                mock.patch.object(run_local.subprocess, "run") as ran:
+            kill(1234)
+        self.assertNotIn("/T", ran.call_args.args[0])
+
+    def test_the_launcher_accepts_the_flag(self):
+        with mock.patch.object(run_local, "update_from_app", return_value=0) as from_app:
+            self.assertEqual(run_local.main(["--update", "--from-app"]), 0)
+        from_app.assert_called_once_with()
 
 
 class IdleStopTests(unittest.TestCase):

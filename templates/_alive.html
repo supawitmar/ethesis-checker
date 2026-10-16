@@ -31,7 +31,8 @@
       })
       .catch(function(){
         misses += 1;
-        if (misses >= 2) { if (gone) gone.hidden = false; }
+        // ระหว่างกดอัปเดต (index.html) ระบบปิดแล้วเปิดใหม่ตั้งใจ — ไม่ต้องขึ้นแถบ
+        if (misses >= 2) { if (gone && !window.ETHESIS_UPDATING) gone.hidden = false; }
         else retry = setTimeout(ping, 3000);
       });
   }

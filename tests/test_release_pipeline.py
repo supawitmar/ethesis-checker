@@ -152,18 +152,30 @@ class VersionFooterTests(unittest.TestCase):
             }
         return "demo"
 
-    def test_the_upload_page_shows_the_version_and_the_start_time(self):
+    def test_the_upload_page_shows_the_version_but_not_the_start_time(self):
+        """เวลาเริ่มทำงานเอาออกจากหน้าเว็บ (เจ้าของสั่ง 16 ต.ค. 2569) — ยังอยู่ใน /health"""
         html = self.client.get("/").text
         self.assertIn("เวอร์ชันระบบ", html)
         self.assertIn(f"<b>{main.APP_VERSION}</b>", html)
-        self.assertIn(main.APP_STARTED_AT.strftime("%d/%m/%Y %H:%M"), html)
+        self.assertNotIn("เริ่มทำงาน", html)
+        self.assertNotIn(main.APP_STARTED_AT.strftime("%d/%m/%Y %H:%M"), html)
 
     def test_the_report_page_shows_it_in_both_languages(self):
         html = self.client.get(f"/result/{self._seed_clean_report()}").text
         self.assertIn('data-th="เวอร์ชันระบบ" data-en="System version"', html)
-        self.assertIn('data-th="เริ่มทำงาน" data-en="running since"', html)
         self.assertIn(f"<b>{main.APP_VERSION}</b>", html)
-        self.assertIn(main.APP_STARTED_AT.strftime("%d/%m/%Y %H:%M"), html)
+        self.assertNotIn("เริ่มทำงาน", html)
+        self.assertNotIn("running since", html)
+
+    def test_the_release_number_sits_next_to_the_name_at_the_top(self):
+        """เลขรุ่นที่หัวจอ เหมือนระบบปรับเอกสาร (เจ้าของขอ 16 ต.ค. 2569)"""
+        with mock.patch.dict(main.templates.env.globals, {"app_release": "9.9"}):
+            for page in ("/", f"/result/{self._seed_clean_report()}"):
+                with self.subTest(page=page):
+                    self.assertIn('<span class="ver-badge" title="อัปเดต 9.9">v9.9</span>',
+                                  self.client.get(page).text)
+        with mock.patch.dict(main.templates.env.globals, {"app_release": ""}):
+            self.assertNotIn('class="ver-badge"', self.client.get("/").text)
 
     def test_the_release_number_shows_next_to_the_commit_when_there_is_one(self):
         """เจ้าของขอ 9 ต.ค. 2569: อัปเดตมีเลขรุ่น (แท็ก v*) — สองเครื่องเทียบกันที่ "อัปเดต 1.0" ได้ทันที"""
@@ -181,6 +193,90 @@ class VersionFooterTests(unittest.TestCase):
         html = TestClient(main.app).get("/login").text
         self.assertNotIn("เวอร์ชันระบบ", html)
         self.assertNotIn(f"<b>{main.APP_VERSION}</b>", html)
+
+
+class UpdateFromThePageTests(unittest.TestCase):
+    """แถบ "มีอัปเดตใหม่" + ปุ่ม "อัปเดตเลย" (เจ้าของขอ 16 ต.ค. 2569 ให้เหมือนระบบปรับเอกสาร)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        response = cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                                   follow_redirects=False)
+        if response.status_code != 303:
+            raise RuntimeError("Test login failed")
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        for target in (mock.patch.dict(main._update_cache, {"at": None, "result": None}),
+                       mock.patch.dict(main.JOBS, {}, clear=True),
+                       mock.patch.object(main, "UPDATE_STATE", Path(folder.name) / ".run" / "update.json")):
+            target.start()
+            self.addCleanup(target.stop)
+
+    FOUND = {"available": True, "current": "1.1", "latest": "1.2", "notes": ["ข้อ ก"], "error": ""}
+
+    def test_the_upload_page_has_the_bar_hidden_until_the_check_answers(self):
+        html = self.client.get("/").text
+        self.assertIn('<section class="update-bar" id="update-bar" hidden>', html)
+        self.assertIn("fetch('/update/check'", html)
+        self.assertIn("อัปเดตเลย", html)
+
+    def test_check_tells_what_is_new_and_asks_github_only_once_in_a_while(self):
+        with mock.patch.object(main.release_check, "check", return_value=dict(self.FOUND)) as asked, \
+                mock.patch.object(main, "LOCAL_STOP_TOKEN", "key"):
+            first = self.client.get("/update/check").json()
+            second = self.client.get("/update/check").json()
+        self.assertEqual(asked.call_count, 1)
+        self.assertEqual(first, second)
+        self.assertTrue(first["available"])
+        self.assertEqual(first["latest"], "1.2")
+        self.assertTrue(first["can_apply"])
+
+    def test_without_the_background_launcher_the_page_points_to_the_bat_file(self):
+        with mock.patch.object(main.release_check, "check", return_value=dict(self.FOUND)), \
+                mock.patch.object(main, "LOCAL_STOP_TOKEN", ""), \
+                mock.patch.object(main.subprocess, "Popen") as spawned:
+            self.assertFalse(self.client.get("/update/check").json()["can_apply"])
+            response = self.client.post("/update/apply")
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("อัปเดตระบบตรวจเล่ม.bat", response.json()["detail"])
+        self.assertFalse(spawned.called)
+
+    def test_never_updates_while_a_book_is_being_checked(self):
+        main.JOBS["job"] = {"done": False}
+        with mock.patch.object(main, "LOCAL_STOP_TOKEN", "key"), \
+                mock.patch.object(main.subprocess, "Popen") as spawned:
+            response = self.client.post("/update/apply")
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("กำลังตรวจ", response.json()["detail"])
+        self.assertFalse(spawned.called)
+
+    def test_apply_runs_the_same_updater_as_the_bat_file(self):
+        with mock.patch.object(main, "LOCAL_STOP_TOKEN", "key"), \
+                mock.patch.object(main.subprocess, "Popen") as spawned:
+            response = self.client.post("/update/apply")
+            status = self.client.get("/update/status").json()
+        self.assertEqual(response.status_code, 200)
+        command = spawned.call_args.args[0]
+        self.assertEqual(command[1:], [str(main.BASE / "tools" / "run_local.py"), "--update", "--from-app"])
+        self.assertEqual(status["state"], "running")
+
+    def test_status_reports_what_the_updater_wrote(self):
+        main.UPDATE_STATE.parent.mkdir(parents=True)
+        main.UPDATE_STATE.write_text('{"state": "failed", "message": "ไม่มีอินเทอร์เน็ต"}', encoding="utf-8")
+        self.assertEqual(self.client.get("/update/status").json(),
+                         {"state": "failed", "message": "ไม่มีอินเทอร์เน็ต"})
+
+    def test_needs_login_and_answers_json(self):
+        response = TestClient(main.app).post("/update/apply")
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(response.json()["login_required"])
+
+    def test_the_closed_banner_stays_away_while_updating(self):
+        alive = (CODE / "templates" / "_alive.html").read_text(encoding="utf-8")
+        self.assertIn("!window.ETHESIS_UPDATING", alive)
 
 
 WORKFLOW = CODE / ".github" / "workflows" / "ci.yml"
