@@ -172,7 +172,7 @@ class VersionFooterTests(unittest.TestCase):
         with mock.patch.dict(main.templates.env.globals, {"app_release": "9.9"}):
             for page in ("/", f"/result/{self._seed_clean_report()}"):
                 with self.subTest(page=page):
-                    self.assertIn('<span class="ver-badge" title="อัปเดต 9.9">v9.9</span>',
+                    self.assertIn('<span class="ver-badge" title="อัปเดต 9.9">v. 9.9</span>',
                                   self.client.get(page).text)
         with mock.patch.dict(main.templates.env.globals, {"app_release": ""}):
             self.assertNotIn('class="ver-badge"', self.client.get("/").text)
