@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -22,6 +23,8 @@ sys.path.insert(0, str(CODE / "tools"))
 import release  # noqa: E402
 sys.path.insert(0, str(CODE))
 import release_check  # noqa: E402
+
+os.environ["LOCALAPPDATA"] = tempfile.mkdtemp(prefix="ethesis-test-appdata-")
 import run_local  # noqa: E402
 
 try:
@@ -660,7 +663,7 @@ class ReleaseCheckFormatTests(unittest.TestCase):
 
     def test_a_wrapped_item_is_read_as_one_note(self):
         text = "## อัปเดต 1.2 — 16 ต.ค. 2569\n\n- บรรทัดแรก\n  ต่อบรรทัดสอง\n- ข้อสอง\n\n## อัปเดต 1.1 — 15 ต.ค. 2569\n\n- เก่า\n"
-        self.assertEqual(release_check.changelog_notes(text, (1, 1), (1, 2)), ["บรรทัดแรก ต่อบรรทัดสอง", "ข้อสอง"])
+        self.assertEqual(release_check.changelog_notes(text, (1, 1, 0), (1, 2, 0)), ["บรรทัดแรก ต่อบรรทัดสอง", "ข้อสอง"])
 
 
 class UpdateFromTheAppTests(unittest.TestCase):
@@ -711,6 +714,275 @@ class UpdateFromTheAppTests(unittest.TestCase):
         with mock.patch.object(run_local, "update_from_app", return_value=0) as from_app:
             self.assertEqual(run_local.main(["--update", "--from-app"]), 0)
         from_app.assert_called_once_with()
+
+
+# ---------- อัปเดตโดยไม่ใช้ Git (เครื่องที่ทำงานติดตั้งจาก ZIP ลง Git ไม่ได้ — 16 ต.ค. 2569) ----------
+
+def program_tree(folder, version="1.2.1", extra=None):
+    """โฟลเดอร์โปรแกรมขั้นต่ำที่ตัวติดตั้งยอมรับ (หน้าตาเหมือนโฟลเดอร์ที่แตกจาก ZIP ของ GitHub)"""
+    folder = Path(folder)
+    files = {"main.py": "# main\n", "checker.py": "# checker\n", "tools/run_local.py": "# launcher\n",
+             "templates/index.html": "<p>index</p>\n",
+             "CHANGELOG.md": f"# บันทึก\n\n## อัปเดต {version} — 16 ต.ค. 2569\n\n- แก้ให้ติดตั้งจาก ZIP ได้\n"
+                             "  และอ่านเลขรุ่นได้\n\n## อัปเดต 1.2 — 16 ต.ค. 2569\n\n- แถบมีอัปเดตใหม่\n"}
+    files.update(extra or {})
+    for rel, text in files.items():
+        (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+        (folder / rel).write_text(text, encoding="utf-8", newline="\n")
+    return folder
+
+
+def program_zip(target, version="1.2.1", extra=None, comment=b"0123456789abcdef0123456789abcdef01234567"):
+    with tempfile.TemporaryDirectory() as work:
+        root = program_tree(Path(work) / f"ethesis-checker-{version}", version, extra)
+        with zipfile.ZipFile(target, "w") as archive:
+            for path in root.rglob("*"):
+                if path.is_file():
+                    archive.write(path, f"{root.name}/{path.relative_to(root).as_posix()}")
+            archive.comment = comment
+    return target
+
+
+class VersionNumberTests(unittest.TestCase):
+    """เลขย่อย 1.2.1 = แก้เล็กน้อยไม่เพิ่มความสามารถ (เจ้าของสั่ง 16 ต.ค. 2569)"""
+
+    def test_three_part_versions_sort_after_their_minor_release(self):
+        self.assertLess(release_check.parse_label("1.2"), release_check.parse_label("1.2.1"))
+        self.assertLess(release_check.parse_label("1.2.1"), release_check.parse_label("1.3"))
+        self.assertEqual(release_check.parse_label("1.2"), release_check.parse_label("1.2.0"))
+
+    def test_labels_drop_a_zero_patch(self):
+        for version, text in (((1, 2, 0), "1.2"), ((1, 2, 1), "1.2.1"), ((1, 1), "1.1")):
+            with self.subTest(text=text):
+                self.assertEqual(run_local._label(version), text)
+                self.assertEqual(release_check.label(version), text)
+
+    def test_tags_and_headings_with_a_patch_number(self):
+        found = run_local.release_tags(lambda *_: subprocess.CompletedProcess([], 0, stdout="v1.2\nv1.2.1\nv1.1\n"))
+        self.assertEqual([name for _, name in found], ["v1.1", "v1.2", "v1.2.1"])
+        entries = run_local.changelog_entries("## อัปเดต 1.2.1 — 16 ต.ค. 2569\n\n- ข้อ\n")
+        self.assertEqual(entries[0][:2], ((1, 2, 1), "16 ต.ค. 2569"))
+
+    def test_the_web_page_reads_a_patch_tag(self):
+        os.environ.setdefault("APP_PASSWORD", "test-password")
+        import main
+        self.assertEqual(main._RELEASE_TAG.match("v1.2.1").group(1), "1.2.1")
+
+
+class InstallTreeTests(TempFolder):
+    """ตัวติดตั้งตัวเดียวที่ทั้งอัปเดตจากเครื่องและแบบ manual ใช้"""
+
+    def setUp(self):
+        super().setUp()
+        self.dest = program_tree(self.dir / "installed", "1.2", {"old_only.py": "# gone in 1.2.1\n"})
+        (self.dest / ".env").write_text("APP_PASSWORD=secret\n", encoding="utf-8")
+        (self.dest / ".venv").mkdir()
+        (self.dest / ".venv" / "keep.txt").write_text("venv\n", encoding="utf-8")
+        self.src = program_tree(self.dir / "new", "1.2.1", {"new_file.py": "# new\n"})
+
+    def test_installs_the_new_files_and_records_the_release(self):
+        result = release_check.install_tree(self.src, self.dest, commit="ABCDEF0123456")
+        self.assertEqual(result["release"], "1.2.1")
+        self.assertTrue((self.dest / "new_file.py").is_file())
+        self.assertEqual(release_check.installed_release(self.dest), "1.2.1")
+        self.assertEqual(release_check.installed_commit(self.dest), "abcdef0")
+
+    def test_never_touches_the_password_or_the_packages(self):
+        (self.src / ".env").write_text("APP_PASSWORD=from-zip\n", encoding="utf-8")
+        (self.src / ".venv").mkdir()
+        (self.src / ".venv" / "keep.txt").write_text("other\n", encoding="utf-8")
+        release_check.install_tree(self.src, self.dest)
+        self.assertEqual((self.dest / ".env").read_text(encoding="utf-8"), "APP_PASSWORD=secret\n")
+        self.assertEqual((self.dest / ".venv" / "keep.txt").read_text(encoding="utf-8"), "venv\n")
+
+    def test_removes_only_files_the_previous_install_put_there(self):
+        release_check.install_tree(program_tree(self.dir / "v12", "1.2", {"old_only.py": "# x\n"}), self.dest)
+        (self.dest / "staff_note.txt").write_text("ของเจ้าหน้าที่\n", encoding="utf-8")
+        result = release_check.install_tree(self.src, self.dest)
+        self.assertIn("old_only.py", result["removed"])
+        self.assertFalse((self.dest / "old_only.py").exists())
+        self.assertTrue((self.dest / "staff_note.txt").exists())
+
+    def test_the_first_install_over_a_zip_copy_deletes_nothing(self):
+        result = release_check.install_tree(self.src, self.dest)
+        self.assertEqual(result["removed"], [])
+        self.assertTrue((self.dest / "old_only.py").exists())
+
+    def test_unchanged_files_are_not_rewritten(self):
+        """ไฟล์ .bat ที่กำลังรันอยู่ต้องไม่ถูกเขียนทับถ้าเนื้อหาเหมือนเดิม (cmd อ่านไฟล์ทีละบรรทัด)"""
+        release_check.install_tree(self.src, self.dest)
+        result = release_check.install_tree(self.src, self.dest)
+        self.assertEqual(result["changed"], [])
+
+    def test_refuses_a_developer_checkout_and_an_incomplete_folder(self):
+        (self.dest / ".git").mkdir()
+        with self.assertRaises(ValueError):
+            release_check.install_tree(self.src, self.dest)
+        (self.dest / ".git").rmdir()
+        (self.src / "checker.py").unlink()
+        with self.assertRaises(ValueError):
+            release_check.install_tree(self.src, self.dest)
+
+    def test_a_zip_from_github_installs_with_its_commit(self):
+        archive = program_zip(self.dir / "v1.2.1.zip")
+        work = self.dir / "work"
+        result = release_check.install_zip(archive, self.dest, work)
+        self.assertEqual(result["release"], "1.2.1")
+        self.assertEqual(release_check.installed_commit(self.dest), "0123456")
+
+    def test_a_zip_that_writes_outside_its_folder_is_refused(self):
+        archive = self.dir / "bad.zip"
+        with zipfile.ZipFile(archive, "w") as bad:
+            bad.writestr("x/../../evil.py", "boom")
+        with self.assertRaises(ValueError):
+            release_check.install_zip(archive, self.dest, self.dir / "work")
+        self.assertFalse((self.dir / "evil.py").exists())
+
+    def test_the_release_shown_without_git(self):
+        """ไม่มี installed.json = หัวข้อบนสุดของ CHANGELOG.md · มี = ตามที่ตัวติดตั้งบันทึก"""
+        self.assertEqual(release_check.installed_release(self.dest), "1.2")
+        os.environ.setdefault("APP_PASSWORD", "test-password")
+        import main
+        self.assertEqual(main._resolve_app_release(self.dest), "1.2")
+        release_check.install_tree(self.src, self.dest, commit="abcdef1")
+        self.assertEqual(main._resolve_app_release(self.dest), "1.2.1")
+        self.assertEqual(main._resolve_app_version({}, self.dest), "abcdef1")
+
+
+class FakeGitHub:
+    """GitHub ปลอม: รายการแท็ก · CHANGELOG ของแท็ก · ZIP ของแท็ก — ไม่ออกเน็ตจริง"""
+
+    def __init__(self, folder, tags=("v1.2", "v1.2.1"), online=True):
+        self.folder, self.tags, self.online, self.urls = Path(folder), tags, online, []
+
+    def __call__(self, url, timeout=None):
+        self.urls.append(url)
+        if not self.online:
+            raise OSError("no network")
+        if "/tags?" in url:
+            return json.dumps([{"name": t, "commit": {"sha": "fedcba9876543210fedcba9876543210fedcba98"}}
+                               for t in self.tags]).encode("utf-8")
+        if url.endswith("/CHANGELOG.md"):
+            return (self.folder / "CHANGELOG.md").read_bytes()
+        if url.endswith(".zip"):
+            return program_zip(self.folder / "dl.zip", "1.2.1").read_bytes()
+        raise OSError(url)
+
+
+class UpdateFromGitHubTests(TempFolder):
+    """อัปเดตระบบตรวจเล่ม.bat / ปุ่ม "อัปเดตเลย" บนเครื่องที่ไม่มี .git"""
+
+    def setUp(self):
+        super().setUp()
+        self.install = program_tree(self.dir / "installed", "1.2")
+        (self.install / ".env").write_text("APP_PASSWORD=secret\n", encoding="utf-8")
+        program_tree(self.dir, "1.2.1")                     # CHANGELOG ของรุ่นใหม่ที่ GitHub ปลอมส่ง
+        for target in (mock.patch.object(run_local, "CODE", self.install),
+                       mock.patch.object(run_local, "ensure_venv"),
+                       mock.patch.object(run_local, "read_state", return_value=None)):
+            target.start()
+            self.addCleanup(target.stop)
+        self.said = []
+        said = mock.patch.object(run_local, "say", side_effect=lambda t="": self.said.append(str(t)))
+        said.start()
+        self.addCleanup(said.stop)
+
+    def test_downloads_and_installs_the_newest_release(self):
+        github = FakeGitHub(self.dir)
+        self.assertEqual(run_local.update(get=github), 0, self.said)
+        self.assertEqual(release_check.installed_release(self.install), "1.2.1")
+        self.assertEqual((self.install / ".env").read_text(encoding="utf-8"), "APP_PASSWORD=secret\n")
+        text = "\n".join(self.said)
+        self.assertIn("ติดตั้งอัปเดต 1.2.1 แล้ว", text)
+        self.assertIn("แก้ให้ติดตั้งจาก ZIP ได้", text)
+
+    def test_nothing_to_download_when_already_on_the_newest(self):
+        github = FakeGitHub(self.dir, tags=("v1.1", "v1.2"))
+        self.assertEqual(run_local.update(get=github), 0)
+        self.assertIn("รุ่นล่าสุดแล้ว", "\n".join(self.said))
+        self.assertFalse(any(u.endswith(".zip") for u in github.urls))
+
+    def test_no_internet_points_to_the_manual_way(self):
+        self.assertEqual(run_local.update(get=FakeGitHub(self.dir, online=False)), 1)
+        self.assertIn("ติดตั้งอัปเดตจากโฟลเดอร์นี้.bat", "\n".join(self.said))
+        self.assertEqual(release_check.installed_release(self.install), "1.2")
+
+    def test_the_banner_offers_it_on_a_zip_install(self):
+        found = release_check.check(self.install, get=FakeGitHub(self.dir))
+        self.assertTrue(found["available"])
+        self.assertEqual((found["current"], found["latest"]), ("1.2", "1.2.1"))
+        self.assertEqual(found["notes"], ["แก้ให้ติดตั้งจาก ZIP ได้ และอ่านเลขรุ่นได้"])
+        offline = release_check.check(self.install, get=FakeGitHub(self.dir, online=False))
+        self.assertFalse(offline["available"])
+        self.assertTrue(offline["error"])
+
+
+class InstallHereTests(TempFolder):
+    """อัปเดตแบบ manual: แตก ZIP แล้วดับเบิลคลิก ติดตั้งอัปเดตจากโฟลเดอร์นี้.bat"""
+
+    def setUp(self):
+        super().setUp()
+        self.target = program_tree(self.dir / "Documents" / "ethesis-checker-main" / "ethesis-checker-main", "1.1")
+        (self.target / ".env").write_text("APP_PASSWORD=secret\n", encoding="utf-8")
+        (self.target / ".venv").mkdir()
+        self.source = program_tree(self.dir / "Downloads" / "ระบบตรวจเล่ม อัปเดต 1.2.1", "1.2.1")
+        for target in (mock.patch.object(run_local, "CODE", self.source),
+                       mock.patch.object(run_local, "say")):
+            target.start()
+            self.addCleanup(target.stop)
+        self.run = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
+
+    def install(self, answers, finder=None):
+        answers = iter(answers)
+        return run_local.install_here(ask=lambda _prompt="": next(answers), python="py",
+                                      finder=finder or (lambda _src: [self.target]), run=self.run)
+
+    def test_stops_installs_and_reopens_the_system(self):
+        self.assertEqual(self.install([""]), 0)
+        self.assertEqual(release_check.installed_release(self.target), "1.2.1")
+        self.assertEqual((self.target / ".env").read_text(encoding="utf-8"), "APP_PASSWORD=secret\n")
+        commands = [c.args[0] for c in self.run.call_args_list]
+        self.assertEqual(commands[0][-1], "--stop")
+        self.assertEqual(commands[1], ["py", str(self.target / "tools" / "run_local.py")])
+
+    def test_answering_no_changes_nothing(self):
+        self.assertEqual(self.install(["n"]), 1)
+        self.assertEqual(release_check.installed_release(self.target), "1.1")
+        self.assertFalse(self.run.called)
+
+    def test_asks_for_the_folder_when_it_cannot_find_one(self):
+        self.assertEqual(self.install([f'"{self.target}"', ""], finder=lambda _src: []), 0)
+        self.assertEqual(release_check.installed_release(self.target), "1.2.1")
+
+    def test_finds_the_system_in_use_but_not_extracted_copies(self):
+        program_tree(self.dir / "Downloads" / "old update 1.1", "1.1")            # แตกไว้ ไม่เคยใช้ (ไม่มี .env)
+        dev = program_tree(self.dir / "Desktop" / "dev", "1.2")
+        (dev / ".env").write_text("x\n", encoding="utf-8")
+        (dev / ".git").mkdir()
+        found = run_local.find_installs(self.source, roots=[self.dir / "Documents", self.dir / "Downloads",
+                                                            self.dir / "Desktop"], remembered=[])
+        self.assertEqual(found, [self.target.resolve()])
+
+    def test_the_place_the_launcher_remembered_is_found_first(self):
+        run_local.remember_install(self.target)
+        self.assertEqual(run_local.find_installs(self.source, roots=[]), [self.target.resolve()])
+
+
+@unittest.skipIf(shutil.which("git") is None, "ไม่มี git")
+class ManualPackageTests(GitRepos):
+    """release.py สร้าง dist/อัปเดต <เลข>.zip ไว้ส่งต่อ (LINE/อีเมล/แฟลชไดรฟ์)"""
+
+    def test_a_patch_release_gets_its_tag_and_package(self):
+        self.commit("CHANGELOG.md", changelog_with("1.0.1", "แก้บั๊ก"), "patch")
+        self.release("1.0.1")
+        self.assertEqual(self.git(self.dev, "describe", "--tags"), "v1.0.1")
+        package = self.dev / "dist" / "อัปเดต 1.0.1.zip"
+        with zipfile.ZipFile(package) as archive:
+            names = archive.namelist()
+            readme = [n for n in names if n.endswith("อ่านก่อน - อัปเดต 1.0.1.txt")]
+            self.assertTrue(readme)
+            self.assertIn("แก้บั๊ก", archive.read(readme[0]).decode("utf-8-sig"))
+            self.assertIn("ระบบตรวจเล่ม อัปเดต 1.0.1/CHANGELOG.md", names)
 
 
 class IdleStopTests(unittest.TestCase):
@@ -865,7 +1137,8 @@ class PipedOutputTests(unittest.TestCase):
 class BatchFileTests(unittest.TestCase):
     FILES = {"เปิดระบบตรวจเล่ม.bat": "tools\\run_local.py %*",
              "อัปเดตระบบตรวจเล่ม.bat": "tools\\run_local.py --update",
-             "ปิดระบบตรวจเล่ม.bat": "tools\\run_local.py --stop"}
+             "ปิดระบบตรวจเล่ม.bat": "tools\\run_local.py --stop",
+             "ติดตั้งอัปเดตจากโฟลเดอร์นี้.bat": "tools\\run_local.py --install-here"}
 
     def test_call_the_launcher_with_crlf_and_utf8(self):
         for name, call in self.FILES.items():

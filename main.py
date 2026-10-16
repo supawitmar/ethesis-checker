@@ -84,19 +84,23 @@ def _resolve_app_version(environ=None, repo_dir=None):
         value = run.stdout.strip()
         if run.returncode == 0 and _COMMIT_HEX.match(value):
             return value[:7].lower()
-    return APP_VERSION_UNKNOWN
+        return APP_VERSION_UNKNOWN
+    # ติดตั้งจาก ZIP: รหัส commit ที่ตัวติดตั้งอ่านจาก ZIP ของ GitHub (release_check.install_zip)
+    return release_check.installed_commit(repo_dir) or APP_VERSION_UNKNOWN
 
 
 
 # เลขอัปเดตที่เจ้าหน้าที่เห็น (เช่น "1.0") = แท็ก v<หลัก>.<รอง> ล่าสุดที่โค้ดนี้มีอยู่ — ออกรุ่นด้วย
 # tools/release.py (เจ้าของขอ 9 ต.ค. 2569 ให้อัปเดตมีเลขรุ่นและวันที่) · ไม่มี git/แท็ก = "" ไม่แสดง
-_RELEASE_TAG = re.compile(r"^v(\d+\.\d+)$")
+_RELEASE_TAG = re.compile(r"^v(\d+\.\d+(?:\.\d+)?)$")
 
 
 def _resolve_app_release(repo_dir=None):
     repo_dir = Path(repo_dir or BASE)
     if not (repo_dir / ".git").exists():
-        return ""
+        # เครื่องที่ติดตั้งจาก ZIP (ลง Git ไม่ได้ — เครื่องที่ทำงาน 16 ต.ค. 2569): รุ่นที่ตัวติดตั้งบันทึกไว้
+        # หรือหัวข้อบนสุดของ CHANGELOG.md · image Docker ไม่มีทั้งสองอย่าง = "" ไม่แสดง
+        return release_check.installed_release(repo_dir)
     try:
         run = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
                              cwd=repo_dir, capture_output=True, text=True, timeout=3)

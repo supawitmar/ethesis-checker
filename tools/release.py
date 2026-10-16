@@ -7,17 +7,22 @@
   - ตรวจว่าหัวข้อบนสุดของ CHANGELOG.md คือ "## อัปเดต <เลขนี้> — <วันที่>"
   - เลขใหม่ต้องมากกว่ารุ่นล่าสุดที่ออก และยังไม่เคยใช้
   - สร้างแท็ก v<เลข> (annotated) ที่ HEAD — ไม่ push เอง (เจ้าของสั่ง push เท่านั้น)
+  - สร้างแพ็กเกจอัปเดตแบบ manual dist/อัปเดต <เลข>.zip (เจ้าของขอ 16 ต.ค. 2569 ให้มีเหมือนระบบปรับเอกสาร):
+    โค้ดของแท็กนั้น (git archive) + "อ่านก่อน" บอกว่าเปลี่ยนอะไรและวิธีติดตั้ง — ส่งทาง LINE/อีเมล/แฟลชไดรฟ์ได้
+    แตกไฟล์แล้วดับเบิลคลิก ติดตั้งอัปเดตจากโฟลเดอร์นี้.bat · สร้างใหม่ของรุ่นที่ออกแล้ว: python tools/release.py --package 1.2.1
 """
 import re
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_local  # noqa: E402
 
-VERSION = re.compile(r"^(\d+)\.(\d+)$")
+VERSION = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
 def _git(code, *args):
@@ -28,10 +33,10 @@ def _git(code, *args):
 def release(version_text, code=run_local.CODE, say=run_local.say):
     match = VERSION.match(version_text.strip())
     if not match:
-        say(f"เลขรุ่นต้องเป็นแบบ 1.1 (ได้ {version_text!r})")
+        say(f"เลขรุ่นต้องเป็นแบบ 1.3 หรือ 1.2.1 (ได้ {version_text!r})")
         return 1
-    version = (int(match.group(1)), int(match.group(2)))
-    tag = f"v{version[0]}.{version[1]}"
+    version = run_local.version_of(match)
+    tag = f"v{version_text.strip()}"
     code = Path(code)
 
     status = _git(code, "status", "--porcelain", "--untracked-files=no")
@@ -70,13 +75,69 @@ def release(version_text, code=run_local.CODE, say=run_local.say):
         return 1
     head = _git(code, "rev-parse", "--short=7", "HEAD").stdout.strip()
     say(f"ออกอัปเดต {version_text} — {date} ที่ {head} แล้ว (แท็ก {tag} ยังอยู่ในเครื่องนี้)")
+    package = build_package(version_text, code=code, say=say)
+    if package:
+        say(f"แพ็กเกจอัปเดตแบบ manual: {package}")
     say(f"ส่งขึ้น GitHub: git push origin main {tag}")
     return 0
 
 
+README = """ระบบตรวจเล่ม — อัปเดต {version} ({date})
+================================================
+
+สิ่งที่เปลี่ยนในรุ่นนี้
+{notes}
+
+วิธีอัปเดต (ไม่ต้องใช้ Git และไม่ต้องต่ออินเทอร์เน็ต)
+  1. แตกไฟล์ ZIP นี้ก่อน (คลิกขวา → Extract All)
+  2. เปิดโฟลเดอร์ที่ได้ แล้วดับเบิลคลิก ติดตั้งอัปเดตจากโฟลเดอร์นี้.bat
+  3. ตัวติดตั้งหาระบบที่ติดตั้งไว้ในเครื่องเอง (ไม่เจอ = ให้ลากโฟลเดอร์ระบบมาวางในหน้าต่าง)
+     บอกรุ่นเดิม → รุ่นใหม่ ให้กด Enter ยืนยัน แล้ว ปิดระบบ → ติดตั้งทับ → เปิดระบบรุ่นใหม่ให้เอง
+  4. เสร็จแล้วลบโฟลเดอร์ที่แตกไว้ได้ — หัวจอของระบบจะขึ้นป้าย v{version}
+
+ไม่ถูกเขียนทับ: รหัสผ่านและค่าการบันทึกลงชีท (.env) และแพ็กเกจ Python ที่ติดตั้งไว้ (.venv)
+
+เครื่องที่ต่ออินเทอร์เน็ตอัปเดตได้อีกทาง: กด "อัปเดตเลย" บนแถบ "มีอัปเดตใหม่" ในหน้าแรกของระบบ
+หรือดับเบิลคลิก อัปเดตระบบตรวจเล่ม.bat ในโฟลเดอร์ระบบ
+"""
+
+
+def build_package(version_text, code=run_local.CODE, say=run_local.say):
+    """dist/อัปเดต <เลข>.zip = โค้ดของแท็ก v<เลข> + ไฟล์ "อ่านก่อน" — คืน path หรือ None"""
+    code = Path(code)
+    tag = f"v{version_text.strip()}"
+    folder = f"ระบบตรวจเล่ม อัปเดต {version_text}"
+    entries = []
+    shown = _git(code, "show", f"{tag}:CHANGELOG.md")
+    if shown.returncode == 0:
+        entries = [e for e in run_local.changelog_entries(shown.stdout)
+                   if run_local._label(e[0]) == version_text.strip()]
+    if not entries:
+        say(f"สร้างแพ็กเกจไม่ได้: ไม่พบแท็ก {tag} หรือหัวข้อ อัปเดต {version_text} ใน CHANGELOG.md ของแท็กนั้น")
+        return None
+    _version, date, body = entries[0]
+    dist = code / "dist"
+    dist.mkdir(exist_ok=True)
+    target = dist / f"อัปเดต {version_text}.zip"
+    with tempfile.TemporaryDirectory() as work:
+        raw = Path(work) / "raw.zip"
+        made = _git(code, "archive", "--format=zip", f"--prefix={folder}/", "-o", str(raw), tag)
+        if made.returncode != 0:
+            say("สร้างแพ็กเกจไม่สำเร็จ\n" + made.stderr.strip())
+            return None
+        readme = README.format(version=version_text, date=date, notes=body.strip())
+        with zipfile.ZipFile(raw, "a", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(f"{folder}/อ่านก่อน - อัปเดต {version_text}.txt",
+                             "\ufeff" + readme.replace("\n", "\r\n"))
+        target.write_bytes(raw.read_bytes())
+    return target
+
+
 if __name__ == "__main__":
     run_local._utf8_output()
+    if len(sys.argv) == 3 and sys.argv[1] == "--package":
+        sys.exit(0 if build_package(sys.argv[2]) else 1)
     if len(sys.argv) != 2:
-        run_local.say("ใช้: python tools/release.py <เลขรุ่น เช่น 1.1>")
+        run_local.say("ใช้: python tools/release.py <เลขรุ่น เช่น 1.3 หรือ 1.2.1>  ·  python tools/release.py --package <เลขรุ่น>")
         sys.exit(2)
     sys.exit(release(sys.argv[1]))

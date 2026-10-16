@@ -453,7 +453,7 @@
   </div>
   </form>
   {# เวอร์ชันของโค้ดที่รันอยู่ ไว้เทียบกับ commit ที่ push (DEPLOY.md หัวข้อ "เช็กว่าระบบจริงเป็นเวอร์ชันล่าสุดหรือยัง") #}
-  <p class="appver">เวอร์ชันระบบ {% if app_release %}<b>อัปเดต {{ app_release }}</b> · {% endif %}<b>{{ app_version }}</b></p>
+  <p class="appver">เวอร์ชันระบบ {% if app_release %}<b>อัปเดต {{ app_release }}</b>{% endif %}{% if app_release and app_version != "unknown" %} · {% endif %}{% if app_version != "unknown" or not app_release %}<b>{{ app_version }}</b>{% endif %}</p>
 </main>
 
 <div id="overlay" style="display:none;">
