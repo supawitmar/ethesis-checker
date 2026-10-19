@@ -712,7 +712,7 @@ class Update14PrecheckFlow(unittest.TestCase):
         self.assertIn("ไม่มีค่าปรับ (ครบกำหนด 06/08/2026)", html)
         report = main._get_job(job_id)["report"]
         reds = [i["found"] for i in report["issues_by_zone"]["RED"]]
-        self.assertIn("ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ 28% เกินเกณฑ์", reds)
+        self.assertIn("ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity 28% ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน 25%)", reds)
 
 
 if __name__ == "__main__":

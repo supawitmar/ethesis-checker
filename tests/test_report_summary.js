@@ -196,6 +196,21 @@ function load(cards, summaryText) {
         '5. Signature pages\n   please restructure the page\n   (1) item two');
 }
 
+// ---- ข้อ Turnitin: ขั้นตอน (1) (2) แปลได้ทั้งบรรทัด เลขคงอยู่ (อัปเดต 1.4) ----
+{
+  const summary = '1. ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity 28% ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน 25%)\n'
+    + '   กรุณาดำเนินการดังนี้\n'
+    + '   (1) ปรับแก้เนื้อหาส่วนที่ซ้ำ แล้วตรวจ Turnitin ใหม่ ให้ค่า Overall Similarity ของเนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย) ไม่เกิน 25%\n'
+    + '   (2) แนบไฟล์ผลตรวจ Turnitin ฉบับใหม่ โดยไฟล์ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity';
+  const { sandbox } = load([], summary);
+  const en = sandbox.trSummary(summary).split('\n');
+  check('Turnitin: บรรทัดแรก', en[0],
+        '1. The attached Turnitin report shows an Overall Similarity of 28%, which exceeds the limit (no more than 25%).');
+  check('Turnitin: ขั้นตอน (1) เลขคงอยู่มีช่องว่าง', en[2].indexOf('   (1) Revise the overlapping content') === 0, true);
+  check('Turnitin: ขั้นตอน (2) เลขคงอยู่มีช่องว่าง', en[3].indexOf('   (2) Submit a new Turnitin report') === 0, true);
+  check('Turnitin: ไม่เหลืออักษรไทย', /[฀-๿]/.test(en.join('\n')), false);
+}
+
 // ---- ถ้อยคำปิดท้ายต้องถูกแปลทั้งก้อน ----
 {
   const wording = REGISTRY[2].choices[0];

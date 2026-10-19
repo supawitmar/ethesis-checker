@@ -295,6 +295,9 @@ def tr_whole(text, pairs):
         # ค่าที่คร่อมด้วยเครื่องหมายคำพูดทั้งก้อน = ค่าที่อ่านได้จากเล่ม คงเป็นไทยเสมอ
         if re.fullmatch(r'"[^"]*"', raw.strip()):
             return raw
+        # เลขข้อย่อย "(1) " คงไว้ทั้งช่องว่าง (ตรงกับ trWhole ใน JS)
+        if re.fullmatch(r"\(\d+\)\s*", raw):
+            return raw
         return tr_en(raw, pairs)
 
     return re.sub(r"\$(\d)", sub, _rep_text(pairs[hit[0]][2]))

@@ -3974,25 +3974,30 @@ def _report_turnitin(rep, turnitin):
     if not turnitin:
         return
     value = turnitin.get("similarity")
-    # ถ้อยคำเกลาจากข้อความที่เจ้าหน้าที่เคยใช้ (19 ต.ค. 2569) "Please re-check the Turnitin report. The overall
-    # similarity score for the main content must not exceed 25%. The submitted report must include both the cover
-    # page and the Overall Similarity page." — ฉบับอังกฤษในหน้ารายงานใช้ถ้อยคำนั้นตรงตัว (ตาราง TR)
-    # บรรทัดเรื่องหน้าปก + หน้า Overall Similarity อยู่ใน notice ให้เป็นบรรทัดของตัวเองในข้อความสรุป
-    notice = "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity"
-    expected = (f"กรุณาตรวจสอบผลตรวจ Turnitin อีกครั้ง ค่า Overall Similarity ของเนื้อหาหลัก"
-                f"ต้องไม่เกิน {TURNITIN_LIMIT}%")
+    # ถ้อยคำที่เจ้าหน้าที่รีวิวแล้ว (19 ต.ค. 2569) เกลาจากข้อความที่เคยใช้ "Please re-check the Turnitin report. ..."
+    # เนื้อหาหลัก = บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย · ไม่บอกช่องทางส่ง (ส่งช่องทางเดิม) แต่บอกว่าติดต่อหอสมุดฯ
+    # ขั้นตอน (1) (2) และบรรทัดหอสมุดฯ อยู่ใน notice ให้เป็นบรรทัดของตัวเองในข้อความสรุป
+    main_content = "เนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย)"
     if value is None:
         rep.add("ORANGE", "-", "ไฟล์ Turnitin",
                 "ระบบอ่านค่า Overall Similarity จากไฟล์ Turnitin ไม่ได้",
-                expected,
+                "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity "
+                f"และค่า Overall Similarity ของ{main_content} ต้องไม่เกิน {TURNITIN_LIMIT}%",
                 "เปิดไฟล์ Turnitin ดูค่า Overall Similarity ด้วยตา ถ้าไม่เกินเกณฑ์ให้กดผ่าน",
-                "TURNITIN.SIMILARITY", notice=notice)
+                "TURNITIN.SIMILARITY")
     elif value > TURNITIN_LIMIT:
         rep.add("RED", "-", "ไฟล์ Turnitin",
-                f"ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ {value}% เกินเกณฑ์",
-                expected,
+                f"ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity {value}% "
+                f"ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน {TURNITIN_LIMIT}%)",
+                "กรุณาดำเนินการดังนี้",
                 f"ปรับเนื้อหาให้ค่า Overall Similarity ไม่เกิน {TURNITIN_LIMIT}% แล้วแนบผลตรวจ Turnitin ใหม่",
-                "TURNITIN.SIMILARITY", notice=notice)
+                "TURNITIN.SIMILARITY",
+                notice=(f"(1) ปรับแก้เนื้อหาส่วนที่ซ้ำ แล้วตรวจ Turnitin ใหม่ ให้ค่า Overall Similarity "
+                        f"ของ{main_content} ไม่เกิน {TURNITIN_LIMIT}%\n"
+                        "(2) แนบไฟล์ผลตรวจ Turnitin ฉบับใหม่ โดยไฟล์ต้องมีทั้งหน้าปก (Cover page) "
+                        "และหน้า Overall Similarity\n"
+                        "กรณีที่ไม่สามารถปรับแก้ไขร้อยละการคัดลอกได้ กรุณาติดต่อหอสมุดฯ "
+                        "เพื่อขอยกเว้น (Exclude) คำที่เป็นคำศัพท์เฉพาะได้"))
 
 
 # ---------- ค่าปรับส่งเล่มล่าช้า (อัปเดต 1.4) ----------

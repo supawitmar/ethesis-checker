@@ -147,9 +147,10 @@ def main():
         "failed": [], "passed": [],
         "staff": ["SIGNATURE_LAYOUT_WRONG", "SIGNATURE_LAYOUT_ITEM_2"]}).json()["plain"]
     passed.append(check("ข้อความโครงสร้างหน้าลงนามมีเฉพาะข้อที่ไม่ผ่าน",
-                        "(1) หากมีคณะกรรมการเกิน 5 ท่าน" in layout and "(2)" not in layout))
+                        "(1) หากมีคณะกรรมการเกิน 5 ท่าน" in layout
+                        and "คุณวุฒิสูงสุด" not in layout and "เรียงรายชื่อคณะกรรมการ" not in layout))
     passed.append(check("ข้อความสรุปแจ้ง Turnitin เกินเกณฑ์",
-                        "ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ 31% เกินเกณฑ์" in layout))
+                        "Overall Similarity 31% ซึ่งเกินเกณฑ์ที่กำหนด" in layout))
     passed.append(check("ปุ่มผ่านของข้อสังเกตถูกส่งไปด้วย",
                         '[data-zone="YELLOW"]' in html.split("function collectPassed()", 1)[-1][:400]))
 
