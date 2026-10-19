@@ -2634,8 +2634,11 @@ def _check_cover_year(rep, year, cover_text):
     lines = [soft(line) for line in (cover_text or "").splitlines() if soft(line)]
     year_lines = [line for line in lines if year in line]
     year_ok = any(soft(_ERA_PREFIX.sub(' ', line)) == year for line in year_lines)
+    # บรรทัดที่เป็นปีล้วน (มี/ไม่มี "พ.ศ.") แต่เป็นปีอื่น — ไว้บอกว่าเล่มพิมพ์ปีอะไร
+    other_year_line = next((line for line in lines
+                            if re.fullmatch(r'\d{4}', soft(_ERA_PREFIX.sub(' ', line)))), "")
     rep.add_verification("ปีบนหน้าปก", "หน้าปก", "pass" if year_ok else "fail",
-                         "" if year_ok else (year_lines[0] if year_lines else ""))
+                         "" if year_ok else (year_lines[0] if year_lines else other_year_line))
     if year_ok:
         return
     if year_lines:
@@ -2643,6 +2646,13 @@ def _check_cover_year(rep, year, cover_text):
                 f'พบปี {year} บนหน้าปกแต่ไม่ได้อยู่ในบรรทัดปีของตัวเอง: "{year_lines[0]}"',
                 f'หน้าปกต้องมีบรรทัดที่เป็นปีเพียงอย่างเดียว เช่น "{year}" หรือ "พ.ศ. {year}"',
                 "เพิ่มหรือแก้บรรทัดปีบนหน้าปกให้มีเฉพาะปี", "FRONT.COVER")
+    elif other_year_line:
+        # มีบรรทัดปีอยู่แล้วแต่เป็นปีอื่น (เล่มจริง ต.ค. 2569 พิมพ์ปีที่ส่งเล่ม ไม่ใช่ปีที่สอบผ่าน)
+        # บอกว่าเล่มเขียนปีอะไร และต้องแก้เป็นปีอะไร (เจ้าหน้าที่สั่ง 19 ต.ค. 2569)
+        rep.add("RED", "front_matter", "หน้าปก",
+                f'ปีบนหน้าปกในเล่มเขียนว่า "{other_year_line}"',
+                f'ปีบนหน้าปกต้องเป็นปีที่มีผลสอบผ่าน คือ "{year}"',
+                f'แก้ปีบนหน้าปกจาก "{other_year_line}" เป็น "{year}"', "FRONT.COVER")
     else:
         rep.add("RED", "front_matter", "หน้าปก", f"ไม่พบปี {year} บนหน้าปก",
                 "ปี = ปีที่มีผลสอบผ่าน", "", "FRONT.COVER")
@@ -4759,6 +4769,12 @@ def _degree_search_text(page_text, abstract=False):
     return head if soft(head) else text
 
 
+# บรรทัดวันที่สอบบนหน้าลงนาม: "on 1 June, 2024" / "on June 1, 2024" / "วันที่ 11 พฤษภาคม พ.ศ. 2569"
+_EXAM_DATE_LINE = re.compile(
+    r'^(?:on\s+)?(?:\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\.?,?|[A-Za-z]+\.?\s+\d{1,2},?)\s+\d{4}\.?$'
+    r'|^(?:เมื่อ)?วันที่\s*\d', re.I)
+
+
 def closest_degree_line(page_text, expected, abstract=False):
     """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
 
@@ -4777,8 +4793,15 @@ def closest_degree_line(page_text, expected, abstract=False):
         if not any(marker in norm(line) for marker in markers):
             continue
         for span in (1, 2, 3):
-            if k + span <= len(lines):
-                candidates.append(' '.join(lines[k:k + span]))
+            if k + span > len(lines):
+                break
+            # บรรทัดวันที่สอบ ("on 1 June, 2024") ตามหลังบรรทัดปริญญาบนหน้าลงนามเสมอ
+            # ไม่ใช่ส่วนของชื่อปริญญา — เล่มจริง ต.ค. 2569 ได้ชื่อปริญญา "Doctor of ...
+            # on 30 <เดือน>, <ปี>" (ต่อบรรทัดวันที่เข้ามา) แล้วเจ้าหน้าที่อ่านไม่ออกว่าผิดเรื่องปริญญา
+            # หรือวันที่ (เจ้าหน้าที่ทัก 19 ต.ค. 2569)
+            if span > 1 and _EXAM_DATE_LINE.match(lines[k + span - 1]):
+                break
+            candidates.append(' '.join(lines[k:k + span]))
     if not candidates:
         return closest_text_line(page_text, expected)
     # ชื่อปริญญามีสาขาในวงเล็บเสมอ — ถ้ามีตัวเลือกที่วงเล็บครบให้ใช้ชุดนั้นก่อน
@@ -5427,6 +5450,25 @@ def analyze_case_diff(found, expected):
         tuple(f'ให้แก้ตัวพิมพ์เล็ก-ใหญ่ "{a}" เป็น "{b}"' for a, b in pairs))
 
 
+def analyze_word_diff(found, expected):
+    """ชี้คำที่พิมพ์ต่างจากข้อมูลอนุมัติ ทั้งตัวพิมพ์เล็ก-ใหญ่และวรรคตอนในคำ (ขีด/ขีดยาว)
+
+    analyze_diff ไม่สนตัวพิมพ์และวรรคตอน ส่วน analyze_case_diff ดูแค่ตัวพิมพ์ คำที่ต่างทั้งสองอย่าง
+    จึงไม่มีใครชี้ — เล่มจริง ต.ค. 2569 พิมพ์คำหนึ่งในชื่อเรื่องเป็นตัวใหญ่ทั้งคำ + ขีดยาว (–) แต่ระบบ
+    เป็น "Xx-YYY" (ขีดสั้น) รายงานขึ้นชื่อเรื่องยาวสองก้อนที่ดูเหมือนกันโดยไม่บอกว่าต่างตรงไหน
+    ใช้กติกาเดียวกับ analyze_case_diff: จำนวนคำต้องเท่ากัน และต่างไม่เกินสามคำ
+    """
+    got, want = soft(found).split(), soft(expected).split()
+    if len(got) != len(want):
+        return _NO_DIFF
+    pairs = [(a, b) for a, b in zip(got, want) if a != b]
+    if not pairs or len(pairs) > 3:
+        return _NO_DIFF
+    body = " และ ".join(f'"{a}" ต้องเป็น "{b}"' for a, b in pairs)
+    return DiffAnalysis(f"ต่างที่ {body}",
+                        tuple(f'ให้แก้ "{a}" เป็น "{b}"' for a, b in pairs))
+
+
 def describe_case_diff(found, expected):
     return analyze_case_diff(found, expected).text
 
@@ -5608,6 +5650,17 @@ _TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา',
                              'บทคัดย่อ', 'บัณฑิตวิทยาลัย')
 
 
+def _looks_like_name(line, want_name):
+    """บรรทัดนี้คือชื่อนักศึกษาที่สะกดผิดหรือไม่ (want_name ผ่าน norm แล้ว)
+
+    เล่มจริง ต.ค. 2569 พิมพ์นามสกุลบนหน้าปกขาดไปสองตัวอักษร ถ้าหยุดเฉพาะชื่อที่สะกดตรง บล็อกชื่อเรื่องจะกินบรรทัดชื่อเข้าไปด้วย
+    แล้วรายงานว่าชื่อเรื่องมีชื่อนักศึกษาเกินมา (ซ้ำกับข้อชื่อนักศึกษาสะกดผิดอีกข้อ)
+    บรรทัดของชื่อเรื่องไม่มีทางคล้ายชื่อคนถึงเกณฑ์นี้
+    """
+    got = norm(line)
+    return bool(got) and difflib.SequenceMatcher(None, want_name, got).ratio() >= 0.8
+
+
 def printed_title(page_text, student_name=""):
     """ชื่อเรื่อง "ตามที่พิมพ์จริง" บนหน้านั้น รวมบรรทัดที่ห่อคำมาให้ครบ
 
@@ -5637,7 +5690,7 @@ def printed_title(page_text, student_name=""):
         if (_TITLE_STOP.match(line.strip()) or _starts_loosely(line, _TITLE_STOP_TH)
                 or _ABS_STUDENT_LINE.search(line)):
             break
-        if want_name and want_name in norm(line):
+        if want_name and (want_name in norm(line) or _looks_like_name(line, want_name)):
             break
         out.append(line)
     return _join_wrapped(out).strip()
@@ -5732,6 +5785,8 @@ def title_mismatch_detail(label, compared, expected=''):
         # ถ้าปล่อยไว้ รายงานจะขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะโดยไม่บอกว่าต่างตรงไหน
         if not analysis.text and compared['status'] == 'case':
             analysis = analyze_case_diff(compared['actual'], expected)
+        if not analysis.text:
+            analysis = analyze_word_diff(compared['actual'], expected)
         return found_with_diff(detail, analysis)
     return DetailText(detail, marks_only=compared.get('marks_only', False))
 
@@ -7915,12 +7970,20 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if printed_name:
                         compared = compare_values(printed_name, core_name, 'student_name')
                 if compared['status'] != 'exact':
+                    # ชื่อที่บอกให้แก้ต้องอยู่ในรูปแบบตัวพิมพ์ของหน้านั้น — หน้าลงนามเป็น
+                    # Sentence Case ไม่ใช่ UPPERCASE ตามข้อมูลอนุมัติ (เจ้าหน้าที่สั่ง 19 ต.ค. 2569)
+                    # ไม่งั้นนักศึกษาแก้ตัวสะกดแล้วกลายเป็นตัวพิมพ์ผิดแทน
+                    shown_name = core_name
+                    if re.search(r'[A-Za-z]', core_name):
+                        shown_name = (core_name.upper()
+                                      if _STUDENT_NAME_STYLE[spot_kind][0] == "upper"
+                                      else person_name_sentence_case(core_name))
                     rep.add_verification("ชื่อนักศึกษา", spot_name,
                                          rep.mismatch_status(compared.get('marks_only'), compared['actual']),
                                          compared['actual'])
                     rep.add("RED", "front_matter", spot_name,
-                            mismatch_detail("ชื่อนักศึกษา", compared, core_name),
-                            f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{core_name}\"",
+                            mismatch_detail("ชื่อนักศึกษา", compared, shown_name),
+                            f"ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: \"{shown_name}\"",
                             "แก้การสะกดชื่อ", "FORM.APPROVED_MATCH")
                     continue
                 _report_student_name_style(rep, pages[spot_idx], core_name, spot_name,

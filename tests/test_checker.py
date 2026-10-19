@@ -2408,6 +2408,56 @@ class CoverYearLineTests(unittest.TestCase):
         rep = self._run("A THESIS ...\nMAHIDOL UNIVERSITY\n2026\nCOPYRIGHT", year="2026")
         self.assertEqual(rep.zones["RED"], [])
 
+    def test_wrong_year_says_what_it_is_and_what_it_must_be(self):
+        """เล่มพิมพ์ปีอื่น — บอกว่าเล่มเขียนปีอะไร และต้องแก้เป็นปีอะไร (เจ้าหน้าที่สั่ง 19 ต.ค. 2569)"""
+        rep = self._run("MAHIDOL UNIVERSITY\n2026\nCOPYRIGHT", year="2023")
+        issue = rep.zones["RED"][0]
+        self.assertEqual(issue["found"], 'ปีบนหน้าปกในเล่มเขียนว่า "2026"')
+        self.assertTrue(issue["expected"].endswith('"2023"'))
+        self.assertIn('ต้องแก้เป็น "2023"', checker_module._summary_sentence(issue))
+
+    def test_wrong_buddhist_year_keeps_prefix(self):
+        rep = self._run("บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล\nพ.ศ. 2566\nลิขสิทธิ์ฯ")
+        self.assertIn('"พ.ศ. 2566"', rep.zones["RED"][0]["found"])
+
+
+class ReportQuestionsOct19Tests(unittest.TestCase):
+    """เจ้าหน้าที่ทักผลตรวจเล่มจริง 19 ต.ค. 2569 (หน้าปก/หน้าลงนาม เล่มอังกฤษ)"""
+
+    def test_misspelled_name_ends_the_cover_title(self):
+        cover = ("A STUDY OF COMMUNITY HEALTH NETWORKS:\n"
+                 "CO-OPERATION UNDER THE PANDEMIC SITUATION\n"
+                 "IN THAILAND\n"
+                 "SOMCHAI JAIDEEKUL\n"
+                 "A THESIS SUBMITTED IN PARTIAL FULFILLMENT\n")
+        title = printed_title(cover, "SOMCHAI JAIDEE")
+        self.assertTrue(title.endswith("IN THAILAND"), title)
+        self.assertNotIn("SOMCHAI", title)
+
+    def test_degree_line_does_not_swallow_the_exam_date(self):
+        page = ("was submitted to the Faculty of Graduate Studies, Mahidol University\n"
+                "for the degree of Doctor of Philosophy\n"
+                "on 1 June, 2024\n"
+                "Thesis Advisory Committees\n")
+        got = closest_degree_line(page, "Doctor of Philosophy (Public Policy and Management)")
+        self.assertEqual(got, "Doctor of Philosophy")
+
+    def test_title_points_to_word_with_different_dash_and_case(self):
+        found = "NETWORK BY CO–OPERATION UNDER THE PANDEMIC"
+        expected = "NETWORK BY Co-OPERATION UNDER THE PANDEMIC"
+        detail = checker_module.title_mismatch_detail(
+            "ชื่อเรื่อง", checker_module.compare_values(found, expected, "title"), expected)
+        self.assertEqual(detail.fix_steps,
+                         ('ให้แก้ "CO–OPERATION" เป็น "Co-OPERATION"',))
+
+    def test_signature_name_fix_is_in_sentence_case(self):
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("shown_name = core_name", 1)[1][:600]
+        self.assertIn('_STUDENT_NAME_STYLE[spot_kind][0] == "upper"', block)
+        self.assertIn("person_name_sentence_case(core_name)", block)
+        self.assertEqual(checker_module.person_name_sentence_case("SOMCHAI JAIDEE"),
+                         "Somchai Jaidee")
+
 
 class HeaderOnlyPageNumberTests(unittest.TestCase):
     """หัวกระดาษส่วนเนื้อหา/ส่วนท้าย ต้องมีเพียงเลขหน้าอารบิก ไม่มี running head/ชื่อบท"""

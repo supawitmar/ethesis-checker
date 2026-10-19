@@ -93,7 +93,8 @@ class APrefixInTheBookIsOrangeButAMisspellingIsRed(unittest.TestCase):
 
     def test_the_spelling_check_is_red_and_comes_before_the_prefix_check(self):
         source = inspect.getsource(checker_module.run_check)
-        for marker in ('mismatch_detail("ชื่อนักศึกษา", compared, core_name)',     # หน้าปก + หน้าลงนาม
+        # หน้าปก + หน้าลงนาม: ค่าที่ต้องแก้แสดงตามตัวพิมพ์ของหน้านั้น (shown_name, 19 ต.ค. 2569)
+        for marker in ('mismatch_detail("ชื่อนักศึกษา", compared, shown_name)',
                        'mismatch_detail(f"{nlbl}", compared, core3)'):              # หน้าบทคัดย่อ
             before, after = source.split(marker, 1)
             self.assertIn('rep.add("RED"', before[-160:], marker)
