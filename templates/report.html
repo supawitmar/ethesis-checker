@@ -414,6 +414,9 @@
              ไม่แสดงเมื่อไฟล์ถูกลบไปแล้ว (หมดอายุ / เกินงบดิสก์) — ดู /book ใน main.py #}
           {% if has_book %}<a class="book-open" href="/book/{{ job_id }}" target="_blank" rel="noopener"
              data-th="📄 เปิดดูไฟล์รูปเล่ม" data-en="📄 Open the thesis file">📄 เปิดดูไฟล์รูปเล่ม</a>{% endif %}
+          {# อัปเดต 1.4: ไฟล์ Turnitin ที่แนบตอนสั่งตรวจ เปิดดูได้ข้างไฟล์เล่ม (เจ้าของสั่ง 19 ต.ค. 2569) #}
+          {% if has_turnitin %}<a class="book-open" href="/turnitin/{{ job_id }}" target="_blank" rel="noopener"
+             data-th="🔎 เปิดดูไฟล์ Turnitin" data-en="🔎 Open the Turnitin report">🔎 เปิดดูไฟล์ Turnitin</a>{% endif %}
           {# วันดำเนินการที่กรอกไว้ตอนสั่งตรวจ (เจ้าหน้าที่ขอ ก.ย. 2569 ให้อยู่ข้างปุ่มเปิดไฟล์)
              งานเก่าที่ตรวจก่อนมีช่องนี้จะไม่มีค่า ก็ไม่ต้องขึ้นอะไร #}
           {% if queue_date %}<span class="wdate"><span data-th="เข้าคิว" data-en="Queued">เข้าคิว</span>

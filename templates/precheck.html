@@ -177,7 +177,7 @@
         <p class="hint">ดูที่แผ่น Overall Similarity · ต้องไม่เกิน {{ (turnitin and turnitin.limit) or 25 }}%</p>
         {% if turnitin and turnitin.similarity is not none %}
           <dl class="fee-grid">
-            <dt>ไฟล์</dt><dd style="overflow-wrap:anywhere;">{{ turnitin.name }}</dd>
+            <dt>ไฟล์</dt><dd style="overflow-wrap:anywhere;">{% if has_turnitin %}<a class="book-link" href="/turnitin/{{ job_id }}" target="_blank" rel="noopener">{{ turnitin.name }} ↗</a>{% else %}{{ turnitin.name }}{% endif %}</dd>
             <dt>Overall Similarity</dt><dd>{{ turnitin.similarity }}%</dd>
           </dl>
           {% if turnitin.similarity > turnitin.limit %}

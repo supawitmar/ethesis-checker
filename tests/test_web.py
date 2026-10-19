@@ -637,17 +637,47 @@ class Update14PrecheckFlow(unittest.TestCase):
         undated = {k: v for k, v in FORM.items() if k != "submitted_date"}
         self.assertEqual(self._post(form=undated).status_code, 400)
 
-    def test_the_job_keeps_the_fee_and_the_turnitin_number_only(self):
+    def test_the_job_keeps_the_fee_and_both_files(self):
         before = set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*"))
         job_id = self._post().json()["job_id"]
         job = main._get_job(job_id)
         self.assertEqual(job["turnitin"]["similarity"], 28)
         self.assertFalse(job["late_fee"]["late"])          # สอบ 17 ก.ค. 2026 ส่ง 1 ส.ค. 2026
         self.assertEqual(job["late_fee"]["due"].isoformat(), "2026-08-06")
-        # ไฟล์ Turnitin ไม่ถูกเก็บไว้ในโฟลเดอร์เล่ม — การส่งครั้งนี้เพิ่มแค่ไฟล์เล่มไฟล์เดียว
-        # (เทียบก่อน-หลัง เพราะโฟลเดอร์ใช้ร่วมกับเทสต์อื่นที่อาจมีไฟล์ค้าง)
+        # ไฟล์ Turnitin เก็บไว้คู่กับไฟล์เล่ม (เจ้าของสั่ง 19 ต.ค. 2569) — เทียบก่อน-หลัง
+        # เพราะโฟลเดอร์ใช้ร่วมกับเทสต์อื่นที่อาจมีไฟล์ค้าง
         added = set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*")) - before
-        self.assertEqual(sorted(p.name for p in added), [Path(job["pdf_path"]).name])
+        self.assertEqual(sorted(p.name for p in added),
+                         sorted([Path(job["pdf_path"]).name, Path(job["turnitin_path"]).name]))
+
+    def test_the_turnitin_file_opens_from_both_pages_and_is_cleaned_up(self):
+        job_id = self._post().json()["job_id"]
+        opened = self.client.get(f"/turnitin/{job_id}")
+        self.assertEqual(opened.status_code, 200)
+        self.assertEqual(opened.headers["content-type"], "application/pdf")
+        self.assertTrue(opened.headers["content-disposition"].startswith("inline"))
+        self.assertIn("no-store", opened.headers["cache-control"])
+        self.assertIn(f'href="/turnitin/{job_id}"', self.client.get(f"/precheck/{job_id}").text)
+        self.client.post(f"/precheck/{job_id}", json=PRECHECK_ALL_PASS)
+        for _ in range(500):
+            if main._get_job(job_id)["done"]:
+                break
+            time.sleep(0.01)
+        self.assertIn('data-th="🔎 เปิดดูไฟล์ Turnitin"', self.client.get(f"/result/{job_id}").text)
+        # ผลตรวจหมดอายุ = ไฟล์ Turnitin ถูกลบพร้อมไฟล์เล่ม
+        path = Path(main._get_job(job_id)["turnitin_path"])
+        with main.JOBS_LOCK:
+            main.JOBS[job_id]["ts"] = time.time() - main.JOB_TTL - 10
+        main._prune_jobs()
+        self.assertFalse(path.exists())
+        self.assertEqual(self.client.get(f"/turnitin/{job_id}").status_code, 404)
+
+    def test_a_refused_upload_does_not_leave_the_turnitin_file(self):
+        before = set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*"))
+        refused = self.client.post("/check", data=FORM, files={
+            "pdf": ("scan.pdf", make_pdf(""), "application/pdf"), **turnitin_file()})
+        self.assertGreaterEqual(refused.status_code, 400)
+        self.assertEqual(set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*")) - before, set())
 
     def test_the_result_waits_for_the_precheck(self):
         job_id = self._post().json()["job_id"]

@@ -111,7 +111,8 @@
   .panel .grid-2 + .grid-2 > div > label:first-child { margin-top:14px; }
 
   /* ---- ไฟล์: สองช่องเคียงกัน ---- */
-  .file-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  /* แถวละช่อง (อัปเดต 1.4 เจ้าของสั่ง 19 ต.ค. 2569 — สามช่องเรียงสองคอลัมน์แล้วไม่สวย) */
+  .file-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
   .file-grid > div { display:flex; flex-direction:column; }
   .file-grid .drop { flex:1; }
   .slot-foot { display:flex; align-items:center; gap:10px; min-height:44px; margin-top:10px; }
@@ -283,7 +284,7 @@
 
     <section class="panel" id="sec-files">
       <div class="panel-head"><span class="step" aria-hidden="true">1</span>
-        <div><h2>ไฟล์</h2><p class="hint">ไฟล์ eThesis ใช้เติมแบบฟอร์มเท่านั้น ส่วนไฟล์เล่มคือไฟล์ที่ระบบตรวจ</p></div></div>
+        <div><h2>ไฟล์</h2><p class="hint">ไฟล์ eThesis ใช้เติมแบบฟอร์มเท่านั้น · ไฟล์เล่มคือไฟล์ที่ระบบตรวจ · ไฟล์ Turnitin ใช้ตรวจค่า Overall Similarity</p></div></div>
       <div class="file-grid">
         {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสาร
            เพื่ออ่านข้อมูลพอ" — เหลือทางเดียว ตัวอ่านเดียว (ethesis_import.py ฝั่งเซิร์ฟเวอร์) #}
@@ -317,7 +318,7 @@
           </div>
         </div>
         {# อัปเดต 1.4 (เจ้าของสั่ง 19 ต.ค. 2569): แนบไฟล์ Turnitin ทุกเล่ม ระบบอ่านค่า Overall Similarity
-           (ต้องไม่เกิน 25%) แล้วลบไฟล์ทิ้งทันที เก็บไว้แค่ตัวเลข #}
+           (ต้องไม่เกิน 25%) และเก็บไฟล์ไว้ให้เปิดดูจากหน้าผลตรวจ ข้างไฟล์เล่ม #}
         <div>
           <div class="slot-label">ไฟล์ผลตรวจ Turnitin <span class="tag req">จำเป็น</span></div>
           <label class="drop" id="drop-turnitin">
@@ -329,7 +330,7 @@
             <input type="file" id="turnitin-pdf" name="turnitin" accept=".pdf" required>
           </label>
           <div class="slot-foot">
-            <p class="hint">ระบบอ่านค่า Overall Similarity (ต้องไม่เกิน 25%) แล้วลบไฟล์ทิ้งทันที</p>
+            <p class="hint">ระบบอ่านค่า Overall Similarity (ต้องไม่เกิน 25%) และเปิดดูไฟล์ได้จากหน้าผลตรวจ</p>
           </div>
         </div>
       </div>

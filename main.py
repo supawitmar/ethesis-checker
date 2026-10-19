@@ -462,7 +462,8 @@ def _prune_jobs():
         keep = sorted((pair for pair in done if pair[1] not in drop), reverse=True)
         drop.update(k for _ts, k in keep[MAX_KEPT_JOBS:])
         for k in drop:
-            remove.append(JOBS.pop(k, {}).get("pdf_path"))
+            gone = JOBS.pop(k, {})
+            remove += [gone.get("pdf_path"), gone.get("turnitin_path")]
         # ไฟล์รูปเล่มรวมกันเกินงบดิสก์ ลบไฟล์ของเล่มเก่าก่อน ผลตรวจยังอยู่
         used = 0
         for _ts, k in keep[:MAX_KEPT_JOBS]:
@@ -475,16 +476,25 @@ def _prune_jobs():
             except OSError:
                 job["pdf_path"] = None
                 continue
+            # ไฟล์ Turnitin นับรวมในงบเดียวกัน และหายไปพร้อมไฟล์เล่ม (อัปเดต 1.4)
+            try:
+                used += Path(job["turnitin_path"]).stat().st_size if job.get("turnitin_path") else 0
+            except OSError:
+                job["turnitin_path"] = None
             if used > MAX_KEPT_BOOKS_BYTES:
-                remove.append(path)
+                remove += [path, job.get("turnitin_path")]
                 job["pdf_path"] = None
-        referenced = {str(Path(j["pdf_path"])) for j in JOBS.values() if j.get("pdf_path")}
+                job["turnitin_path"] = None
+        referenced = {str(Path(j[key])) for j in JOBS.values()
+                      for key in ("pdf_path", "turnitin_path") if j.get(key)}
     for path in remove:
         _remove_book(path)
     _sweep_orphan_books(referenced, now)
 
 
 def _run_job(job_id, tmp_path, approved, chapters_mode, turnitin=None):
+    turnitin_copy = (_get_job(job_id) or {}).get("turnitin_path")
+
     def progress(msg):
         _update_job(job_id, stage=msg)
 
@@ -496,8 +506,10 @@ def _run_job(job_id, tmp_path, approved, chapters_mode, turnitin=None):
         tb = traceback.format_exc()
         print(f"job {job_id} failed\n{tb}", flush=True)
         # ตรวจไม่สำเร็จ = ไม่มีหน้ารายงานให้เปิดไฟล์ ไม่ต้องเก็บไว้
-        _update_job(job_id, error="ระบบไม่สามารถอ่านหรือตรวจไฟล์นี้ได้", pdf_path=None)
+        _update_job(job_id, error="ระบบไม่สามารถอ่านหรือตรวจไฟล์นี้ได้", pdf_path=None,
+                    turnitin_path=None)
         _remove_book(tmp_path)
+        _remove_book((_get_job(job_id) or {}).get("turnitin_path") or turnitin_copy)
     finally:
         # ตรวจสำเร็จ ไฟล์อยู่ต่อให้เปิดดูจากหน้ารายงาน จนผลตรวจถูกทิ้ง (ดู _prune_jobs)
         _update_job(job_id, done=True, ts=time.time())
@@ -680,6 +692,7 @@ async def check(
             pass
 
     tmp_path = None
+    turnitin_path = None
     try:
         total = 0
         header = b""
@@ -703,7 +716,7 @@ async def check(
         if b"%PDF-" not in header:
             raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
 
-        turnitin_info = await _read_turnitin(turnitin)
+        turnitin_info, turnitin_path = await _read_turnitin(turnitin)
 
         # โพรบว่าอ่านข้อความได้ไหม (สุ่มไม่กี่หน้า เร็วแม้ไฟล์ใหญ่) แล้วปฏิเสธทันที
         readability_issue = await asyncio.to_thread(_pdf_readability_issue, tmp_path)
@@ -722,7 +735,7 @@ async def check(
                 "late_fee": late_fee(form_values["exam_date"], submitted_date),
                 # คำตอบจากหน้าต่างตรวจหน้าลงนามก่อนตรวจเล่ม (POST /precheck) — None = ยังไม่ได้ตรวจ
                 "precheck": None,
-                "turnitin": turnitin_info,
+                "turnitin": turnitin_info, "turnitin_path": turnitin_path,
                 "pdf_path": tmp_path, "ts": time.time(),
             }
         threading.Thread(
@@ -734,6 +747,7 @@ async def check(
     except Exception:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+        _remove_book(turnitin_path)     # อัปโหลดล้มหลังเก็บไฟล์ Turnitin แล้ว (เช่น เล่มอ่านข้อความไม่ได้)
         JOB_SLOTS.release()
         raise
 
@@ -761,9 +775,11 @@ def _fee_view(fee):
 
 
 async def _read_turnitin(upload):
-    """อ่าน Overall Similarity จากไฟล์ Turnitin ที่แนบมา แล้วลบไฟล์ทิ้งทันที (เก็บแค่ตัวเลข)
+    """เก็บไฟล์ Turnitin ที่แนบมาไว้คู่กับไฟล์เล่ม แล้วอ่านค่า Overall Similarity — คืน (ข้อมูล, ที่อยู่ไฟล์)
 
     ไม่ได้แนบ / ไม่ใช่ PDF = ปฏิเสธการตรวจ (บังคับแนบทุกเล่ม เจ้าของสั่ง 19 ต.ค. 2569)
+    เก็บไฟล์ไว้ให้เปิดดูจากหน้าผลตรวจข้างไฟล์เล่ม (เจ้าของสั่ง 19 ต.ค. 2569 — เดิมลบทันที)
+    ใช้คำนำหน้าชื่อไฟล์เดียวกับไฟล์เล่ม จึงถูกลบตามกติกาเดียวกันทุกทาง (หมดอายุ เกินงบดิสก์ ปิดระบบ)
     """
     if upload is None or not (upload.filename or "").strip():
         raise HTTPException(status_code=400, detail="กรุณาแนบไฟล์ Turnitin (PDF) ก่อนตรวจเล่ม")
@@ -784,10 +800,10 @@ async def _read_turnitin(upload):
         if b"%PDF-" not in header:
             raise HTTPException(status_code=400, detail="ไฟล์ Turnitin ที่แนบไม่ใช่ไฟล์ PDF")
         value = await asyncio.to_thread(turnitin_similarity, path)
-        return {"similarity": value, "name": upload.filename, "limit": TURNITIN_LIMIT}
-    finally:
-        if path:
-            Path(path).unlink(missing_ok=True)
+        return {"similarity": value, "name": upload.filename, "limit": TURNITIN_LIMIT}, path
+    except BaseException:
+        _remove_book(path)
+        raise
 
 
 def _layout_items():
@@ -826,6 +842,7 @@ async def precheck_page(request: Request, job_id: str):
         "items": signature_layout_items(wrong["text"]),
         "fee": _fee_view(job.get("late_fee")),
         "turnitin": job.get("turnitin"),
+        "has_turnitin": _turnitin_path(job) is not None,
         "answered": job.get("precheck"),
         "has_book": _book_path(job) is not None,
     })
@@ -1134,6 +1151,7 @@ def result(request: Request, job_id: str):
         "fee": _fee_view(job.get("late_fee")),
         "layout_items": _layout_items(),
         "has_book": _book_path(job) is not None,
+        "has_turnitin": _turnitin_path(job) is not None,
         "sheet_enabled": SHEET_ENABLED,
     })
 
@@ -1163,6 +1181,31 @@ def book_file(job_id: str):
     return FileResponse(
         path, media_type="application/pdf",
         filename=job.get("pdf_name") or "book.pdf", content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+def _turnitin_path(job):
+    """ไฟล์ Turnitin ของผลตรวจนี้ที่ยังอยู่บนดิสก์ หรือ None"""
+    path = (job or {}).get("turnitin_path")
+    return Path(path) if path and Path(path).is_file() else None
+
+
+@app.get("/turnitin/{job_id}")
+def turnitin_file(job_id: str):
+    """เปิดไฟล์ผลตรวจ Turnitin ที่แนบมา ในแท็บใหม่ — กติกาเดียวกับ /book (หาไฟล์จาก job เท่านั้น ห้ามแคช)"""
+    _prune_jobs()
+    job = _get_job(job_id)
+    path = _turnitin_path(job)
+    if path is None:
+        return HTMLResponse(
+            "<h3>ไม่พบไฟล์ Turnitin แล้ว</h3>"
+            f"<p>ระบบเก็บไฟล์ไว้ไม่เกิน {JOB_TTL // 3600} ชั่วโมงหลังตรวจ และเก็บเฉพาะเล่มล่าสุด "
+            "กรุณาตรวจเล่มนี้ใหม่อีกครั้งเพื่อเปิดดูไฟล์</p>"
+            "<a href='/'>&larr; กลับไปตรวจใหม่</a>", status_code=404)
+    return FileResponse(
+        path, media_type="application/pdf",
+        filename=((job.get("turnitin") or {}).get("name") or "turnitin.pdf"),
+        content_disposition_type="inline",
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
