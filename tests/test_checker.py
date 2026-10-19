@@ -6191,7 +6191,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                 self.assertLess(len(prose), 260, prose[:60])
         self.assertTrue(choice["text"].startswith("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"),
                         choice["text"][:60])
-        self.assertTrue(choice["text_en"].startswith("Approval pages (Pages i - ii)"),
+        self.assertTrue(choice["text_en"].startswith("Signature pages (Pages i - ii)"),
                         choice["text_en"][:60])
 
     def test_the_location_line_shows_first_in_the_summary(self):

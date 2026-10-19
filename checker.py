@@ -3679,9 +3679,9 @@ STAFF_CHECKS = [
                          "ดูตัวอย่างการเรียงรายชื่อได้ในคู่มือการจัดรูปแบบ (เรียงตามลูกศรสีเหลือง)"
                          "\n"
                          "https://bit.ly/4jXLjgw"),
-                "text_en": ("Approval pages (Pages i - ii)"
+                "text_en": ("Signature pages (Pages i - ii)"
                             "\n"
-                            "Please restructure the approval pages to match the template, "
+                            "Please restructure the signature pages to match the template, "
                             "using the designated font and table frames. Do not move the "
                             "name slots or resize the frames to fit the number of names."
                             "\n"

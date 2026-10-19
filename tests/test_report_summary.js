@@ -29,7 +29,7 @@ function check(label, actual, wanted) {
 const REGISTRY = [
   { id: 'SIGNATURE_LAYOUT', placement: 'section', choices: [
     { id: 'SIGNATURE_LAYOUT_WRONG', text: 'ในหน้าลงนาม\nปรับโครงสร้างของหน้า',
-      text_en: 'Approval pages\nplease restructure the page' }] },
+      text_en: 'Signature pages\nplease restructure the page' }] },
   { id: 'LATE_FEE', placement: 'closing', applies_to: 'not_pass', choices: [
     { id: 'LATE_FEE_NONE', text: 'นศ. ไม่มีค่าปรับ\nกรุณาส่งกลับเข้าสู่ระบบอีกครั้ง',
       text_en: 'You have no fine\nPlease resubmit the document' }] },
