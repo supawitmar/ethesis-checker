@@ -4773,10 +4773,9 @@ def _degree_search_text(page_text, abstract=False):
     return head if soft(head) else text
 
 
-# บรรทัดวันที่สอบบนหน้าลงนาม: "on 1 June, 2024" / "on June 1, 2024" / "วันที่ 11 พฤษภาคม พ.ศ. 2569"
-_EXAM_DATE_LINE = re.compile(
-    r'^(?:on\s+)?(?:\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\.?,?|[A-Za-z]+\.?\s+\d{1,2},?)\s+\d{4}\.?$'
-    r'|^(?:เมื่อ)?วันที่\s*\d', re.I)
+# บรรทัดวันที่สอบบนหน้าลงนามตาม template: ต่อจากบรรทัดชื่อปริญญาเสมอ และขึ้นต้นด้วย "on" (อังกฤษ)
+# หรือ "วันที่" (ไทย) — ดูแค่คำขึ้นต้น ไม่ดูรูปแบบวันที่ เล่มเขียนวันที่แบบไหนก็แยกได้
+_EXAM_DATE_LINE = re.compile(r'^(?:on\b|(?:เมื่อ|ณ)?\s*วันที่)', re.I)
 
 
 def closest_degree_line(page_text, expected, abstract=False):
@@ -4799,7 +4798,7 @@ def closest_degree_line(page_text, expected, abstract=False):
         for span in (1, 2, 3):
             if k + span > len(lines):
                 break
-            # บรรทัดวันที่สอบ ("on 1 June, 2024") ตามหลังบรรทัดปริญญาบนหน้าลงนามเสมอ
+            # บรรทัดวันที่สอบ ("on ..." / "วันที่ ...") ตามหลังบรรทัดปริญญาบนหน้าลงนามเสมอ (template)
             # ไม่ใช่ส่วนของชื่อปริญญา — เล่มจริง ต.ค. 2569 ได้ชื่อปริญญา "Doctor of ...
             # on 30 <เดือน>, <ปี>" (ต่อบรรทัดวันที่เข้ามา) แล้วเจ้าหน้าที่อ่านไม่ออกว่าผิดเรื่องปริญญา
             # หรือวันที่ (เจ้าหน้าที่ทัก 19 ต.ค. 2569)
@@ -5654,18 +5653,7 @@ _TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา',
                              'บทคัดย่อ', 'บัณฑิตวิทยาลัย')
 
 
-def _looks_like_name(line, want_name):
-    """บรรทัดนี้คือชื่อนักศึกษาที่สะกดผิดหรือไม่ (want_name ผ่าน norm แล้ว)
-
-    เล่มจริง ต.ค. 2569 พิมพ์นามสกุลบนหน้าปกขาดไปสองตัวอักษร ถ้าหยุดเฉพาะชื่อที่สะกดตรง บล็อกชื่อเรื่องจะกินบรรทัดชื่อเข้าไปด้วย
-    แล้วรายงานว่าชื่อเรื่องมีชื่อนักศึกษาเกินมา (ซ้ำกับข้อชื่อนักศึกษาสะกดผิดอีกข้อ)
-    บรรทัดของชื่อเรื่องไม่มีทางคล้ายชื่อคนถึงเกณฑ์นี้
-    """
-    got = norm(line)
-    return bool(got) and difflib.SequenceMatcher(None, want_name, got).ratio() >= 0.8
-
-
-def printed_title(page_text, student_name=""):
+def printed_title(page_text, student_name="", title=""):
     """ชื่อเรื่อง "ตามที่พิมพ์จริง" บนหน้านั้น รวมบรรทัดที่ห่อคำมาให้ครบ
 
     ต้องหาจากโครงสร้างของหน้า ไม่ใช่หาช่วงที่ "ใกล้เคียงข้อมูลอนุมัติที่สุด" เพราะถ้า
@@ -5676,6 +5664,12 @@ def printed_title(page_text, student_name=""):
     ขอบเขต: เริ่มหลังคำว่า "entitled"/"เรื่อง" (หน้าลงนาม) หรือบรรทัดแรกที่ยาวพอ
     (หน้าปก/หน้าบทคัดย่อ) จบเมื่อเจอข้อความ template ที่ตามหลังชื่อเรื่อง ชื่อนักศึกษา
     หรือบรรทัดชื่อ-รหัสนักศึกษา
+
+    หน้าปก: template เรียง ชื่อเรื่อง → ชื่อนักศึกษา → "A THESIS SUBMITTED ..." /
+    "วิทยานิพนธ์นี้เป็นส่วนหนึ่ง..." ตายตัว บรรทัดก่อนประโยคนั้นจึงเป็น "ช่องชื่อ" เสมอ ไม่ใช่ชื่อเรื่อง
+    ไม่ว่าชื่อจะสะกดอย่างไร (เจ้าหน้าที่สั่ง 19 ต.ค. 2569 "ถ้าหัวข้อสะกดยังไงในเล่มไม่ตรงก็แค่แจ้ง
+    อย่าไปเอาชื่อมารวม" — เดิมหยุดเฉพาะชื่อที่สะกดตรงข้อมูลอนุมัติ ชื่อที่สะกดผิดจึงถูกรวมเข้ามา)
+    ยกเว้นเล่มที่ไม่ได้พิมพ์ชื่อไว้เลย ซึ่งบรรทัดในช่องนั้นเป็นท่อนหนึ่งของชื่อเรื่อง (title = ข้อมูลอนุมัติ)
     """
     lines = [soft(line) for line in (page_text or '').splitlines() if soft(line)]
     start = None
@@ -5689,12 +5683,16 @@ def printed_title(page_text, student_name=""):
     if start is None:
         return ""
     want_name = norm(_strip_student_title(student_name)) if student_name else ""
+    name_slot = _cover_name_slot(lines)
     out = []
-    for line in lines[start:start + 6]:
+    for i in range(start, min(start + 6, len(lines))):
+        line = lines[i]
         if (_TITLE_STOP.match(line.strip()) or _starts_loosely(line, _TITLE_STOP_TH)
                 or _ABS_STUDENT_LINE.search(line)):
             break
-        if want_name and (want_name in norm(line) or _looks_like_name(line, want_name)):
+        if want_name and want_name in norm(line):
+            break
+        if i == name_slot and not (title and norm(line) and norm(line) in norm(title)):
             break
         out.append(line)
     return _join_wrapped(out).strip()
@@ -5710,6 +5708,14 @@ _COVER_NAME_STOP = re.compile(
     r'^AN?\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|INDEPENDENT\s+STUDY)\s+SUBMITTED', re.I)
 _COVER_NAME_STOP_TH = _loose_keys('วิทยานิพนธ์นี้เป็นส่วนหนึ่ง', 'สารนิพนธ์นี้เป็นส่วนหนึ่ง',
                                   'การค้นคว้าอิสระนี้เป็นส่วนหนึ่ง')
+
+
+def _cover_name_slot(lines):
+    """ดัชนีบรรทัด "ช่องชื่อนักศึกษา" บนหน้าปก (บรรทัดก่อน "A THESIS SUBMITTED ...") — None ถ้าไม่ใช่หน้าปก"""
+    stop = next((i for i, line in enumerate(lines)
+                 if _COVER_NAME_STOP.match(line.strip())
+                 or _starts_loosely(line, _COVER_NAME_STOP_TH)), 0)
+    return stop - 1 if stop >= 1 else None
 
 
 def cover_printed_name(page_text, title=""):
@@ -5766,7 +5772,7 @@ def _title_as_printed(compared, page_text, expected, student_name=""):
     ใช้เฉพาะตอนที่ยังไม่ตรง — ถ้าตรงอยู่แล้วไม่ต้องแตะ
     ถ้าหาบล็อกไม่เจอ คงค่าเดิมไว้ ดีกว่าไม่มีอะไรให้เจ้าหน้าที่ดูเลย
     """
-    printed = printed_title(page_text, student_name)
+    printed = printed_title(page_text, student_name, expected)
     if not printed:
         return compared
     return compare_values(printed, expected, 'title')

@@ -2424,23 +2424,38 @@ class CoverYearLineTests(unittest.TestCase):
 class ReportQuestionsOct19Tests(unittest.TestCase):
     """เจ้าหน้าที่ทักผลตรวจเล่มจริง 19 ต.ค. 2569 (หน้าปก/หน้าลงนาม เล่มอังกฤษ)"""
 
-    def test_misspelled_name_ends_the_cover_title(self):
-        cover = ("A STUDY OF COMMUNITY HEALTH NETWORKS:\n"
-                 "CO-OPERATION UNDER THE PANDEMIC SITUATION\n"
-                 "IN THAILAND\n"
-                 "SOMCHAI JAIDEEKUL\n"
-                 "A THESIS SUBMITTED IN PARTIAL FULFILLMENT\n")
-        title = printed_title(cover, "SOMCHAI JAIDEE")
-        self.assertTrue(title.endswith("IN THAILAND"), title)
-        self.assertNotIn("SOMCHAI", title)
+    _COVER = ("A STUDY OF COMMUNITY HEALTH NETWORKS:\n"
+              "CO-OPERATION UNDER THE PANDEMIC SITUATION\n"
+              "IN THAILAND\n"
+              "{name}"
+              "A THESIS SUBMITTED IN PARTIAL FULFILLMENT\n")
+    _TITLE = "A STUDY OF COMMUNITY HEALTH NETWORKS: CO-OPERATION UNDER THE PANDEMIC SITUATION IN THAILAND"
 
-    def test_degree_line_does_not_swallow_the_exam_date(self):
-        page = ("was submitted to the Faculty of Graduate Studies, Mahidol University\n"
-                "for the degree of Doctor of Philosophy\n"
-                "on 1 June, 2024\n"
-                "Thesis Advisory Committees\n")
-        got = closest_degree_line(page, "Doctor of Philosophy (Public Policy and Management)")
-        self.assertEqual(got, "Doctor of Philosophy")
+    def test_name_slot_is_never_part_of_the_cover_title(self):
+        """ช่องชื่อตาม template (บรรทัดก่อน A THESIS SUBMITTED) ไม่ใช่ชื่อเรื่อง ไม่ว่าชื่อจะสะกดอย่างไร
+        (เจ้าหน้าที่สั่ง 19 ต.ค. 2569 — ไม่ใช้ความคล้ายกับชื่อนักศึกษาเป็นเกณฑ์)"""
+        for printed in ("SOMCHAI JAIDEEKUL", "JOHN DOE", "PLACEHOLDER NAME"):
+            with self.subTest(printed=printed):
+                title = printed_title(self._COVER.format(name=printed + "\n"),
+                                      "SOMCHAI JAIDEE", self._TITLE)
+                self.assertTrue(title.endswith("IN THAILAND"), title)
+                self.assertNotIn(printed, title)
+
+    def test_cover_without_a_name_keeps_its_last_title_line(self):
+        title = printed_title(self._COVER.format(name=""), "SOMCHAI JAIDEE", self._TITLE)
+        self.assertTrue(title.endswith("IN THAILAND"), title)
+
+    def test_degree_line_stops_at_the_date_template_line(self):
+        """บรรทัดถัดจากชื่อปริญญาบนหน้าลงนามขึ้นต้นด้วย "on" / "วันที่" ตาม template — วันที่จะเขียนแบบไหนก็แยกได้"""
+        for date_line in ("on 1 June, 2024", "on June 1, 2024", "on the 1st day of June 2024",
+                          "on 01/06/2024"):
+            with self.subTest(date_line=date_line):
+                page = ("was submitted to the Faculty of Graduate Studies, Mahidol University\n"
+                        "for the degree of Doctor of Philosophy\n"
+                        f"{date_line}\n"
+                        "Thesis Advisory Committees\n")
+                got = closest_degree_line(page, "Doctor of Philosophy (Public Policy and Management)")
+                self.assertEqual(got, "Doctor of Philosophy")
 
     def test_title_points_to_word_with_different_dash_and_case(self):
         found = "NETWORK BY CO–OPERATION UNDER THE PANDEMIC"
