@@ -2457,6 +2457,15 @@ class ReportQuestionsOct19Tests(unittest.TestCase):
                 got = closest_degree_line(page, "Doctor of Philosophy (Public Policy and Management)")
                 self.assertEqual(got, "Doctor of Philosophy")
 
+    def test_a_book_without_signature_pages_says_so_plainly(self):
+        """เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลย — เดิมขึ้น "พบหน้าลงนาม 0 หน้า" ซึ่งอ่านไม่รู้เรื่อง"""
+        source = inspect.getsource(checker_module.run_check)
+        block = source.split("if len(sig_pages) != 2:", 1)[1][:900]
+        self.assertIn('"ไม่พบหน้าลงนามในเล่ม" if not sig_pages', block)
+        self.assertIn("ต่อจากหน้าปก", block)
+        self.assertIn('{"thai": "ก - ข", "roman": "i - ii"}', block)
+        self.assertNotIn('"ต้องมี 2 หน้า (Advisory + Examination)",', block)
+
     def test_title_points_to_word_with_different_dash_and_case(self):
         found = "NETWORK BY CO–OPERATION UNDER THE PANDEMIC"
         expected = "NETWORK BY Co-OPERATION UNDER THE PANDEMIC"

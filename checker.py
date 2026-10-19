@@ -7101,9 +7101,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
     if len(sig_pages) != 2:
+        # เจ้าหน้าที่ทัก (19 ต.ค. 2569) เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลยได้ "พบหน้าลงนาม 0 หน้า /
+        # ต้องมี 2 หน้า (Advisory + Examination)" ซึ่งอ่านไม่รู้เรื่อง — บอกตรง ๆ ว่าไม่พบ และต้องมีอะไรตรงไหน
+        sig_labels = {"thai": "ก - ข", "roman": "i - ii"}.get(front_label_style, "i - ii หรือ ก - ข")
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
-                f"พบหน้าลงนาม {len(sig_pages)} หน้า", "ต้องมี 2 หน้า (Advisory + Examination)",
-                "ตรวจด้วยตา", "FRONT.APPROVAL")
+                "ไม่พบหน้าลงนามในเล่ม" if not sig_pages else f"พบหน้าลงนาม {len(sig_pages)} หน้า",
+                f"ต้องมีหน้าลงนาม 2 หน้า (หน้า {sig_labels}) ต่อจากหน้าปก "
+                "คือ หน้าคณะกรรมการที่ปรึกษา และหน้าคณะกรรมการสอบ",
+                "เพิ่มหน้าลงนามทั้ง 2 หน้าต่อจากหน้าปกตาม template" if not sig_pages else "ตรวจด้วยตา",
+                "FRONT.APPROVAL")
     sig_label_reported = _report_signature_page_labels(
         rep, sig_pages, pages, page_ref, label_style=front_label_style)
 
