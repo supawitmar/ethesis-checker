@@ -4749,7 +4749,7 @@ class TheStaffWordingNamesThePagesOfThisBook(unittest.TestCase):
         english = checker_module.STAFF_CHOICE_BY_ID[self.WRONG][1]["text_en"]
         self.assertEqual(sent[self.WRONG]["text_en"], english)
         for field in ("text", "text_en"):
-            self.assertEqual(len([ln for ln in sent[self.WRONG][field].split(NEWLINE) if ln.strip()]), 4)
+            self.assertEqual(len([ln for ln in sent[self.WRONG][field].split(NEWLINE) if ln.strip()]), 9)
 
     def test_the_run_stores_the_book_language(self):
         source = inspect.getsource(checker_module.run_check)
@@ -5869,14 +5869,14 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
     def test_nothing_is_added_until_staff_presses(self):
         text = checker_module.plain_summary(self._clean_report())
         self.assertIn("ไม่พบจุดที่ต้องแก้ไข", text)
-        self.assertNotIn("ปรับโครงสร้างของหน้า", text)
+        self.assertNotIn("ปรับโครงสร้างหน้าลงนาม", text)
         self.assertNotIn("ค่าปรับ", text)
 
     def test_pressing_correct_adds_nothing(self):
         """ปุ่ม "ถูกต้อง" มีไว้บันทึกว่าตรวจแล้ว ไม่ใช่เพื่อเพิ่มถ้อยคำ"""
         text = checker_module.plain_summary(self._clean_report(),
                                             staff=["SIGNATURE_LAYOUT_OK"])
-        self.assertNotIn("ปรับโครงสร้างของหน้า", text)
+        self.assertNotIn("ปรับโครงสร้างหน้าลงนาม", text)
         self.assertNotIn("ค่าปรับ", text)
 
     def test_the_wording_reaches_the_summary_word_for_word(self):
@@ -5926,7 +5926,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         report = self._signature_report()
         text = checker_module.plain_summary(report,
                                             staff=[self.WRONG, self.FEE_NONE])
-        self.assertLess(text.index("ปรับโครงสร้างของหน้า"),
+        self.assertLess(text.index("ปรับโครงสร้างหน้าลงนาม"),
                         text.index("นักศึกษาไม่มีค่าปรับ"))
         self.assertTrue(text.rstrip().endswith("supawit.mar@mahidol.ac.th"),
                         text[-80:])
@@ -6142,17 +6142,12 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         """
         verbatim = {
             "SIGNATURE_LAYOUT_WRONG": [
-                # เจ้าหน้าที่สั่งแก้คำพิมพ์ตกสามจุดนี้ (19 ต.ค. 2569) — เดิม "ทำดำเนินจัดทำ" "ทื่กำหนด" "ฝั่ง ละ"
-                "ซึ่งนักศึกษาจะต้องดำเนินการจัดทำรูปเล่มตามโครงสร้างที่กำหนด",
-                "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง",
-                # "6 รายชื่อ" ถูกแล้ว เจ้าหน้าที่ยืนยัน (ก.ย. 2569) ว่าฝั่งซ้าย
-                # ต้องนับชื่อนักศึกษารวมไปด้วย จึงไม่ใช่จำนวนกรรมการล้วน ๆ
-                "จะใส่รายชื่อได้ฝั่งละ 6 รายชื่อ",
-                # เจ้าหน้าที่อนุมัติถ้อยคำไทยท่อนนี้แล้ว (ก.ย. 2569) คู่กับฝั่งอังกฤษ
-                # "and remove the position below the degree" ที่เจ้าหน้าที่เขียนมาเอง
-                # ภายหลังเจ้าหน้าที่แก้เป็น "ตำแหน่งที่ได้รับอนุมัติ ... ออกทั้งหมด" (ก.ย. 2569)
-                "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด "
-                "(ตัวอย่างเช่น Co-advisor, Member)",
+                # ถ้อยคำชุดใหม่ที่เจ้าหน้าที่เกลาและอนุมัติเอง (19 ต.ค. 2569)
+                "กรุณาปรับโครงสร้างหน้าลงนามให้ตรงตาม template ใช้ฟอนต์และกรอบตารางตามที่กำหนด "
+                "โดยไม่เลื่อนช่องชื่อ และไม่ย่อหรือขยายกรอบให้พอดีกับจำนวนชื่อ",
+                "(2) หากมีคณะกรรมการเกิน 5 ท่าน ให้ใส่รายชื่อที่ 6 เป็นต้นไปในช่องด้านซ้ายของรายชื่อที่ 5 "
+                "(ช่องเหนือรายชื่อคณบดีบัณฑิตวิทยาลัย) แล้วไล่ขึ้นไปหาชื่อนักศึกษา",
+                "(5) คุณวุฒิของอาจารย์ทุกท่าน ให้ใส่เพียงคุณวุฒิสูงสุด เพียง 1 รายการเท่านั้น",
             ],
             "LATE_FEE_NONE": [
                 "Line Offical Account ID @322wjrbo",
@@ -6175,7 +6170,8 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                       checker_module.STAFF_CHOICE_BY_ID["LATE_FEE_NONE"][1]["text_en"])
 
     def test_the_signature_wording_starts_with_its_own_location_line(self):
-        """เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569): บรรทัดตำแหน่ง แล้วสามย่อหน้า
+        """เจ้าหน้าที่กำหนดรูปนี้เอง: บรรทัดตำแหน่ง แล้วตามด้วยเนื้อความ
+        (ก.ย. 2569 สามย่อหน้า · 19 ต.ค. 2569 ชุดใหม่ ประโยคนำ + ข้อ (1)-(5) + บรรทัดคู่มือ + ลิงก์ = 9 บรรทัด)
 
         ของเดิมเป็นประโยคเดียวยาวเกือบ 300 ตัวอักษรที่มีคำสั่งซ้อนกันหกอย่าง และมี
         ตำแหน่งฝังอยู่กลางประโยคแรก ส่วนดอกจันหัวท้ายตั้งใจให้เป็นตัวหนา แต่ในอีเมล
@@ -6184,7 +6180,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
         for field in ("text", "text_en"):
             lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
-            self.assertEqual(len(lines), 4, field)
+            self.assertEqual(len(lines), 9, field)
             self.assertNotIn("*", choice[field], field)
             # บรรทัดตำแหน่งต้องสั้น ไม่มีคำสั่งปนมา
             self.assertLess(len(lines[0]), 60, lines[0])
@@ -6204,7 +6200,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         head = lines.index("หน้าลงนาม")
         self.assertEqual(lines[head + 1], "1. ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)")
         self.assertTrue(lines[head + 2].startswith(
-            checker_module.SUMMARY_INDENT + "ปรับโครงสร้างของหน้า"), lines[head + 2])
+            checker_module.SUMMARY_INDENT + "กรุณาปรับโครงสร้างหน้าลงนาม"), lines[head + 2])
 
     def test_the_english_says_whether_this_student_has_a_fine(self):
         """เจ้าหน้าที่อนุมัติให้แก้เฉพาะจุดนี้ (ก.ย. 2569)
@@ -6249,15 +6245,14 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
         choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
         th = [ln for ln in choice["text"].split(NEWLINE) if ln.strip()]
         en = [ln for ln in choice["text_en"].split(NEWLINE) if ln.strip()]
-        # ห้ามกลับไปเป็นคำสั่งลอย ๆ ที่อ่านแล้วขัดกับย่อหน้าที่ 4
+        # ห้ามกลับไปเป็นคำสั่งลอย ๆ ที่อ่านแล้วขัดกับเรื่องกรอบตาม template
         self.assertNotIn("ไม่ต้องเลื่อนหรือปรับกรอบ", th[1])
         self.assertNotIn("without shifting or modifying the frames", en[1])
-        # ต้องบอกด้วยว่าห้ามขยับ "เพื่ออะไร"
-        self.assertIn("เพื่อให้พอดีกับจำนวนชื่อ", th[1])
-        self.assertIn("to fit them", en[1])
-        # ย่อหน้า 4 ยังต้องสั่งให้กรอบตรงกับ template เหมือนเดิม
-        self.assertIn("ให้ตรงกันกับที่ set ไว้", th[3])
-        self.assertIn("match the default settings", en[3])
+        # ชุด 19 ต.ค. 2569 รวมสองเรื่องไว้ประโยคเดียวกัน: กรอบตาม template + ห้ามย่อ/ขยาย "เพื่ออะไร"
+        self.assertIn("ให้ตรงตาม template", th[1])
+        self.assertIn("ให้พอดีกับจำนวนชื่อ", th[1])
+        self.assertIn("to match the template", en[1])
+        self.assertIn("to fit the number of names", en[1])
 
     def test_the_wording_uses_the_full_word_for_student(self):
         """เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ใช้คำว่า "นักศึกษา" ทั้งหมด ไม่ใช้ตัวย่อ
@@ -6270,34 +6265,38 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
                     self.assertNotIn("นศ.", choice.get(field) or "", choice["id"])
 
     def test_the_layout_wording_tells_them_to_remove_the_position(self):
-        """เจ้าหน้าที่สั่งเพิ่มท่อนนี้ (ก.ย. 2569) ต้องมีทั้งสองภาษา
+        """ลบตำแหน่งใต้คุณวุฒิ + ใส่คุณวุฒิสูงสุดรายการเดียว ต้องมีทั้งสองภาษา (19 ต.ค. 2569)
 
-        จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ จึงต้องต่อท้ายย่อหน้าเดิม ไม่ขึ้นบรรทัดใหม่
+        จำนวนบรรทัดที่มีข้อความของสองภาษาต้องเท่ากันเสมอ หน้ารายงานแปลทีละบรรทัด
         """
         choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
-        self.assertIn("and remove the position below the degree", choice["text_en"])
-        self.assertIn("และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด", choice["text"])
-        # ตัวอย่างตำแหน่ง เจ้าหน้าที่สั่งเพิ่ม (ก.ย. 2569) ต้องมีทั้งสองภาษา
-        self.assertIn("(ตัวอย่างเช่น Co-advisor, Member)", choice["text"])
-        self.assertIn("(for example Co-advisor, Member)", choice["text_en"])
-        for field in ("text", "text_en"):
+        self.assertIn("(4) ลบตำแหน่งที่อยู่ใต้คุณวุฒิของกรรมการออกทั้งหมด (เช่น Co-advisor, Member)",
+                      choice["text"])
+        self.assertIn("(4) Remove all positions listed below the committee members' degrees "
+                      "(for example, Co-advisor, Member).", choice["text_en"])
+        self.assertIn("(5) For every committee member, list only their highest degree",
+                      choice["text_en"])
+        counts = [len([ln for ln in choice[field].split(NEWLINE) if ln.strip()])
+                  for field in ("text", "text_en")]
+        self.assertEqual(counts, [9, 9])
+
+    def test_the_formatting_manual_link_is_on_its_own_line(self):
+        """ลิงก์ย่อของคู่มือ (เจ้าหน้าที่ส่งมา 19 ต.ค. 2569) อยู่บรรทัดของตัวเองต่อจากบรรทัดที่พูดถึงคู่มือ
+        อีเมล/แชทจะได้ไม่ตัดกลางลิงก์หรือกินวงเล็บเข้าไปในลิงก์
+        """
+        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+        for field, marker in (("text", "คู่มือการจัดรูปแบบ"), ("text_en", "formatting manual")):
             lines = [ln for ln in choice[field].split(NEWLINE) if ln.strip()]
-            self.assertEqual(len(lines), 4, field)
+            at = next(i for i, ln in enumerate(lines) if marker in ln)
+            self.assertEqual(lines[at + 1], "https://bit.ly/4jXLjgw", field)
 
-    def test_the_formatting_manual_comes_with_a_link(self):
-        """เจ้าหน้าที่ส่งลิงก์คู่มือมาให้ (ก.ย. 2569) — เดิมเขียนว่า "คู่มือการจัดฯ"
-        ลอย ๆ นักศึกษาเปิดไม่ได้ว่าอยู่ที่ไหน ต้องมีทั้งสองภาษา
-        """
-        choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
-        for field in ("text", "text_en"):
-            self.assertIn("https://www.canva.com/design/DAHA0Rwyb84/",
-                          choice[field], field)
-        # ลิงก์ต้องอยู่ย่อหน้าเดียวกับที่พูดถึงคู่มือ ไม่ใช่ขึ้นบรรทัดใหม่ —
-        # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ หน้ารายงานแปลทีละบรรทัด
-        for field, marker in (("text", "คู่มือการจัดฯ"),
-                              ("text_en", "formatting manual")):
-            para = next(ln for ln in choice[field].split(NEWLINE) if marker in ln)
-            self.assertIn("https://www.canva.com/", para, field)
+    def test_the_blank_line_before_the_manual_stays_in_the_summary(self):
+        """เจ้าหน้าที่เว้นบรรทัดก่อน "ดูตัวอย่าง..." เอง — ข้อความสรุปต้องคงไว้ ไม่มีช่องว่างค้าง"""
+        text = checker_module.plain_summary(self._clean_report(), staff=[self.WRONG])
+        lines = text.split(NEWLINE)
+        at = next(i for i, ln in enumerate(lines) if "ดูตัวอย่างการเรียงรายชื่อ" in ln)
+        self.assertEqual(lines[at - 1], "")
+        self.assertTrue(lines[at - 2].strip().startswith("(5)"), lines[at - 2])
 
     def test_the_two_fee_answers_differ_only_in_the_first_sentence(self):
         """ผิดคำเดียวคือบอกนักศึกษาผิดเรื่องเงิน — ล็อกไว้ว่าต่างกันแค่ มี/ไม่มี"""
@@ -6338,7 +6337,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
             text = checker_module.plain_summary(
                 self._clean_report(), staff=[self.WRONG, "SIGNATURE_FONT_WRONG"])
         self.assertIn("ทั้งหมด 2 จุด", text)
-        self.assertIn("ปรับโครงสร้างของหน้า", text)
+        self.assertIn("ปรับโครงสร้างหน้าลงนาม", text)
         self.assertIn("ให้ใช้ฟอนต์ตามที่กำหนดในคู่มือ", text)
 
     def test_only_one_answer_per_topic_survives(self):

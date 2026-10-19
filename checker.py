@@ -3645,56 +3645,67 @@ STAFF_CHECKS = [
                 "label": "โครงสร้างหน้าลงนามผิด",
                 "label_en": "Layout is wrong",
                 "tone": "fail",
-                # บรรทัดแรกคือ "ตำแหน่ง" แยกออกมาให้เหมือนข้ออื่นในสรุป แล้วตามด้วย
-                # สามย่อหน้าที่ย่อหน้าเข้ามา — เจ้าหน้าที่กำหนดรูปนี้เอง (ก.ย. 2569)
-                # คำทุกคำเป็นต้นฉบับ เว้นวรรครอบขีดเขียนเหมือนกันทั้งสองภาษา
-                # ("i - ii หรือ ก - ข" กับ "Pages i - ii")
+                # ถ้อยคำชุดใหม่ที่เจ้าหน้าที่เกลาและอนุมัติเอง (19 ต.ค. 2569) แทนชุดเดิม ก.ย. 2569
+                # บรรทัดแรกคือ "ตำแหน่ง" แยกออกมาให้เหมือนข้ออื่นในสรุป · ข้อ (1)-(5) คือสิ่งที่ต้องแก้
+                # ใช้ "(1)" ไม่ใช่ "1." เพราะเลขข้อหลักของข้อความสรุปเป็น "5." อยู่แล้ว
+                # บรรทัดว่างก่อน "ดูตัวอย่าง..." เจ้าหน้าที่ใส่เอง ข้อความสรุปคงไว้ (_summary_sentence)
                 #
-                # จำนวนบรรทัดสองภาษาต้องเท่ากันเสมอ (สี่ต่อสี่) เพราะหน้ารายงานแปล
-                # ด้วยการเทียบทีละบรรทัด บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                # จำนวนบรรทัดที่มีข้อความของสองภาษาต้องเท่ากันเสมอ (เก้าต่อเก้า) เพราะหน้ารายงานแปล
+                # ด้วยการเทียบทีละบรรทัด (ไม่นับบรรทัดว่าง) บรรทัดตำแหน่งก็อยู่ในคู่แปลด้วย
+                # ลิงก์คู่มืออยู่บรรทัดของตัวเอง อีเมล/แชทจะได้ไม่ตัดกลางลิงก์
                 #
-                # ย่อหน้า 2 กับ 4 เคยอ่านแล้วขัดกันเอง — "ไม่ต้องเลื่อนหรือปรับกรอบ"
-                # กับ "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้" เจ้าหน้าที่สั่งให้
-                # ปรับให้สอดคล้องกัน (ก.ย. 2569) ทั้งสองย่อหน้าพูดคนละเรื่อง
-                #   ย่อหน้า 2  ห้ามขยับ "เพื่อให้พอดีกับจำนวนชื่อของตัวเอง"
-                #   ย่อหน้า 4  กรอบต้องเป็นค่ามาตรฐานของ template (ฝั่งละ 6 รายชื่อ)
+                # ข้อ (2): ฝั่งขวาใส่กรรมการได้ 5 ช่อง (ช่องที่ 6 ของฝั่งขวาคือผู้อำนวยการหลักสูตร)
+                # รายชื่อที่ 6 เป็นต้นไปจึงไปฝั่งซ้าย เริ่มช่องเหนือคณบดีไล่ขึ้น (ตรงกับ _SIG ข้างบน)
                 "text": ("ในหน้าลงนาม (หน้า i - ii หรือ ก - ข)"
                          "\n"
-                         "ปรับโครงสร้างของหน้า "
-                         "และกรุณาให้ปรับตำแหน่งรายชื่อของคณะกรรมการแต่ละชุด "
-                         "โดยให้เรียงตามรายชื่อที่ได้รับอนุมัติในเอกสาร ทั้งนี้ "
-                         "ให้เรียงชื่อลงมาตามลำดับที่ปรากฏในเอกสาร "
-                         "ไม่ต้องเลื่อนชื่อหรือย่อขยายกรอบเพื่อให้พอดีกับจำนวนชื่อ"
+                         "กรุณาปรับโครงสร้างหน้าลงนามให้ตรงตาม template "
+                         "ใช้ฟอนต์และกรอบตารางตามที่กำหนด โดยไม่เลื่อนช่องชื่อ "
+                         "และไม่ย่อหรือขยายกรอบให้พอดีกับจำนวนชื่อ"
                          "\n"
-                         "สำหรับ ส่วนรายชื่อที่ว่างตามไฟล์ตัวอย่าง"
-                         "ให้เปลี่ยนสีตัวอักษรเป็นสีขาว "
-                         "และต้องใช้ font และ template ที่กำหนดด้วย "
-                         "ซึ่งนักศึกษาจะต้องดำเนินการจัดทำรูปเล่มตามโครงสร้างที่กำหนด "
-                         "ดูวิธีการเรียงลำดับชื่อจากคู่มือการจัดฯ "
-                         "(จัดตามลูกศรสีเหลืองในคู่มือ) "
-                         "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
+                         "(1) เรียงรายชื่อคณะกรรมการแต่ละชุดตามลำดับในเอกสารที่ได้รับอนุมัติ "
+                         "เริ่มจากช่องด้านขวาบนสุดไล่ลงมาด้านล่าง"
                          "\n"
-                         "ปรับกรอบของ template ให้ตรงกันกับที่ set ไว้ คือ "
-                         "จะใส่รายชื่อได้ฝั่งละ 6 รายชื่อ ส่วนตรงไหนที่ไม่มีชื่อ "
-                         "ให้ใส่สีขาวไว้ และลบตำแหน่งที่ได้รับอนุมัติ ที่อยู่ใต้คุณวุฒิออกทั้งหมด "
-                         "(ตัวอย่างเช่น Co-advisor, Member)"),
+                         "(2) หากมีคณะกรรมการเกิน 5 ท่าน ให้ใส่รายชื่อที่ 6 เป็นต้นไป"
+                         "ในช่องด้านซ้ายของรายชื่อที่ 5 (ช่องเหนือรายชื่อคณบดีบัณฑิตวิทยาลัย) "
+                         "แล้วไล่ขึ้นไปหาชื่อนักศึกษา"
+                         "\n"
+                         "(3) ช่องที่ไม่มีรายชื่อ ให้คงข้อความตัวอย่างไว้และเปลี่ยนสีตัวอักษรเป็นสีขาว "
+                         "ห้ามลบช่องหรือกรอบตาราง"
+                         "\n"
+                         "(4) ลบตำแหน่งที่อยู่ใต้คุณวุฒิของกรรมการออกทั้งหมด (เช่น Co-advisor, Member)"
+                         "\n"
+                         "(5) คุณวุฒิของอาจารย์ทุกท่าน ให้ใส่เพียงคุณวุฒิสูงสุด เพียง 1 รายการเท่านั้น"
+                         "\n\n"
+                         "ดูตัวอย่างการเรียงรายชื่อได้ในคู่มือการจัดรูปแบบ (เรียงตามลูกศรสีเหลือง)"
+                         "\n"
+                         "https://bit.ly/4jXLjgw"),
                 "text_en": ("Approval pages (Pages i - ii)"
                             "\n"
-                            "please restructure the page and realign each committee "
-                            "list to strictly follow the top-to-bottom sequence "
-                            "approved in the official document without shifting the "
-                            "names or resizing the frames to fit them."
+                            "Please restructure the approval pages to match the template, "
+                            "using the designated font and table frames. Do not move the "
+                            "name slots or resize the frames to fit the number of names."
                             "\n"
-                            "Students must format the file using the designated font "
-                            "and template, following the exact ordering sequence "
-                            "indicated by the arrows in the formatting manual: "
-                            "https://www.canva.com/design/DAHA0Rwyb84/1Jxw_MXS0fDa__P-58UvKA/view?utm_content=DAHA0Rwyb84&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h21893564e5"
+                            "(1) List each committee in the order shown in the approved "
+                            "document, starting from the top slot on the right and moving down."
                             "\n"
-                            "Additionally, the template frames must be adjusted to "
-                            "match the default settings, which accommodate up to 6 "
-                            "names per side; any remaining blank slots must be "
-                            "changed to white font color and remove the position "
-                            "below the degree (for example Co-advisor, Member)"),
+                            "(2) If there are more than 5 committee members, place the 6th "
+                            "name onward in the slot to the left of the 5th name (the slot "
+                            "above the Dean of the Faculty of Graduate Studies), then continue "
+                            "upward toward the student's name."
+                            "\n"
+                            "(3) For any slots without a name, keep the sample text and change "
+                            "its font color to white. Do not delete the slots or table frames."
+                            "\n"
+                            "(4) Remove all positions listed below the committee members' "
+                            "degrees (for example, Co-advisor, Member)."
+                            "\n"
+                            "(5) For every committee member, list only their highest degree "
+                            "(one entry only)."
+                            "\n\n"
+                            "See the formatting manual for how to order the names "
+                            "(follow the yellow arrows)."
+                            "\n"
+                            "https://bit.ly/4jXLjgw"),
             },
         ],
     },
@@ -4128,8 +4139,15 @@ def _summary_sentence(issue, skip_location=False):
     # ห้ามประกอบใหม่หรือย่อ และย่อหน้าบรรทัดต่อ ๆ ไปให้ตรงกับข้ออื่นในสรุป
     dictated = issue.get("summary_text")
     if dictated:
-        return f"\n{SUMMARY_INDENT}".join(
-            line.strip() for line in dictated.split("\n") if line.strip())
+        # บรรทัดว่างที่เจ้าหน้าที่ใส่ไว้กลางถ้อยคำ (เช่นก่อนลิงก์คู่มือ 19 ต.ค. 2569) คงไว้หนึ่งบรรทัด
+        # โดยไม่มีช่องว่างค้าง · บรรทัดว่างหัว/ท้ายและที่ซ้อนกันตัดทิ้ง
+        out = []
+        for line in dictated.strip().split("\n"):
+            line = line.strip()
+            if line or (out and out[-1]):
+                out.append(line)
+        return "\n".join(line and (SUMMARY_INDENT + line if i else line)
+                         for i, line in enumerate(out))
     lines = [] if skip_location else [_prose_location(issue.get("location"))]
     found, steps = _found_and_steps(issue)
     if found:
