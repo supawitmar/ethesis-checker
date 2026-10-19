@@ -9430,7 +9430,16 @@ class Update14Turnitin(unittest.TestCase):
     def test_over_the_limit_is_red(self):
         zones = self._issues({"similarity": 28})
         self.assertEqual(len(zones["RED"]), 1)
-        self.assertEqual(zones["RED"][0]["found"], "ผลตรวจ Turnitin (Overall Similarity) 28% เกินเกณฑ์")
+        self.assertEqual(zones["RED"][0]["found"],
+                         "ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ 28% เกินเกณฑ์")
+        # ถ้อยคำเกลาจากข้อความของเจ้าหน้าที่ (19 ต.ค. 2569): สามบรรทัดในข้อความสรุป
+        text = checker_module._summary_sentence(zones["RED"][0], skip_location=True)
+        self.assertEqual(text.split(NEWLINE), [
+            "ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ 28% เกินเกณฑ์",
+            checker_module.SUMMARY_INDENT + "กรุณาตรวจสอบผลตรวจ Turnitin อีกครั้ง "
+            "ค่า Overall Similarity ของเนื้อหาหลักต้องไม่เกิน 25%",
+            checker_module.SUMMARY_INDENT + "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) "
+            "และหน้า Overall Similarity"])
         self.assertEqual(zones["RED"][0]["rule_id"], "TURNITIN.SIMILARITY")
 
     def test_at_or_under_the_limit_is_clean(self):

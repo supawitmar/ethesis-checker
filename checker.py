@@ -3974,18 +3974,25 @@ def _report_turnitin(rep, turnitin):
     if not turnitin:
         return
     value = turnitin.get("similarity")
+    # ถ้อยคำเกลาจากข้อความที่เจ้าหน้าที่เคยใช้ (19 ต.ค. 2569) "Please re-check the Turnitin report. The overall
+    # similarity score for the main content must not exceed 25%. The submitted report must include both the cover
+    # page and the Overall Similarity page." — ฉบับอังกฤษในหน้ารายงานใช้ถ้อยคำนั้นตรงตัว (ตาราง TR)
+    # บรรทัดเรื่องหน้าปก + หน้า Overall Similarity อยู่ใน notice ให้เป็นบรรทัดของตัวเองในข้อความสรุป
+    notice = "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity"
+    expected = (f"กรุณาตรวจสอบผลตรวจ Turnitin อีกครั้ง ค่า Overall Similarity ของเนื้อหาหลัก"
+                f"ต้องไม่เกิน {TURNITIN_LIMIT}%")
     if value is None:
         rep.add("ORANGE", "-", "ไฟล์ Turnitin",
                 "ระบบอ่านค่า Overall Similarity จากไฟล์ Turnitin ไม่ได้",
-                f"ผลตรวจ Turnitin (Overall Similarity) ต้องไม่เกิน {TURNITIN_LIMIT}%",
+                expected,
                 "เปิดไฟล์ Turnitin ดูค่า Overall Similarity ด้วยตา ถ้าไม่เกินเกณฑ์ให้กดผ่าน",
-                "TURNITIN.SIMILARITY")
+                "TURNITIN.SIMILARITY", notice=notice)
     elif value > TURNITIN_LIMIT:
         rep.add("RED", "-", "ไฟล์ Turnitin",
-                f"ผลตรวจ Turnitin (Overall Similarity) {value}% เกินเกณฑ์",
-                f"ต้องไม่เกิน {TURNITIN_LIMIT}%",
+                f"ผลตรวจ Turnitin (Overall Similarity) ของเล่มนี้ได้ {value}% เกินเกณฑ์",
+                expected,
                 f"ปรับเนื้อหาให้ค่า Overall Similarity ไม่เกิน {TURNITIN_LIMIT}% แล้วแนบผลตรวจ Turnitin ใหม่",
-                "TURNITIN.SIMILARITY")
+                "TURNITIN.SIMILARITY", notice=notice)
 
 
 # ---------- ค่าปรับส่งเล่มล่าช้า (อัปเดต 1.4) ----------

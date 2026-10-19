@@ -1618,7 +1618,13 @@ var TR = [
   [/วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน/g, 'Signature-page date must be the exam pass date'],
   [/ไม่พบปี (\S+) บนหน้าปก/g, 'Year $1 not found on the cover'],
   // ไฟล์ Turnitin (อัปเดต 1.4)
-  [/^ผลตรวจ Turnitin \(Overall Similarity\) (\d+)% เกินเกณฑ์$/g, 'Turnitin result (Overall Similarity) $1% exceeds the limit'],
+  [/^ผลตรวจ Turnitin \(Overall Similarity\) ของเล่มนี้ได้ (\d+)% เกินเกณฑ์$/g,
+   'The Turnitin result (Overall Similarity) for this document is $1%, which exceeds the limit'],
+  // ถ้อยคำอังกฤษของเจ้าหน้าที่ (19 ต.ค. 2569) ตรงตัว — ฝั่งไทยเกลาจากถ้อยคำนี้
+  [/^กรุณาตรวจสอบผลตรวจ Turnitin อีกครั้ง ค่า Overall Similarity ของเนื้อหาหลักต้องไม่เกิน (\d+)%$/g,
+   'Please re-check the Turnitin report. The overall similarity score for the main content must not exceed $1%.'],
+  [/^ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก \(Cover page\) และหน้า Overall Similarity$/g,
+   'The submitted report must include both the cover page and the Overall Similarity page.'],
   [/^ผลตรวจ Turnitin \(Overall Similarity\) ต้องไม่เกิน (\d+)%$/g, 'The Turnitin result (Overall Similarity) must not exceed $1%'],
   [/^ต้องไม่เกิน (\d+)%$/g, 'Must not exceed $1%'],
   [/^ปรับเนื้อหาให้ค่า Overall Similarity ไม่เกิน (\d+)% แล้วแนบผลตรวจ Turnitin ใหม่$/g,
