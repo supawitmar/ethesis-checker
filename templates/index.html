@@ -743,6 +743,7 @@ document.getElementById('f').addEventListener('submit', async function(e){
     }
     const {job_id} = await resp.json();
     // อัปเดต 1.4: ตรวจหน้าลงนามและค่าปรับก่อน ระบบตรวจส่วนอื่นอยู่เบื้องหลัง หน้านั้นรอผลแล้วพาไปหน้ารายงานเอง
+    stage.textContent = 'อัปโหลดเสร็จ กำลังเปิดหน้าตรวจหน้าลงนาม…';
     window.location.href = '/precheck/' + job_id;
   } catch(err) {
     overlay.style.display = 'none';

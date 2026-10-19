@@ -59,6 +59,20 @@
   .sig-page figcaption { font-size:.85rem; font-weight:600; color:var(--ink-2); margin-bottom:6px; }
   .sig-page img { display:block; width:100%; height:auto; border:1px solid var(--line-2); border-radius:10px;
        background:#fff; }
+  /* ระหว่างรอภาพ (ระบบวาดภาพจากไฟล์ทีละหน้า ใช้เวลาสักครู่) แสดงกรอบขนาดหน้า A4 พร้อมบอกว่ากำลังโหลด */
+  .frame { position:relative; border-radius:10px; }
+  .frame:not(.loaded) { aspect-ratio:210 / 297; background:#f3f6fa; border:1px dashed var(--line-2); }
+  .frame:not(.loaded) img { position:absolute; inset:0; opacity:0; }
+  .frame .state { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+       justify-content:flex-start; gap:10px; padding:18% 16px 16px; text-align:center; font-size:.88rem; color:var(--ink-2); }
+  .frame.loaded .state { display:none; }
+  .frame .fail-msg { display:none; color:var(--bad); }
+  .frame.failed .fail-msg { display:block; }
+  .frame.failed .spin, .frame.failed .wait-msg { display:none; }
+  .spin { width:34px; height:34px; border-radius:50%; border:3px solid #d7e2f0; border-top-color:var(--navy-3);
+       animation:spin .9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:none; border-top-color:#d7e2f0; } }
   .sig-page a { display:block; border-radius:10px; }
   .sig-page a:focus-visible { outline:none; box-shadow:var(--ring); }
   .no-pages { padding:14px; border-radius:12px; background:var(--bad-bg); border:1px solid var(--bad-line);
@@ -159,8 +173,17 @@
           <figure class="sig-page">
             <figcaption>หน้าลงนาม {{ loop.index }}{% if page.label %} (หน้า {{ page.label }}){% endif %}</figcaption>
             <a href="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" target="_blank" rel="noopener">
-              <img src="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" loading="lazy"
-                   alt="ภาพหน้าลงนาม {{ loop.index }}{% if page.label %} หน้า {{ page.label }}{% endif %}">
+              <div class="frame" aria-busy="true">
+                <img src="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png"
+                     alt="ภาพหน้าลงนาม {{ loop.index }}{% if page.label %} หน้า {{ page.label }}{% endif %}"
+                     onload="var f=this.closest('.frame'); f.classList.add('loaded'); f.removeAttribute('aria-busy');"
+                     onerror="var f=this.closest('.frame'); f.classList.add('failed'); f.removeAttribute('aria-busy');">
+                <div class="state" role="status">
+                  <div class="spin" aria-hidden="true"></div>
+                  <div class="wait-msg">กำลังโหลดภาพหน้าลงนาม {{ loop.index }}…</div>
+                  <div class="fail-msg">โหลดภาพไม่สำเร็จ — กดเปิดไฟล์เล่มทั้งเล่มด้านล่างเพื่อดูแทน</div>
+                </div>
+              </div>
             </a>
           </figure>
           {% endfor %}
