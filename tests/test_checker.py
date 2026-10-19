@@ -2466,6 +2466,11 @@ class ReportQuestionsOct19Tests(unittest.TestCase):
         self.assertIn('{"thai": "ก - ข", "roman": "i - ii"}', block)
         self.assertNotIn('"ต้องมี 2 หน้า (Advisory + Examination)",', block)
 
+    def test_international_book_with_thai_abstract_uses_staff_wording(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('"ต้องมีเพียงบทคัดย่อภาษาอังกฤษเท่านั้น ให้ลบบทคัดย่อไทยออก"', source)
+        self.assertNotIn('"หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น",', source)
+
     def test_title_points_to_word_with_different_dash_and_case(self):
         found = "NETWORK BY CO–OPERATION UNDER THE PANDEMIC"
         expected = "NETWORK BY Co-OPERATION UNDER THE PANDEMIC"

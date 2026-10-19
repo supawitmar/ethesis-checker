@@ -8356,9 +8356,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "หลักสูตรนานาชาติต้องมีบทคัดย่อภาษาอังกฤษ",
                         "เพิ่มบทคัดย่อภาษาอังกฤษ", "FRONT.ABSTRACT")
             if has_th_abs:
+                # ถ้อยคำเจ้าหน้าที่ (19 ต.ค. 2569) แทน "หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น"
                 rep.add("RED", "front_matter", "บทคัดย่อ", "มีบทคัดย่อภาษาไทย",
-                        "หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น",
-                        "ลบบทคัดย่อไทย", "FRONT.ABSTRACT")
+                        "ต้องมีเพียงบทคัดย่อภาษาอังกฤษเท่านั้น ให้ลบบทคัดย่อไทยออก",
+                        "ลบบทคัดย่อไทยออก", "FRONT.ABSTRACT")
         if prog in ("thai", "thai_english"):
             _report_missing_abstract_language(
                 rep, has_en_abs, has_th_abs,
