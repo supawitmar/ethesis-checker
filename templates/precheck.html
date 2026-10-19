@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>ตรวจหน้าลงนามและค่าปรับ — E-Thesis Staff Checker</title>
+{#- อัปเดต 1.4 (เจ้าของสั่ง 19 ต.ค. 2569): ขั้นตรวจหน้าลงนามและค่าปรับ "ก่อน" หน้าผลตรวจ
+    กดตรวจเล่มแล้วมาหน้านี้ทันที ระบบตรวจส่วนอื่นของเล่มอยู่เบื้องหลังระหว่างที่เจ้าหน้าที่ดูหน้านี้
+    - ติ้กรายชื่อแต่ละชุด = ยืนยันว่าดูแล้ว (ไม่สร้างข้อความถึงนักศึกษา ชื่อสะกดผิด/จำนวนกรรมการ ระบบตรวจเป็นสีแดงเอง)
+    - เช็กลิสต์ (1)-(5) ข้อที่ "ไม่ผ่าน" เท่านั้นที่เข้าข้อความโครงสร้างหน้าลงนาม (checker.signature_layout_text)
+    - ค่าปรับคิดจากแบบฟอร์ม (checker.late_fee) หน้ารายงานเลือกถ้อยคำค่าปรับให้เอง
+    คำตอบเก็บกับงาน (POST /precheck) หน้ารายงานตั้งค่าให้ตามนี้ และยังแก้ได้ -#}
+<style>
+  :root { --navy:#16365a; --navy-2:#23548a; --navy-3:#2f6db3; --navy-soft:#eef3fa;
+          --bg:#f4f6fa; --surface:#ffffff; --line:#e4e9f0; --line-2:#d5dde8;
+          --ink:#16212e; --ink-2:#465567; --ink-3:#5f6d7e;
+          --ok:#1a7a43; --ok-bg:#eaf7ef; --ok-line:#9fd1b1;
+          --bad:#a12626; --bad-bg:#fdf1f0; --bad-line:#eab6b0;
+          --ring:0 0 0 3px rgba(47,109,179,.22);
+          --shadow:0 1px 2px rgba(16,24,40,.04), 0 8px 24px -12px rgba(16,24,40,.14);
+          --radius:16px;
+          --font:'IBM Plex Sans Thai','Noto Sans Thai','Sarabun','Segoe UI',Tahoma,sans-serif; }
+  * { box-sizing:border-box; font-family:var(--font); }
+  body { margin:0; color:var(--ink); font-size:15px; line-height:1.55;
+         background:linear-gradient(180deg,#e9eff8 0, var(--bg) 320px) no-repeat, var(--bg); }
+  .topbar { position:sticky; top:0; z-index:20; background:rgba(255,255,255,.88);
+       -webkit-backdrop-filter:saturate(1.4) blur(10px); backdrop-filter:saturate(1.4) blur(10px);
+       border-bottom:1px solid var(--line); }
+  .topbar-in { max-width:1180px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; gap:14px; }
+  .brand-mark { flex:none; display:grid; place-items:center; width:40px; height:40px; border-radius:11px;
+       font-size:1.2rem; color:#fff; background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); }
+  .brand-name { font-weight:700; font-size:1.02rem; color:var(--navy); line-height:1.2; }
+  .brand-sub { font-size:.78rem; color:var(--ink-3); }
+  .ver-badge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:99px; vertical-align:2px;
+       font-size:.7rem; font-weight:600; color:var(--navy); background:#e6eef8; border:1px solid #cddcee; }
+  .bg-status { margin-left:auto; font-size:.8rem; color:var(--ink-2); background:var(--navy-soft);
+       border:1px solid #cddcee; border-radius:99px; padding:5px 12px; max-width:48%; overflow:hidden;
+       text-overflow:ellipsis; white-space:nowrap; }
+  .bg-status.done { color:var(--ok); background:var(--ok-bg); border-color:var(--ok-line); }
+
+  .page { max-width:1180px; margin:0 auto; padding:24px 24px 120px; }
+  .hero h1 { margin:0 0 4px; font-size:1.35rem; color:var(--navy); }
+  .hero p { margin:0; color:var(--ink-2); font-size:.92rem; }
+  .who { margin:10px 0 0; font-size:.9rem; color:var(--ink-2); overflow-wrap:anywhere; }
+  .who b { color:var(--ink); }
+
+  .layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:20px; margin-top:20px;
+       align-items:start; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+       box-shadow:var(--shadow); padding:18px; margin-bottom:16px; }
+  .panel h2 { margin:0 0 10px; font-size:1.02rem; color:var(--navy); }
+  .panel .hint { margin:0 0 10px; font-size:.84rem; color:var(--ink-3); }
+
+  .pages { position:sticky; top:84px; }
+  .sig-page { margin:0 0 16px; }
+  .sig-page figcaption { font-size:.85rem; font-weight:600; color:var(--ink-2); margin-bottom:6px; }
+  .sig-page img { display:block; width:100%; height:auto; border:1px solid var(--line-2); border-radius:10px;
+       background:#fff; }
+  .sig-page a { display:block; border-radius:10px; }
+  .sig-page a:focus-visible { outline:none; box-shadow:var(--ring); }
+  .no-pages { padding:14px; border-radius:12px; background:var(--bad-bg); border:1px solid var(--bad-line);
+       color:var(--bad); font-size:.9rem; }
+  .book-link { display:inline-block; margin-top:4px; font-size:.86rem; color:var(--navy-3); }
+
+  .fee-grid { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:.9rem; }
+  .fee-grid dt { color:var(--ink-3); }
+  .fee-grid dd { margin:0; font-weight:600; }
+  .fee-result { margin-top:12px; padding:10px 12px; border-radius:10px; font-weight:600; font-size:.92rem; }
+  .fee-result.late { color:var(--bad); background:var(--bad-bg); border:1px solid var(--bad-line); }
+  .fee-result.ok { color:var(--ok); background:var(--ok-bg); border:1px solid var(--ok-line); }
+  .fee-result.unknown { color:var(--ink-2); background:var(--navy-soft); border:1px solid #cddcee; font-weight:500; }
+
+  .section { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .section.checked { border-color:var(--ok-line); background:#fbfefc; }
+  .section ol { margin:6px 0 8px; padding-left:22px; font-size:.88rem; }
+  .section ol li { margin:2px 0; }
+  .section .role { color:var(--ink-3); }
+  .section .empty { font-size:.86rem; color:var(--ink-3); margin:4px 0 8px; }
+  .tick { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; font-size:.92rem; }
+  .tick input { width:20px; height:20px; accent-color:var(--ok); flex:none; }
+
+  .item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center;
+       border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; font-size:.88rem; }
+  .item.pass { border-color:var(--ok-line); background:#fbfefc; }
+  .item.fail { border-color:var(--bad-line); background:var(--bad-bg); }
+  .item .num { font-weight:700; color:var(--navy); margin-right:4px; }
+  .pf { display:flex; gap:6px; }
+  .pf button { border:1px solid var(--line-2); background:#fff; color:var(--ink-2); border-radius:99px;
+       padding:6px 12px; font-size:.82rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .pf button:focus-visible { outline:none; box-shadow:var(--ring); }
+  .pf button[aria-pressed="true"].p { color:#fff; background:var(--ok); border-color:var(--ok); }
+  .pf button[aria-pressed="true"].f { color:#fff; background:var(--bad); border-color:var(--bad); }
+  .outcome { margin:10px 0 0; font-size:.86rem; color:var(--ink-2); }
+
+  .bar { position:fixed; left:0; right:0; bottom:0; z-index:30; background:rgba(255,255,255,.95);
+       border-top:1px solid var(--line); box-shadow:0 -6px 20px -14px rgba(16,24,40,.3); }
+  .bar-in { max-width:1180px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; gap:14px; }
+  .bar .left { flex:1; min-width:0; font-size:.88rem; color:var(--ink-2); }
+  .bar .err { color:var(--bad); }
+  .go { border:0; border-radius:99px; padding:12px 26px; font-size:.98rem; font-weight:700; color:#fff; cursor:pointer;
+       background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); white-space:nowrap; }
+  .go[disabled] { opacity:.45; cursor:not-allowed; }
+  .go:focus-visible { outline:none; box-shadow:var(--ring); }
+
+  .overlay { position:fixed; inset:0; z-index:50; display:none; place-items:center; background:rgba(22,33,46,.45); }
+  .overlay.on { display:grid; }
+  .overlay .box { background:#fff; border-radius:var(--radius); padding:22px 26px; max-width:420px; width:calc(100% - 32px);
+       text-align:center; box-shadow:var(--shadow); }
+  .overlay .box b { display:block; color:var(--navy); margin-bottom:6px; }
+  .overlay .box p { margin:0; font-size:.9rem; color:var(--ink-2); }
+
+  @media (max-width:900px) {
+    .layout { grid-template-columns:1fr; }
+    .pages { position:static; }
+    .bg-status { display:none; }
+  }
+  @media (max-width:520px) {
+    .page { padding:16px 16px 140px; }
+    .topbar-in, .bar-in { padding:10px 16px; }
+    .item { grid-template-columns:1fr; }
+    .bar-in { flex-direction:column; align-items:stretch; gap:8px; }
+    .go { width:100%; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand-mark" aria-hidden="true">📘</div>
+    <div>
+      <div class="brand-name">E-Thesis Staff Checker{% if app_release %}<span class="ver-badge" title="อัปเดต {{ app_release }}">v. {{ app_release }}</span>{% endif %}</div>
+      <div class="brand-sub">บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล</div>
+    </div>
+    <div class="bg-status" id="bg-status" role="status" aria-live="polite">ระบบกำลังตรวจส่วนอื่นของเล่มอยู่เบื้องหลัง…</div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="hero">
+    <h1>ขั้นที่ 1 · ตรวจหน้าลงนาม ค่าปรับ และ Turnitin</h1>
+    <p>ดูหน้าลงนามคู่กับรายชื่อที่ได้รับอนุมัติ ติ้กยืนยันให้ครบ แล้วกด "ตรวจต่อ" — ระบบตรวจส่วนอื่นของเล่มไปพร้อมกันแล้ว</p>
+    <p class="who">
+      {% if student.student_name or student.student_name_th %}<b>{{ student.student_name_th or student.student_name }}</b>{% endif %}
+      {% if student.student_id %} · {{ student.student_id }}{% endif %}
+      {% if pdf_name %} · ไฟล์ {{ pdf_name }}{% endif %}
+    </p>
+  </div>
+
+  <div class="layout">
+    <section class="pages" aria-label="ภาพหน้าลงนามของเล่ม">
+      <div class="panel">
+        <h2>หน้าลงนามในเล่ม</h2>
+        {% if pages %}
+          <p class="hint">กดที่ภาพเพื่อเปิดขนาดเต็มในแท็บใหม่</p>
+          {% for page in pages %}
+          <figure class="sig-page">
+            <figcaption>หน้าลงนาม {{ loop.index }}{% if page.label %} (หน้า {{ page.label }}){% endif %}</figcaption>
+            <a href="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" target="_blank" rel="noopener">
+              <img src="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" loading="lazy"
+                   alt="ภาพหน้าลงนาม {{ loop.index }}{% if page.label %} หน้า {{ page.label }}{% endif %}">
+            </a>
+          </figure>
+          {% endfor %}
+        {% else %}
+          <div class="no-pages">ไม่พบหน้าลงนามในเล่ม — ระบบจะแจ้งเป็นจุดที่ต้องแก้ในผลตรวจอยู่แล้ว ติ้กยืนยันแล้วกดตรวจต่อได้</div>
+        {% endif %}
+        {% if has_book %}<a class="book-link" href="/book/{{ job_id }}" target="_blank" rel="noopener">เปิดไฟล์เล่มทั้งเล่ม ↗</a>{% endif %}
+      </div>
+    </section>
+
+    <div>
+      <section class="panel" aria-labelledby="tii-title">
+        <h2 id="tii-title">ผลตรวจ Turnitin</h2>
+        <p class="hint">ดูที่แผ่น Overall Similarity · ต้องไม่เกิน {{ (turnitin and turnitin.limit) or 25 }}%</p>
+        {% if turnitin and turnitin.similarity is not none %}
+          <dl class="fee-grid">
+            <dt>ไฟล์</dt><dd style="overflow-wrap:anywhere;">{{ turnitin.name }}</dd>
+            <dt>Overall Similarity</dt><dd>{{ turnitin.similarity }}%</dd>
+          </dl>
+          {% if turnitin.similarity > turnitin.limit %}
+            <div class="fee-result late">เกินเกณฑ์ — ผลตรวจจะแจ้งเป็นจุดที่ต้องแก้ (สีแดง)</div>
+          {% else %}
+            <div class="fee-result ok">ไม่เกินเกณฑ์</div>
+          {% endif %}
+        {% elif turnitin %}
+          <div class="fee-result unknown">ระบบอ่านค่า Overall Similarity จากไฟล์ "{{ turnitin.name }}" ไม่ได้
+            — ผลตรวจจะมีข้อสีส้มให้เปิดไฟล์ดูเอง</div>
+        {% else %}
+          <div class="fee-result unknown">ไม่ได้แนบไฟล์ Turnitin</div>
+        {% endif %}
+      </section>
+
+      <section class="panel" aria-labelledby="fee-title">
+        <h2 id="fee-title">ค่าปรับส่งเล่มล่าช้า</h2>
+        <p class="hint">ครบกำหนดส่ง = วันที่สอบผ่าน + 20 วัน · ส่งเข้าระบบหลังวันครบกำหนดมีค่าปรับ</p>
+        {% if fee %}
+          <dl class="fee-grid">
+            <dt>วันที่สอบผ่าน</dt><dd>{{ fee.exam }}{% if student.exam_date %} <span class="role">({{ student.exam_date }})</span>{% endif %}</dd>
+            <dt>ครบกำหนดส่ง</dt><dd>{{ fee.due }}</dd>
+            <dt>วันที่ส่งเข้าระบบ</dt><dd>{{ fee.submitted }}</dd>
+          </dl>
+          {% if fee.late %}
+            <div class="fee-result late">มีค่าปรับ — ส่งเกินกำหนด {{ fee.days_late }} วัน</div>
+          {% else %}
+            <div class="fee-result ok">ไม่มีค่าปรับ — ส่งภายในกำหนด</div>
+          {% endif %}
+        {% else %}
+          <div class="fee-result unknown">ระบบคิดค่าปรับไม่ได้ เพราะอ่านวันที่สอบผ่าน "{{ student.exam_date }}" ไม่ออก
+            — กรุณาเลือกค่าปรับเองในหน้าผลตรวจ</div>
+        {% endif %}
+      </section>
+
+      <section class="panel" aria-labelledby="names-title">
+        <h2 id="names-title">รายชื่อบนหน้าลงนาม</h2>
+        <p class="hint">เทียบกับภาพทีละชุด แล้วติ้กยืนยันว่าดูแล้ว — ชื่อสะกดผิด จำนวนกรรมการ และตำแหน่งคณบดี/ผู้อำนวยการ
+          ระบบตรวจและแจ้งเป็นสีแดงในผลตรวจเองเหมือนเดิม</p>
+        {% for key, label in sections %}
+        <div class="section" data-section="{{ key }}">
+          <div class="tick-label" style="font-weight:600; font-size:.92rem; color:var(--navy);">{{ label }}</div>
+          {% if key in ('advisory', 'exam') %}
+            {% set people = committees.get(key) or [] %}
+            {% if people %}
+              <ol>{% for person in people %}<li>{{ person.name }}{% if person.role %} <span class="role">· {{ person.role }}</span>{% endif %}</li>{% endfor %}</ol>
+            {% else %}
+              <p class="empty">ไม่มีรายชื่อจากไฟล์ eThesis — เทียบกับเอกสาร {{ 'บฑ.1' if key == 'advisory' else 'บฑ.2' }} เอง</p>
+            {% endif %}
+          {% else %}
+            <p class="empty">ดูช่องมุมล่างขวาในภาพหน้าลงนาม {{ 1 if key == 'program_head' else 2 }}</p>
+          {% endif %}
+          <label class="tick"><input type="checkbox" data-tick="{{ key }}"> ตรวจแล้ว</label>
+        </div>
+        {% endfor %}
+      </section>
+
+      <section class="panel" aria-labelledby="layout-title">
+        <h2 id="layout-title">โครงสร้างหน้าลงนาม</h2>
+        <p class="hint">ตอบทุกข้อ — ข้อที่ "ไม่ผ่าน" เท่านั้นที่เข้าข้อความแจ้งนักศึกษา (เรียงเลขใหม่ให้เอง)</p>
+        {% for number, text in items %}
+        <div class="item" data-item="{{ number }}">
+          <div><span class="num">({{ number }})</span>{{ text }}</div>
+          <div class="pf" role="group" aria-label="ข้อ {{ number }}">
+            <button type="button" class="p" data-answer="pass" aria-pressed="false">✓ ผ่าน</button>
+            <button type="button" class="f" data-answer="fail" aria-pressed="false">✗ ไม่ผ่าน</button>
+          </div>
+        </div>
+        {% endfor %}
+        <p class="outcome" id="outcome" aria-live="polite"></p>
+      </section>
+    </div>
+  </div>
+</main>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="left" id="bar-msg" aria-live="polite"></div>
+    <button type="button" class="go" id="go" disabled>ตรวจต่อ →</button>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="ov-title">
+  <div class="box">
+    <b id="ov-title">กำลังตรวจส่วนอื่นของเล่ม</b>
+    <p id="ov-stage">…</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var JOB = {{ job_id | tojson }};
+  var LOGIN_AGAIN = '/login?next=' + encodeURIComponent('/precheck/' + JOB);
+  var ANSWERED = {{ (answered or none) | tojson }};
+  var ticks = Array.from(document.querySelectorAll('[data-tick]'));
+  var items = Array.from(document.querySelectorAll('[data-item]'));
+  var go = document.getElementById('go');
+  var barMsg = document.getElementById('bar-msg');
+  var outcome = document.getElementById('outcome');
+  var answers = {};
+
+  function setAnswer(row, value){
+    answers[row.dataset.item] = value;
+    row.classList.toggle('pass', value === 'pass');
+    row.classList.toggle('fail', value === 'fail');
+    row.querySelectorAll('button').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.answer === value));
+    });
+  }
+  function refresh(){
+    ticks.forEach(function(t){ t.closest('.section').classList.toggle('checked', t.checked); });
+    var left = ticks.filter(function(t){ return !t.checked; }).length;
+    var unanswered = items.filter(function(r){ return !answers[r.dataset.item]; }).length;
+    var failed = items.filter(function(r){ return answers[r.dataset.item] === 'fail'; }).length;
+    outcome.textContent = unanswered ? '' : (failed
+      ? 'ไม่ผ่าน ' + failed + ' ข้อ — ผลตรวจจะมีข้อ "โครงสร้างหน้าลงนาม" แจ้งนักศึกษาเฉพาะข้อที่ไม่ผ่าน'
+      : 'ผ่านทุกข้อ — โครงสร้างหน้าลงนามถูกต้อง ไม่มีข้อความแจ้งนักศึกษาเรื่องนี้');
+    var parts = [];
+    if (left) parts.push('ยังไม่ได้ติ้กรายชื่อ ' + left + ' ชุด');
+    if (unanswered) parts.push('ยังไม่ได้ตอบโครงสร้าง ' + unanswered + ' ข้อ');
+    barMsg.className = 'left';
+    barMsg.textContent = parts.length ? parts.join(' · ') : 'ครบแล้ว กดตรวจต่อเพื่อไปหน้าผลตรวจ';
+    go.disabled = parts.length > 0;
+  }
+
+  ticks.forEach(function(t){ t.addEventListener('change', refresh); });
+  items.forEach(function(row){
+    row.querySelectorAll('button').forEach(function(b){
+      b.addEventListener('click', function(){ setAnswer(row, b.dataset.answer); refresh(); });
+    });
+  });
+  // กลับมาหน้านี้อีกครั้ง (ย้อนกลับ/เปิดลิงก์ผลตรวจก่อนตอบ) — คงคำตอบเดิมไว้
+  if (ANSWERED){
+    ticks.forEach(function(t){ t.checked = true; });
+    var failedSet = (ANSWERED.failed_items || []).map(String);
+    items.forEach(function(row){
+      setAnswer(row, failedSet.indexOf(row.dataset.item) !== -1 ? 'fail' : 'pass');
+    });
+  }
+  refresh();
+
+  // ความคืบหน้าของการตรวจส่วนอื่น (เบื้องหลัง)
+  var bg = document.getElementById('bg-status');
+  var ovStage = document.getElementById('ov-stage');
+  var waiting = false, failures = 0;
+  function poll(){
+    var ctrl = new AbortController();
+    var to = setTimeout(function(){ ctrl.abort(); }, 8000);
+    // Accept: application/json ให้ระบบตอบ 401 (ไม่ใช่พาไปหน้า login) เมื่อเซสชันหมดอายุ
+    fetch('/progress/' + JOB, {signal: ctrl.signal, headers: {'Accept': 'application/json'}}).then(function(r){
+      clearTimeout(to);
+      if (r.status === 401) { window.location.href = LOGIN_AGAIN; return null; }
+      if (!r.ok) throw new Error('poll ' + r.status);
+      return r.json();
+    }).then(function(p){
+      if (!p) return;
+      failures = 0;
+      if (p.done){
+        bg.textContent = p.error ? 'ตรวจส่วนอื่นไม่สำเร็จ' : 'ตรวจส่วนอื่นของเล่มเสร็จแล้ว';
+        bg.classList.add('done');
+        if (waiting) window.location.href = '/result/' + JOB;
+        return;
+      }
+      bg.textContent = 'กำลังตรวจเบื้องหลัง: ' + p.stage;
+      ovStage.textContent = p.stage;
+      setTimeout(poll, 1500);
+    }).catch(function(){
+      clearTimeout(to);
+      failures += 1;
+      if (failures >= 40){
+        bg.textContent = 'ขาดการเชื่อมต่อกับระบบตรวจ';
+        if (waiting) { document.getElementById('overlay').classList.remove('on');
+          barMsg.className = 'left err'; barMsg.textContent = 'ขาดการเชื่อมต่อกับระบบตรวจ กรุณาลองใหม่'; }
+        return;
+      }
+      setTimeout(poll, 1500);
+    });
+  }
+  poll();
+
+  go.addEventListener('click', function(){
+    if (go.disabled) return;
+    go.disabled = true;
+    var payload = {
+      sections_ok: ticks.filter(function(t){ return t.checked; }).map(function(t){ return t.dataset.tick; }),
+      items: answers
+    };
+    fetch('/precheck/' + JOB, {method:'POST', body: JSON.stringify(payload),
+                               headers:{'Content-Type':'application/json', 'Accept':'application/json'}})
+      .then(function(r){
+        if (r.status === 401) { window.location.href = LOGIN_AGAIN; return new Promise(function(){}); }
+        return r.json().then(function(b){ return {ok: r.ok, body: b}; },
+                             function(){ return {ok: false, body: {error: 'บันทึกไม่สำเร็จ (' + r.status + ')'}}; });
+      })
+      .then(function(res){
+        if (!res.ok) throw new Error(res.body.error || 'บันทึกไม่สำเร็จ');
+        waiting = true;
+        if (bg.classList.contains('done')) { window.location.href = '/result/' + JOB; return; }
+        document.getElementById('overlay').classList.add('on');
+      })
+      .catch(function(err){
+        go.disabled = false;
+        barMsg.className = 'left err';
+        barMsg.textContent = err.message;
+      });
+  });
+})();
+</script>
+{% include "_alive.html" %}
+</body>
+</html>

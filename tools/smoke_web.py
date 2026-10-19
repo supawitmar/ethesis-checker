@@ -90,15 +90,39 @@ def main():
     # วันดำเนินการ: ไม่กรอก = ระบบไม่ตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569)
     form["queue_date"] = "2026-09-20"
     form["checked_date"] = "2026-09-24"
+    # อัปเดต 1.4: วันที่ส่งเข้าระบบ (คิดค่าปรับ) + ไฟล์ Turnitin บังคับทั้งคู่
+    form["submitted_date"] = "2026-09-15"
+    sys.path.insert(0, str(CODE / "tests"))
+    from test_web import make_pdf          # PDF เล็ก ๆ ที่มีบรรทัด Overall Similarity
+    turnitin = {"turnitin": ("turnitin.pdf", make_pdf("31% Overall Similarity"), "application/pdf")}
 
     with open(BOOKS / f"{book}.pdf", "rb") as fh:
         started = client.post("/check", data=form,
-                              files={"pdf": (f"{book}.pdf", fh, "application/pdf")})
+                              files={"pdf": (f"{book}.pdf", fh, "application/pdf"), **turnitin})
     passed.append(check("สั่งตรวจ", started.status_code == 200, str(started.status_code)))
     job = started.json().get("job_id")
     passed.append(check("ได้รหัสงาน", bool(job)))
     if not job:
         return 1
+
+    # ---- ขั้นที่ 1: ตรวจหน้าลงนาม ค่าปรับ และ Turnitin ก่อนหน้าผลตรวจ (อัปเดต 1.4) ----
+    early = client.get(f"/result/{job}", follow_redirects=False)
+    passed.append(check("หน้าผลตรวจรอให้ตรวจหน้าลงนามก่อน", early.status_code == 303,
+                        str(early.status_code)))
+    pre = client.get(f"/precheck/{job}")
+    passed.append(check("เปิดหน้าตรวจหน้าลงนามได้", pre.status_code == 200, str(pre.status_code)))
+    passed.append(check("หน้าตรวจหน้าลงนามมีภาพหน้าลงนาม 2 หน้า",
+                        pre.text.count(f'src="/precheck/{job}/page/') == 2))
+    image = client.get(f"/precheck/{job}/page/0.png")
+    passed.append(check("ภาพหน้าลงนามเป็น PNG",
+                        image.status_code == 200 and image.content[:4] == b"\x89PNG",
+                        str(image.status_code)))
+    passed.append(check("หน้าตรวจหน้าลงนามบอกค่า Turnitin เกินเกณฑ์",
+                        "31%" in pre.text and "เกินเกณฑ์" in pre.text))
+    answer = {"sections_ok": ["advisory", "exam", "program_head", "faculty_head"],
+              "items": {"1": "pass", "2": "fail", "3": "pass", "4": "pass", "5": "pass"}}
+    saved = client.post(f"/precheck/{job}", json=answer)
+    passed.append(check("บันทึกคำตอบหน้าลงนาม", saved.status_code == 200, saved.text[:120]))
 
     for _ in range(3000):
         if client.get(f"/progress/{job}").json().get("done"):
@@ -117,6 +141,15 @@ def main():
                             f'<b id="{box}">' in html))
     passed.append(check("หน้ารายงานเขียนตัวเลขจากเซิร์ฟเวอร์",
                         "renderZoneCounts(data.counts)" in html))
+    passed.append(check("หน้าผลตรวจได้คำตอบหน้าลงนามไปตั้งค่า",
+                        '{"failed_items": [2]}' in html))
+    layout = client.post(f"/summary/{job}", json={
+        "failed": [], "passed": [],
+        "staff": ["SIGNATURE_LAYOUT_WRONG", "SIGNATURE_LAYOUT_ITEM_2"]}).json()["plain"]
+    passed.append(check("ข้อความโครงสร้างหน้าลงนามมีเฉพาะข้อที่ไม่ผ่าน",
+                        "(1) หากมีคณะกรรมการเกิน 5 ท่าน" in layout and "(2)" not in layout))
+    passed.append(check("ข้อความสรุปแจ้ง Turnitin เกินเกณฑ์",
+                        "ผลตรวจ Turnitin (Overall Similarity) 31% เกินเกณฑ์" in layout))
     passed.append(check("ปุ่มผ่านของข้อสังเกตถูกส่งไปด้วย",
                         '[data-zone="YELLOW"]' in html.split("function collectPassed()", 1)[-1][:400]))
 
@@ -165,7 +198,7 @@ def main():
     short = dict(form, title_en="")
     with open(BOOKS / f"{book}.pdf", "rb") as fh:
         refused = client.post("/check", data=short,
-                              files={"pdf": (f"{book}.pdf", fh, "application/pdf")})
+                              files={"pdf": (f"{book}.pdf", fh, "application/pdf"), **turnitin})
     passed.append(check("ช่องข้อมูลอนุมัติว่าง ระบบไม่ให้ตรวจ",
                         refused.status_code == 400, str(refused.status_code)))
     passed.append(check("บอกชื่อช่องที่ยังไม่ได้กรอก",
@@ -176,7 +209,7 @@ def main():
     undated = {k: v for k, v in form.items() if k != "queue_date"}
     with open(BOOKS / f"{book}.pdf", "rb") as fh:
         refused_date = client.post("/check", data=undated,
-                                   files={"pdf": (f"{book}.pdf", fh, "application/pdf")})
+                                   files={"pdf": (f"{book}.pdf", fh, "application/pdf"), **turnitin})
     passed.append(check("ไม่กรอกวันดำเนินการ ระบบไม่ให้ตรวจ",
                         refused_date.status_code == 400, str(refused_date.status_code)))
     passed.append(check("บอกว่าขาดวันดำเนินการ",

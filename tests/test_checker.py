@@ -6676,7 +6676,7 @@ class TheReportPageCanAlwaysReceiveStaffWording(unittest.TestCase):
         html = self._render(self._clean_result())
         self.assertIn('<div class="sf-state" hidden></div>', html)
         self.assertIn("function renderStaffState(card)", html)
-        self.assertIn("if (card.classList.contains('sf')) renderStaffState(card);", html)
+        self.assertIn("if (card.classList.contains('sf')) { syncSigItems(card); renderStaffState(card); }", html)
         self.assertIn("renderAllStaffState();", html)
 
     def test_a_clean_book_still_gets_a_copy_box(self):
@@ -9345,6 +9345,120 @@ class TheReferenceHeadingIsReportedOnThePageThatCarriesIt(unittest.TestCase):
         self.assertEqual(
             i18n.tr_en('หัวข้อในหน้านี้เลือกหลายคำ: "REFERENCES/BIBLIOGRAPHY"', pairs),
             'The heading on this page uses multiple terms: "REFERENCES/BIBLIOGRAPHY"')
+
+
+class Update14LateFee(unittest.TestCase):
+    """ค่าปรับ (อัปเดต 1.4 เจ้าของสั่ง 19 ต.ค. 2569): ครบกำหนด = สอบผ่าน + 20 วัน ส่งหลังจากนั้น = ปรับ"""
+
+    def test_submitting_on_the_due_date_is_not_late(self):
+        fee = checker_module.late_fee("30 November 2023", "2023-12-20")
+        self.assertEqual(fee["due"].isoformat(), "2023-12-20")
+        self.assertFalse(fee["late"])
+        self.assertEqual(fee["days_late"], 0)
+
+    def test_the_day_after_the_due_date_is_late(self):
+        fee = checker_module.late_fee("30 November 2023", "2023-12-21")
+        self.assertTrue(fee["late"])
+        self.assertEqual(fee["days_late"], 1)
+
+    def test_thai_buddhist_dates_and_year_change(self):
+        fee = checker_module.late_fee("วันที่ 11 พฤษภาคม พ.ศ. 2569", "2026-06-01")
+        self.assertEqual(fee["due"].isoformat(), "2026-05-31")
+        self.assertEqual(fee["days_late"], 1)
+        fee = checker_module.late_fee("31 December 2025", "2026-01-21")
+        self.assertEqual(fee["due"].isoformat(), "2026-01-20")
+        self.assertTrue(fee["late"])
+
+    def test_other_written_forms_of_the_exam_date(self):
+        for text in ("November 30, 2023", "30 November, 2023", "30 Nov 2023",
+                     "30 November 2023 / 30 พฤศจิกายน 2566"):
+            with self.subTest(text=text):
+                fee = checker_module.late_fee(text, "2023-12-20")
+                self.assertEqual(fee["exam"].isoformat(), "2023-11-30")
+
+    def test_unreadable_dates_mean_staff_choose_the_fee(self):
+        self.assertIsNone(checker_module.late_fee("ไม่ทราบ", "2023-12-20"))
+        self.assertIsNone(checker_module.late_fee("30 November 2023", ""))
+        self.assertIsNone(checker_module.late_fee("31 February 2024", "2024-03-01"))
+
+
+class Update14SignatureLayoutText(unittest.TestCase):
+    """ข้อความโครงสร้างหน้าลงนามมีเฉพาะข้อที่ติ้กไม่ผ่าน เรียงเลขใหม่ (อัปเดต 1.4)"""
+
+    def setUp(self):
+        self.choice = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_LAYOUT_WRONG"][1]
+
+    def test_only_failed_items_are_listed_and_renumbered(self):
+        text = checker_module.signature_layout_text(self.choice["text"], {2, 5})
+        items = [ln for ln in text.split(NEWLINE) if re.match(r"^\(\d\)", ln)]
+        self.assertEqual(len(items), 2)
+        self.assertTrue(items[0].startswith("(1) หากมีคณะกรรมการเกิน 5 ท่าน"))
+        self.assertTrue(items[1].startswith("(2) คุณวุฒิของอาจารย์ทุกท่าน"))
+        self.assertIn("กรุณาปรับโครงสร้างหน้าลงนาม", text)
+        self.assertTrue(text.endswith("https://bit.ly/4jXLjgw"))
+        self.assertIn(NEWLINE + NEWLINE + "ดูตัวอย่าง", text)
+
+    def test_no_item_given_means_the_full_wording(self):
+        self.assertEqual(checker_module.signature_layout_text(self.choice["text"], set()),
+                         self.choice["text"])
+
+    def test_both_languages_keep_the_same_line_count(self):
+        for failed in ({1}, {3, 4}, {1, 2, 3, 4, 5}):
+            th = checker_module.signature_layout_text(self.choice["text"], failed)
+            en = checker_module.signature_layout_text(self.choice["text_en"], failed)
+            self.assertEqual(len([l for l in th.split(NEWLINE) if l.strip()]),
+                             len([l for l in en.split(NEWLINE) if l.strip()]), failed)
+
+    def test_the_summary_follows_the_ticked_items(self):
+        report = checker_module.check_result(checker_module.Report(), {"front_label_style": "thai"})
+        text = checker_module.plain_summary(
+            report, staff=["SIGNATURE_LAYOUT_WRONG", "SIGNATURE_LAYOUT_ITEM_4", "BOGUS"])
+        self.assertIn("ในหน้าลงนาม (หน้า ก - ข)", text)
+        self.assertIn("(1) ลบตำแหน่งที่อยู่ใต้คุณวุฒิ", text)
+        self.assertNotIn("(2)", text)
+        self.assertNotIn("คุณวุฒิสูงสุด", text)
+
+
+class Update14Turnitin(unittest.TestCase):
+    """ไฟล์ Turnitin: Overall Similarity ต้องไม่เกิน 25% (อัปเดต 1.4)"""
+
+    def _issues(self, turnitin):
+        rep = checker_module.Report()
+        checker_module._report_turnitin(rep, turnitin)
+        return rep.zones
+
+    def test_over_the_limit_is_red(self):
+        zones = self._issues({"similarity": 28})
+        self.assertEqual(len(zones["RED"]), 1)
+        self.assertEqual(zones["RED"][0]["found"], "ผลตรวจ Turnitin (Overall Similarity) 28% เกินเกณฑ์")
+        self.assertEqual(zones["RED"][0]["rule_id"], "TURNITIN.SIMILARITY")
+
+    def test_at_or_under_the_limit_is_clean(self):
+        for value in (25, 13, 0):
+            zones = self._issues({"similarity": value})
+            self.assertEqual((zones["RED"], zones["ORANGE"]), ([], []), value)
+
+    def test_unreadable_is_orange_and_absent_is_nothing(self):
+        self.assertEqual(len(self._issues({"similarity": None})["ORANGE"]), 1)
+        zones = self._issues(None)
+        self.assertEqual((zones["RED"], zones["ORANGE"]), ([], []))
+
+    def test_the_reader_finds_the_percentage(self):
+        import tempfile
+        try:
+            from test_web import make_pdf
+        except ImportError:          # รันแบบ python -m unittest tests.test_checker
+            from tests.test_web import make_pdf
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "t.pdf"
+            path.write_bytes(make_pdf("28% Overall Similarity"))
+            self.assertEqual(checker_module.turnitin_similarity(str(path)), 28)
+            path.write_bytes(make_pdf("no number here"))
+            self.assertIsNone(checker_module.turnitin_similarity(str(path)))
+
+    def test_the_summary_puts_turnitin_before_the_cover(self):
+        order = checker_module.SUMMARY_SECTION_ORDER
+        self.assertLess(order.index("ไฟล์ Turnitin"), order.index("หน้าปก"))
 
 
 if __name__ == "__main__":

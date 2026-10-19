@@ -75,6 +75,14 @@
   .stu .wdate { margin-left:10px; font-size:.8rem; font-weight:400; color:var(--ink-3);
        white-space:nowrap; }
   .stu .wdate b { font-weight:600; color:var(--ink-2); }
+  .stu .wdate.fee-late b { color:#a12626; }
+  .stu .wdate.fee-ok b { color:#1a7a43; }
+  /* เช็กลิสต์โครงสร้างหน้าลงนาม (อัปเดต 1.4) — ขึ้นเมื่อเลือก "โครงสร้างหน้าลงนามผิด" */
+  .sig-items { margin-top:10px; padding:10px 12px; border:1px dashed #d9c3e6; border-radius:10px; background:#fbf7fd; }
+  .sig-items[hidden] { display:none; }
+  .sig-items .si-head { font-size:.82rem; font-weight:600; color:#4a2a5c; margin-bottom:6px; }
+  .sig-items label { display:flex; gap:8px; align-items:flex-start; font-size:.84rem; margin:4px 0; cursor:pointer; }
+  .sig-items input { margin-top:3px; flex:none; accent-color:#a12626; }
   .stu .book-open { display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:4px 12px;
        border-radius:99px; font-size:.8rem; font-weight:600; color:var(--navy); text-decoration:none; white-space:nowrap;
        background:var(--navy-soft); border:1px solid #d6e2f1; transition:background .15s, border-color .15s; }
@@ -411,7 +419,15 @@
           {% if queue_date %}<span class="wdate"><span data-th="เข้าคิว" data-en="Queued">เข้าคิว</span>
             <b>{{ queue_date }}</b></span>{% endif %}
           {% if checked_date %}<span class="wdate"><span data-th="ตรวจเมื่อ" data-en="Checked">ตรวจเมื่อ</span>
-            <b>{{ checked_date }}</b></span>{% endif %}</div></div>
+            <b>{{ checked_date }}</b></span>{% endif %}
+          {# อัปเดต 1.4: ค่าปรับคิดจากวันที่สอบผ่าน + 20 วัน เทียบวันที่ส่งเข้าระบบ (main._fee_view) #}
+          {% if submitted_date %}<span class="wdate"><span data-th="ส่งเข้าระบบ" data-en="Submitted">ส่งเข้าระบบ</span>
+            <b>{{ submitted_date }}</b></span>{% endif %}
+          {% if fee %}<span class="wdate fee-{{ 'late' if fee.late else 'ok' }}" id="fee-line">
+            {% if fee.late %}<b data-th="มีค่าปรับ (ครบกำหนด {{ fee.due }} · เกิน {{ fee.days_late }} วัน)"
+                data-en="Late fee (due {{ fee.due }} · {{ fee.days_late }} day(s) late)">มีค่าปรับ (ครบกำหนด {{ fee.due }} · เกิน {{ fee.days_late }} วัน)</b>
+            {% else %}<b data-th="ไม่มีค่าปรับ (ครบกำหนด {{ fee.due }})"
+                data-en="No late fee (due {{ fee.due }})">ไม่มีค่าปรับ (ครบกำหนด {{ fee.due }})</b>{% endif %}</span>{% endif %}</div></div>
     </div>
 
   <div class="verdict-bar">
@@ -433,6 +449,8 @@
        อยู่นอกเงื่อนไขข้างล่าง เพราะต้องใช้แปลแม้ในเล่มที่ระบบไม่พบจุดผิดเลย #}
     {% if report.staff_findings %}
     <script id="staff-findings-data" type="application/json">{{ report.staff_findings | tojson }}</script>
+    <script id="precheck-data" type="application/json">{{ (precheck or none) | tojson }}</script>
+    <script id="fee-data" type="application/json">{{ (fee or none) | tojson }}</script>
     {% endif %}
     {# เล่มที่ระบบไม่พบจุดผิดเลยก็ต้องมีกล่องสรุป ไม่งั้นเจ้าหน้าที่กดปุ่ม "ผิด" แล้ว
        ถ้อยคำไม่มีที่ไป (กล่องทั้งกล่องไม่ถูกสร้าง) #}
@@ -615,6 +633,18 @@
       </div>
       {# บอกให้เห็นตรงนี้เลยว่าถ้อยคำเข้าสรุปแล้ว เจ้าหน้าที่จะได้ไม่ต้องเลื่อนขึ้นไปดู
          กล่องคัดลอกทุกครั้งที่กด (เคยสับสนว่ากดแล้วไม่มีอะไรเกิดขึ้น) #}
+      {% if sf.id == 'SIGNATURE_LAYOUT' and layout_items %}
+      {# อัปเดต 1.4: ข้อที่ติ๊ก = ไม่ผ่าน เข้าข้อความสรุปเฉพาะข้อนั้น (checker.signature_layout_text)
+         ค่าเริ่มมาจากหน้าต่างตรวจหน้าลงนามก่อนตรวจเล่ม แก้ได้ #}
+      <div class="sig-items" hidden>
+        <div class="si-head" data-th="ติ๊กข้อที่ไม่ผ่าน (เข้าข้อความสรุปเฉพาะข้อที่ติ๊ก)"
+             data-en="Tick the items that fail (only ticked items go into the summary)">ติ๊กข้อที่ไม่ผ่าน (เข้าข้อความสรุปเฉพาะข้อที่ติ๊ก)</div>
+        {% for item in layout_items %}
+        <label><input type="checkbox" data-sig-item="{{ item.n }}" onchange="scheduleSummaryRefresh()">
+          <span data-th="({{ item.n }}) {{ item.th }}" data-en="({{ item.n }}) {{ item.en }}">({{ item.n }}) {{ item.th }}</span></label>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div class="sf-state" hidden></div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
       <div class="note-editor"><textarea placeholder="พิมพ์ความเห็นของเจ้าหน้าที่..."></textarea>
@@ -701,7 +731,7 @@ var CATMAP = {
   'สะกดผิดเล็กน้อย (typo)':'Minor typo', 'ข้อมูลนักศึกษาไม่ถูกต้อง':'Student data incorrect',
   'ชื่อปริญญาไม่ตรงข้อมูลอนุมัติ':'Degree name mismatch',
   // ชื่อกลุ่มการ์ดในรายงาน = ส่วนของเล่มที่ต้องไปแก้ (เรียงตามลำดับที่อยู่ในเล่มจริง)
-  'หน้าปก':'Cover page', 'หน้าลงนาม':'Signature pages', 'กิตติกรรมประกาศ':'Acknowledgements',
+  'ไฟล์ Turnitin':'Turnitin report', 'หน้าปก':'Cover page', 'หน้าลงนาม':'Signature pages', 'กิตติกรรมประกาศ':'Acknowledgements',
   'บทคัดย่อ':'Abstract', 'สารบัญ':'Table of contents', 'เนื้อหา (บท)':'Body chapters',
   'อื่น ๆ':'Other'
 };
@@ -1584,6 +1614,16 @@ var TR = [
   [/ไม่พบวันที่สอบ ("[^"]+")/g, 'Exam date $1 not found'],
   [/วันที่บนหน้าลงนาม = วันที่มีผลสอบผ่าน/g, 'Signature-page date must be the exam pass date'],
   [/ไม่พบปี (\S+) บนหน้าปก/g, 'Year $1 not found on the cover'],
+  // ไฟล์ Turnitin (อัปเดต 1.4)
+  [/^ผลตรวจ Turnitin \(Overall Similarity\) (\d+)% เกินเกณฑ์$/g, 'Turnitin result (Overall Similarity) $1% exceeds the limit'],
+  [/^ผลตรวจ Turnitin \(Overall Similarity\) ต้องไม่เกิน (\d+)%$/g, 'The Turnitin result (Overall Similarity) must not exceed $1%'],
+  [/^ต้องไม่เกิน (\d+)%$/g, 'Must not exceed $1%'],
+  [/^ปรับเนื้อหาให้ค่า Overall Similarity ไม่เกิน (\d+)% แล้วแนบผลตรวจ Turnitin ใหม่$/g,
+   'Revise the content so the Overall Similarity is no more than $1%, then attach a new Turnitin report'],
+  [/^ระบบอ่านค่า Overall Similarity จากไฟล์ Turnitin ไม่ได้$/g, 'The system could not read the Overall Similarity from the Turnitin file'],
+  [/^เปิดไฟล์ Turnitin ดูค่า Overall Similarity ด้วยตา ถ้าไม่เกินเกณฑ์ให้กดผ่าน$/g,
+   'Open the Turnitin file and read the Overall Similarity yourself; mark it as passed if it is within the limit'],
+  [/^ไฟล์ Turnitin$/g, 'Turnitin report'],
   [/ปี = ปีที่มีผลสอบผ่าน/g, 'Year = the exam pass year'],
   [/^ปีบนหน้าปกในเล่มเขียนว่า ("[^"]+")$/g, 'The year on the cover reads $1'],
   [/^ต้องแก้เป็น ("[^"]+") โดยอ้างอิงจากปีที่มีผลสอบผ่าน$/g, 'Must be changed to $1, based on the exam pass year'],
@@ -1839,8 +1879,11 @@ var STAFF_BLOCK_EN = [];
           if (!th || !en) return;
           if (whole){ STAFF_BLOCK_EN.push([th, en]); return; }
           var thLines = lines(th), enLines = lines(en);
+          // ข้อเช็กลิสต์โครงสร้างหน้าลงนามถูกเรียงเลขใหม่ตามข้อที่ไม่ผ่าน (อัปเดต 1.4) จึงเก็บคู่แปล
+          // แบบไม่มีเลข "(n) " นำหน้า แล้ว trSummary เติมเลขของบรรทัดนั้นกลับเอง
+          var bare = function(s){ return s.replace(/^\(\d+\)\s*/, ''); };
           thLines.forEach(function(line, i){
-            if (enLines[i]) STAFF_LINE_EN[line] = enLines[i];
+            if (enLines[i]) STAFF_LINE_EN[bare(line)] = bare(enLines[i]);
           });
         });
       });
@@ -1859,9 +1902,11 @@ function trSummary(text){
   // บรรทัดอังกฤษที่เพิ่งแทนเข้าไปผ่านลูปข้างล่างได้ปลอดภัย — ทุกกฎใน TR มีอักษรไทย
   // อยู่ในรูปแบบที่ต้องตรง จึงไม่มีกฎไหนไปแตะข้อความอังกฤษล้วน
   return out.split('\n').map(function(line){
-    var m = line.match(/^(\s*(?:\d+\.\s*)?)([\s\S]*)$/);
-    if (!m[2]) return line;
-    return m[1] + (STAFF_LINE_EN[m[2].trim()] || trEN(m[2]));
+    var m = line.match(/^(\s*(?:\d+\.\s*)?)(\(\d+\)\s*)?([\s\S]*)$/);
+    if (!m[3]) return line;
+    var staffEN = STAFF_LINE_EN[m[3].trim()];
+    if (staffEN) return m[1] + (m[2] || '') + staffEN;
+    return m[1] + trEN((m[2] || '') + m[3]);
   }).join('\n');
 }
 function currentSummaryText(){
@@ -1892,8 +1937,15 @@ function collectFailed(){
 // จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" — ถ้อยคำชุดที่กำหนดไว้จะถูกเพิ่ม
 // เข้าข้อความสรุปในส่วนของเล่มที่ระบุไว้ในทะเบียน (checker.STAFF_FINDINGS)
 function collectStaff(){
-  return Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
+  var picked = Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
     .map(el => el.getAttribute('data-choice'));
+  // อัปเดต 1.4: ข้อเช็กลิสต์ที่ไม่ผ่าน ส่งเฉพาะตอนเลือก "โครงสร้างหน้าลงนามผิด" อยู่
+  if (picked.indexOf('SIGNATURE_LAYOUT_WRONG') !== -1){
+    document.querySelectorAll('.sig-items input[data-sig-item]:checked').forEach(function(box){
+      picked.push('SIGNATURE_LAYOUT_ITEM_' + box.getAttribute('data-sig-item'));
+    });
+  }
+  return picked;
 }
 // ข้อที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) — สีส้มถูกตัดออกจากข้อความสรุป ส่วนสีเหลือง
 // ไม่เคยอยู่ในสรุปอยู่แล้ว (เข้าเมื่อกด "ไม่ผ่าน" เท่านั้น) แต่ต้องส่งไปด้วย ไม่งั้น
@@ -1988,6 +2040,7 @@ function applyVerdictScope(verdict){
   var shown = document.querySelectorAll('.sf:not([hidden])').length;
   var count = document.querySelector('#sf-head .count b');
   if (count) count.textContent = String(shown);
+  if (typeof autoFee === 'function' && autoFee()) scheduleSummaryRefresh();
 }
 function setSummaryBusy(on){
   const box = document.querySelector('.copybox .copy-btn');
@@ -2204,10 +2257,59 @@ function fallbackCopy(text){
   const ta = document.querySelector('.copy-text');
   if (ta){ ta.focus(); ta.select(); try { document.execCommand('copy'); } catch(e){} }
 }
+// อัปเดต 1.4: คำตอบจากหน้าต่างตรวจหน้าลงนาม (ก่อนตรวจเล่ม) และค่าปรับที่ระบบคิดไว้ — ตั้งให้เอง แก้ได้
+var PRECHECK = (function(){
+  try { return JSON.parse(document.getElementById('precheck-data').textContent || 'null'); }
+  catch(e){ return null; }
+})();
+var FEE = (function(){
+  try { return JSON.parse(document.getElementById('fee-data').textContent || 'null'); }
+  catch(e){ return null; }
+})();
+function pressChoice(card, choiceId){
+  var btn = card && card.querySelector('.pf[data-choice="' + choiceId + '"]');
+  if (!btn || btn.classList.contains('on')) return false;
+  card.querySelectorAll('.pf').forEach(function(b){ b.classList.remove('on'); });
+  card.classList.remove('state-pass', 'state-fail');
+  btn.classList.add('on');
+  card.classList.add('state-' + (btn.classList.contains('fail') ? 'fail' : 'pass'));
+  syncSigItems(card);
+  renderStaffState(card);
+  return true;
+}
+// เช็กลิสต์ขึ้นเฉพาะตอนเลือก "โครงสร้างหน้าลงนามผิด"
+function syncSigItems(card){
+  var box = card && card.querySelector('.sig-items');
+  if (!box) return;
+  box.hidden = !card.querySelector('.pf.on[data-choice="SIGNATURE_LAYOUT_WRONG"]');
+}
+function applyPrecheck(){
+  if (!PRECHECK) return false;
+  var card = document.querySelector('.sf[data-staff="SIGNATURE_LAYOUT"]');
+  if (!card) return false;
+  var failed = (PRECHECK.failed_items || []).map(String);
+  card.querySelectorAll('.sig-items input[data-sig-item]').forEach(function(box){
+    box.checked = failed.indexOf(box.getAttribute('data-sig-item')) !== -1;
+  });
+  return pressChoice(card, failed.length ? 'SIGNATURE_LAYOUT_WRONG' : 'SIGNATURE_LAYOUT_OK');
+}
+// ค่าปรับ: เลือกให้ในหัวข้อที่ใช้กับผลตรวจตอนนี้ (เล่มผ่าน = PASS_FEE, ไม่ผ่าน = LATE_FEE) ถ้ายังไม่ได้เลือก
+function autoFee(){
+  if (!FEE) return false;
+  var changed = false;
+  ['LATE_FEE', 'PASS_FEE'].forEach(function(id){
+    var card = document.querySelector('.sf[data-staff="' + id + '"]');
+    if (!card || card.hidden || card.querySelector('.pf.on')) return;
+    if (pressChoice(card, id + (FEE.late ? '_YES' : '_NONE'))) changed = true;
+  });
+  return changed;
+}
 document.addEventListener('DOMContentLoaded', function(){
   renderSummary();
+  var prefilled = applyPrecheck();
   applyVerdictScope(REPORT_VERDICT);
   renderVerdictPill(REPORT_VERDICT);
+  if (prefilled || autoFee()) scheduleSummaryRefresh();
 });
 
 // การ์ดที่มีปุ่มนี้เหลือสองแบบ: ข้อสีส้ม/เหลือง (.issue) กับหัวข้อที่เจ้าหน้าที่ต้อง
@@ -2223,7 +2325,7 @@ function setPF(btn, state){
   }
   // ผลพิจารณาของเจ้าหน้าที่มีผลต่อสรุป (ส้ม/เหลืองที่ไม่ผ่าน = ต้องแก้ และจุดที่
   // ระบบตรวจเองไม่ได้ซึ่งเจ้าหน้าที่กด "ผิด")
-  if (card.classList.contains('sf')) renderStaffState(card);
+  if (card.classList.contains('sf')) { syncSigItems(card); renderStaffState(card); }
   if (card.classList.contains('issue') || card.classList.contains('sf'))
     scheduleSummaryRefresh();
 }

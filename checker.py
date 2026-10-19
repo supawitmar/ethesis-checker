@@ -9,6 +9,8 @@ treats ำ as า. Section headings are detected from top-of-page lines only.
 """
 import re
 import difflib
+import datetime
+import threading
 from collections import namedtuple
 from pathlib import Path
 import pdfplumber
@@ -3286,6 +3288,8 @@ SUMMARY_SECTIONS = [
     # ภาษาของเล่มมาก่อนทุกอย่าง — ถ้าเล่มทำผิดภาษา ข้ออื่นไม่มีความหมาย
     # ไม่มีตำแหน่งไหนเขียนคำนี้ กลุ่มนี้จึงถูกเติมจาก "รหัสกฎ" ใน summary_section
     ("ภาษาของเล่ม", "ภาษาของเล่ม"),
+    # ไฟล์ Turnitin ตรวจในขั้นแรกก่อนตัวเล่ม (อัปเดต 1.4) จึงขึ้นก่อนหน้าปก
+    ("ไฟล์ Turnitin", "Turnitin"),
     ("หน้าปก", "หน้าปก"),
     # หน้าลงนามถูกตั้งชื่อตามบทบาทของหน้า ไม่ได้เขียนคำว่า "หน้าลงนาม" ตรง ๆ เสมอ
     # (หน้าอาจารย์ที่ปรึกษา / หน้ากรรมการสอบ / ช่องประธานหลักสูตร / ช่องคณบดีคณะ)
@@ -3896,6 +3900,164 @@ def staff_text_for_book(text, label_style):
     return _SIGNATURE_PAGES_BOTH.sub(pages, text) if pages and text else text
 
 
+# ---------- โครงสร้างหน้าลงนาม: ข้อความตามข้อที่เจ้าหน้าที่ติ้กไม่ผ่าน (อัปเดต 1.4) ----------
+# เจ้าของสั่ง (19 ต.ค. 2569): หน้าต่างตรวจหน้าลงนามก่อนตรวจเล่มมีเช็กลิสต์ (1)-(5) ข้อความที่แจ้ง
+# นักศึกษามาจาก "ข้อที่ติ้กไม่ผ่านเท่านั้น" เรียงเลขใหม่ (1), (2), ... ประโยคนำ บรรทัดคู่มือ และลิงก์คงไว้
+# ถ้อยคำทั้งหมดยังมาจาก text/text_en ฉบับเต็มของ SIGNATURE_LAYOUT_WRONG ที่เดียว ไม่แยกเก็บซ้ำ
+SIGNATURE_LAYOUT_WRONG = "SIGNATURE_LAYOUT_WRONG"
+SIGNATURE_LAYOUT_OK = "SIGNATURE_LAYOUT_OK"
+SIGNATURE_ITEM_PREFIX = "SIGNATURE_LAYOUT_ITEM_"
+_LAYOUT_ITEM_LINE = re.compile(r"^\((\d+)\)\s*")
+
+
+def signature_layout_items(text):
+    """ข้อเช็กลิสต์ (เลข, ข้อความ) จากถ้อยคำฉบับเต็ม — ใช้แสดงในหน้าต่างและหน้ารายงาน"""
+    out = []
+    for line in (text or "").split("\n"):
+        match = _LAYOUT_ITEM_LINE.match(line.strip())
+        if match:
+            out.append((int(match.group(1)), line.strip()[match.end():]))
+    return out
+
+
+def signature_failed_items(staff):
+    """เลขข้อเช็กลิสต์ที่ติ้กไม่ผ่าน จาก id "SIGNATURE_LAYOUT_ITEM_<n>" ในชุด staff (ค่าจากหน้าเว็บ เชื่อไม่ได้)"""
+    found = set()
+    for key in staff or ():
+        key = str(key)
+        if key.startswith(SIGNATURE_ITEM_PREFIX) and key[len(SIGNATURE_ITEM_PREFIX):].isdigit():
+            found.add(int(key[len(SIGNATURE_ITEM_PREFIX):]))
+    return found
+
+
+def signature_layout_text(text, failed_items):
+    """ถ้อยคำโครงสร้างหน้าลงนามเฉพาะข้อที่ไม่ผ่าน เรียงเลขใหม่ — ไม่ระบุข้อเลย = ทุกข้อ
+
+    "ไม่ระบุข้อ" คือหน้าเก่าหรือคำขอเก่าที่ส่งมาแค่ SIGNATURE_LAYOUT_WRONG ต้องได้ถ้อยคำเต็มแบบเดิม
+    """
+    numbers = [n for n, _line in signature_layout_items(text)]
+    wanted = {n for n in (failed_items or ()) if n in numbers} or set(numbers)
+    out, k = [], 0
+    for line in (text or "").split("\n"):
+        match = _LAYOUT_ITEM_LINE.match(line.strip())
+        if not match:
+            out.append(line)
+        elif int(match.group(1)) in wanted:
+            k += 1
+            out.append(f"({k}) " + line.strip()[match.end():])
+    return "\n".join(out)
+
+
+# ---------- ผลตรวจ Turnitin (อัปเดต 1.4) ----------
+# เจ้าของสั่ง (19 ต.ค. 2569): แนบไฟล์ Turnitin ทุกเล่ม ดูที่แผ่น Overall Similarity ต้องไม่เกิน 25%
+# เกิน = สีแดงเข้าข้อความสรุป · อ่านตัวเลขไม่ได้ = สีส้มให้เจ้าหน้าที่เปิดไฟล์ดูเอง
+# รายงาน Turnitin รุ่นปัจจุบันพิมพ์ "28% Overall Similarity" ไว้หน้า 2 (ตัวอย่างจริง 2 ไฟล์ ต.ค. 2569)
+TURNITIN_LIMIT = 25
+_TURNITIN_OVERALL = re.compile(r"(\d{1,3})\s*%\s*Overall\s+Similarity", re.I)
+
+
+def turnitin_similarity(pdf_path, max_pages=6):
+    """ค่า Overall Similarity (เปอร์เซ็นต์ เต็มจำนวน) จากไฟล์รายงาน Turnitin — None ถ้าหาไม่เจอ/เปิดไม่ได้"""
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for pg in pdf.pages[:max_pages]:
+                match = _TURNITIN_OVERALL.search(pg.extract_text() or "")
+                if match and int(match.group(1)) <= 100:
+                    return int(match.group(1))
+    except Exception:
+        return None
+    return None
+
+
+def _report_turnitin(rep, turnitin):
+    """ข้อของไฟล์ Turnitin ในผลตรวจ — turnitin = {"similarity": int|None} หรือ None (ไม่ได้ส่งมา = ไม่ตรวจ)"""
+    if not turnitin:
+        return
+    value = turnitin.get("similarity")
+    if value is None:
+        rep.add("ORANGE", "-", "ไฟล์ Turnitin",
+                "ระบบอ่านค่า Overall Similarity จากไฟล์ Turnitin ไม่ได้",
+                f"ผลตรวจ Turnitin (Overall Similarity) ต้องไม่เกิน {TURNITIN_LIMIT}%",
+                "เปิดไฟล์ Turnitin ดูค่า Overall Similarity ด้วยตา ถ้าไม่เกินเกณฑ์ให้กดผ่าน",
+                "TURNITIN.SIMILARITY")
+    elif value > TURNITIN_LIMIT:
+        rep.add("RED", "-", "ไฟล์ Turnitin",
+                f"ผลตรวจ Turnitin (Overall Similarity) {value}% เกินเกณฑ์",
+                f"ต้องไม่เกิน {TURNITIN_LIMIT}%",
+                f"ปรับเนื้อหาให้ค่า Overall Similarity ไม่เกิน {TURNITIN_LIMIT}% แล้วแนบผลตรวจ Turnitin ใหม่",
+                "TURNITIN.SIMILARITY")
+
+
+# ---------- ค่าปรับส่งเล่มล่าช้า (อัปเดต 1.4) ----------
+# เจ้าของสั่ง (19 ต.ค. 2569): วันครบกำหนด = วันที่สอบผ่าน + 20 วัน (วันปฏิทิน รวมวันหยุด)
+# ส่งเข้าระบบหลังวันครบกำหนด = มีค่าปรับ · ส่งตรงวันครบกำหนดพอดี = ไม่มี
+LATE_FEE_GRACE_DAYS = 20
+_MONTHS_EN = {name.lower(): i for i, name in enumerate(
+    ("January", "February", "March", "April", "May", "June", "July", "August",
+     "September", "October", "November", "December"), start=1)}
+_MONTHS_TH = {name: i for i, name in enumerate(
+    ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม",
+     "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"), start=1)}
+
+
+_FEE_ERA = re.compile(r"พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|\bB\.\s*E\.|\bA\.\s*D\.")
+
+
+def _month_number(word):
+    word = (word or "").strip().rstrip(".,")
+    if word in _MONTHS_TH:
+        return _MONTHS_TH[word]
+    word = word.lower()
+    if word in _MONTHS_EN:
+        return _MONTHS_EN[word]
+    return next((i for name, i in _MONTHS_EN.items() if len(word) >= 3 and name.startswith(word)), None)
+
+
+def parse_exam_date(text):
+    """วันที่สอบผ่านจากช่องในแบบฟอร์ม → datetime.date หรือ None ถ้าอ่านไม่ได้
+
+    รับ "30 November 2023" · "30 November, 2023" · "November 30, 2023" · "11 พฤษภาคม 2569"
+    (พ.ศ. แปลงเป็น ค.ศ.) · มีคำ "พ.ศ." / "วันที่" นำหน้าได้
+    """
+    # ไม่ใช้ _ERA_PREFIX — ตัวนั้นไม่สนตัวพิมพ์และไม่บังคับจุด "be" ใน "November" จึงถูกตัดทิ้ง
+    value = _FEE_ERA.sub(" ", re.sub(r"^\s*(?:วันที่|on)\s*", "", str(text or ""), flags=re.I))
+    value = re.sub(r"\s+", " ", value.replace(",", " ")).strip()
+    day_first = re.match(r"^(\d{1,2}) (\S+) (\d{4})$", value)
+    month_first = re.match(r"^(\S+) (\d{1,2}) (\d{4})$", value)
+    if day_first:
+        day, month, year = int(day_first.group(1)), _month_number(day_first.group(2)), int(day_first.group(3))
+    elif month_first:
+        day, month, year = int(month_first.group(2)), _month_number(month_first.group(1)), int(month_first.group(3))
+    else:
+        return None
+    if year > 2400:
+        year -= 543
+    try:
+        return datetime.date(year, month, day) if month else None
+    except ValueError:
+        return None
+
+
+def late_fee(exam_date_text, submitted_iso):
+    """คิดค่าปรับจากวันที่สอบผ่านกับวันที่ส่งเข้าระบบ (yyyy-mm-dd จากช่องวันที่ในแบบฟอร์ม)
+
+    คืน {"exam", "due", "submitted": date, "late": bool, "days_late": int} หรือ None ถ้าอ่านวันใดวันหนึ่งไม่ได้
+    (None = ระบบคิดไม่ได้ ให้เจ้าหน้าที่เลือกค่าปรับเองแบบเดิม)
+    """
+    # ช่องวันที่สอบอาจกรอกสองภาษาคั่นด้วย "/" ("29 June 2026 / 29 มิถุนายน 2569") ใช้วันแรกที่อ่านได้
+    exam = next((d for d in map(parse_exam_date, str(exam_date_text or "").split("/")) if d), None)
+    try:
+        submitted = datetime.date.fromisoformat(str(submitted_iso or "").strip())
+    except ValueError:
+        submitted = None
+    if not exam or not submitted:
+        return None
+    due = exam + datetime.timedelta(days=LATE_FEE_GRACE_DAYS)
+    days_late = max(0, (submitted - due).days)
+    return {"exam": exam, "due": due, "submitted": submitted,
+            "late": days_late > 0, "days_late": days_late}
+
+
 def staff_checks_for_book(label_style):
     """ทะเบียน STAFF_CHECKS ที่ถ้อยคำไทยบอกเลขหน้าตามภาษาเล่ม (สำเนา ไม่แก้ทะเบียนกลาง)
 
@@ -3954,7 +4116,7 @@ def staff_choices(keys, placement, verdict=None):
     return out
 
 
-def staff_issue(check, choice, label_style=None):
+def staff_issue(check, choice, label_style=None, staff=None):
     """แปลงตัวเลือกที่เจ้าหน้าที่กด ให้อยู่ในรูปเดียวกับข้ออื่นในข้อความสรุป
 
     summary_text = ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า ให้พิมพ์ตรงตัว ไม่ผ่านการ
@@ -3969,7 +4131,9 @@ def staff_issue(check, choice, label_style=None):
         "expected": "",
         "fix": "",
         "system_note": False,
-        "summary_text": staff_text_for_book(choice["text"], label_style),
+        "summary_text": staff_text_for_book(
+            signature_layout_text(choice["text"], signature_failed_items(staff))
+            if choice["id"] == SIGNATURE_LAYOUT_WRONG else choice["text"], label_style),
         "staff_choice": choice["id"],
         **rule_reference(check["rule_id"]),
     }
@@ -4002,7 +4166,7 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
     # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
     for check, choice in staff_choices(staff, "section"):
-        items.append(staff_issue(check, choice, report_label_style(report)))
+        items.append(staff_issue(check, choice, report_label_style(report), staff))
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" in failed:
             items.append(issue)
@@ -4362,6 +4526,7 @@ SHEET_COLUMNS = ("Cover", "Abstract", "LoC", "Main Content",
 # กิตติกรรมประกาศ และเลขหน้าส่วนนำ นับเป็น Cover
 SHEET_SECTION_COLUMN = {
     "ภาษาของเล่ม": "Other",
+    "ไฟล์ Turnitin": "Other",   # ชีทไม่มีช่อง Turnitin (อัปเดต 1.4)
     "หน้าปก": "Cover",
     "หน้าลงนาม": "Cover",
     "กิตติกรรมประกาศ": "Cover",
@@ -6812,6 +6977,44 @@ def front_section_kind(page_text):
     return "", ""
 
 
+def signature_preview(pdf_path, limit=20):
+    """หน้าลงนามของเล่มแบบเร็ว สำหรับหน้าต่างตรวจหน้าลงนามก่อนตรวจเล่ม (อัปเดต 1.4)
+
+    อ่านเฉพาะหน้าต้นเล่ม แล้วชี้หน้าลงนามด้วยตัวเดียวกับ run_check (front_section_kind)
+    หน้าต่างจึงเห็นหน้าเดียวกับที่ผลตรวจอ้าง ไม่ต้องรอตรวจทั้งเล่มเสร็จ
+    คืน [{"index": ดัชนีหน้าในไฟล์, "label": เลขหน้าที่พิมพ์}]
+    ช่องประธานหลักสูตร/คณบดี-ผู้อำนวยการ ให้เจ้าหน้าที่ดูจากภาพ (ข้อความที่อ่านได้มีเส้นประลายเซ็นปนจนอ่านไม่รู้เรื่อง)
+    """
+    out = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for i, pg in enumerate(pdf.pages[:limit]):
+            text = _page_text(pg)
+            kind, _heading = front_section_kind(text)
+            if kind == "signature":
+                out.append({"index": i, "label": _extract_page_label(text)})
+            try:
+                pg.flush_cache()
+            except Exception:
+                pass
+    return out
+
+
+def render_page_png(pdf_path, index, resolution=110):
+    """ภาพหน้าเดียวของเล่มเป็น PNG (bytes) — ใช้แสดงหน้าลงนามในหน้าต่างตรวจก่อนตรวจเล่ม
+
+    วาดทีละภาพเท่านั้น (_RENDER_LOCK) — ตัววาด (pdfium ใต้ pdfplumber.to_image) ใช้พร้อมกันหลายเธรดไม่ได้
+    หน้าต่างขอภาพหน้าลงนามสองภาพพร้อมกัน ทดสอบจริงแล้วระบบดับทั้งระบบ (exit 0x80000003)
+    """
+    import io
+    with _RENDER_LOCK, pdfplumber.open(pdf_path) as pdf:
+        buf = io.BytesIO()
+        pdf.pages[index].to_image(resolution=resolution).save(buf, format="PNG")
+        return buf.getvalue()
+
+
+_RENDER_LOCK = threading.Lock()
+
+
 def check_result(rep, context=None, not_checked=NOT_CHECKED):
     """ผลตรวจหนึ่งชุด — **ทุกทางออกของ run_check ต้องผ่านฟังก์ชันนี้**
 
@@ -6857,7 +7060,7 @@ def check_result(rep, context=None, not_checked=NOT_CHECKED):
 
 
 def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
-              skip_identity_check=False):
+              skip_identity_check=False, turnitin=None):
     """skip_identity_check=True ปิดด่าน "ไฟล์ eThesis กับเล่มคนละคน"
 
     ใช้เฉพาะเครื่องมือตรวจคำแปล (check_i18n --corpus) ที่จงใจจับคู่ข้อมูลอ้างอิง
@@ -6877,6 +7080,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if not str(pdf_path).lower().endswith(".pdf"):
         rep.add("ORANGE", "-", Path(pdf_path).name, "ไม่ใช่ไฟล์ PDF", "ระบบตรวจ PDF เท่านั้น", "ส่งไฟล์ PDF")
         return check_result(rep)
+
+    # ไฟล์ Turnitin อ่านไว้ตั้งแต่ตอนอัปโหลด (main /check) ส่งมาแค่ตัวเลข ไม่เกี่ยวกับตัวเล่ม
+    _report_turnitin(rep, turnitin)
 
     _p("เปิดไฟล์ PDF")
     pages = []

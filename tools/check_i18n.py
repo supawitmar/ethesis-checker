@@ -368,12 +368,13 @@ def collect_corpus(folder):
 
     messages, seen, cats = [], set(), set()
     for path in sorted(Path(folder).glob("*.pdf")):
-        for approved in approvals:
+        # ผลตรวจ Turnitin (อัปเดต 1.4) เกินเกณฑ์ / อ่านไม่ได้ / ไม่ได้ส่ง ให้ข้อความครบทุกแบบเข้าด่านคำแปล
+        for approved, turnitin in zip(approvals, ({"similarity": 31}, {"similarity": None}, None)):
             try:
                 # ปิดด่านภาษาของเล่ม เพราะเครื่องมือนี้จับคู่ข้อมูลสมมติกับเล่มไหนก็ได้
                 # ถ้าไม่ปิด เล่มที่ภาษาไม่ตรงข้อมูลสมมติจะหยุดตรวจ ข้อความอีกครึ่งไม่ถูกตรวจคำแปล
                 report = checker.run_check(str(path), dict(approved),
-                                           skip_identity_check=True)
+                                           skip_identity_check=True, turnitin=turnitin)
             except Exception as exc:                   # เล่มที่อ่านไม่ได้ ข้ามไป
                 print(f"  ({path.name}: ตรวจไม่ได้ {type(exc).__name__})")
                 continue

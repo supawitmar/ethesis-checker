@@ -34,7 +34,20 @@ FORM = {
     "year": "2026",
     "queue_date": "2026-09-20",
     "checked_date": "2026-09-24",
+    # อัปเดต 1.4: วันที่ส่งเข้าระบบใช้คิดค่าปรับ (บังคับกรอก)
+    "submitted_date": "2026-08-01",
 }
+
+
+PRECHECK_ALL_PASS = {
+    "sections_ok": ["advisory", "exam", "program_head", "faculty_head"],
+    "items": {str(n): "pass" for n in range(1, 6)},
+}
+
+
+def turnitin_file(percent=13):
+    """ไฟล์ Turnitin ปลอมที่มีบรรทัด Overall Similarity ให้ระบบอ่าน (บังคับแนบทุกเล่มตั้งแต่ 1.4)"""
+    return {"turnitin": ("turnitin.pdf", make_pdf(f"{percent}% Overall Similarity"), "application/pdf")}
 
 
 def make_pdf(text="Hello PDF"):
@@ -505,7 +518,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=FORM,
-            files={"pdf": ("fake.pdf", b"not a pdf", "application/pdf")},
+            files={"pdf": ("fake.pdf", b"not a pdf", "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 400)
 
@@ -514,7 +527,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=form,
-            files={"pdf": ("test.pdf", make_pdf(), "application/pdf")},
+            files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("ชื่อปริญญา", response.json()["detail"])
@@ -523,7 +536,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=FORM,
-            files={"pdf": ("broken.pdf", b"%PDF-1.4\nbroken", "application/pdf")},
+            files={"pdf": ("broken.pdf", b"%PDF-1.4\nbroken", "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 422)
 
@@ -531,7 +544,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=FORM,
-            files={"pdf": ("readable.pdf", make_pdf(), "application/pdf")},
+            files={"pdf": ("readable.pdf", make_pdf(), "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 200)
         job_id = response.json()["job_id"]
@@ -546,7 +559,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=FORM,
-            files={"pdf": ("image-only.pdf", make_pdf(""), "application/pdf")},
+            files={"pdf": ("image-only.pdf", make_pdf(""), "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 422)
 
@@ -555,7 +568,7 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.post(
             "/check",
             data=FORM,
-            files={"pdf": ("large.pdf", content, "application/pdf")},
+            files={"pdf": ("large.pdf", content, "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 413)
 
@@ -581,7 +594,7 @@ class WebSmokeTests(unittest.TestCase):
         form = {**FORM, "committees_json": "{ broken json", "faculty": "คณะทดสอบ"}
         response = self.client.post(
             "/check", data=form,
-            files={"pdf": ("readable.pdf", make_pdf(), "application/pdf")},
+            files={"pdf": ("readable.pdf", make_pdf(), "application/pdf"), **turnitin_file()},
         )
         self.assertEqual(response.status_code, 200)
 
@@ -595,6 +608,81 @@ class WebSmokeTests(unittest.TestCase):
         response = self.client.get("/result/error-test")
         self.assertEqual(response.status_code, 500)
         self.assertNotIn("secret traceback", response.text)
+
+
+class Update14PrecheckFlow(unittest.TestCase):
+    """อัปเดต 1.4: กดตรวจเล่ม → ตรวจหน้าลงนาม/ค่าปรับ/Turnitin ก่อน → หน้าผลตรวจ"""
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        for job in list(main.JOBS.values()):
+            if job.get("pdf_path"):
+                main._remove_book(job["pdf_path"])
+        main.JOBS.clear()
+
+    def _post(self, form=None, files=None):
+        return self.client.post("/check", data=form or FORM,
+                                files=files or {"pdf": ("b.pdf", make_pdf(), "application/pdf"),
+                                                **turnitin_file(28)})
+
+    def test_turnitin_and_the_submitted_date_are_required(self):
+        missing_file = self.client.post("/check", data=FORM,
+                                        files={"pdf": ("b.pdf", make_pdf(), "application/pdf")})
+        self.assertEqual(missing_file.status_code, 400)
+        self.assertIn("Turnitin", missing_file.json()["detail"])
+        undated = {k: v for k, v in FORM.items() if k != "submitted_date"}
+        self.assertEqual(self._post(form=undated).status_code, 400)
+
+    def test_the_job_keeps_the_fee_and_the_turnitin_number_only(self):
+        before = set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*"))
+        job_id = self._post().json()["job_id"]
+        job = main._get_job(job_id)
+        self.assertEqual(job["turnitin"]["similarity"], 28)
+        self.assertFalse(job["late_fee"]["late"])          # สอบ 17 ก.ค. 2026 ส่ง 1 ส.ค. 2026
+        self.assertEqual(job["late_fee"]["due"].isoformat(), "2026-08-06")
+        # ไฟล์ Turnitin ไม่ถูกเก็บไว้ในโฟลเดอร์เล่ม — การส่งครั้งนี้เพิ่มแค่ไฟล์เล่มไฟล์เดียว
+        # (เทียบก่อน-หลัง เพราะโฟลเดอร์ใช้ร่วมกับเทสต์อื่นที่อาจมีไฟล์ค้าง)
+        added = set(main.BOOKS_DIR.glob(main.BOOK_PREFIX + "*")) - before
+        self.assertEqual(sorted(p.name for p in added), [Path(job["pdf_path"]).name])
+
+    def test_the_result_waits_for_the_precheck(self):
+        job_id = self._post().json()["job_id"]
+        early = self.client.get(f"/result/{job_id}", follow_redirects=False)
+        self.assertEqual(early.status_code, 303)
+        self.assertEqual(early.headers["location"], f"/precheck/{job_id}")
+        page = self.client.get(f"/precheck/{job_id}")
+        self.assertEqual(page.status_code, 200)
+        for text in ("ขั้นที่ 1", "28%", "เกินเกณฑ์", "ไม่มีค่าปรับ", "ตรวจแล้ว", "ไม่พบหน้าลงนามในเล่ม"):
+            self.assertIn(text, page.text)
+        self.assertEqual(self.client.get(f"/precheck/{job_id}/page/0.png").status_code, 404)
+
+    def test_an_incomplete_answer_is_refused(self):
+        job_id = self._post().json()["job_id"]
+        half = {"sections_ok": ["advisory"], "items": PRECHECK_ALL_PASS["items"]}
+        self.assertEqual(self.client.post(f"/precheck/{job_id}", json=half).status_code, 400)
+        short = {**PRECHECK_ALL_PASS, "items": {"1": "pass"}}
+        self.assertEqual(self.client.post(f"/precheck/{job_id}", json=short).status_code, 400)
+        self.assertIsNone(main._get_job(job_id)["precheck"])
+
+    def test_the_answers_reach_the_report_page(self):
+        job_id = self._post().json()["job_id"]
+        answer = {**PRECHECK_ALL_PASS, "items": {**PRECHECK_ALL_PASS["items"], "2": "fail"}}
+        self.assertEqual(self.client.post(f"/precheck/{job_id}", json=answer).json()["failed_items"], [2])
+        for _ in range(500):
+            if main._get_job(job_id)["done"]:
+                break
+            time.sleep(0.01)
+        html = self.client.get(f"/result/{job_id}").text
+        self.assertIn('<script id="precheck-data" type="application/json">{"failed_items": [2]}</script>', html)
+        self.assertIn('data-sig-item="2"', html)
+        self.assertIn("ไม่มีค่าปรับ (ครบกำหนด 06/08/2026)", html)
+        report = main._get_job(job_id)["report"]
+        reds = [i["found"] for i in report["issues_by_zone"]["RED"]]
+        self.assertIn("ผลตรวจ Turnitin (Overall Similarity) 28% เกินเกณฑ์", reds)
 
 
 if __name__ == "__main__":
@@ -884,7 +972,7 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
     def test_the_server_refuses_a_thai_book_without_thai_fields(self):
         form = {**FORM, "program_language": "thai"}
         response = self.client.post("/check", data=form,
-                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
         self.assertEqual(response.status_code, 400)
         detail = response.json()["detail"]
         self.assertIn("กรุณากรอกข้อมูลอ้างอิงให้ครบก่อนตรวจ", detail)
@@ -904,8 +992,10 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         block = self.html.split('id="sec-dates"', 1)[1].split("</section>", 1)[0]
         self.assertIn('name="queue_date"', block)
         self.assertIn('name="checked_date"', block)
-        self.assertEqual(block.count('type="date"'), 2)
-        self.assertEqual(block.count(" required"), 2)
+        # อัปเดต 1.4: เพิ่มวันที่ส่งเข้าระบบ (ใช้คิดค่าปรับ) เป็นช่องที่สาม
+        self.assertIn('name="submitted_date"', block)
+        self.assertEqual(block.count('type="date"'), 3)
+        self.assertEqual(block.count(" required"), 3)
         self.assertIn('<li data-sec="sec-dates">วันดำเนินการ</li>', self.html)
 
     def test_the_working_dates_live_inside_the_first_card(self):
@@ -1027,7 +1117,7 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
     def test_the_server_refuses_a_book_without_the_working_dates(self):
         form = {k: v for k, v in FORM.items() if k not in ("queue_date", "checked_date")}
         response = self.client.post("/check", data=form,
-                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
         self.assertEqual(response.status_code, 400)
         self.assertIn("วันดำเนินการ", response.json()["detail"])
         self.assertEqual(main.JOBS, {})
@@ -1036,13 +1126,13 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
         """"3/9/2026" ตีความได้ทั้งวันที่ 3 กันยายน และวันที่ 9 มีนาคม — ห้ามเดา"""
         form = {**FORM, "queue_date": "3/9/2026"}
         response = self.client.post("/check", data=form,
-                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(main.JOBS, {})
 
     def test_the_dates_ride_along_with_the_job(self):
         response = self.client.post("/check", data=FORM,
-                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf")})
+                                    files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
         self.assertEqual(response.status_code, 200)
         job = main._get_job(response.json()["job_id"])
         self.assertEqual(job["queue_date"], FORM["queue_date"])
@@ -1090,7 +1180,7 @@ class TheDocumentTypeFollowsWhatStaffSelected(unittest.TestCase):
 
         with mock.patch.object(main, "run_check", side_effect=capture):
             response = self.client.post("/check", data={**FORM, **fields},
-                                        files={"pdf": ("b.pdf", make_pdf(), "application/pdf")})
+                                        files={"pdf": ("b.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
             if response.status_code != 200:
                 return response.status_code
             job_id = response.json()["job_id"]
@@ -1263,9 +1353,12 @@ class TheCheckedBookCanBeOpenedFromTheReport(unittest.TestCase):
 
     def _check(self, content, name="readable.pdf"):
         response = self.client.post(
-            "/check", data=FORM, files={"pdf": (name, content, "application/pdf")})
+            "/check", data=FORM, files={"pdf": (name, content, "application/pdf"), **turnitin_file()})
         self.assertEqual(response.status_code, 200, response.text)
         job_id = response.json()["job_id"]
+        # อัปเดต 1.4: หน้าผลตรวจเปิดได้หลังตรวจหน้าลงนามแล้ว — ตอบแบบเจ้าหน้าที่ (ทุกชุดดูแล้ว ทุกข้อผ่าน)
+        answered = self.client.post(f"/precheck/{job_id}", json=PRECHECK_ALL_PASS)
+        self.assertEqual(answered.status_code, 200, answered.text)
         for _ in range(500):
             job = main._get_job(job_id)
             if job and job["done"]:

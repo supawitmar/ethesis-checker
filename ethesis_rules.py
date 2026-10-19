@@ -178,6 +178,14 @@ RULE_CATALOG = {
             "Electronic File template-2026 ตามประเภทและภาษาของเล่ม",
         ),
     },
+    "TURNITIN.SIMILARITY": {
+        "title": "ผลตรวจ Turnitin (Overall Similarity) ไม่เกิน 25%",
+        "basis": "เจ้าของระบบกำหนด (อัปเดต 1.4)",
+        "failure_zone": "RED",
+        "references": (
+            "เจ้าของสั่ง 19 ต.ค. 2569: ตรวจไฟล์ Turnitin ที่แผ่น Overall Similarity กำหนดไม่เกิน 25%",
+        ),
+    },
     "FRONT.APPROVAL": {
         "title": "หน้าลงนาม/หน้าอนุมัติ",
         "basis": "ประกาศฯ คู่มือ และข้อมูลอนุมัติ",

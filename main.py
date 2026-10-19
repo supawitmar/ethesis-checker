@@ -28,13 +28,21 @@ import urllib.request
 
 import pdfplumber
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 from checker import (
+    STAFF_CHOICE_BY_ID,
+    SIGNATURE_LAYOUT_WRONG,
+    late_fee,
+    TURNITIN_LIMIT,
+    turnitin_similarity,
     plain_summary,
+    render_page_png,
     run_check,
+    signature_layout_items,
+    signature_preview,
     sheet_row,
     sheet_staff_pending,
     sheet_undecided,
@@ -476,12 +484,13 @@ def _prune_jobs():
     _sweep_orphan_books(referenced, now)
 
 
-def _run_job(job_id, tmp_path, approved, chapters_mode):
+def _run_job(job_id, tmp_path, approved, chapters_mode, turnitin=None):
     def progress(msg):
         _update_job(job_id, stage=msg)
 
     try:
-        report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress)
+        report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress,
+                           turnitin=turnitin)
         _update_job(job_id, report=report, stage="เสร็จสิ้น")
     except Exception:
         tb = traceback.format_exc()
@@ -584,6 +593,8 @@ async def parse_ethesis(pdf: UploadFile = File(...)):
 @app.post("/check")
 async def check(
     pdf: UploadFile = File(...),
+    # ไฟล์รายงาน Turnitin บังคับแนบทุกเล่ม (อัปเดต 1.4) — รับเป็น None ก่อน แล้วตอบข้อความไทยเองถ้าไม่ได้แนบ
+    turnitin: UploadFile = File(None),
     doc_type: str = Form(...),
     format: str = Form(...),
     program_language: str = Form(...),
@@ -607,6 +618,7 @@ async def check(
     ethesis_doc_type: str = Form(""),
     queue_date: str = Form(""),
     checked_date: str = Form(""),
+    submitted_date: str = Form(""),
 ):
     _prune_jobs()
     if doc_type not in DOC_TYPES or (ethesis_doc_type and ethesis_doc_type not in DOC_TYPES):
@@ -619,10 +631,12 @@ async def check(
         raise HTTPException(status_code=400, detail="โหมดตรวจชื่อบทไม่ถูกต้อง")
     # วันดำเนินการ: เจ้าหน้าที่สั่ง (ก.ย. 2569) ว่าไม่กรอกสองช่องนี้ = ไม่ตรวจ
     # ตรวจซ้ำฝั่งเซิร์ฟเวอร์ ไม่เชื่อ required ในหน้าเว็บอย่างเดียว
+    # วันที่ส่งเข้าระบบใช้คิดค่าปรับ (อัปเดต 1.4 เจ้าของสั่ง 19 ต.ค. 2569) บังคับกรอกเหมือนสองช่องเดิม
     queue_date, checked_date = _iso_date(queue_date), _iso_date(checked_date)
-    if not queue_date or not checked_date:
+    submitted_date = _iso_date(submitted_date)
+    if not queue_date or not checked_date or not submitted_date:
         raise HTTPException(status_code=400,
-                            detail="กรุณาระบุวันดำเนินการให้ครบ: วันที่เข้าคิว, วันที่ตรวจ")
+                            detail="กรุณาระบุวันดำเนินการให้ครบ: วันที่ส่งเข้าระบบ, วันที่เข้าคิว, วันที่ตรวจ")
 
     form_values = {
         "title_en": title_en.strip(), "title_th": title_th.strip(),
@@ -689,6 +703,8 @@ async def check(
         if b"%PDF-" not in header:
             raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
 
+        turnitin_info = await _read_turnitin(turnitin)
+
         # โพรบว่าอ่านข้อความได้ไหม (สุ่มไม่กี่หน้า เร็วแม้ไฟล์ใหญ่) แล้วปฏิเสธทันที
         readability_issue = await asyncio.to_thread(_pdf_readability_issue, tmp_path)
         if readability_issue:
@@ -701,11 +717,17 @@ async def check(
                 "report": None, "pdf_name": pdf.filename, "approved": approved,
                 # เก็บไว้กับงาน ไม่ปนกับข้อมูลอนุมัติที่ใช้ตัดสินเล่ม — ใช้ตอนบันทึกลงชีท
                 "queue_date": queue_date, "checked_date": checked_date,
+                "submitted_date": submitted_date,
+                # ค่าปรับคิดจากแบบฟอร์มล้วน ไม่ขึ้นกับเล่ม (None = อ่านวันที่สอบผ่านไม่ได้ ให้เจ้าหน้าที่เลือกเอง)
+                "late_fee": late_fee(form_values["exam_date"], submitted_date),
+                # คำตอบจากหน้าต่างตรวจหน้าลงนามก่อนตรวจเล่ม (POST /precheck) — None = ยังไม่ได้ตรวจ
+                "precheck": None,
+                "turnitin": turnitin_info,
                 "pdf_path": tmp_path, "ts": time.time(),
             }
         threading.Thread(
             target=_run_job,
-            args=(job_id, tmp_path, approved, chapters_mode),
+            args=(job_id, tmp_path, approved, chapters_mode, turnitin_info),
             daemon=True,
         ).start()
         return JSONResponse({"job_id": job_id})
@@ -714,6 +736,135 @@ async def check(
             Path(tmp_path).unlink(missing_ok=True)
         JOB_SLOTS.release()
         raise
+
+
+# ---------- ตรวจหน้าลงนามและค่าปรับก่อนตรวจเล่ม (อัปเดต 1.4) ----------
+# เจ้าของสั่ง (19 ต.ค. 2569): กดตรวจเล่มแล้วขึ้นหน้าต่างให้ดูภาพหน้าลงนามคู่รายชื่อที่อนุมัติ ติ้กยืนยันรายชื่อ
+# ทีละชุด และเช็กลิสต์โครงสร้าง (1)-(5) ให้ครบก่อน ระหว่างนั้นระบบตรวจส่วนอื่นอยู่เบื้องหลัง
+# คำตอบเก็บกับงาน แล้วหน้ารายงานตั้งค่าหัวข้อโครงสร้างหน้าลงนามกับค่าปรับให้เอง (แก้ได้)
+# ติ้กรายชื่อแต่ละชุด = ยืนยันว่าดูแล้ว ไม่สร้างข้อความ (ชื่อสะกดผิด/จำนวนกรรมการ ระบบตรวจเป็นสีแดงเอง)
+PRECHECK_SECTIONS = (
+    ("advisory", "รายชื่อคณะกรรมการที่ปรึกษา (บฑ.1)"),
+    ("exam", "รายชื่อคณะกรรมการสอบ (บฑ.2)"),
+    ("program_head", "ช่องประธานหลักสูตร (มุมล่างขวาของหน้าลงนาม 1)"),
+    ("faculty_head", "ช่องคณบดี/ผู้อำนวยการ (มุมล่างขวาของหน้าลงนาม 2)"),
+)
+
+
+def _fee_view(fee):
+    """ค่าปรับที่คิดไว้ ในรูปที่หน้าเว็บแสดงได้เลย (วันที่ dd/mm/yyyy) — None ถ้าคิดไม่ได้"""
+    if not fee:
+        return None
+    return {"exam": _date_label(fee["exam"].isoformat()), "due": _date_label(fee["due"].isoformat()),
+            "submitted": _date_label(fee["submitted"].isoformat()),
+            "late": fee["late"], "days_late": fee["days_late"]}
+
+
+async def _read_turnitin(upload):
+    """อ่าน Overall Similarity จากไฟล์ Turnitin ที่แนบมา แล้วลบไฟล์ทิ้งทันที (เก็บแค่ตัวเลข)
+
+    ไม่ได้แนบ / ไม่ใช่ PDF = ปฏิเสธการตรวจ (บังคับแนบทุกเล่ม เจ้าของสั่ง 19 ต.ค. 2569)
+    """
+    if upload is None or not (upload.filename or "").strip():
+        raise HTTPException(status_code=400, detail="กรุณาแนบไฟล์ Turnitin (PDF) ก่อนตรวจเล่ม")
+    BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=BOOK_PREFIX, suffix=".pdf",
+                                         dir=BOOKS_DIR, delete=False) as tmp:
+            path = tmp.name
+            total, header = 0, b""
+            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="ไฟล์ Turnitin มีขนาดใหญ่เกินไป")
+                if len(header) < 1024:
+                    header += chunk[:1024 - len(header)]
+                tmp.write(chunk)
+        if b"%PDF-" not in header:
+            raise HTTPException(status_code=400, detail="ไฟล์ Turnitin ที่แนบไม่ใช่ไฟล์ PDF")
+        value = await asyncio.to_thread(turnitin_similarity, path)
+        return {"similarity": value, "name": upload.filename, "limit": TURNITIN_LIMIT}
+    finally:
+        if path:
+            Path(path).unlink(missing_ok=True)
+
+
+def _layout_items():
+    """ข้อเช็กลิสต์โครงสร้างหน้าลงนามสองภาษา [{n, th, en}] จากถ้อยคำฉบับเต็มที่เดียว"""
+    _check, wrong = STAFF_CHOICE_BY_ID[SIGNATURE_LAYOUT_WRONG]
+    english = dict(signature_layout_items(wrong["text_en"]))
+    return [{"n": n, "th": text, "en": english.get(n, "")}
+            for n, text in signature_layout_items(wrong["text"])]
+
+
+def _sig_preview(job_id, job):
+    """หน้าลงนามของเล่ม (อ่านครั้งเดียวแล้วเก็บกับงาน)"""
+    if job.get("sig_preview") is not None:
+        return job["sig_preview"]
+    path = _book_path(job)
+    try:
+        preview = signature_preview(str(path)) if path else []
+    except Exception:
+        preview = []
+    _update_job(job_id, sig_preview=preview)
+    return preview
+
+
+@app.get("/precheck/{job_id}", response_class=HTMLResponse)
+async def precheck_page(request: Request, job_id: str):
+    job = _get_job(job_id)
+    if not job:
+        return HTMLResponse("<h3>ไม่พบงานตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
+    preview = await asyncio.to_thread(_sig_preview, job_id, job)
+    approved = job.get("approved") or {}
+    _check, wrong = STAFF_CHOICE_BY_ID[SIGNATURE_LAYOUT_WRONG]
+    return templates.TemplateResponse(request=request, name="precheck.html", context={
+        "job_id": job_id, "pdf_name": job.get("pdf_name") or "",
+        "student": approved, "committees": approved.get("committees") or {},
+        "pages": preview, "sections": PRECHECK_SECTIONS,
+        "items": signature_layout_items(wrong["text"]),
+        "fee": _fee_view(job.get("late_fee")),
+        "turnitin": job.get("turnitin"),
+        "answered": job.get("precheck"),
+        "has_book": _book_path(job) is not None,
+    })
+
+
+@app.get("/precheck/{job_id}/page/{k}.png")
+async def precheck_page_image(job_id: str, k: int):
+    job = _get_job(job_id)
+    path = _book_path(job) if job else None
+    preview = (job or {}).get("sig_preview") or []
+    if not path or not 0 <= k < len(preview):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    png = await asyncio.to_thread(render_page_png, str(path), preview[k]["index"])
+    # ภาพหน้าของเล่มจริง (มีชื่อนักศึกษา/กรรมการ) ห้ามเก็บแคชไว้ในเบราว์เซอร์
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/precheck/{job_id}")
+async def precheck_answer(job_id: str, request: Request):
+    job = _get_job(job_id)
+    if not job:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    sections = {str(k) for k in (payload.get("sections_ok") or [])}
+    if sections != {key for key, _label in PRECHECK_SECTIONS}:
+        return JSONResponse({"error": "กรุณาติ้กยืนยันรายชื่อให้ครบทุกชุดก่อน"}, status_code=400)
+    _check, wrong = STAFF_CHOICE_BY_ID[SIGNATURE_LAYOUT_WRONG]
+    numbers = {n for n, _line in signature_layout_items(wrong["text"])}
+    answers = payload.get("items") or {}
+    if (not isinstance(answers, dict)
+            or {int(k) for k in answers if str(k).isdigit()} != numbers
+            or any(v not in ("pass", "fail") for v in answers.values())):
+        return JSONResponse({"error": "กรุณาตอบเช็กลิสต์โครงสร้างหน้าลงนามให้ครบทุกข้อก่อน"}, status_code=400)
+    failed = sorted(int(k) for k, v in answers.items() if v == "fail")
+    _update_job(job_id, precheck={"failed_items": failed})
+    return {"ok": True, "failed_items": failed}
 
 
 @app.get("/progress/{job_id}")
@@ -960,6 +1111,10 @@ def result(request: Request, job_id: str):
     job = _get_job(job_id)
     if not job:
         return HTMLResponse("<h3>ไม่พบผลตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
+    # ต้องตรวจหน้าลงนามก่อนเสมอ (อัปเดต 1.4) — เปิดลิงก์ผลตรวจตรง ๆ โดยยังไม่ได้ตรวจ ถูกพาไปหน้าต่างนั้น
+    # งานจาก /check รุ่น 1.4 มีคีย์ "precheck" ตั้งต้นเป็น None — งานที่ไม่มีคีย์นี้ (ผลตรวจที่ระบบอื่นสร้างไว้) เปิดได้ตามเดิม
+    if "precheck" in job and job["precheck"] is None and not job["error"]:
+        return RedirectResponse(url=f"/precheck/{job_id}", status_code=303)
     if not job["done"]:
         return HTMLResponse("<h3>ยังตรวจไม่เสร็จ</h3><a href='javascript:history.back()'>← กลับ</a>", status_code=202)
     if job["error"]:
@@ -974,6 +1129,10 @@ def result(request: Request, job_id: str):
         # วันดำเนินการที่เจ้าหน้าที่กรอกไว้ตอนสั่งตรวจ — แสดงบนหัวรายงานให้เทียบกับชีทได้
         "queue_date": _date_label(job.get("queue_date")),
         "checked_date": _date_label(job.get("checked_date")),
+        "submitted_date": _date_label(job.get("submitted_date")),
+        "precheck": job.get("precheck") or {},
+        "fee": _fee_view(job.get("late_fee")),
+        "layout_items": _layout_items(),
         "has_book": _book_path(job) is not None,
         "sheet_enabled": SHEET_ENABLED,
     })

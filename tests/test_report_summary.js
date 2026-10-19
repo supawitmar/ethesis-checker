@@ -28,8 +28,9 @@ function check(label, actual, wanted) {
 // ทะเบียนจำลอง — เทสต์นี้คุม "กลไก" ถ้อยคำจริงมีเทสต์ฝั่ง python คุมอยู่แล้ว
 const REGISTRY = [
   { id: 'SIGNATURE_LAYOUT', placement: 'section', choices: [
-    { id: 'SIGNATURE_LAYOUT_WRONG', text: 'ในหน้าลงนาม\nปรับโครงสร้างของหน้า',
-      text_en: 'Signature pages\nplease restructure the page' }] },
+    { id: 'SIGNATURE_LAYOUT_WRONG',
+      text: 'ในหน้าลงนาม\nปรับโครงสร้างของหน้า\n(1) ข้อหนึ่ง\n(2) ข้อสอง',
+      text_en: 'Signature pages\nplease restructure the page\n(1) item one\n(2) item two' }] },
   { id: 'LATE_FEE', placement: 'closing', applies_to: 'not_pass', choices: [
     { id: 'LATE_FEE_NONE', text: 'นศ. ไม่มีค่าปรับ\nกรุณาส่งกลับเข้าสู่ระบบอีกครั้ง',
       text_en: 'You have no fine\nPlease resubmit the document' }] },
@@ -185,6 +186,14 @@ function load(cards, summaryText) {
     check('อ่านผลตรวจจากข้อความสรุป: ' + JSON.stringify(text.split('\n')[0]),
           sandbox.REPORT_VERDICT, wanted);
   });
+}
+
+// ---- ข้อเช็กลิสต์โครงสร้างหน้าลงนามที่ถูกเรียงเลขใหม่ ยังหาคู่แปลเจอ (อัปเดต 1.4) ----
+{
+  const summary = '5. ในหน้าลงนาม\n   ปรับโครงสร้างของหน้า\n   (1) ข้อสอง';
+  const { sandbox } = load([], summary);
+  check('ข้อที่เรียงเลขใหม่แปลได้ เลขคงตามสรุป', sandbox.trSummary(summary),
+        '5. Signature pages\n   please restructure the page\n   (1) item two');
 }
 
 // ---- ถ้อยคำปิดท้ายต้องถูกแปลทั้งก้อน ----
