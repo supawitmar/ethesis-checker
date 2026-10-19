@@ -855,6 +855,7 @@ async def precheck_page_image(job_id: str, k: int):
     preview = (job or {}).get("sig_preview") or []
     if not path or not 0 <= k < len(preview):
         return JSONResponse({"error": "not found"}, status_code=404)
+    # 220 dpi: ภาพคมพอซูม 300% ได้ (เจ้าของทักว่าภาพ 110 dpi จาง 19 ต.ค. 2569) วาดหน้าละราว 0.2 วินาที
     png = await asyncio.to_thread(render_page_png, str(path), preview[k]["index"])
     # ภาพหน้าของเล่มจริง (มีชื่อนักศึกษา/กรรมการ) ห้ามเก็บแคชไว้ในเบราว์เซอร์
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})

@@ -7011,7 +7011,7 @@ def signature_preview(pdf_path, limit=20):
     return out
 
 
-def render_page_png(pdf_path, index, resolution=110):
+def render_page_png(pdf_path, index, resolution=220):
     """ภาพหน้าเดียวของเล่มเป็น PNG (bytes) — ใช้แสดงหน้าลงนามในหน้าต่างตรวจก่อนตรวจเล่ม
 
     วาดทีละภาพเท่านั้น (_RENDER_LOCK) — ตัววาด (pdfium ใต้ pdfplumber.to_image) ใช้พร้อมกันหลายเธรดไม่ได้

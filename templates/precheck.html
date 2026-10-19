@@ -56,12 +56,26 @@
 
   .pages { position:sticky; top:84px; }
   .sig-page { margin:0 0 16px; }
-  .sig-page figcaption { font-size:.85rem; font-weight:600; color:var(--ink-2); margin-bottom:6px; }
-  .sig-page img { display:block; width:100%; height:auto; border:1px solid var(--line-2); border-radius:10px;
-       background:#fff; }
+  .sig-page figcaption { font-size:.85rem; font-weight:600; color:var(--ink-2); }
+  .sig-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .sig-bar figcaption { flex:1; min-width:120px; }
+  /* ซูมภาพหน้าลงนาม (เจ้าของขอ 19 ต.ค. 2569) — ภาพเลื่อนดูในกรอบของตัวเอง ไม่ล้นหน้าจอ */
+  .zoom { display:flex; align-items:center; gap:4px; }
+  .zoom button, .zoom a { border:1px solid var(--line-2); background:#fff; color:var(--ink-2); border-radius:8px;
+       min-width:32px; height:30px; padding:0 8px; font-size:.82rem; font-weight:600; cursor:pointer;
+       display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+  .zoom button:hover, .zoom a:hover { background:var(--navy-soft); }
+  .zoom button:focus-visible, .zoom a:focus-visible, .viewer:focus-visible { outline:none; box-shadow:var(--ring); }
+  .zoom button[disabled] { opacity:.4; cursor:default; }
+  .zoom output { min-width:44px; text-align:center; font-size:.8rem; color:var(--ink-3); }
+  .viewer { overflow:auto; max-height:78vh; border:1px solid var(--line-2); border-radius:10px; background:#eef1f5;
+       overscroll-behavior:contain; }
+  .viewer.zoomed { cursor:grab; }
+  .viewer.dragging { cursor:grabbing; user-select:none; }
+  .sig-page img { display:block; width:100%; height:auto; background:#fff; }
   /* ระหว่างรอภาพ (ระบบวาดภาพจากไฟล์ทีละหน้า ใช้เวลาสักครู่) แสดงกรอบขนาดหน้า A4 พร้อมบอกว่ากำลังโหลด */
-  .frame { position:relative; border-radius:10px; }
-  .frame:not(.loaded) { aspect-ratio:210 / 297; background:#f3f6fa; border:1px dashed var(--line-2); }
+  .frame { position:relative; width:100%; }
+  .frame:not(.loaded) { aspect-ratio:210 / 297; background:#f3f6fa; }
   .frame:not(.loaded) img { position:absolute; inset:0; opacity:0; }
   .frame .state { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
        justify-content:flex-start; gap:10px; padding:18% 16px 16px; text-align:center; font-size:.88rem; color:var(--ink-2); }
@@ -73,8 +87,6 @@
        animation:spin .9s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation:none; border-top-color:#d7e2f0; } }
-  .sig-page a { display:block; border-radius:10px; }
-  .sig-page a:focus-visible { outline:none; box-shadow:var(--ring); }
   .no-pages { padding:14px; border-radius:12px; background:var(--bad-bg); border:1px solid var(--bad-line);
        color:var(--bad); font-size:.9rem; }
   .book-link { display:inline-block; margin-top:4px; font-size:.86rem; color:var(--navy-3); }
@@ -168,11 +180,21 @@
       <div class="panel">
         <h2>หน้าลงนามในเล่ม</h2>
         {% if pages %}
-          <p class="hint">กดที่ภาพเพื่อเปิดขนาดเต็มในแท็บใหม่</p>
+          <p class="hint">ซูมด้วยปุ่ม − / + หรือกด Ctrl ค้างแล้วหมุนเมาส์บนภาพ · ภาพที่ซูมแล้วลากเพื่อเลื่อนดูได้</p>
           {% for page in pages %}
           <figure class="sig-page">
-            <figcaption>หน้าลงนาม {{ loop.index }}{% if page.label %} (หน้า {{ page.label }}){% endif %}</figcaption>
-            <a href="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" target="_blank" rel="noopener">
+            <div class="sig-bar">
+              <figcaption>หน้าลงนาม {{ loop.index }}{% if page.label %} (หน้า {{ page.label }}){% endif %}</figcaption>
+              <div class="zoom" role="group" aria-label="ซูมภาพหน้าลงนาม {{ loop.index }}">
+                <button type="button" data-zoom="out" aria-label="ซูมออก">−</button>
+                <output aria-live="polite">100%</output>
+                <button type="button" data-zoom="in" aria-label="ซูมเข้า">+</button>
+                <button type="button" data-zoom="fit">พอดีกรอบ</button>
+                <a href="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png" target="_blank" rel="noopener"
+                   aria-label="เปิดภาพหน้าลงนาม {{ loop.index }} ขนาดเต็มในแท็บใหม่">↗</a>
+              </div>
+            </div>
+            <div class="viewer" tabindex="0" aria-label="ภาพหน้าลงนาม {{ loop.index }} เลื่อนดูได้เมื่อซูม">
               <div class="frame" aria-busy="true">
                 <img src="/precheck/{{ job_id }}/page/{{ loop.index0 }}.png"
                      alt="ภาพหน้าลงนาม {{ loop.index }}{% if page.label %} หน้า {{ page.label }}{% endif %}"
@@ -184,7 +206,7 @@
                   <div class="fail-msg">โหลดภาพไม่สำเร็จ — กดเปิดไฟล์เล่มทั้งเล่มด้านล่างเพื่อดูแทน</div>
                 </div>
               </div>
-            </a>
+            </div>
           </figure>
           {% endfor %}
         {% else %}
@@ -291,6 +313,67 @@
 </div>
 
 <script>
+// ---- ซูมภาพหน้าลงนาม: ขยายความกว้างของภาพในกรอบที่เลื่อนได้ ภาพจึงไม่ล้นหน้าจอ ----
+(function(){
+  var STEPS = [1, 1.5, 2, 2.5, 3];
+  document.querySelectorAll('.sig-page').forEach(function(fig){
+    var viewer = fig.querySelector('.viewer');
+    var frame = fig.querySelector('.frame');
+    var label = fig.querySelector('.zoom output');
+    var btnOut = fig.querySelector('[data-zoom="out"]');
+    var btnIn = fig.querySelector('[data-zoom="in"]');
+    var level = 0;
+    function apply(next, cx, cy){
+      next = Math.max(0, Math.min(STEPS.length - 1, next));
+      if (next === level) return;
+      // คงจุดที่กำลังดูไว้กลางกรอบ (หรือจุดที่เมาส์ชี้) หลังซูม
+      var rect = viewer.getBoundingClientRect();
+      var px = (cx == null) ? rect.width / 2 : cx - rect.left;
+      var py = (cy == null) ? rect.height / 2 : cy - rect.top;
+      var fx = (viewer.scrollLeft + px) / (frame.offsetWidth || 1);
+      var fy = (viewer.scrollTop + py) / (frame.offsetHeight || 1);
+      level = next;
+      frame.style.width = (STEPS[level] * 100) + '%';
+      viewer.classList.toggle('zoomed', level > 0);
+      viewer.scrollLeft = fx * frame.offsetWidth - px;
+      viewer.scrollTop = fy * frame.offsetHeight - py;
+      label.textContent = Math.round(STEPS[level] * 100) + '%';
+      btnOut.disabled = level === 0;
+      btnIn.disabled = level === STEPS.length - 1;
+    }
+    btnOut.disabled = true;
+    btnOut.addEventListener('click', function(){ apply(level - 1); });
+    btnIn.addEventListener('click', function(){ apply(level + 1); });
+    fig.querySelector('[data-zoom="fit"]').addEventListener('click', function(){ apply(0); });
+    viewer.addEventListener('wheel', function(e){
+      if (!e.ctrlKey) return;                     // หมุนเมาส์ธรรมดา = เลื่อนดูตามปกติ
+      e.preventDefault();
+      apply(level + (e.deltaY < 0 ? 1 : -1), e.clientX, e.clientY);
+    }, {passive: false});
+    viewer.addEventListener('keydown', function(e){
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); apply(level + 1); }
+      else if (e.key === '-') { e.preventDefault(); apply(level - 1); }
+      else if (e.key === '0') { e.preventDefault(); apply(0); }
+    });
+    // ลากเพื่อเลื่อนดูภาพที่ซูมแล้ว
+    var drag = null;
+    viewer.addEventListener('pointerdown', function(e){
+      if (level === 0 || e.button !== 0) return;
+      drag = {x: e.clientX, y: e.clientY, left: viewer.scrollLeft, top: viewer.scrollTop};
+      viewer.classList.add('dragging');
+      viewer.setPointerCapture(e.pointerId);
+    });
+    viewer.addEventListener('pointermove', function(e){
+      if (!drag) return;
+      viewer.scrollLeft = drag.left - (e.clientX - drag.x);
+      viewer.scrollTop = drag.top - (e.clientY - drag.y);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(ev){
+      viewer.addEventListener(ev, function(){ drag = null; viewer.classList.remove('dragging'); });
+    });
+    fig.querySelector('img').addEventListener('dragstart', function(e){ e.preventDefault(); });
+  });
+})();
 (function(){
   var JOB = {{ job_id | tojson }};
   var LOGIN_AGAIN = '/login?next=' + encodeURIComponent('/precheck/' + JOB);
