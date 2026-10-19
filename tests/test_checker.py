@@ -2413,8 +2413,8 @@ class CoverYearLineTests(unittest.TestCase):
         rep = self._run("MAHIDOL UNIVERSITY\n2026\nCOPYRIGHT", year="2023")
         issue = rep.zones["RED"][0]
         self.assertEqual(issue["found"], 'ปีบนหน้าปกในเล่มเขียนว่า "2026"')
-        self.assertTrue(issue["expected"].endswith('"2023"'))
-        self.assertIn('ต้องแก้เป็น "2023"', checker_module._summary_sentence(issue))
+        self.assertEqual(checker_module._summary_sentence(issue).splitlines()[-1].strip(),
+                         'ต้องแก้เป็น "2023" โดยอ้างอิงจากปีที่มีผลสอบผ่าน')
 
     def test_wrong_buddhist_year_keeps_prefix(self):
         rep = self._run("บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล\nพ.ศ. 2566\nลิขสิทธิ์ฯ")

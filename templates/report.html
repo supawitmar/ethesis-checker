@@ -1582,7 +1582,7 @@ var TR = [
   [/ไม่พบปี (\S+) บนหน้าปก/g, 'Year $1 not found on the cover'],
   [/ปี = ปีที่มีผลสอบผ่าน/g, 'Year = the exam pass year'],
   [/^ปีบนหน้าปกในเล่มเขียนว่า ("[^"]+")$/g, 'The year on the cover reads $1'],
-  [/^ปีบนหน้าปกต้องเป็นปีที่มีผลสอบผ่าน คือ ("[^"]+")$/g, 'The year on the cover must be the exam pass year, $1'],
+  [/^ต้องแก้เป็น ("[^"]+") โดยอ้างอิงจากปีที่มีผลสอบผ่าน$/g, 'Must be changed to $1, based on the exam pass year'],
   [/^แก้ปีบนหน้าปกจาก ("[^"]+") เป็น ("[^"]+")$/g, 'Change the year on the cover from $1 to $2'],
   [/พบปี (\S+) บนหน้าปกแต่ไม่ได้อยู่ในบรรทัดปีของตัวเอง:/g,
    'Year $1 appears on the cover but not on a line of its own:'],
