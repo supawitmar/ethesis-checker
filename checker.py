@@ -85,6 +85,18 @@ def soft(s):
     return re.sub(r'\s+', ' ', (s or '')).strip()
 
 
+# ขีดทุกแบบนับเป็นขีดเดียวกัน (เจ้าหน้าที่สั่ง 20 ต.ค. 2569): ขีดสั้น "-" ขีดยาว "–" "—" ขีดไม่ตัดบรรทัด "‑"
+# เครื่องหมายลบ "−" ฯลฯ ต่างกันแค่ความยาวตามฟอนต์/ภาษา แต่คือขีดเหมือนกัน — เล่มจริงพิมพ์ชื่อเรื่อง "Co–PRODUCTION"
+# (ขีดยาว) ส่วนข้อมูลอนุมัติเป็น "Co-PRODUCTION" แล้วถูกฟ้องว่าชื่อเรื่องไม่ตรง
+# ใช้ตอน "ตัดสินว่าตรงหรือไม่" เท่านั้น ข้อความที่ยกมาจากเล่มยังแสดงตามที่พิมพ์จริง
+_DASH_VARIANTS = re.compile('[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]')
+
+
+def fold_dashes(s):
+    """แทนขีดทุกแบบด้วยขีดสั้น "-" (U+002D)"""
+    return _DASH_VARIANTS.sub('-', s or '')
+
+
 # ---------- ตัวสะกดไทยครบทุกตัว (ใช้ "ตัดสิน" ว่าเล่มสะกดตรงหรือไม่) ----------
 # norm() ข้างบนตัดวรรณยุกต์ สระบน-ล่าง การันต์ทิ้ง และมอง ำ เป็น า เพราะ PDF ทำตัวเล็กพวกนี้หายหรือสลับที่บ่อย
 # จึงใช้ "หา" ข้อความได้ดี (หัวข้อ ส่วนของเล่ม บรรทัดที่จะยกมาแสดง) แต่ใช้ตัดสินไม่ได้ — เจ้าหน้าที่สั่ง
@@ -3217,8 +3229,8 @@ def exact_reference_status(page_text, expected):
     ทำให้ substring แบบตรงตัวพลาดทั้งที่ข้อความครบ จึงเทียบแบบตัดช่องว่างทิ้ง
     โดยยังคงตรวจตัวพิมพ์เล็ก-ใหญ่ได้
     """
-    expected = soft(expected)
-    page_flat = soft(page_text)
+    expected = soft(fold_dashes(expected))
+    page_flat = soft(fold_dashes(page_text))
     if not expected:
         return True, ""
     if re.search(r'[ก-๙]', expected):
@@ -5027,7 +5039,12 @@ def compare_values(actual, expected, rule_name):
     """Apply one centrally configured matching policy to two visible values."""
     rule = MATCH_RULES[rule_name]
     actual, expected = soft(actual), soft(expected)
+    # ขีดต่างแบบไม่นับเป็นความต่าง (fold_dashes) แต่ค่าที่ส่งกลับยังเป็นข้อความตามที่เล่มพิมพ์
+    if rule['case_sensitive'] and fold_dashes(actual) == fold_dashes(expected):
+        return {'status': 'exact', 'actual': actual, 'score': 1.0}
     if rule['case_sensitive']:
+        if fold_dashes(actual).casefold() == fold_dashes(expected).casefold():
+            return {'status': 'case', 'actual': actual, 'score': 1.0}
         if actual == expected:
             return {'status': 'exact', 'actual': actual, 'score': 1.0}
         if actual.casefold() == expected.casefold():
@@ -5619,8 +5636,10 @@ def _case_pairs(found, expected):
     got, want = soft(found).split(), soft(expected).split()
     if len(got) != len(want):
         return []
+    # คำที่ต่างกันแค่ชนิดขีดไม่นับ (fold_dashes) — ส่วนที่ต่างตัวพิมพ์ด้วยยังชี้ตามเดิม โดยยกคำตามที่เล่มพิมพ์
     pairs = [(a, b) for a, b in zip(got, want)
-             if a != b and a.casefold() == b.casefold()]
+             if fold_dashes(a) != fold_dashes(b)
+             and fold_dashes(a).casefold() == fold_dashes(b).casefold()]
     # เกินสามคำแปลว่าทั้งประโยคเขียนคนละแบบ (เล่มใช้ Sentence case ทั้งชื่อเรื่อง)
     # ไล่ทีละคำจะยาวจนไม่ช่วยอะไร ให้ดูข้อความที่ถูกต้องในบรรทัดถัดไปแทน
     return pairs if len(pairs) <= 3 else []
@@ -5659,7 +5678,7 @@ def analyze_word_diff(found, expected):
     got, want = soft(found).split(), soft(expected).split()
     if len(got) != len(want):
         return _NO_DIFF
-    pairs = [(a, b) for a, b in zip(got, want) if a != b]
+    pairs = [(a, b) for a, b in zip(got, want) if fold_dashes(a) != fold_dashes(b)]
     if not pairs or len(pairs) > 3:
         return _NO_DIFF
     body = " และ ".join(f'"{a}" ต้องเป็น "{b}"' for a, b in pairs)

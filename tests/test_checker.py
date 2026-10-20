@@ -2472,12 +2472,29 @@ class ReportQuestionsOct19Tests(unittest.TestCase):
         self.assertNotIn('"หลักสูตรนานาชาติใช้บทคัดย่ออังกฤษเท่านั้น",', source)
 
     def test_title_points_to_word_with_different_dash_and_case(self):
+        """ขีดต่างแบบไม่นับ (20 ต.ค. 2569) — เหลือชี้แค่ตัวพิมพ์เล็ก-ใหญ่ โดยยกคำตามที่เล่มพิมพ์"""
         found = "NETWORK BY CO–OPERATION UNDER THE PANDEMIC"
         expected = "NETWORK BY Co-OPERATION UNDER THE PANDEMIC"
-        detail = checker_module.title_mismatch_detail(
-            "ชื่อเรื่อง", checker_module.compare_values(found, expected, "title"), expected)
+        compared = checker_module.compare_values(found, expected, "title")
+        self.assertEqual(compared["status"], "case")
+        detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, expected)
         self.assertEqual(detail.fix_steps,
-                         ('ให้แก้ "CO–OPERATION" เป็น "Co-OPERATION"',))
+                         ('ให้แก้ตัวพิมพ์เล็ก-ใหญ่ "CO–OPERATION" เป็น "Co-OPERATION"',))
+
+    def test_every_kind_of_dash_counts_as_the_same_dash(self):
+        """เจ้าหน้าที่สั่ง (20 ต.ค. 2569): ขีดสั้นหรือยาวต่างกันตามภาษา/ฟอนต์ แต่คือขีดเหมือนกัน"""
+        expected = "A STUDY OF Co-OPERATION IN THAILAND"
+        page = "A STUDY OF Co{d}OPERATION IN THAILAND\nNAME\nA THESIS SUBMITTED"
+        for dash in ("-", " - ", "\u2010", "\u2011", "\u2012", "\u2013", " \u2013 ", "\u2014",
+                     "\u2015", "\u2212", "\uFF0D"):
+            with self.subTest(dash=dash):
+                compared = checker_module.compare_reference_text(page.format(d=dash), expected, "title")
+                self.assertEqual(compared["status"], "exact")
+                self.assertEqual(checker_module.compare_values(
+                    f"A STUDY OF Co{dash.strip()}OPERATION IN THAILAND", expected, "title")["status"], "exact")
+        # ตัวอักษรที่ต่างจริงยังนับเป็นความต่างเหมือนเดิม
+        self.assertNotEqual(checker_module.compare_values(
+            "A STUDY OF Ko-OPERATION IN THAILAND", expected, "title")["status"], "exact")
 
     def test_signature_name_fix_is_in_sentence_case(self):
         source = inspect.getsource(checker_module.run_check)
