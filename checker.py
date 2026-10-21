@@ -1109,15 +1109,10 @@ def ethesis_matches_book(approved, pages):
     return (bool(found) or len(checked) < 2), checked, found
 
 
-# จำนวนหน้ารวมในบทคัดย่อต่างจากเลขหน้าสุดท้ายเกินเท่านี้ = สีแดง (เจ้าของสั่ง 20 ต.ค. 2569)
-ABSTRACT_PAGE_COUNT_TOLERANCE = 2
-
-
-def _page_count_issue(count_wrong, last_arabic, last_page_read=False):
+def _page_count_issue(count_wrong, last_arabic):
     """รวม "จำนวนหน้ารวมไม่ตรง" ของทุกหน้าบทคัดย่อเป็นข้อเดียว
 
     count_wrong = [(ชื่อตำแหน่ง, เลขที่เล่มระบุ), ...]
-    last_page_read = แผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ และเป็นเลขหน้าสุดท้ายที่ระบบเห็น
     คืน (zone, ตำแหน่ง, ข้อความ "พบ")
 
     จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
@@ -1126,12 +1121,13 @@ def _page_count_issue(count_wrong, last_arabic, last_page_read=False):
     """
     where = " และ ".join(lbl for lbl, _num in count_wrong)
     stated = {num for _lbl, num in count_wrong}
-    # ต่างเกิน 2 หน้า = แดง ต่างไม่เกิน 2 หน้า = ส้ม (เจ้าของสั่ง 20 ต.ค. 2569 — เดิม ส.ค. 2569 ส้มเสมอ)
-    # แดงได้เฉพาะเมื่อแผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ — ถ้าท้ายเล่มเป็นหน้าภาพสแกน/พิมพ์เลขหน้าไม่ชัด
-    # "เลขหน้าสุดท้าย" ที่ระบบอ่านได้จะน้อยกว่าจริง ระบบยืนยันเองไม่ได้ว่าเล่มผิด จึงยังเป็นส้ม
-    far = last_arabic is not None and any(
-        abs(num - last_arabic) > ABSTRACT_PAGE_COUNT_TOLERANCE for num in stated)
-    zone = "RED" if far and last_page_read else "ORANGE"
+    # นโยบายเจ้าหน้าที่ (ส.ค. 2569): ให้เป็น "สีส้ม" เสมอ ไม่ฟันธงแดง ต่างกันกี่หน้าก็ตาม
+    # เพราะ "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
+    # (หน้าภาคผนวกที่เป็นภาพสแกน/หน้าที่พิมพ์เลขหน้าไม่ชัด ทำให้ระบบอ่านได้น้อยกว่าจริง)
+    # ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม จึงส่งให้เจ้าหน้าที่ตัดสิน
+    # อัปเดต 1.5 เคยเปลี่ยนเป็น "ต่างเกิน 2 หน้า = แดง" จากการเข้าใจผิด — เจ้าของยืนยัน 21 ต.ค. 2569 ว่า
+    # "ถ้าเลขต่างกัน แจ้งส้ม อันนี้ถูกต้องแล้ว" จึงคืนเป็นส้มเสมอ
+    zone = "ORANGE"
     if len(stated) == 1:
         found = (f"ระบุจำนวนหน้า {stated.pop()} "
                  f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
@@ -8083,12 +8079,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
                 "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
     if count_wrong:
-        # แผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ = เลขหน้าสุดท้ายที่ระบบเห็นคือเลขหน้าสุดท้ายของเล่มจริง
-        last_page_read = last_arabic is not None and printed.get(n - 1) == last_arabic
-        zone, where, found_count = _page_count_issue(count_wrong, last_arabic, last_page_read)
+        zone, where, found_count = _page_count_issue(count_wrong, last_arabic)
         rep.add(zone, "front_matter", where, found_count,
                 "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
-                "แก้จำนวนหน้าให้ตรงกับเลขหน้าสุดท้ายของเล่มทุกหน้าที่ระบุไว้" if zone == "RED" else
                 "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้",
                 "FRONT.ABSTRACT")
 
