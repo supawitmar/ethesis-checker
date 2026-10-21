@@ -99,6 +99,7 @@
   @media (prefers-reduced-motion: reduce) { .spin { animation:none; border-top-color:#d7e2f0; } }
   .no-pages { padding:14px; border-radius:12px; background:var(--bad-bg); border:1px solid var(--bad-line);
        color:var(--bad); font-size:.9rem; }
+  .scan-note { margin-bottom:10px; }
   .book-link { display:inline-block; margin-top:4px; font-size:.86rem; color:var(--navy-3); }
 
   .fee-grid { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:.9rem; }
@@ -197,6 +198,13 @@
         <h2>หน้าลงนามในเล่ม</h2>
         {% if pages %}
           <p class="hint">ซูมด้วยปุ่ม − / + หรือกด Ctrl ค้างแล้วหมุนเมาส์บนภาพ · ภาพที่ซูมแล้วลากเพื่อเลื่อนดูได้</p>
+          {#- หน้าลงนามที่สแกนมา (เจ้าของทัก 21 ต.ค. 2569) — ระบบอ่านไม่ได้ แต่เจ้าหน้าที่ยังเทียบรายชื่อจากภาพได้ -#}
+          {% set scanned = pages | selectattr("scanned") | list %}
+          {% if scanned %}
+          <div class="no-pages scan-note" role="note">หน้าลงนามเป็นไฟล์สแกน (แผ่นที่
+            {%- for page in scanned %} {{ page.index + 1 }}{% if not loop.last %} และ{% endif %}{% endfor %} ของไฟล์)
+            ระบบอ่านข้อความไม่ได้ — ผลตรวจจะแจ้งให้แนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม ยังเทียบรายชื่อจากภาพได้ตามปกติ</div>
+          {% endif %}
           {#- ช่องดูภาพช่องเดียว กดสลับหน้า (เจ้าของสั่ง 20 ต.ค. 2569) — ทุกหน้ายังมีกรอบซูมของตัวเอง
               แต่แสดงทีละหน้า ภาพหน้าอื่นโหลดรอไว้ สลับแล้วเห็นทันที ซูมค้างไว้ตามที่ตั้งไว้ของหน้านั้น -#}
           {% if pages | length > 1 %}
@@ -212,7 +220,7 @@
           <figure class="sig-page" id="sig-page-{{ loop.index0 }}"{% if pages | length > 1 %} role="tabpanel"
                   aria-labelledby="sig-tab-{{ loop.index0 }}"{% endif %}{% if not loop.first %} hidden{% endif %}>
             <div class="sig-bar">
-              <figcaption>{{ tab_labels[loop.index0] }}</figcaption>
+              <figcaption>{{ tab_labels[loop.index0] }}{% if page.scanned %} · ไฟล์สแกน แผ่นที่ {{ page.index + 1 }}{% endif %}</figcaption>
               <div class="zoom" role="group" aria-label="ซูมภาพหน้าลงนาม {{ loop.index }}">
                 <button type="button" data-zoom="out" aria-label="ซูมออก">−</button>
                 <output aria-live="polite">100%</output>

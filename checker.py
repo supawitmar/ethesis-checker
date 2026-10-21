@@ -1370,6 +1370,47 @@ def signature_page_position(sig_pages, page_index):
         return "หน้าลงนาม"
 
 
+def scanned_signature_pages(page_texts, cover_idx, sig_pages, image_pages):
+    """แผ่นภาพสแกนที่อยู่ตรงตำแหน่งหน้าลงนาม (ถัดจากหน้าปก) — ระบบอ่านข้อความบนแผ่นนั้นไม่ได้
+
+    เจ้าของทัก (21 ต.ค. 2569): เล่มที่สแกนหน้าลงนามที่เซ็นแล้วมาใส่เป็นภาพ ได้ "ไม่พบหน้าลงนามในเล่ม"
+    ทั้งที่มีหน้าลงนาม แค่อ่านไม่ได้ ต้องแจ้งว่าอ่านไม่ได้และให้แนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม
+    นับเฉพาะแผ่นที่มีภาพและไม่มีข้อความ (หรือมีแค่เลขหน้า) ไล่จากแผ่นถัดจากปกจนเจอแผ่นที่มีข้อความ
+    รวมกับหน้าลงนามที่อ่านได้แล้วไม่เกิน 2 แผ่น · หน้าขาวล้วนที่ไม่มีภาพไม่นับ (คงเป็น "ไม่พบหน้าลงนาม")
+    """
+    if len(sig_pages) >= 2:
+        return []
+    found, i = [], cover_idx + 1
+    while i < len(page_texts) and len(found) + len(sig_pages) < 2:
+        if i not in sig_pages:
+            if i not in image_pages or not _is_blank_page_text(page_texts[i]):
+                break
+            found.append(i)
+        i += 1
+    return found
+
+
+def _report_signature_page_count(rep, sig_pages, scanned, label_style=None):
+    """หน้าลงนามต้องมี 2 หน้าต่อจากหน้าปก — แผ่นสแกนที่อ่านไม่ได้แจ้งเป็นข้อเดียวว่าอ่านไม่ได้"""
+    # เจ้าหน้าที่ทัก (19 ต.ค. 2569) เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลยได้ "พบหน้าลงนาม 0 หน้า /
+    # ต้องมี 2 หน้า (Advisory + Examination)" ซึ่งอ่านไม่รู้เรื่อง — บอกตรง ๆ ว่าไม่พบ และต้องมีอะไรตรงไหน
+    sig_labels = {"thai": "ก - ข", "roman": "i - ii"}.get(label_style, "i - ii หรือ ก - ข")
+    if scanned:
+        sheets = " และ ".join(str(i + 1) for i in scanned)
+        rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
+                f"อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ {sheets} ของไฟล์)",
+                f"กรุณาแนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม (หน้า {sig_labels}) แทนหน้าที่สแกน",
+                "แทนหน้าที่สแกนด้วยหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม", "FRONT.APPROVAL")
+        return
+    if len(sig_pages) != 2:
+        rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
+                "ไม่พบหน้าลงนามในเล่ม" if not sig_pages else f"พบหน้าลงนาม {len(sig_pages)} หน้า",
+                f"ต้องมีหน้าลงนาม 2 หน้า (หน้า {sig_labels}) ต่อจากหน้าปก "
+                "คือ หน้าคณะกรรมการที่ปรึกษา และหน้าคณะกรรมการสอบ",
+                "เพิ่มหน้าลงนามทั้ง 2 หน้าต่อจากหน้าปกตาม template" if not sig_pages else "ตรวจด้วยตา",
+                "FRONT.APPROVAL")
+
+
 def _report_signature_page_labels(rep, sig_pages, pages, page_ref, zone=None, label_style=None):
     """หน้าลงนามหน้าแรกต้องเป็นหน้า i (ไทย: ก) หน้าที่สองต้องเป็น ii (ไทย: ข)
 
@@ -7175,19 +7216,28 @@ def signature_preview(pdf_path, limit=20):
     หน้าต่างจึงเห็นหน้าเดียวกับที่ผลตรวจอ้าง ไม่ต้องรอตรวจทั้งเล่มเสร็จ
     คืน [{"index": ดัชนีหน้าในไฟล์, "label": เลขหน้าที่พิมพ์}]
     ช่องประธานหลักสูตร/คณบดี-ผู้อำนวยการ ให้เจ้าหน้าที่ดูจากภาพ (ข้อความที่อ่านได้มีเส้นประลายเซ็นปนจนอ่านไม่รู้เรื่อง)
+    แผ่นสแกนตรงตำแหน่งหน้าลงนาม (scanned_signature_pages) ได้ "scanned": True ด้วย — ระบบอ่านไม่ได้
+    แต่เจ้าหน้าที่ยังดูรายชื่อจากภาพได้ ผลตรวจแจ้งให้แนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม
     """
-    out = []
+    texts, sig, images = [], [], set()
     with pdfplumber.open(pdf_path) as pdf:
         for i, pg in enumerate(pdf.pages[:limit]):
-            text = _page_text(pg)
-            kind, _heading = front_section_kind(text)
+            texts.append(_page_text(pg))
+            kind, _heading = front_section_kind(texts[-1])
             if kind == "signature":
-                out.append({"index": i, "label": _extract_page_label(text)})
+                sig.append(i)
+            try:
+                if pg.images:
+                    images.add(i)
+            except Exception:
+                pass
             try:
                 pg.flush_cache()
             except Exception:
                 pass
-    return out
+    scanned = scanned_signature_pages(texts, find_cover_page(texts), sig, images)
+    return [{"index": i, "label": _extract_page_label(texts[i]), **({"scanned": True} if i in scanned else {})}
+            for i in sorted(sig + scanned)]
 
 
 _ROMAN_FRONT_LABELS = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
@@ -7300,6 +7350,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     pages = []
     header_words = []    # คำในแถบหัวกระดาษต่อหน้า — ตัดสินทีหลังเมื่อรู้ว่าหน้าไหนเป็นส่วนนำ
     font_damaged = []          # ดัชนีหน้าที่ฟอนต์ในไฟล์ทำให้อ่านข้อความเพี้ยน
+    image_pages = set()        # หน้าต้นเล่มที่มีภาพ — ใช้แยกหน้าลงนามที่สแกนมาออกจาก "ไม่พบหน้าลงนาม"
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -7313,6 +7364,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             try:
                 if font_damage_score(_pg, pages[-1]):
                     font_damaged.append(_i)
+            except Exception:
+                pass
+            try:
+                if _i < 20 and _pg.images:
+                    image_pages.add(_i)
             except Exception:
                 pass
             try:
@@ -7377,6 +7433,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # บอกสาเหตุจริงเลย และบางข้ออ่านแล้วสับสน เช่นยกชื่อเรื่องมาอ้างว่าเป็นชื่อนักศึกษา
     cover_idx = find_cover_page(pages)
     cover_text = pages[cover_idx] if pages else ""
+    scanned_sig = scanned_signature_pages(pages, cover_idx, sig_pages, image_pages)
     want_language = (approved_book_language(approved)
                      if approved and same_student and not skip_identity_check else "")
     if want_language:
@@ -7495,7 +7552,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # จึงรวมหน้าติดกันเป็นรายการเดียว ไม่ฟ้องแยกทีละหน้า
     blank_runs = []
     for blank_idx, page_text in enumerate(pages):
-        if not _is_blank_page_text(page_text):
+        # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
+        if not _is_blank_page_text(page_text) or blank_idx in scanned_sig:
             continue
         if blank_runs and blank_runs[-1][-1] == blank_idx - 1:
             blank_runs[-1].append(blank_idx)
@@ -7519,16 +7577,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
-    if len(sig_pages) != 2:
-        # เจ้าหน้าที่ทัก (19 ต.ค. 2569) เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลยได้ "พบหน้าลงนาม 0 หน้า /
-        # ต้องมี 2 หน้า (Advisory + Examination)" ซึ่งอ่านไม่รู้เรื่อง — บอกตรง ๆ ว่าไม่พบ และต้องมีอะไรตรงไหน
-        sig_labels = {"thai": "ก - ข", "roman": "i - ii"}.get(front_label_style, "i - ii หรือ ก - ข")
-        rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
-                "ไม่พบหน้าลงนามในเล่ม" if not sig_pages else f"พบหน้าลงนาม {len(sig_pages)} หน้า",
-                f"ต้องมีหน้าลงนาม 2 หน้า (หน้า {sig_labels}) ต่อจากหน้าปก "
-                "คือ หน้าคณะกรรมการที่ปรึกษา และหน้าคณะกรรมการสอบ",
-                "เพิ่มหน้าลงนามทั้ง 2 หน้าต่อจากหน้าปกตาม template" if not sig_pages else "ตรวจด้วยตา",
-                "FRONT.APPROVAL")
+    _report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)
     sig_label_reported = _report_signature_page_labels(
         rep, sig_pages, pages, page_ref, label_style=front_label_style)
 
@@ -8005,7 +8054,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         sig_pages[0] if sig_pages else 1,
         body_ch[0][2] if body_ch else None,
         front_label_style,
-        page_texts=pages, reported=sig_label_reported)
+        page_texts=pages, reported=list(sig_label_reported) + scanned_sig)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
@@ -8947,5 +8996,6 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
          "n_pages": n, "approved_data": bool(approved), "front_label_style": front_label_style,
          # ข้อรายชื่อกรรมการที่เจ้าหน้าที่ติ๊ก (อัปเดต 1.5) ต้องบอกหน้าและรายชื่อที่ได้รับอนุมัติ
-         "signature_refs": [page_ref(idx) for idx in sig_pages[:2]],
+         # ลำดับเดียวกับภาพในขั้นที่ 1 (signature_preview) — แผ่นสแกนก็เป็นภาพหน้าลงนามในขั้นนั้นด้วย
+         "signature_refs": [page_ref(idx) for idx in sorted(sig_pages + scanned_sig)[:2]],
          "committees": committee_names_by_kind(approved)})

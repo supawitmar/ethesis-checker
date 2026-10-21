@@ -2459,12 +2459,16 @@ class ReportQuestionsOct19Tests(unittest.TestCase):
 
     def test_a_book_without_signature_pages_says_so_plainly(self):
         """เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลย — เดิมขึ้น "พบหน้าลงนาม 0 หน้า" ซึ่งอ่านไม่รู้เรื่อง"""
+        for style, labels in (("thai", "ก - ข"), ("roman", "i - ii"), (None, "i - ii หรือ ก - ข")):
+            rep = Report()
+            checker_module._report_signature_page_count(rep, [], [], style)
+            [issue] = rep.zones["RED"]
+            self.assertEqual(issue["found"], "ไม่พบหน้าลงนามในเล่ม")
+            self.assertEqual(issue["expected"], f"ต้องมีหน้าลงนาม 2 หน้า (หน้า {labels}) ต่อจากหน้าปก "
+                                                "คือ หน้าคณะกรรมการที่ปรึกษา และหน้าคณะกรรมการสอบ")
         source = inspect.getsource(checker_module.run_check)
-        block = source.split("if len(sig_pages) != 2:", 1)[1][:900]
-        self.assertIn('"ไม่พบหน้าลงนามในเล่ม" if not sig_pages', block)
-        self.assertIn("ต่อจากหน้าปก", block)
-        self.assertIn('{"thai": "ก - ข", "roman": "i - ii"}', block)
-        self.assertNotIn('"ต้องมี 2 หน้า (Advisory + Examination)",', block)
+        self.assertIn("_report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)", source)
+        self.assertNotIn('"ต้องมี 2 หน้า (Advisory + Examination)",', source)
 
     def test_international_book_with_thai_abstract_uses_staff_wording(self):
         source = inspect.getsource(checker_module.run_check)
@@ -9547,6 +9551,97 @@ class SignaturePreviewTabLabels(unittest.TestCase):
         three = self.PAGES + [{"index": 3, "label": ""}]
         self.assertEqual(checker_module.signature_tab_labels(three, "international")[-1], "หน้าลงนาม 3 (iii)")
         self.assertEqual(checker_module.signature_tab_labels([], "thai"), [])
+
+
+def _pdf_with_pages(pages):
+    """PDF เล็ก ๆ ในหน่วยความจำ — แต่ละหน้าเป็นข้อความ (str) หรือภาพเต็มหน้าไม่มีข้อความ (None)"""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None,
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+               b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray "
+               b"/BitsPerComponent 8 /Length 1 >>\nstream\n\x80\nendstream"]
+    kids = []
+    for text in pages:
+        if text is None:
+            stream = b"q 595 0 0 842 0 0 cm /Im1 Do Q"
+        else:
+            lines = " ".join(f"({line}) Tj 0 -16 Td" for line in text.split(NEWLINE))
+            stream = f"BT /F1 12 Tf 72 760 Td {lines} ET".encode("ascii")
+        objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+                       + stream + b"\nendstream")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
+                       f"<< /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >> "
+                       f"/Contents {len(objects)} 0 R >>".encode("ascii"))
+        kids.append(f"{len(objects)} 0 R")
+    objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode("ascii")
+    pdf, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    pdf.extend("".join(f"{offset:010d} 00000 n \n" for offset in offsets).encode("ascii"))
+    pdf.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+               .encode("ascii"))
+    return bytes(pdf)
+
+
+class ScannedSignaturePages(unittest.TestCase):
+    """หน้าลงนามที่สแกนมาเป็นภาพ = "อ่านหน้าลงนามไม่ได้" ไม่ใช่ "ไม่พบหน้าลงนาม" (เจ้าของทัก 21 ต.ค. 2569)"""
+
+    COVER = "THESIS TITLE" + NEWLINE + "A THESIS SUBMITTED" + NEWLINE + "MAHIDOL UNIVERSITY"
+    ACK = "iii" + NEWLINE + "ACKNOWLEDGEMENTS" + NEWLINE + "I would like to thank my advisor."
+
+    def test_image_pages_right_after_the_cover_are_the_scanned_signature_pages(self):
+        pages = [self.COVER, "", "", self.ACK]
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [], {1, 2}), [1, 2])
+        # สแกนมาแต่มีเลขหน้าพิมพ์ทับ ก็ยังนับ · หน้าลงนามที่อ่านได้หนึ่งหน้า เหลือแผ่นสแกนอีกหน้าเดียว
+        self.assertEqual(checker_module.scanned_signature_pages([self.COVER, "i", "", self.ACK], 0, [], {1, 2}),
+                         [1, 2])
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [2], {1}), [1])
+
+    def test_pages_that_are_not_scans_are_not_counted(self):
+        pages = [self.COVER, "", "", self.ACK]
+        # หน้าขาวล้วนที่ไม่มีภาพ = ไม่พบหน้าลงนามเหมือนเดิม
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [], set()), [])
+        # หน้าที่มีภาพแต่มีข้อความด้วย (เช่น กิตติกรรมประกาศที่มีโลโก้) ไม่ใช่แผ่นสแกน
+        self.assertEqual(checker_module.scanned_signature_pages([self.COVER, self.ACK], 0, [], {1}), [])
+        # หน้าลงนามครบ 2 หน้าแล้ว ไม่ต้องหาอีก
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [1, 2], {1, 2}), [])
+        # แผ่นสแกนที่อยู่หลังหน้าที่มีข้อความ (เช่น ภาคผนวก) ไม่ใช่ตำแหน่งหน้าลงนาม
+        self.assertEqual(checker_module.scanned_signature_pages([self.COVER, self.ACK, ""], 0, [], {2}), [])
+
+    def test_scanned_pages_say_they_cannot_be_read_and_ask_for_the_unsigned_original(self):
+        rep = Report()
+        checker_module._report_signature_page_count(rep, [], [1, 2], "roman")
+        [issue] = rep.zones["RED"]
+        self.assertEqual(issue["location"], "หน้าลงนาม")
+        self.assertEqual(issue["found"], "อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ 2 และ 3 ของไฟล์)")
+        self.assertEqual(issue["expected"],
+                         "กรุณาแนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม (หน้า i - ii) แทนหน้าที่สแกน")
+        self.assertEqual(issue["rule_id"], "FRONT.APPROVAL")
+        self.assertNotIn("ไม่พบหน้าลงนาม", issue["found"])
+        rep = Report()
+        checker_module._report_signature_page_count(rep, [1], [2], "thai")
+        [issue] = rep.zones["RED"]
+        self.assertEqual(issue["found"], "อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ 3 ของไฟล์)")
+        self.assertIn("(หน้า ก - ข)", issue["expected"])
+
+    def test_the_scanned_pages_are_not_reported_again_as_unreadable_pages(self):
+        """เดิมได้สามข้อจากแผ่นสแกนชุดเดียว: ไม่พบหน้าลงนาม + อ่านเลขหน้าไม่ได้ + ดึงข้อความไม่ได้"""
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("blank_idx in scanned_sig", source)
+        self.assertIn("reported=list(sig_label_reported) + scanned_sig", source)
+
+    def test_the_step_1_preview_shows_the_scanned_pages(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([self.COVER, None, None, self.ACK]))
+            self.assertEqual(checker_module.signature_preview(str(path)),
+                             [{"index": 1, "label": "", "scanned": True},
+                              {"index": 2, "label": "", "scanned": True}])
+            path.write_bytes(_pdf_with_pages([self.COVER, self.ACK]))
+            self.assertEqual(checker_module.signature_preview(str(path)), [])
 
 
 class Update14Turnitin(unittest.TestCase):
