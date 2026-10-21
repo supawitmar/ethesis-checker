@@ -1109,10 +1109,15 @@ def ethesis_matches_book(approved, pages):
     return (bool(found) or len(checked) < 2), checked, found
 
 
-def _page_count_issue(count_wrong, last_arabic):
+# จำนวนหน้ารวมในบทคัดย่อต่างจากเลขหน้าสุดท้ายเกินเท่านี้ = สีแดง (เจ้าของสั่ง 20 ต.ค. 2569)
+ABSTRACT_PAGE_COUNT_TOLERANCE = 2
+
+
+def _page_count_issue(count_wrong, last_arabic, last_page_read=False):
     """รวม "จำนวนหน้ารวมไม่ตรง" ของทุกหน้าบทคัดย่อเป็นข้อเดียว
 
     count_wrong = [(ชื่อตำแหน่ง, เลขที่เล่มระบุ), ...]
+    last_page_read = แผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ และเป็นเลขหน้าสุดท้ายที่ระบบเห็น
     คืน (zone, ตำแหน่ง, ข้อความ "พบ")
 
     จำนวนหน้ารวมเป็นค่าเดียวของทั้งเล่ม แต่พิมพ์ไว้ทั้งบทคัดย่อไทยและอังกฤษ
@@ -1121,11 +1126,12 @@ def _page_count_issue(count_wrong, last_arabic):
     """
     where = " และ ".join(lbl for lbl, _num in count_wrong)
     stated = {num for _lbl, num in count_wrong}
-    # นโยบายเจ้าหน้าที่ (ส.ค. 2569): ให้เป็น "สีส้ม" เสมอ ไม่ฟันธงแดง
-    # เพราะ "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
-    # (หน้าภาคผนวกที่เป็นภาพสแกน/หน้าที่พิมพ์เลขหน้าไม่ชัด ทำให้ระบบอ่านได้น้อยกว่าจริง)
-    # ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม จึงส่งให้เจ้าหน้าที่ตัดสิน
-    zone = "ORANGE"
+    # ต่างเกิน 2 หน้า = แดง ต่างไม่เกิน 2 หน้า = ส้ม (เจ้าของสั่ง 20 ต.ค. 2569 — เดิม ส.ค. 2569 ส้มเสมอ)
+    # แดงได้เฉพาะเมื่อแผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ — ถ้าท้ายเล่มเป็นหน้าภาพสแกน/พิมพ์เลขหน้าไม่ชัด
+    # "เลขหน้าสุดท้าย" ที่ระบบอ่านได้จะน้อยกว่าจริง ระบบยืนยันเองไม่ได้ว่าเล่มผิด จึงยังเป็นส้ม
+    far = last_arabic is not None and any(
+        abs(num - last_arabic) > ABSTRACT_PAGE_COUNT_TOLERANCE for num in stated)
+    zone = "RED" if far and last_page_read else "ORANGE"
     if len(stated) == 1:
         found = (f"ระบุจำนวนหน้า {stated.pop()} "
                  f"แต่เลขหน้าสุดท้ายที่ระบบอ่านได้คือ {last_arabic}")
@@ -3626,7 +3632,73 @@ _PASS_FEE_EN = "\n".join([
 ])
 
 
+# ---------- รายชื่อกรรมการบนหน้าลงนาม: ข้อที่เจ้าหน้าที่ติ๊กว่าผิด (อัปเดต 1.5) ----------
+# เจ้าของสั่ง (20 ต.ค. 2569): ระบบนับจำนวนกรรมการให้แต่ไม่เทียบชื่อ เจ้าหน้าที่เทียบรายชื่อกับ บฑ.1 / บฑ.2
+# เองในขั้นที่ 1 อยู่แล้ว จึงต้องมีช่องติ๊ก "รายชื่อไม่ถูกต้อง" / "รายชื่อไม่ครบตามที่ได้รับอนุมัติ" ด้วย
+# ติ๊กแล้ว = จุดที่ต้องแก้ของหน้าลงนามนั้น (signature_name_issues) — ไม่ยกรายชื่อมาในข้อความ ให้นักศึกษา
+# ตรวจกับเอกสาร บฑ. เอง (เจ้าของยืนยัน 20 ต.ค. 2569)
+# (เลขข้อ, ชุดรายชื่อ, ปัญหา) — เลขข้อคือสิ่งเดียวที่หน้าเว็บส่งกลับมา
+SIGNATURE_NAME_PROBLEMS = (
+    (1, "advisory", "wrong"),
+    (2, "advisory", "short"),
+    (3, "exam", "wrong"),
+    (4, "exam", "short"),
+)
+# ป้ายช่องติ๊กใต้รายชื่อแต่ละชุดในขั้นที่ 1 — ถ้อยคำของเจ้าของ (20 ต.ค. 2569)
+SIGNATURE_NAME_PROBLEM_LABEL = {"wrong": "รายชื่อไม่ถูกต้อง",
+                                "short": "รายชื่อไม่ครบตามที่ได้รับอนุมัติ"}
+# ข้อเช็กลิสต์บนการ์ดหน้าผลตรวจ เลขข้อตรงกับ SIGNATURE_NAME_PROBLEMS
+_SIGNATURE_NAMES_TEXT = ("(1) รายชื่อคณะกรรมการที่ปรึกษา (บฑ.1) ไม่ถูกต้อง"
+                         "\n"
+                         "(2) รายชื่อคณะกรรมการที่ปรึกษา (บฑ.1) ไม่ครบตามที่ได้รับอนุมัติ"
+                         "\n"
+                         "(3) รายชื่อคณะกรรมการสอบ (บฑ.2) ไม่ถูกต้อง"
+                         "\n"
+                         "(4) รายชื่อคณะกรรมการสอบ (บฑ.2) ไม่ครบตามที่ได้รับอนุมัติ")
+_SIGNATURE_NAMES_TEXT_EN = ("(1) Advisory committee names (GR.1) are incorrect"
+                            "\n"
+                            "(2) Advisory committee list (GR.1) is incomplete compared with the approval"
+                            "\n"
+                            "(3) Examination committee names (GR.2) are incorrect"
+                            "\n"
+                            "(4) Examination committee list (GR.2) is incomplete compared with the approval")
+
+
 STAFF_CHECKS = [
+    {
+        # ไม่บังคับตอบก่อนบันทึกลงชีท (must_answer) — ขั้นที่ 1 บังคับติ๊ก "ตรวจแล้ว" ทุกชุดอยู่แล้ว
+        # และหน้าผลตรวจตั้งค่าให้ตามที่ติ๊กไว้ในขั้นที่ 1 เสมอ
+        "id": "SIGNATURE_NAMES",
+        "item": "รายชื่อกรรมการบนหน้าลงนาม",
+        "item_en": "Committee names on the signature pages",
+        "why": "ระบบนับจำนวนกรรมการให้ แต่ไม่ได้เทียบชื่อ เจ้าหน้าที่เทียบรายชื่อกับ บฑ.1 / บฑ.2 "
+               "ในขั้นที่ 1 ข้อที่ติ๊กว่าผิดจะเข้าข้อความสรุปเป็นจุดที่ต้องแก้",
+        "why_en": "The system counts the committee members but does not compare their names. "
+                  "Staff compare the names with Forms GR.1 / GR.2 in step 1. Each item ticked "
+                  "as wrong goes into the summary as a fix.",
+        "rule_id": "FRONT.COMMITTEE",
+        "placement": "section",
+        "section": "หน้าลงนาม",
+        "choices": [
+            {
+                "id": "SIGNATURE_NAMES_OK",
+                "label": "ถูกต้อง",
+                "label_en": "Correct",
+                "tone": "pass",
+                "text": "",
+                "text_en": "",
+            },
+            {
+                "id": "SIGNATURE_NAMES_WRONG",
+                "label": "รายชื่อไม่ถูกต้อง / ไม่ครบ",
+                "label_en": "Names wrong / incomplete",
+                "tone": "fail",
+                # ข้อเช็กลิสต์ ไม่ใช่ถ้อยคำที่ส่งนักศึกษา — ข้อความสรุปสร้างจาก signature_name_issues
+                "text": _SIGNATURE_NAMES_TEXT,
+                "text_en": _SIGNATURE_NAMES_TEXT_EN,
+            },
+        ],
+    },
     {
         "id": "SIGNATURE_LAYOUT",
         "item": "โครงสร้างหน้าลงนาม",
@@ -3678,7 +3750,8 @@ STAFF_CHECKS = [
                          "ใช้ฟอนต์และกรอบตารางตามที่กำหนด โดยไม่เลื่อนช่องชื่อ "
                          "และไม่ย่อหรือขยายกรอบให้พอดีกับจำนวนชื่อ"
                          "\n"
-                         "(1) เรียงรายชื่อคณะกรรมการแต่ละชุดตามลำดับในเอกสารที่ได้รับอนุมัติ "
+                         # ข้อ (1) ถ้อยคำเจ้าของ ตรงตัว (20 ต.ค. 2569) — ครอบทั้งรายชื่อและลำดับ
+                         "(1) รายชื่อคณะกรรมการแต่ละชุด และการเรียงตามลำดับตามเอกสารที่ได้รับอนุมัติ "
                          "เริ่มจากช่องด้านขวาบนสุดไล่ลงมาด้านล่าง"
                          "\n"
                          "(2) หากมีคณะกรรมการเกิน 5 ท่าน ให้ใส่รายชื่อที่ 6 เป็นต้นไป"
@@ -3701,8 +3774,8 @@ STAFF_CHECKS = [
                             "using the designated font and table frames. Do not move the "
                             "name slots or resize the frames to fit the number of names."
                             "\n"
-                            "(1) List each committee in the order shown in the approved "
-                            "document, starting from the top slot on the right and moving down."
+                            "(1) The names in each committee and their order as in the approved "
+                            "document, starting from the top-right slot and going down"
                             "\n"
                             "(2) If there are more than 5 committee members, place the 6th "
                             "name onward in the slot to the left of the 5th name (the slot "
@@ -3932,13 +4005,13 @@ def signature_layout_items(text):
     return out
 
 
-def signature_failed_items(staff):
-    """เลขข้อเช็กลิสต์ที่ติ้กไม่ผ่าน จาก id "SIGNATURE_LAYOUT_ITEM_<n>" ในชุด staff (ค่าจากหน้าเว็บ เชื่อไม่ได้)"""
+def signature_failed_items(staff, prefix=SIGNATURE_ITEM_PREFIX):
+    """เลขข้อเช็กลิสต์ที่ติ้กไม่ผ่าน จาก id "<prefix><n>" ในชุด staff (ค่าจากหน้าเว็บ เชื่อไม่ได้)"""
     found = set()
     for key in staff or ():
         key = str(key)
-        if key.startswith(SIGNATURE_ITEM_PREFIX) and key[len(SIGNATURE_ITEM_PREFIX):].isdigit():
-            found.add(int(key[len(SIGNATURE_ITEM_PREFIX):]))
+        if key.startswith(prefix) and key[len(prefix):].isdigit():
+            found.add(int(key[len(prefix):]))
     return found
 
 
@@ -3958,6 +4031,83 @@ def signature_layout_text(text, failed_items):
             k += 1
             out.append(f"({k}) " + line.strip()[match.end():])
     return "\n".join(out)
+
+
+SIGNATURE_NAMES_WRONG = "SIGNATURE_NAMES_WRONG"
+SIGNATURE_NAMES_OK = "SIGNATURE_NAMES_OK"
+SIGNATURE_NAMES_ITEM_PREFIX = "SIGNATURE_NAMES_ITEM_"
+# ข้อจำนวนกรรมการที่ระบบนับเองแล้วไม่ตรง (_report_committee_count) ขึ้นต้นด้วยถ้อยคำเหล่านี้
+_COMMITTEE_COUNT_FOUND = ("รายชื่อไม่ครบตามที่ได้รับอนุมัติใน", "รายชื่อเกินจากที่ได้รับอนุมัติใน")
+_SIGNATURE_NAME_LEAD = {
+    frozenset({"wrong"}): "รายชื่อไม่ถูกต้อง",
+    frozenset({"short"}): "รายชื่อไม่ครบ",
+    frozenset({"wrong", "short"}): "รายชื่อไม่ถูกต้องและไม่ครบ",
+}
+
+
+def signature_name_items(staff):
+    """เลขข้อรายชื่อที่ติ๊กว่าผิด จาก id "SIGNATURE_NAMES_ITEM_<n>" — เลขที่ไม่รู้จักทิ้งเงียบ ๆ"""
+    known = {n for n, _kind, _problem in SIGNATURE_NAME_PROBLEMS}
+    return signature_failed_items(staff, SIGNATURE_NAMES_ITEM_PREFIX) & known
+
+
+def committee_names_by_kind(approved):
+    """รายชื่อกรรมการตามข้อมูลอนุมัติ {"advisory": [...], "exam": [...]} ในรูปที่แสดงในรายงาน
+
+    เก็บไว้ใน context ของผลตรวจ ข้อความสรุปที่สร้างใหม่ทุกครั้งที่เจ้าหน้าที่กด จึงบอกได้ว่า
+    ควรมีชื่ออะไรบ้าง โดยไม่ต้องย้อนไปหาข้อมูลอนุมัติของงาน
+    """
+    committees = (approved or {}).get("committees") or {}
+    return {kind: [_display_committee_name(name) for name in _committee_names(committees.get(kind) or [])
+                   if name]
+            for kind in SIGNATURE_PAGE_COMMITTEE}
+
+
+def signature_name_issues(report, staff):
+    """จุดที่ต้องแก้จากข้อรายชื่อที่เจ้าหน้าที่ติ๊กว่าผิด — หน้าลงนามละไม่เกินหนึ่งข้อ
+
+    ตำแหน่ง / "รายชื่อไม่ถูกต้อง|ไม่ครบตามที่ได้รับอนุมัติใน บฑ.x" / "กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.x"
+    ไม่ยกรายชื่อตาม บฑ. มาในข้อความ (เจ้าของยืนยัน 20 ต.ค. 2569) — ข้อที่ระบบนับจำนวนเองยังยกรายชื่อเหมือนเดิม
+    ติ๊กทั้งสองข้อของหน้าเดียวกัน = ข้อเดียวว่า "ไม่ถูกต้องและไม่ครบ" (แก้ที่รายชื่อชุดเดียวกัน)
+
+    ข้อ "ไม่ครบ" ของหน้าที่ระบบฟ้องจำนวนไม่ตรงไว้แล้ว ไม่แจ้งซ้ำ — นักศึกษาจะได้สองข้อที่พูดเรื่อง
+    เดียวกัน ข้อของระบบบอกจำนวนที่นับได้ด้วย จึงเก็บข้อนั้นไว้
+    """
+    ticked = signature_name_items(staff)
+    if not ticked:
+        return []
+    report = report or {}
+    context = report.get("context") or {}
+    refs = context.get("signature_refs") or []
+    reds = (report.get("issues_by_zone") or {}).get("RED") or []
+    out = []
+    for k, kind in enumerate(SIGNATURE_PAGE_COMMITTEE, start=1):
+        page = f"หน้าลงนาม {k}"
+        problems = {problem for n, which, problem in SIGNATURE_NAME_PROBLEMS
+                    if which == kind and n in ticked}
+        counted = any(
+            (str(issue.get("location") or "") == page
+             or str(issue.get("location") or "").startswith(page + " ("))
+            and str(issue.get("found") or "").startswith(_COMMITTEE_COUNT_FOUND)
+            for issue in reds)
+        if counted:
+            problems.discard("short")
+        if not problems:
+            continue
+        form = committee_source_form(kind)
+        expected = f"กรุณาตรวจสอบรายชื่อตามเอกสาร {form}"
+        ref = refs[k - 1] if len(refs) >= k and refs[k - 1] else ""
+        out.append({
+            "part": "front_matter",
+            "location": f"{page} ({ref})" if ref else page,
+            "found": f"{_SIGNATURE_NAME_LEAD[frozenset(problems)]}ตามที่ได้รับอนุมัติใน {form}",
+            "expected": expected,
+            "fix": "",
+            "system_note": False,
+            "staff_choice": SIGNATURE_NAMES_WRONG,
+            **rule_reference("FRONT.COMMITTEE"),
+        })
+    return out
 
 
 # ---------- ผลตรวจ Turnitin (อัปเดต 1.4) ----------
@@ -4163,6 +4313,21 @@ def staff_issue(check, choice, label_style=None, staff=None):
     }
 
 
+def staff_section_issues(report, staff=None):
+    """จุดที่ต้องแก้จากหัวข้อที่เจ้าหน้าที่กดเอง (placement = section)
+
+    หัวข้อส่วนใหญ่ได้หนึ่งข้อต่อหนึ่งคำตอบ ยกเว้นรายชื่อกรรมการ (อัปเดต 1.5) ที่ได้หน้าลงนามละข้อ
+    ข้อความสรุปและตัวเลขกล่อง "ต้องแก้" ต้องนับจากรายการชุดนี้ชุดเดียวกัน (ดู zone_counts)
+    """
+    out = []
+    for check, choice in staff_choices(staff, "section"):
+        if choice["id"] == SIGNATURE_NAMES_WRONG:
+            out += signature_name_issues(report, staff)
+        else:
+            out.append(staff_issue(check, choice, report_label_style(report), staff))
+    return out
+
+
 def issues_to_fix(report, failed=None, passed=None, staff=None):
     """รายการในกลุ่ม "กรุณาแก้ไข" ของข้อความสรุป — นับเท่ากับกล่อง "ต้องแก้" บนหัวรายงานเสมอ
 
@@ -4189,8 +4354,7 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
              if not it.get("system_note")]
     # จุดที่เจ้าหน้าที่กด "ผิด" เองมาก่อนข้ออื่น เพราะเป็นคำตัดสินของคน ไม่ใช่ของระบบ
     # (ลำดับในข้อความสรุปยังจัดตามส่วนของเล่มอยู่ดี ตรงนี้แค่กันไม่ให้ตกท้ายกลุ่ม)
-    for check, choice in staff_choices(staff, "section"):
-        items.append(staff_issue(check, choice, report_label_style(report), staff))
+    items += staff_section_issues(report, staff)
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" in failed:
             items.append(issue)
@@ -4414,7 +4578,7 @@ def zone_counts(report, failed=None, passed=None, staff=None):
     zones = report.get("issues_by_zone") or {}
     # จุดที่เจ้าหน้าที่กดเพิ่มเองเป็นคำตัดสินว่าเล่มผิด นับรวมกับสีแดงเหมือนใน
     # issues_to_fix (ตัวเลือก placement=closing เป็นข้อความปิดท้าย ไม่ใช่จุดผิด)
-    red = len(zones.get("RED") or []) + len(staff_choices(staff, "section"))
+    red = len(zones.get("RED") or []) + len(staff_section_issues(report, staff))
     pending = notice = 0
     for index, issue in enumerate(zones.get("ORANGE") or []):
         key = f"ORANGE:{index}"
@@ -7030,6 +7194,27 @@ def signature_preview(pdf_path, limit=20):
     return out
 
 
+_ROMAN_FRONT_LABELS = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
+
+
+def signature_tab_labels(pages, program_language):
+    """ป้ายปุ่มสลับหน้าลงนามในขั้นที่ 1 — "หน้าลงนาม 1 (ก)" / "หน้าลงนาม 1 (i)" ตามภาษาเล่ม
+
+    เจ้าของสั่ง (20 ต.ค. 2569): "ปรับเป็นช่องเดียว แต่กดเปลี่ยนหน้า หน้าลงนาม 1 (ก) หน้าลงนาม 2 (ข)
+    เปลี่ยนไปตามภาษาของเล่ม" · หน้าลงนามคือหน้าแรก ๆ ของส่วนนำ (ปกไม่มีเลขหน้า) หน้าที่ k จึงได้เลขที่ k
+    ของชนิดเลขหน้าตามภาษาเล่ม (_expected_front_label_style) · ไม่รู้ภาษาเล่ม = ใช้เลขหน้าที่พิมพ์ในเล่ม
+    ไม่มีทั้งสองอย่าง = ไม่มีวงเล็บ
+    """
+    style = _expected_front_label_style(program_language)
+    letters = (_THAI_PAGE_LETTERS if style == "thai" else
+               _ROMAN_FRONT_LABELS if style == "roman" else ())
+    out = []
+    for k, page in enumerate(pages or [], start=1):
+        label = letters[k - 1] if k <= len(letters) else (page.get("label") or "")
+        out.append(f"หน้าลงนาม {k} ({label})" if label else f"หน้าลงนาม {k}")
+    return out
+
+
 def render_page_png(pdf_path, index, resolution=220):
     """ภาพหน้าเดียวของเล่มเป็น PNG (bytes) — ใช้แสดงหน้าลงนามในหน้าต่างตรวจก่อนตรวจเล่ม
 
@@ -7224,7 +7409,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep,
                 {"document_type": doc_type, "option": None,
                  "chapters_mode": chapters_mode, "n_pages": n,
-                 "approved_data": bool(approved), "front_label_style": front_label_style},
+                 "approved_data": bool(approved), "front_label_style": front_label_style,
+                 "committees": committee_names_by_kind(approved)},
                 (BOOK_LANGUAGE_STOPPED,) + tuple(NOT_CHECKED))
         if wrong_parts:
             # สัญญาณขัดกันเอง (เช่น ปกอังกฤษ แต่หัวบทเป็น "บทที่ 1") ตัดสินภาษาทั้งเล่ม
@@ -7897,9 +8083,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "ระบบไม่พบการระบุจำนวนหน้า (เช่น 123 pages / 123 หน้า)",
                 "ท้ายบทคัดย่อต้องระบุจำนวนหน้ารวมของเล่ม", "ตรวจด้วยตา", "FRONT.ABSTRACT")
     if count_wrong:
-        zone, where, found_count = _page_count_issue(count_wrong, last_arabic)
+        # แผ่นสุดท้ายของไฟล์อ่านเลขหน้าได้ = เลขหน้าสุดท้ายที่ระบบเห็นคือเลขหน้าสุดท้ายของเล่มจริง
+        last_page_read = last_arabic is not None and printed.get(n - 1) == last_arabic
+        zone, where, found_count = _page_count_issue(count_wrong, last_arabic, last_page_read)
         rep.add(zone, "front_matter", where, found_count,
                 "จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม",
+                "แก้จำนวนหน้าให้ตรงกับเลขหน้าสุดท้ายของเล่มทุกหน้าที่ระบุไว้" if zone == "RED" else
                 "เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้",
                 "FRONT.ABSTRACT")
 
@@ -8763,4 +8952,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     return check_result(
         rep,
         {"document_type": doc_type, "option": option, "chapters_mode": chapters_mode,
-         "n_pages": n, "approved_data": bool(approved), "front_label_style": front_label_style})
+         "n_pages": n, "approved_data": bool(approved), "front_label_style": front_label_style,
+         # ข้อรายชื่อกรรมการที่เจ้าหน้าที่ติ๊ก (อัปเดต 1.5) ต้องบอกหน้าและรายชื่อที่ได้รับอนุมัติ
+         "signature_refs": [page_ref(idx) for idx in sig_pages[:2]],
+         "committees": committee_names_by_kind(approved)})

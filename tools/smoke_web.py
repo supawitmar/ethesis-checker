@@ -113,13 +113,19 @@ def main():
     passed.append(check("เปิดหน้าตรวจหน้าลงนามได้", pre.status_code == 200, str(pre.status_code)))
     passed.append(check("หน้าตรวจหน้าลงนามมีภาพหน้าลงนาม 2 หน้า",
                         pre.text.count(f'src="/precheck/{job}/page/') == 2))
+    # ช่องดูภาพช่องเดียว กดสลับหน้า (เจ้าของสั่ง 20 ต.ค. 2569) — แสดงหน้าแรก อีกหน้าซ่อนรอไว้
+    passed.append(check("ช่องดูภาพหน้าลงนามช่องเดียวมีปุ่มสลับ 2 หน้า",
+                        pre.text.count('role="tab"') == 2 and 'id="sig-page-1" role="tabpanel"' in pre.text
+                        and 'aria-labelledby="sig-tab-1" hidden' in pre.text))
     image = client.get(f"/precheck/{job}/page/0.png")
     passed.append(check("ภาพหน้าลงนามเป็น PNG",
                         image.status_code == 200 and image.content[:4] == b"\x89PNG",
                         str(image.status_code)))
     passed.append(check("หน้าตรวจหน้าลงนามบอกค่า Turnitin เกินเกณฑ์",
                         "31%" in pre.text and "เกินเกณฑ์" in pre.text))
+    # อัปเดต 1.5: ติ้กว่ารายชื่อคณะกรรมการสอบ (บฑ.2) ไม่ถูกต้อง = ข้อ 3
     answer = {"sections_ok": ["advisory", "exam", "program_head", "faculty_head"],
+              "name_items": [3],
               "items": {"1": "pass", "2": "fail", "3": "pass", "4": "pass", "5": "pass"}}
     saved = client.post(f"/precheck/{job}", json=answer)
     passed.append(check("บันทึกคำตอบหน้าลงนาม", saved.status_code == 200, saved.text[:120]))
@@ -142,7 +148,13 @@ def main():
     passed.append(check("หน้ารายงานเขียนตัวเลขจากเซิร์ฟเวอร์",
                         "renderZoneCounts(data.counts)" in html))
     passed.append(check("หน้าผลตรวจได้คำตอบหน้าลงนามไปตั้งค่า",
-                        '{"failed_items": [2]}' in html))
+                        '{"failed_items": [2], "name_items": [3]}' in html))
+    names = client.post(f"/summary/{job}", json={
+        "failed": [], "passed": [],
+        "staff": ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_3"]}).json()["plain"]
+    passed.append(check("ข้อรายชื่อที่ติ้กเข้าข้อความสรุป ให้ตรวจกับเอกสาร บฑ.2 (ไม่ยกรายชื่อ)",
+                        "รายชื่อไม่ถูกต้องตามที่ได้รับอนุมัติใน บฑ.2" in names
+                        and "กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.2" in names))
     layout = client.post(f"/summary/{job}", json={
         "failed": [], "passed": [],
         "staff": ["SIGNATURE_LAYOUT_WRONG", "SIGNATURE_LAYOUT_ITEM_2"]}).json()["plain"]

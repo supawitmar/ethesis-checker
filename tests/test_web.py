@@ -707,12 +707,39 @@ class Update14PrecheckFlow(unittest.TestCase):
                 break
             time.sleep(0.01)
         html = self.client.get(f"/result/{job_id}").text
-        self.assertIn('<script id="precheck-data" type="application/json">{"failed_items": [2]}</script>', html)
+        self.assertIn('<script id="precheck-data" type="application/json">'
+                      '{"failed_items": [2], "name_items": []}</script>', html)
         self.assertIn('data-sig-item="2"', html)
         self.assertIn("ไม่มีค่าปรับ (ครบกำหนด 06/08/2026)", html)
         report = main._get_job(job_id)["report"]
         reds = [i["found"] for i in report["issues_by_zone"]["RED"]]
         self.assertIn("ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity 28% ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน 25%)", reds)
+
+    def test_name_problems_ticked_in_step_one_reach_the_report_page(self):
+        """อัปเดต 1.5: ช่องติ้ก "รายชื่อไม่ถูกต้อง" / "รายชื่อไม่ครบตามที่ได้รับอนุมัติ" ใต้ บฑ.1 / บฑ.2"""
+        job_id = self._post().json()["job_id"]
+        page = self.client.get(f"/precheck/{job_id}").text
+        for number in (1, 2, 3, 4):
+            self.assertIn(f'data-name-item="{number}"', page)
+        self.assertIn("รายชื่อไม่ครบตามที่ได้รับอนุมัติ", page)
+        answer = {**PRECHECK_ALL_PASS, "name_items": [3, 1]}
+        self.assertEqual(self.client.post(f"/precheck/{job_id}", json=answer).json()["name_items"], [1, 3])
+        for _ in range(500):
+            if main._get_job(job_id)["done"]:
+                break
+            time.sleep(0.01)
+        html = self.client.get(f"/result/{job_id}").text
+        self.assertIn('"name_items": [1, 3]', html)
+        self.assertIn('data-staff="SIGNATURE_NAMES"', html)
+        self.assertIn("(4) รายชื่อคณะกรรมการสอบ (บฑ.2) ไม่ครบตามที่ได้รับอนุมัติ", html)
+
+    def test_unknown_name_problems_are_refused(self):
+        job_id = self._post().json()["job_id"]
+        for bad in ([5], ["x"], "1", [True]):
+            with self.subTest(bad=bad):
+                answer = {**PRECHECK_ALL_PASS, "name_items": bad}
+                self.assertEqual(self.client.post(f"/precheck/{job_id}", json=answer).status_code, 400)
+        self.assertIsNone(main._get_job(job_id)["precheck"])
 
 
 if __name__ == "__main__":

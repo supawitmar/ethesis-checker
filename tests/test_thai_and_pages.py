@@ -883,16 +883,29 @@ class TotalPageCountIsOneIssueForAllAbstractPages(unittest.TestCase):
         self.assertIn(f"{self.EN} ระบุ 170", found)
         self.assertIn("154", found)
 
-    def test_always_orange_never_red(self):
-        """นโยบายเจ้าหน้าที่ (ส.ค. 2569): ต่างมากแค่ไหนก็ยังเป็นส้ม
+    def test_more_than_two_pages_off_is_red(self):
+        """เจ้าของสั่ง (20 ต.ค. 2569): ต่างเกิน 2 หน้า = แดง (เดิม ส.ค. 2569 ส้มเสมอ)"""
+        for numbers in (([(self.TH, 171), (self.EN, 171)], 154),
+                        ([(self.TH, 155), (self.EN, 171)], 154),     # หน้าใดหน้าหนึ่งต่างเกินก็พอ
+                        ([(self.TH, 157)], 154),
+                        ([(self.TH, 151)], 154)):
+            zone, _where, _found = _page_count_issue(*numbers, last_page_read=True)
+            self.assertEqual(zone, "RED", numbers)
 
-        "เลขหน้าสุดท้าย" ที่ระบบอ่านได้ขึ้นกับว่าอ่านเลขหน้าท้ายเล่มออกครบไหม
-        ระบบยืนยันเองไม่ได้ว่าเป็นความผิดของเล่ม จึงห้ามฟันธงแดง
-        """
+    def test_up_to_two_pages_off_stays_orange(self):
         for numbers in (([(self.TH, 155), (self.EN, 155)], 154),
-                        ([(self.TH, 155), (self.EN, 171)], 154),
+                        ([(self.TH, 156)], 154),
+                        ([(self.TH, 152)], 154)):
+            zone, _where, _found = _page_count_issue(*numbers, last_page_read=True)
+            self.assertEqual(zone, "ORANGE", numbers)
+
+    def test_unread_last_page_stays_orange_however_far(self):
+        """แผ่นสุดท้ายอ่านเลขหน้าไม่ได้ (ภาพสแกน) — เลขที่ระบบเห็นน้อยกว่าจริง ห้ามฟันธงแดง"""
+        for numbers in (([(self.TH, 171), (self.EN, 171)], 154),
                         ([(self.TH, 117), (self.EN, 117)], 104)):
             zone, _where, _found = _page_count_issue(*numbers)
+            self.assertEqual(zone, "ORANGE", numbers)
+            zone, _where, _found = _page_count_issue(*numbers, last_page_read=False)
             self.assertEqual(zone, "ORANGE", numbers)
 
     def test_single_page_keeps_the_plain_message(self):

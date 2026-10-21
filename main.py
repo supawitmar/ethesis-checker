@@ -35,6 +35,9 @@ from fastapi.staticfiles import StaticFiles
 from checker import (
     STAFF_CHOICE_BY_ID,
     SIGNATURE_LAYOUT_WRONG,
+    SIGNATURE_NAMES_WRONG,
+    SIGNATURE_NAME_PROBLEMS,
+    SIGNATURE_NAME_PROBLEM_LABEL,
     late_fee,
     TURNITIN_LIMIT,
     turnitin_similarity,
@@ -43,6 +46,7 @@ from checker import (
     run_check,
     signature_layout_items,
     signature_preview,
+    signature_tab_labels,
     sheet_row,
     sheet_staff_pending,
     sheet_undecided,
@@ -755,14 +759,21 @@ async def check(
 # ---------- ตรวจหน้าลงนามและค่าปรับก่อนตรวจเล่ม (อัปเดต 1.4) ----------
 # เจ้าของสั่ง (19 ต.ค. 2569): กดตรวจเล่มแล้วขึ้นหน้าต่างให้ดูภาพหน้าลงนามคู่รายชื่อที่อนุมัติ ติ้กยืนยันรายชื่อ
 # ทีละชุด และเช็กลิสต์โครงสร้าง (1)-(5) ให้ครบก่อน ระหว่างนั้นระบบตรวจส่วนอื่นอยู่เบื้องหลัง
-# คำตอบเก็บกับงาน แล้วหน้ารายงานตั้งค่าหัวข้อโครงสร้างหน้าลงนามกับค่าปรับให้เอง (แก้ได้)
-# ติ้กรายชื่อแต่ละชุด = ยืนยันว่าดูแล้ว ไม่สร้างข้อความ (ชื่อสะกดผิด/จำนวนกรรมการ ระบบตรวจเป็นสีแดงเอง)
+# คำตอบเก็บกับงาน แล้วหน้ารายงานตั้งค่าหัวข้อรายชื่อกรรมการ โครงสร้างหน้าลงนาม และค่าปรับให้เอง (แก้ได้)
+# ติ้ก "ตรวจแล้ว" ทุกชุด = ยืนยันว่าดูแล้ว · ระบบนับจำนวนกรรมการเองแต่ไม่เทียบชื่อ จึงมีช่องติ้ก
+# "รายชื่อไม่ถูกต้อง" / "รายชื่อไม่ครบตามที่ได้รับอนุมัติ" ใต้รายชื่อ บฑ.1 / บฑ.2 (อัปเดต 1.5 เจ้าของสั่ง 20 ต.ค. 2569)
 PRECHECK_SECTIONS = (
     ("advisory", "รายชื่อคณะกรรมการที่ปรึกษา (บฑ.1)"),
     ("exam", "รายชื่อคณะกรรมการสอบ (บฑ.2)"),
     ("program_head", "ช่องประธานหลักสูตร (มุมล่างขวาของหน้าลงนาม 1)"),
     ("faculty_head", "ช่องคณบดี/ผู้อำนวยการ (มุมล่างขวาของหน้าลงนาม 2)"),
 )
+# ช่องติ้กปัญหาของรายชื่อแต่ละชุด {ชุด: [(เลขข้อ, ป้าย, ปัญหา), ...]} — เลขข้อตรงกับ checker.SIGNATURE_NAME_PROBLEMS
+# ปัญหา ("wrong"/"short") ไว้ให้หน้าเว็บรู้ว่าช่องไหนคือ "รายชื่อไม่ถูกต้อง" (ติ๊กแล้วเช็กลิสต์ข้อ (1) ไม่ผ่านทันที)
+PRECHECK_NAME_PROBLEMS = {}
+for _n, _kind, _problem in SIGNATURE_NAME_PROBLEMS:
+    PRECHECK_NAME_PROBLEMS.setdefault(_kind, []).append(
+        (_n, SIGNATURE_NAME_PROBLEM_LABEL[_problem], _problem))
 
 
 def _fee_view(fee):
@@ -806,9 +817,10 @@ async def _read_turnitin(upload):
         raise
 
 
-def _layout_items():
-    """ข้อเช็กลิสต์โครงสร้างหน้าลงนามสองภาษา [{n, th, en}] จากถ้อยคำฉบับเต็มที่เดียว"""
-    _check, wrong = STAFF_CHOICE_BY_ID[SIGNATURE_LAYOUT_WRONG]
+def _layout_items(choice_id=SIGNATURE_LAYOUT_WRONG):
+    """ข้อเช็กลิสต์ของหัวข้อเจ้าหน้าที่สองภาษา [{n, th, en}] จากถ้อยคำฉบับเต็มที่เดียว
+    (โครงสร้างหน้าลงนาม หรือรายชื่อกรรมการ)"""
+    _check, wrong = STAFF_CHOICE_BY_ID[choice_id]
     english = dict(signature_layout_items(wrong["text_en"]))
     return [{"n": n, "th": text, "en": english.get(n, "")}
             for n, text in signature_layout_items(wrong["text"])]
@@ -839,6 +851,9 @@ async def precheck_page(request: Request, job_id: str):
         "job_id": job_id, "pdf_name": job.get("pdf_name") or "",
         "student": approved, "committees": approved.get("committees") or {},
         "pages": preview, "sections": PRECHECK_SECTIONS,
+        # ปุ่มสลับหน้าลงนาม "หน้าลงนาม 1 (ก)" ตามภาษาเล่ม (เจ้าของสั่ง 20 ต.ค. 2569)
+        "tab_labels": signature_tab_labels(preview, approved.get("program_language")),
+        "name_problems": PRECHECK_NAME_PROBLEMS,
         "items": signature_layout_items(wrong["text"]),
         "fee": _fee_view(job.get("late_fee")),
         "turnitin": job.get("turnitin"),
@@ -881,8 +896,16 @@ async def precheck_answer(job_id: str, request: Request):
             or any(v not in ("pass", "fail") for v in answers.values())):
         return JSONResponse({"error": "กรุณาตอบเช็กลิสต์โครงสร้างหน้าลงนามให้ครบทุกข้อก่อน"}, status_code=400)
     failed = sorted(int(k) for k, v in answers.items() if v == "fail")
-    _update_job(job_id, precheck={"failed_items": failed})
-    return {"ok": True, "failed_items": failed}
+    # ข้อรายชื่อที่ติ้กว่าผิด (อัปเดต 1.5) — ไม่ส่งมาเลย = ไม่มีข้อไหนผิด ค่าที่ไม่รู้จัก = ปฏิเสธ
+    names = payload.get("name_items") or []
+    known = {n for n, _kind, _problem in SIGNATURE_NAME_PROBLEMS}
+    if (not isinstance(names, list)
+            or any(not str(n).isdigit() or int(n) not in known for n in names)):
+        return JSONResponse({"error": "ข้อรายชื่อที่ติ้กไม่ถูกต้อง กรุณาโหลดหน้าใหม่แล้วติ้กอีกครั้ง"},
+                            status_code=400)
+    name_items = sorted({int(n) for n in names})
+    _update_job(job_id, precheck={"failed_items": failed, "name_items": name_items})
+    return {"ok": True, "failed_items": failed, "name_items": name_items}
 
 
 @app.get("/progress/{job_id}")
@@ -1151,6 +1174,7 @@ def result(request: Request, job_id: str):
         "precheck": job.get("precheck") or {},
         "fee": _fee_view(job.get("late_fee")),
         "layout_items": _layout_items(),
+        "name_items": _layout_items(SIGNATURE_NAMES_WRONG),
         "has_book": _book_path(job) is not None,
         "has_turnitin": _turnitin_path(job) is not None,
         "sheet_enabled": SHEET_ENABLED,

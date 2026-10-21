@@ -647,6 +647,17 @@
           <span data-th="({{ item.n }}) {{ item.th }}" data-en="({{ item.n }}) {{ item.en }}">({{ item.n }}) {{ item.th }}</span></label>
         {% endfor %}
       </div>
+      {% elif sf.id == 'SIGNATURE_NAMES' and name_items %}
+      {# อัปเดต 1.5: ข้อรายชื่อที่ติ๊ก = จุดที่ต้องแก้ของหน้าลงนามนั้น พร้อมรายชื่อตามที่ได้รับอนุมัติ
+         (checker.signature_name_issues) ค่าเริ่มมาจากช่องติ้กในขั้นที่ 1 แก้ได้ #}
+      <div class="sig-items" hidden>
+        <div class="si-head" data-th="ติ๊กข้อที่ผิด (เข้าข้อความสรุปเฉพาะข้อที่ติ๊ก)"
+             data-en="Tick what is wrong (only ticked items go into the summary)">ติ๊กข้อที่ผิด (เข้าข้อความสรุปเฉพาะข้อที่ติ๊ก)</div>
+        {% for item in name_items %}
+        <label><input type="checkbox" data-sig-item="{{ item.n }}" onchange="sigItemChanged(this)">
+          <span data-th="({{ item.n }}) {{ item.th }}" data-en="({{ item.n }}) {{ item.en }}">({{ item.n }}) {{ item.th }}</span></label>
+        {% endfor %}
+      </div>
       {% endif %}
       <div class="sf-state" hidden></div>
       <button type="button" class="cmt-btn" onclick="toggleNote(this)" data-th="💬 เพิ่มความเห็น" data-en="💬 Add comment">💬 เพิ่มความเห็น</button>
@@ -1058,6 +1069,7 @@ var TR = [
   [/ส่วนเลขหน้าสุดท้ายที่ระบบอ่านได้คือ (\d+)/g, 'while the last page number read is $1'],
   [/จำนวนหน้าที่ระบุต้องเท่ากับเลขหน้าสุดท้ายของเล่ม/g, 'The stated page count must equal the last page number of the document'],
   [/เจ้าหน้าที่ยืนยันเลขหน้าสุดท้ายจากไฟล์จริง แล้วให้แก้ตัวเลขให้ตรงทุกหน้าที่ระบุไว้/g, 'Staff to confirm the last page number from the file, then correct the figure on every page that states it'],
+  [/^แก้จำนวนหน้าให้ตรงกับเลขหน้าสุดท้ายของเล่มทุกหน้าที่ระบุไว้$/g, 'Correct the stated page count on every page that states it, so it matches the last page number of the document'],
   // ---- "…ในเล่มเขียนว่า …" (ข้อความแบบภาษาคน) ----
   [/ชื่อบทในเล่มเขียนว่า/g, 'The chapter title in the document reads'],
   [/ชื่อเรื่องในเล่มเขียนว่า/g, 'The thesis title in the document reads'],
@@ -1105,7 +1117,7 @@ var TR = [
   [/Plagiarism หรือเปอร์เซ็นต์ความซ้ำซ้อน/g, 'Plagiarism or similarity percentage'],
   [/มาตรฐาน PDF\/A, embedded fonts และความคมชัดของภาพ/g, 'PDF\/A compliance, embedded fonts and image quality'],
   [/เนื้อหาของคุณวุฒิ \(Degree\/Subject\) ใต้ชื่อกรรมการ \(ระบบตรวจว่ามีบรรทัดคุณวุฒิครบทุกคน แต่ไม่ตรวจว่าคุณวุฒิถูกต้องหรือไม่\)/g, 'The qualification (Degree\/Subject) text under each committee name (the system checks that every member has a qualification line, but not whether the qualification itself is correct)'],
-  [/ชื่อ-สกุลและตัวสะกดของกรรมการ ทั้งบนหน้าลงนามและหน้าบทคัดย่อ \(ระบบนับให้ว่าจำนวนครบตามฟอร์มต้นทางหรือไม่ แล้วพิมพ์รายชื่อตามฟอร์ม ไว้ในรายการสีม่วงให้เจ้าหน้าที่ทานเอง\)/g, 'Committee member names and their spelling, on both the signature pages and the abstract page (the system only checks whether the number matches the source form, and prints the list from that form in the purple section for staff to check by eye)'],
+  [/ชื่อ-สกุลและตัวสะกดของกรรมการ ทั้งบนหน้าลงนามและหน้าบทคัดย่อ \(ระบบนับให้ว่าจำนวนครบตามฟอร์มต้นทางหรือไม่ ส่วนชื่อให้เจ้าหน้าที่เทียบเอง: หน้าลงนามในขั้นที่ 1 และหน้าบทคัดย่อจากรายการสีม่วง\)/g, 'Committee member names and their spelling, on both the signature pages and the abstract page (the system only checks whether the number matches the source form; staff compare the names themselves: the signature pages in step 1, and the abstract page from the purple list)'],
   [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน\)/g, 'Where each committee name sits in the signature table (every document is laid out differently)'],
   [/ตำแหน่งการวางชื่อกรรมการในตาราง \(แต่ละเล่มจัดหน้าไม่เหมือนกัน ระบบดูเฉพาะว่าชื่อครบและถูกคน\)/g, 'Where each committee name sits in the table (books are laid out differently, so the system only checks that the names are complete and correct)'],
   [/การมี\/ไม่มีลายเซ็นและการตรวจความแท้จริงของลายเซ็น/g, 'Presence and authenticity of signatures'],
@@ -1675,6 +1687,12 @@ var TR = [
   // นักศึกษาต่างชาติอ่านไม่ออก ฉบับไทยยังยกรายชื่อครบเหมือนเดิม กฎเต็มประโยคจึงกินรายชื่อทิ้งทั้งท่อน
   [/ต้องมีรายชื่อครบตาม (บฑ\.\d) คือ .+/g, 'The list must match $1'],
   [/ต้องมีรายชื่อครบตาม (บฑ\.\d) คือ/g, 'The list must match $1 in full:'],
+  // ---- ข้อรายชื่อกรรมการที่เจ้าหน้าที่ติ๊กในขั้นที่ 1 (อัปเดต 1.5) — ผูกหัวท้าย ห้ามยิงกลางประโยค ----
+  [/^รายชื่อไม่ถูกต้องตามที่ได้รับอนุมัติใน (บฑ\.\d)$/g, 'The names do not match what $1 approved'],
+  [/^รายชื่อไม่ครบตามที่ได้รับอนุมัติใน (บฑ\.\d)$/g, 'The list is short of what $1 approved'],
+  [/^รายชื่อไม่ถูกต้องและไม่ครบตามที่ได้รับอนุมัติใน (บฑ\.\d)$/g, 'The names are wrong and the list is short of what $1 approved'],
+  // ไม่ยกรายชื่อ ให้ตรวจกับเอกสาร บฑ. เอง (เจ้าของยืนยัน 20 ต.ค. 2569)
+  [/^กรุณาตรวจสอบรายชื่อตามเอกสาร (บฑ\.\d)$/g, 'Please check the names against $1'],
   [/ตรวจว่าหน้านี้มีรายชื่อครบหรือไม่ ถ้าครบแล้วแปลว่าระบบอ่านบางช่องไม่ออก ให้ผ่านได้/g, 'Check whether the page really lists everyone; if it does, the system simply could not read some cells and this can pass'],
   [/ระบบนับจำนวนอาจารย์เทียบกับ (บฑ\.\d) ให้แล้ว แต่ไม่ได้เทียบชื่อ โปรดทานรายชื่อเอง รายชื่อตาม (บฑ\.\d) คือ .+/g, 'The system compared the number of professors against $1 but did not compare the names themselves — please check them by eye against $2'],
   [/ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ (บฑ\.\d) ไม่ได้ โปรดทานรายชื่อเอง และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม (บฑ\.\d) คือ .+/g, 'The system could not read the names on this page clearly, so it could not even compare the count with $1 — please check by eye against $2, and see what the system did read under supporting information'],
@@ -1952,15 +1970,23 @@ function collectFailed(){
 }
 // จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" — ถ้อยคำชุดที่กำหนดไว้จะถูกเพิ่ม
 // เข้าข้อความสรุปในส่วนของเล่มที่ระบุไว้ในทะเบียน (checker.STAFF_FINDINGS)
+// ตัวเลือกที่มีเช็กลิสต์ย่อย → คำนำหน้า id ของข้อที่ติ๊ก (ชุดเดียวกับ checker)
+var STAFF_ITEM_PREFIX = {
+  SIGNATURE_LAYOUT_WRONG: 'SIGNATURE_LAYOUT_ITEM_',   // อัปเดต 1.4 โครงสร้างหน้าลงนาม
+  SIGNATURE_NAMES_WRONG: 'SIGNATURE_NAMES_ITEM_'      // อัปเดต 1.5 รายชื่อกรรมการ
+};
 function collectStaff(){
-  var picked = Array.from(document.querySelectorAll('.sf .pf.on[data-choice]'))
-    .map(el => el.getAttribute('data-choice'));
-  // อัปเดต 1.4: ข้อเช็กลิสต์ที่ไม่ผ่าน ส่งเฉพาะตอนเลือก "โครงสร้างหน้าลงนามผิด" อยู่
-  if (picked.indexOf('SIGNATURE_LAYOUT_WRONG') !== -1){
-    document.querySelectorAll('.sig-items input[data-sig-item]:checked').forEach(function(box){
-      picked.push('SIGNATURE_LAYOUT_ITEM_' + box.getAttribute('data-sig-item'));
+  var picked = [];
+  // ข้อเช็กลิสต์ที่ติ๊ก ส่งเฉพาะตอนเลือกตัวเลือก "ผิด" ของการ์ดนั้นอยู่ และเฉพาะช่องในการ์ดนั้น
+  document.querySelectorAll('.sf .pf.on[data-choice]').forEach(function(el){
+    var id = el.getAttribute('data-choice');
+    picked.push(id);
+    var prefix = STAFF_ITEM_PREFIX[id];
+    if (!prefix) return;
+    el.closest('.sf').querySelectorAll('.sig-items input[data-sig-item]:checked').forEach(function(box){
+      picked.push(prefix + box.getAttribute('data-sig-item'));
     });
-  }
+  });
   return picked;
 }
 // ข้อที่เจ้าหน้าที่กด "ผ่าน" (ยอมรับได้) — สีส้มถูกตัดออกจากข้อความสรุป ส่วนสีเหลือง
@@ -2293,21 +2319,35 @@ function pressChoice(card, choiceId){
   renderStaffState(card);
   return true;
 }
-// เช็กลิสต์ขึ้นเฉพาะตอนเลือก "โครงสร้างหน้าลงนามผิด"
+// เช็กลิสต์ขึ้นเฉพาะตอนเลือกตัวเลือก "ผิด" ที่มีเช็กลิสต์ ("โครงสร้างหน้าลงนามผิด" / "รายชื่อไม่ถูกต้อง / ไม่ครบ")
 function syncSigItems(card){
   var box = card && card.querySelector('.sig-items');
   if (!box) return;
-  box.hidden = !card.querySelector('.pf.on[data-choice="SIGNATURE_LAYOUT_WRONG"]');
+  var on = card.querySelector('.pf.on[data-choice]');
+  box.hidden = !(on && STAFF_ITEM_PREFIX[on.getAttribute('data-choice')]);
 }
-function applyPrecheck(){
-  if (!PRECHECK) return false;
-  var card = document.querySelector('.sf[data-staff="SIGNATURE_LAYOUT"]');
+function sigItemChanged(input){
+  renderStaffState(input.closest('.sf'));
+  scheduleSummaryRefresh();
+}
+// ติ๊กตามขั้นที่ 1 แล้วกดตัวเลือกให้ — มีข้อผิดอย่างน้อยหนึ่งข้อ = ตัวเลือก "ผิด"
+function precheckCard(staffId, failed, wrongId, okId){
+  var card = document.querySelector('.sf[data-staff="' + staffId + '"]');
   if (!card) return false;
-  var failed = (PRECHECK.failed_items || []).map(String);
   card.querySelectorAll('.sig-items input[data-sig-item]').forEach(function(box){
     box.checked = failed.indexOf(box.getAttribute('data-sig-item')) !== -1;
   });
-  return pressChoice(card, failed.length ? 'SIGNATURE_LAYOUT_WRONG' : 'SIGNATURE_LAYOUT_OK');
+  return pressChoice(card, failed.length ? wrongId : okId);
+}
+function applyPrecheck(){
+  if (!PRECHECK) return false;
+  var layout = precheckCard('SIGNATURE_LAYOUT', (PRECHECK.failed_items || []).map(String),
+                            'SIGNATURE_LAYOUT_WRONG', 'SIGNATURE_LAYOUT_OK');
+  // งานที่ตรวจขั้นที่ 1 ก่อนรุ่น 1.5 ไม่มี name_items — ปล่อยการ์ดรายชื่อไว้ให้เจ้าหน้าที่กดเอง
+  var names = Array.isArray(PRECHECK.name_items) &&
+      precheckCard('SIGNATURE_NAMES', PRECHECK.name_items.map(String),
+                   'SIGNATURE_NAMES_WRONG', 'SIGNATURE_NAMES_OK');
+  return layout || names;
 }
 // ค่าปรับ: เลือกให้ในหัวข้อที่ใช้กับผลตรวจตอนนี้ (เล่มผ่าน = PASS_FEE, ไม่ผ่าน = LATE_FEE) ถ้ายังไม่ได้เลือก
 function autoFee(){
@@ -2353,6 +2393,14 @@ function renderStaffState(card){
   if (!picked){ line.hidden = true; line.textContent = ''; return; }
   const label = picked.dataset[LANG] || picked.textContent.trim();
   line.hidden = false;
+  // รายชื่อกรรมการ: ข้อความสรุปสร้างจากข้อที่ติ๊ก — ยังไม่ติ๊กสักข้อ = ยังไม่มีอะไรเข้าสรุป
+  if (picked.getAttribute('data-choice') === 'SIGNATURE_NAMES_WRONG'
+      && !card.querySelector('.sig-items input[data-sig-item]:checked')){
+    line.textContent = (LANG === 'en')
+      ? 'Tick at least one item below. Nothing is added to the summary yet.'
+      : 'ติ๊กข้อที่ผิดอย่างน้อย 1 ข้อด้านล่าง ตอนนี้ยังไม่มีถ้อยคำเข้าข้อความสรุป';
+    return;
+  }
   if (picked.getAttribute('data-adds')){
     line.textContent = (LANG === 'en')
       ? 'Added the "' + label + '" wording to the summary above.'

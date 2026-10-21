@@ -4784,7 +4784,7 @@ class TheStaffWordingNamesThePagesOfThisBook(unittest.TestCase):
 
     def test_the_run_stores_the_book_language(self):
         source = inspect.getsource(checker_module.run_check)
-        self.assertEqual(source.count('"front_label_style": front_label_style}'), 2)
+        self.assertEqual(source.count('"front_label_style": front_label_style,'), 2)
 
 
 class ABiographyHeadedJustPrathawat(unittest.TestCase):
@@ -5887,7 +5887,7 @@ class StaffChecksThatAddTheirOwnWordingToTheSummary(unittest.TestCase):
 
     def test_the_registry_holds_both_topics(self):
         self.assertEqual([c["id"] for c in checker_module.STAFF_CHECKS],
-                         ["SIGNATURE_LAYOUT", "LATE_FEE", "PASS_FEE"])
+                         ["SIGNATURE_NAMES", "SIGNATURE_LAYOUT", "LATE_FEE", "PASS_FEE"])
         for choice_id in (self.WRONG, self.FEE_NONE, self.FEE_YES,
                           self.PASS_NONE, self.PASS_YES):
             self.assertIn(choice_id, checker_module.STAFF_CHOICE_BY_ID)
@@ -9436,6 +9436,119 @@ class Update14SignatureLayoutText(unittest.TestCase):
         self.assertNotIn("คุณวุฒิสูงสุด", text)
 
 
+class Update15SignatureNames(unittest.TestCase):
+    """ช่องติ๊ก "รายชื่อไม่ถูกต้อง" / "รายชื่อไม่ครบตามที่ได้รับอนุมัติ" (อัปเดต 1.5 เจ้าของสั่ง 20 ต.ค. 2569)"""
+
+    CONTEXT = {"front_label_style": "thai", "signature_refs": ["หน้า ก", "หน้า ข"],
+               "committees": {"advisory": ["มยุรี หอมสนิท", "วันเพ็ญ แก้วปาน"],
+                              "exam": ["สมชาย ใจดี", "มยุรี หอมสนิท", "วันเพ็ญ แก้วปาน"]}}
+
+    def _report(self, rep=None, context=None):
+        return checker_module.check_result(rep or checker_module.Report(), context or self.CONTEXT)
+
+    def test_each_ticked_page_becomes_a_fix_with_the_approved_names(self):
+        report = self._report()
+        staff = ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_2", "SIGNATURE_NAMES_ITEM_3"]
+        text = checker_module.plain_summary(report, staff=staff)
+        self.assertIn("กรุณาแก้ไขทั้งหมด 2 จุด", text)
+        # ไม่ยกรายชื่อ ให้ตรวจกับเอกสาร บฑ. เอง (เจ้าของยืนยัน 20 ต.ค. 2569)
+        self.assertIn("หน้าลงนาม 1 (หน้า ก)" + NEWLINE + checker_module.SUMMARY_INDENT
+                      + "รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.1" + NEWLINE + checker_module.SUMMARY_INDENT
+                      + "กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.1", text)
+        self.assertIn("หน้าลงนาม 2 (หน้า ข)" + NEWLINE + checker_module.SUMMARY_INDENT
+                      + "รายชื่อไม่ถูกต้องตามที่ได้รับอนุมัติใน บฑ.2" + NEWLINE + checker_module.SUMMARY_INDENT
+                      + "กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.2", text)
+        self.assertNotIn("มยุรี หอมสนิท", text)
+        self.assertEqual(checker_module.zone_counts(report, staff=staff)["RED"], 2)
+        self.assertEqual(checker_module.summary_verdict(report, staff=staff), "ไม่ผ่าน")
+        # ช่องติ๊กของชีท: หน้าลงนามนับเป็น Cover
+        self.assertTrue(checker_module.sheet_row(report, staff=staff)["flags"]["Cover"])
+
+    def test_both_ticks_on_one_page_are_one_item(self):
+        staff = ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_1", "SIGNATURE_NAMES_ITEM_2"]
+        issues = checker_module.signature_name_issues(self._report(), staff)
+        self.assertEqual([i["found"] for i in issues],
+                         ["รายชื่อไม่ถูกต้องและไม่ครบตามที่ได้รับอนุมัติใน บฑ.1"])
+        self.assertEqual(issues[0]["rule_id"], "FRONT.COMMITTEE")
+
+    def test_nothing_ticked_adds_nothing(self):
+        report = self._report()
+        for staff in (["SIGNATURE_NAMES_OK"], ["SIGNATURE_NAMES_WRONG"],
+                      ["SIGNATURE_NAMES_ITEM_1"],                      # ข้อที่ติ๊กไม่มีตัวเลือก "ผิด" กำกับ
+                      ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_9", "SIGNATURE_NAMES_ITEM_x"]):
+            with self.subTest(staff=staff):
+                self.assertEqual(checker_module.zone_counts(report, staff=staff)["RED"], 0)
+                self.assertEqual(checker_module.summary_verdict(report, staff=staff), "ผ่าน")
+
+    def test_short_is_not_repeated_when_the_system_counted_already(self):
+        rep = checker_module.Report()
+        checker_module._report_committee_count(
+            rep, self.CONTEXT["committees"]["advisory"], ["มยุรี หอมสนิท"], "หน้าลงนาม 1 (หน้า ก)")
+        report = self._report(rep)
+        only_short = ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_2"]
+        self.assertEqual(checker_module.signature_name_issues(report, only_short), [])
+        self.assertEqual(checker_module.zone_counts(report, staff=only_short)["RED"], 1)
+        both = only_short + ["SIGNATURE_NAMES_ITEM_1"]
+        self.assertEqual([i["found"] for i in checker_module.signature_name_issues(report, both)],
+                         ["รายชื่อไม่ถูกต้องตามที่ได้รับอนุมัติใน บฑ.1"])
+        # หน้าลงนาม 2 ไม่ถูกนับโดยระบบ ข้อ "ไม่ครบ" ของหน้านั้นยังแจ้งตามปกติ
+        self.assertEqual(len(checker_module.signature_name_issues(
+            report, ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_4"])), 1)
+
+    def test_without_approved_names_or_page_labels(self):
+        report = self._report(context={"front_label_style": "thai"})
+        issues = checker_module.signature_name_issues(
+            report, ["SIGNATURE_NAMES_WRONG", "SIGNATURE_NAMES_ITEM_3"])
+        self.assertEqual(issues[0]["location"], "หน้าลงนาม 2")
+        self.assertEqual(issues[0]["expected"], "กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.2")
+
+    def test_the_names_come_from_the_approved_data_without_titles(self):
+        names = checker_module.committee_names_by_kind({"committees": {
+            "advisory": [{"name": "ผศ.ดร. มยุรี หอมสนิท", "role": "Major advisor"}], "exam": []}})
+        self.assertEqual(names, {"advisory": ["มยุรี หอมสนิท"], "exam": []})
+        self.assertEqual(checker_module.committee_names_by_kind({}), {"advisory": [], "exam": []})
+
+    def test_the_new_lines_have_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("รายชื่อไม่ถูกต้องตามที่ได้รับอนุมัติใน บฑ.1", pairs),
+                         "The names do not match what GR.1 approved")
+        self.assertEqual(i18n.tr_en("รายชื่อไม่ถูกต้องและไม่ครบตามที่ได้รับอนุมัติใน บฑ.2", pairs),
+                         "The names are wrong and the list is short of what GR.2 approved")
+        self.assertEqual(i18n.tr_en("กรุณาตรวจสอบรายชื่อตามเอกสาร บฑ.2", pairs),
+                         "Please check the names against GR.2")
+
+    def test_the_card_lists_the_same_four_items_in_both_languages(self):
+        _check, wrong = checker_module.STAFF_CHOICE_BY_ID["SIGNATURE_NAMES_WRONG"]
+        th = checker_module.signature_layout_items(wrong["text"])
+        en = checker_module.signature_layout_items(wrong["text_en"])
+        self.assertEqual([n for n, _ in th], [n for n, _k, _p in checker_module.SIGNATURE_NAME_PROBLEMS])
+        self.assertEqual([n for n, _ in en], [n for n, _ in th])
+
+
+class SignaturePreviewTabLabels(unittest.TestCase):
+    """ปุ่มสลับหน้าลงนามในขั้นที่ 1: "หน้าลงนาม 1 (ก)" ตามภาษาเล่ม (เจ้าของสั่ง 20 ต.ค. 2569)"""
+
+    PAGES = [{"index": 1, "label": "i"}, {"index": 2, "label": ""}]
+
+    def test_the_label_follows_the_language_of_the_book(self):
+        self.assertEqual(checker_module.signature_tab_labels(self.PAGES, "thai"),
+                         ["หน้าลงนาม 1 (ก)", "หน้าลงนาม 2 (ข)"])
+        for language in ("international", "thai_english"):
+            self.assertEqual(checker_module.signature_tab_labels(self.PAGES, language),
+                             ["หน้าลงนาม 1 (i)", "หน้าลงนาม 2 (ii)"], language)
+
+    def test_unknown_language_falls_back_to_the_printed_label(self):
+        self.assertEqual(checker_module.signature_tab_labels(self.PAGES, ""),
+                         ["หน้าลงนาม 1 (i)", "หน้าลงนาม 2"])
+
+    def test_one_page_or_more_than_two(self):
+        self.assertEqual(checker_module.signature_tab_labels(self.PAGES[:1], "thai"), ["หน้าลงนาม 1 (ก)"])
+        three = self.PAGES + [{"index": 3, "label": ""}]
+        self.assertEqual(checker_module.signature_tab_labels(three, "international")[-1], "หน้าลงนาม 3 (iii)")
+        self.assertEqual(checker_module.signature_tab_labels([], "thai"), [])
+
+
 class Update14Turnitin(unittest.TestCase):
     """ไฟล์ Turnitin: Overall Similarity ต้องไม่เกิน 25% (อัปเดต 1.4)"""
 
@@ -9619,14 +9732,17 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         """หน้าเว็บกันไว้ก่อนยิงด้วยค่าจากฝั่งเซิร์ฟเวอร์ ไม่ใช่ไล่ชื่อหัวข้อเอง"""
         passing = checker_module.check_result(checker_module.Report(),
                                               {"front_label_style": "roman"})
+        # รายชื่อกรรมการ (อัปเดต 1.5) ไม่กันการบันทึก — ขั้นที่ 1 บังคับติ้กตรวจแล้ว และตั้งค่าการ์ดให้เสมอ
         self.assertEqual({c["id"]: c["blocks_save"] for c in passing["staff_findings"]},
-                         {"SIGNATURE_LAYOUT": True, "LATE_FEE": False, "PASS_FEE": True})
+                         {"SIGNATURE_NAMES": False, "SIGNATURE_LAYOUT": True,
+                          "LATE_FEE": False, "PASS_FEE": True})
         rep = checker_module.Report()
         rep.add("RED", "front_matter", "หน้าปก", "ชื่อเรื่องไม่ตรง", "x", "",
                 "FORM.APPROVED_MATCH")
         failing = checker_module.check_result(rep, {"front_label_style": "roman"})
         self.assertEqual({c["id"]: c["blocks_save"] for c in failing["staff_findings"]},
-                         {"SIGNATURE_LAYOUT": True, "LATE_FEE": False, "PASS_FEE": False})
+                         {"SIGNATURE_NAMES": False, "SIGNATURE_LAYOUT": True,
+                          "LATE_FEE": False, "PASS_FEE": False})
 
     def test_the_fine_question_follows_the_result(self):
         """กดว่าโครงสร้างหน้าลงนามผิด = เล่มไม่ผ่าน คำถามค่าปรับต้องเปลี่ยนชุดตาม
@@ -9640,7 +9756,7 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         self.assertEqual(verdict, "ไม่ผ่าน")
         shown = [c["id"] for c in checker_module.staff_checks_for_book("roman")
                  if checker_module.check_applies(c, verdict)]
-        self.assertEqual(shown, ["SIGNATURE_LAYOUT", "LATE_FEE"])
+        self.assertEqual(shown, ["SIGNATURE_NAMES", "SIGNATURE_LAYOUT", "LATE_FEE"])
         pending = checker_module.sheet_staff_pending(
             report, staff=["SIGNATURE_LAYOUT_WRONG"])
         self.assertEqual([c["id"] for c in pending], [])

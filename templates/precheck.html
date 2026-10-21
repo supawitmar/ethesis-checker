@@ -9,7 +9,9 @@
 <title>ตรวจหน้าลงนามและค่าปรับ — E-Thesis Staff Checker</title>
 {#- อัปเดต 1.4 (เจ้าของสั่ง 19 ต.ค. 2569): ขั้นตรวจหน้าลงนามและค่าปรับ "ก่อน" หน้าผลตรวจ
     กดตรวจเล่มแล้วมาหน้านี้ทันที ระบบตรวจส่วนอื่นของเล่มอยู่เบื้องหลังระหว่างที่เจ้าหน้าที่ดูหน้านี้
-    - ติ้กรายชื่อแต่ละชุด = ยืนยันว่าดูแล้ว (ไม่สร้างข้อความถึงนักศึกษา ชื่อสะกดผิด/จำนวนกรรมการ ระบบตรวจเป็นสีแดงเอง)
+    - ติ้ก "ตรวจแล้ว" ทุกชุด = ยืนยันว่าดูแล้ว (ระบบนับจำนวนกรรมการเอง แต่ไม่เทียบชื่อ)
+    - ช่องติ้ก "รายชื่อไม่ถูกต้อง" / "รายชื่อไม่ครบตามที่ได้รับอนุมัติ" ใต้รายชื่อ บฑ.1 / บฑ.2 (อัปเดต 1.5 เจ้าของสั่ง
+      20 ต.ค. 2569) ข้อที่ติ้กเป็นจุดที่ต้องแก้ พร้อมรายชื่อตามที่ได้รับอนุมัติ (checker.signature_name_issues)
     - เช็กลิสต์ (1)-(5) ข้อที่ "ไม่ผ่าน" เท่านั้นที่เข้าข้อความโครงสร้างหน้าลงนาม (checker.signature_layout_text)
     - ค่าปรับคิดจากแบบฟอร์ม (checker.late_fee) หน้ารายงานเลือกถ้อยคำค่าปรับให้เอง
     คำตอบเก็บกับงาน (POST /precheck) หน้ารายงานตั้งค่าให้ตามนี้ และยังแก้ได้ -#}
@@ -56,6 +58,14 @@
 
   .pages { position:sticky; top:84px; }
   .sig-page { margin:0 0 16px; }
+  .sig-page[hidden] { display:none; }
+  /* ปุ่มสลับหน้าลงนาม (เจ้าของสั่ง 20 ต.ค. 2569) — ช่องดูภาพช่องเดียว */
+  .sig-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+  .sig-tab { border:1px solid var(--line-2); background:#fff; color:var(--ink-2); border-radius:99px;
+       padding:7px 14px; font-size:.86rem; font-weight:600; cursor:pointer; }
+  .sig-tab:hover { background:var(--navy-soft); }
+  .sig-tab[aria-selected="true"] { color:#fff; background:var(--navy-2); border-color:var(--navy-2); }
+  .sig-tab:focus-visible { outline:none; box-shadow:var(--ring); }
   .sig-page figcaption { font-size:.85rem; font-weight:600; color:var(--ink-2); }
   .sig-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .sig-bar figcaption { flex:1; min-width:120px; }
@@ -107,6 +117,12 @@
   .section .empty { font-size:.86rem; color:var(--ink-3); margin:4px 0 8px; }
   .tick { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; font-size:.92rem; }
   .tick input { width:20px; height:20px; accent-color:var(--ok); flex:none; }
+  /* ช่องติ้กปัญหาของรายชื่อ (อัปเดต 1.5) — ติ้กแล้ว = จุดที่ต้องแก้ กรอบชุดนั้นเป็นสีแดง */
+  .problems { display:flex; flex-wrap:wrap; gap:6px 18px; margin:0 0 8px; }
+  .problem { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:.88rem; color:var(--ink-2); }
+  .problem input { width:18px; height:18px; accent-color:var(--bad); flex:none; }
+  .problem:has(input:checked) { color:var(--bad); font-weight:600; }
+  .section.checked.has-problem { border-color:var(--bad-line); background:var(--bad-bg); }
 
   .item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center;
        border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; font-size:.88rem; }
@@ -181,10 +197,22 @@
         <h2>หน้าลงนามในเล่ม</h2>
         {% if pages %}
           <p class="hint">ซูมด้วยปุ่ม − / + หรือกด Ctrl ค้างแล้วหมุนเมาส์บนภาพ · ภาพที่ซูมแล้วลากเพื่อเลื่อนดูได้</p>
+          {#- ช่องดูภาพช่องเดียว กดสลับหน้า (เจ้าของสั่ง 20 ต.ค. 2569) — ทุกหน้ายังมีกรอบซูมของตัวเอง
+              แต่แสดงทีละหน้า ภาพหน้าอื่นโหลดรอไว้ สลับแล้วเห็นทันที ซูมค้างไว้ตามที่ตั้งไว้ของหน้านั้น -#}
+          {% if pages | length > 1 %}
+          <div class="sig-tabs" role="tablist" aria-label="เลือกหน้าลงนามที่จะดู">
+            {% for page in pages %}
+            <button type="button" role="tab" class="sig-tab" id="sig-tab-{{ loop.index0 }}"
+                    aria-controls="sig-page-{{ loop.index0 }}" aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    tabindex="{{ '0' if loop.first else '-1' }}">{{ tab_labels[loop.index0] }}</button>
+            {% endfor %}
+          </div>
+          {% endif %}
           {% for page in pages %}
-          <figure class="sig-page">
+          <figure class="sig-page" id="sig-page-{{ loop.index0 }}"{% if pages | length > 1 %} role="tabpanel"
+                  aria-labelledby="sig-tab-{{ loop.index0 }}"{% endif %}{% if not loop.first %} hidden{% endif %}>
             <div class="sig-bar">
-              <figcaption>หน้าลงนาม {{ loop.index }}{% if page.label %} (หน้า {{ page.label }}){% endif %}</figcaption>
+              <figcaption>{{ tab_labels[loop.index0] }}</figcaption>
               <div class="zoom" role="group" aria-label="ซูมภาพหน้าลงนาม {{ loop.index }}">
                 <button type="button" data-zoom="out" aria-label="ซูมออก">−</button>
                 <output aria-live="polite">100%</output>
@@ -260,8 +288,9 @@
 
       <section class="panel" aria-labelledby="names-title">
         <h2 id="names-title">รายชื่อบนหน้าลงนาม</h2>
-        <p class="hint">เทียบกับภาพทีละชุด แล้วติ้กยืนยันว่าดูแล้ว — ชื่อสะกดผิด จำนวนกรรมการ และตำแหน่งคณบดี/ผู้อำนวยการ
-          ระบบตรวจและแจ้งเป็นสีแดงในผลตรวจเองเหมือนเดิม</p>
+        <p class="hint">เทียบกับภาพทีละชุด แล้วติ้กยืนยันว่าดูแล้ว — ระบบนับจำนวนกรรมการและตรวจตำแหน่งคณบดี/ผู้อำนวยการให้เอง
+          แต่ไม่ได้เทียบชื่อ ถ้ารายชื่อไม่ถูกต้องหรือไม่ครบ ให้ติ้กไว้ ผลตรวจจะแจ้งเป็นจุดที่ต้องแก้ (สีแดง)
+          พร้อมรายชื่อตามที่ได้รับอนุมัติ</p>
         {% for key, label in sections %}
         <div class="section" data-section="{{ key }}">
           <div class="tick-label" style="font-weight:600; font-size:.92rem; color:var(--navy);">{{ label }}</div>
@@ -274,6 +303,13 @@
             {% endif %}
           {% else %}
             <p class="empty">ดูช่องมุมล่างขวาในภาพหน้าลงนาม {{ 1 if key == 'program_head' else 2 }}</p>
+          {% endif %}
+          {% if name_problems and name_problems.get(key) %}
+          <div class="problems" role="group" aria-label="ปัญหาของ{{ label }}">
+            {% for number, problem, kind in name_problems[key] %}
+            <label class="problem"><input type="checkbox" data-name-item="{{ number }}" data-name-problem="{{ kind }}"> {{ problem }}</label>
+            {% endfor %}
+          </div>
           {% endif %}
           <label class="tick"><input type="checkbox" data-tick="{{ key }}"> ตรวจแล้ว</label>
         </div>
@@ -313,6 +349,28 @@
 </div>
 
 <script>
+// ---- สลับหน้าลงนามในช่องดูภาพช่องเดียว (เจ้าของสั่ง 20 ต.ค. 2569) · ลูกศรซ้าย/ขวาเลื่อนปุ่มได้ ----
+(function(){
+  var tabs = Array.from(document.querySelectorAll('.sig-tab'));
+  function show(k, focus){
+    tabs.forEach(function(tab, i){
+      var on = i === k;
+      tab.setAttribute('aria-selected', String(on));
+      tab.tabIndex = on ? 0 : -1;
+      document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+    });
+    if (focus) tabs[k].focus();
+  }
+  tabs.forEach(function(tab, i){
+    tab.addEventListener('click', function(){ show(i); });
+    tab.addEventListener('keydown', function(e){
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft'){
+        e.preventDefault();
+        show((i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length, true);
+      }
+    });
+  });
+})();
 // ---- ซูมภาพหน้าลงนาม: ขยายความกว้างของภาพในกรอบที่เลื่อนได้ ภาพจึงไม่ล้นหน้าจอ ----
 (function(){
   var STEPS = [1, 1.5, 2, 2.5, 3];
@@ -379,6 +437,7 @@
   var LOGIN_AGAIN = '/login?next=' + encodeURIComponent('/precheck/' + JOB);
   var ANSWERED = {{ (answered or none) | tojson }};
   var ticks = Array.from(document.querySelectorAll('[data-tick]'));
+  var nameBoxes = Array.from(document.querySelectorAll('[data-name-item]'));
   var items = Array.from(document.querySelectorAll('[data-item]'));
   var go = document.getElementById('go');
   var barMsg = document.getElementById('bar-msg');
@@ -395,6 +454,9 @@
   }
   function refresh(){
     ticks.forEach(function(t){ t.closest('.section').classList.toggle('checked', t.checked); });
+    document.querySelectorAll('.section').forEach(function(s){
+      s.classList.toggle('has-problem', !!s.querySelector('[data-name-item]:checked'));
+    });
     var left = ticks.filter(function(t){ return !t.checked; }).length;
     var unanswered = items.filter(function(r){ return !answers[r.dataset.item]; }).length;
     var failed = items.filter(function(r){ return answers[r.dataset.item] === 'fail'; }).length;
@@ -410,6 +472,18 @@
   }
 
   ticks.forEach(function(t){ t.addEventListener('change', refresh); });
+  // ติ้กว่ารายชื่อผิด = ดูชุดนั้นแล้ว จึงติ้ก "ตรวจแล้ว" ของชุดเดียวกันให้ด้วย
+  // ติ้ก "รายชื่อไม่ถูกต้อง" (บฑ.1 หรือ บฑ.2) = เช็กลิสต์โครงสร้างข้อ (1) ไม่ผ่านทันที (เจ้าของสั่ง 20 ต.ค. 2569)
+  // เอาติ้กออกแล้วข้อ (1) ไม่กลับเป็นผ่านเอง ให้เจ้าหน้าที่ตัดสิน · "รายชื่อไม่ครบ" ไม่แตะข้อ (1)
+  var itemOne = items.filter(function(r){ return r.dataset.item === '1'; })[0];
+  nameBoxes.forEach(function(box){
+    box.addEventListener('change', function(){
+      var seen = box.closest('.section').querySelector('[data-tick]');
+      if (box.checked && seen) seen.checked = true;
+      if (box.checked && box.dataset.nameProblem === 'wrong' && itemOne) setAnswer(itemOne, 'fail');
+      refresh();
+    });
+  });
   items.forEach(function(row){
     row.querySelectorAll('button').forEach(function(b){
       b.addEventListener('click', function(){ setAnswer(row, b.dataset.answer); refresh(); });
@@ -418,6 +492,8 @@
   // กลับมาหน้านี้อีกครั้ง (ย้อนกลับ/เปิดลิงก์ผลตรวจก่อนตอบ) — คงคำตอบเดิมไว้
   if (ANSWERED){
     ticks.forEach(function(t){ t.checked = true; });
+    var nameSet = (ANSWERED.name_items || []).map(String);
+    nameBoxes.forEach(function(box){ box.checked = nameSet.indexOf(box.dataset.nameItem) !== -1; });
     var failedSet = (ANSWERED.failed_items || []).map(String);
     items.forEach(function(row){
       setAnswer(row, failedSet.indexOf(row.dataset.item) !== -1 ? 'fail' : 'pass');
@@ -469,6 +545,7 @@
     go.disabled = true;
     var payload = {
       sections_ok: ticks.filter(function(t){ return t.checked; }).map(function(t){ return t.dataset.tick; }),
+      name_items: nameBoxes.filter(function(b){ return b.checked; }).map(function(b){ return Number(b.dataset.nameItem); }),
       items: answers
     };
     fetch('/precheck/' + JOB, {method:'POST', body: JSON.stringify(payload),
