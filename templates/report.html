@@ -287,6 +287,18 @@
   .copy-btn.sheet-save { margin-left:0; background:linear-gradient(135deg,#1f6f4a 0%,#2e8f60 100%);
        box-shadow:0 6px 14px -8px rgba(31,111,74,.8); }
   @media print { .sheet-save { display:none; } }
+  /* ---- ปุ่มแนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ (อัปเดต 1.6) — อยู่หน้าปุ่มคัดลอก สีส้มทองให้เด่นแยกจากปุ่มอื่น ----
+     ปุ่มนี้รับ margin-left:auto แทนปุ่มคัดลอก (กฎ .req-btn + .copy-btn ต้องอยู่หลังกฎของ .copy-btn)
+     ไม่ใช้คลาส copy-btn เพราะ setSummaryBusy หาปุ่มคัดลอกด้วย id · กดแล้ว = พื้นส้มอ่อน ขอบส้ม */
+  .req-btn { margin-left:auto; border:none; color:#fff; border-radius:99px; padding:7px 18px; font-size:.82rem;
+       font-weight:700; cursor:pointer; background:linear-gradient(135deg,#b45309 0%,#d97706 100%);
+       box-shadow:0 6px 14px -8px rgba(180,83,9,.8); transition:filter .15s; }
+  .req-btn:hover { filter:brightness(1.08); }
+  /* สีตามภาพจำลองที่เจ้าของอนุมัติ (22 ต.ค. 2569) · ขอบ 2px ทำด้วยเงาด้านใน ปุ่มจึงไม่เปลี่ยนขนาดตอนกด */
+  .req-btn.on { color:#9a3412; background:#fff7ed; box-shadow:inset 0 0 0 2px #d97706; }
+  .req-btn:focus-visible { outline:none; box-shadow:var(--ring); }
+  .req-btn + .copy-btn { margin-left:0; }
+  @media print { .req-btn { display:none; } }
   .copy-text { width:100%; box-sizing:border-box; border:none; border-top:1px solid #dbe4ee; padding:16px 20px;
        font:0.86rem/1.65 var(--font); resize:vertical; min-height:160px; background:#fbfdff; color:#22303f; white-space:pre; }
   .copy-text:focus { outline:none; background:#fff; }
@@ -459,9 +471,16 @@
        ถ้อยคำไม่มีที่ไป (กล่องทั้งกล่องไม่ถูกสร้าง) #}
     {% if report.issues_by_zone.RED or report.issues_by_zone.ORANGE or report.issues_by_zone.YELLOW or report.staff_findings %}
     <script id="plain-summary-data" type="application/json">{{ report.plain_summary | tojson }}</script>
+    <script id="requirements-data" type="application/json">{{ (requirements or none) | tojson }}</script>
     <details class="copybox" open data-verdict="{{ report.verdict }}" data-job="{{ job_id }}">
       <summary class="copy-sum">📋 <span data-th="สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)" data-en="Summary of fixes (copyable)">สรุปจุดที่ต้องแก้ + วิธีแก้ (คัดลอกได้)</span>
-        <button type="button" class="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
+        {# อัปเดต 1.6 (เจ้าของยืนยัน 22 ต.ค. 2569): แนบลิงก์ข้อกำหนดรูปเล่มอิเล็กทรอนิกส์เข้าข้อความสรุป กดซ้ำเอาออก
+           ปุ่มเรียง แนบข้อกำหนด · คัดลอก · บันทึกผลการตรวจ · ป้ายสองสถานะอยู่ใน data-*-off / data-*-on #}
+        <button type="button" class="req-btn" id="req-btn" aria-pressed="false" onclick="toggleRequirements(event, this)"
+                data-th="📎 แนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์" data-en="📎 Attach electronic file requirements"
+                data-th-off="📎 แนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์" data-en-off="📎 Attach electronic file requirements"
+                data-th-on="✓ แนบข้อกำหนดแล้ว (กดเพื่อเอาออก)" data-en-on="✓ Requirements attached (click to remove)">📎 แนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์</button>
+        <button type="button" class="copy-btn" id="copy-btn" onclick="copySummary(event, this)" data-th="⧉ คัดลอก" data-en="⧉ Copy">⧉ คัดลอก</button>
         {# เจ้าหน้าที่สั่ง (ก.ย. 2569) ให้ปุ่มบันทึกอยู่ข้างปุ่มคัดลอก — ยังไม่บังคับกด
            อยู่ใน <summary> จึงต้องกัน event ไม่ให้ไปพับกล่องสรุป (ดู saveToSheet) #}
         {% if sheet_enabled %}
@@ -1932,6 +1951,16 @@ var STAFF_BLOCK_EN = [];
   // ก้อนยาวก่อน กันก้อนสั้นไปตรงกับส่วนหนึ่งของก้อนยาวแล้วแปลค้างครึ่งเดียว
   STAFF_BLOCK_EN.sort(function(a, b){ return b[0].length - a[0].length; });
 })();
+// ย่อหน้าของปุ่มแนบข้อกำหนด (อัปเดต 1.6) แปลทั้งก้อนแบบถ้อยคำปิดท้าย — ลิงก์ฉบับอังกฤษคนละลิงก์กับฉบับไทย
+(function(){
+  try {
+    var req = JSON.parse((document.getElementById('requirements-data') || {}).textContent || 'null');
+    if (req && req.th && req.en){
+      STAFF_BLOCK_EN.push([String(req.th).trim(), String(req.en).trim()]);
+      STAFF_BLOCK_EN.sort(function(a, b){ return b[0].length - a[0].length; });
+    }
+  } catch(e){}
+})();
 function trSummary(text){
   var out = String(text == null ? '' : text);
   for (var i = 0; i < STAFF_BLOCK_EN.length; i++){
@@ -2091,7 +2120,7 @@ function applyVerdictScope(verdict){
   if (typeof autoFee === 'function' && autoFee()) scheduleSummaryRefresh();
 }
 function setSummaryBusy(on){
-  const box = document.querySelector('.copybox .copy-btn');
+  const box = document.getElementById('copy-btn');
   if (box) box.textContent = on ? '… กำลังอัปเดต' : (LANG === 'en' ? '⧉ Copy' : '⧉ คัดลอก');
 }
 function refreshSummary(){
@@ -2103,7 +2132,7 @@ function refreshSummary(){
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({failed: collectFailed(), passed: collectPassed(),
-                          staff: collectStaff()}),
+                          staff: collectStaff(), requirements: REQUIREMENTS_ON}),
   }).then(function(r){
       // เซสชันหมดอายุ (ทิ้งหน้ารายงานไว้นาน) — บอกให้ชัด ไม่ใช่ปล่อยพังเงียบ ๆ
       if (r.status === 401) return Promise.reject(new Error('login'));
@@ -2290,6 +2319,23 @@ function saveToSheet(ev, btn){
     .finally(function(){ btn.disabled = false; });
 }
 
+// ---- ปุ่มแนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ (อัปเดต 1.6) ----
+// สถานะอยู่ที่หน้านี้ ส่งไปกับทุกคำขอข้อความสรุป ย่อหน้าจึงอยู่ต่อเมื่อเปลี่ยนเรื่องค่าปรับหรือสลับภาษา
+var REQUIREMENTS_ON = false;
+function renderRequirementsBtn(btn){
+  var key = REQUIREMENTS_ON ? 'On' : 'Off';
+  btn.dataset.th = btn.dataset['th' + key];
+  btn.dataset.en = btn.dataset['en' + key];
+  btn.textContent = btn.dataset[LANG];
+  btn.classList.toggle('on', REQUIREMENTS_ON);
+  btn.setAttribute('aria-pressed', REQUIREMENTS_ON ? 'true' : 'false');
+}
+function toggleRequirements(ev, btn){
+  ev.preventDefault();  // อยู่ใน <summary> — กันไม่ให้ไปพับกล่องสรุป
+  REQUIREMENTS_ON = !REQUIREMENTS_ON;
+  renderRequirementsBtn(btn);
+  scheduleSummaryRefresh();
+}
 function copySummary(ev, btn){
   ev.preventDefault();  // กันไม่ให้ปุ่มไปสลับการเปิด/ปิด <details>
   const text = currentSummaryText();

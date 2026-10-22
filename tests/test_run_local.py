@@ -469,6 +469,17 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["ETHESIS_STOP_TOKEN"], state["stop_token"])
         self.assertTrue((self.dir / ".run" / "server.log").exists())
 
+    def test_the_background_server_writes_its_log_in_utf8(self):
+        """Windows ภาษาอังกฤษ (cp1252) เขียนอักษรไทยลง log ไม่ได้ → ปิดระบบอัตโนมัติพัง (21 ต.ค. 2569)"""
+        seen = {}
+
+        def popen(command, **kwargs):
+            seen.update(kwargs["env"])
+            return FakeProcess()
+        run_local.start_background(Path("py"), 8123, popen=popen)
+        self.assertEqual(seen["PYTHONUTF8"], "1")
+        self.assertEqual(seen["PYTHONIOENCODING"], "utf-8")
+
     def test_a_new_stop_key_every_start(self):
         popen = lambda command, **kwargs: FakeProcess()           # noqa: E731
         run_local.start_background(Path("py"), 8123, popen=popen)
@@ -1098,6 +1109,15 @@ class IdleStopTests(unittest.TestCase):
 
     def test_stopping_removes_kept_books_like_the_stop_button(self):
         with mock.patch.object(self.main, "_remove_book_folder") as removed,                 mock.patch.object(self.main.os, "_exit") as exited,                 mock.patch("builtins.print"):
+            self.main._stop_when_idle()
+        removed.assert_called_once_with(self.main.BOOKS_DIR)
+        exited.assert_called_once_with(0)
+
+    def test_a_log_that_cannot_take_thai_does_not_block_the_stop(self):
+        cannot_write = UnicodeEncodeError("charmap", "", 0, 1, "x")
+        with mock.patch.object(self.main, "_remove_book_folder") as removed, \
+                mock.patch.object(self.main.os, "_exit") as exited, \
+                mock.patch("builtins.print", side_effect=cannot_write):
             self.main._stop_when_idle()
         removed.assert_called_once_with(self.main.BOOKS_DIR)
         exited.assert_called_once_with(0)

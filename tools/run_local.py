@@ -267,7 +267,9 @@ def start_background(python, port, popen=subprocess.Popen):
     folder = run_dir()
     folder.mkdir(exist_ok=True)
     token = secrets.token_urlsafe(32)
-    env = dict(os.environ, ETHESIS_STOP_TOKEN=token)
+    # ข้อความของระบบลงไฟล์ — Python บน Windows ที่ภาษาตั้งต้นเป็นอังกฤษใช้ cp1252 เขียนอักษรไทยไม่ได้
+    # (เจอ 21 ต.ค. 2569: ปิดระบบอัตโนมัติพังที่บรรทัดแรก ไม่ลบเล่มที่เก็บไว้ แล้ววนซ้ำไม่จบ)
+    env = dict(os.environ, ETHESIS_STOP_TOKEN=token, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     with open(folder / LOG_NAME, "w", encoding="utf-8") as log:
         process = popen(server_command(python, port), cwd=CODE, env=env, stdin=subprocess.DEVNULL,
                         stdout=log, stderr=subprocess.STDOUT, close_fds=True, **_no_window_flags())

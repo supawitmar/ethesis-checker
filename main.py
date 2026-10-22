@@ -32,12 +32,23 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
+# รันเบื้องหลัง stdout/stderr เป็นไฟล์ log — ถ้าไม่ใช่ UTF-8 (Windows ภาษาอังกฤษ = cp1252) print ภาษาไทยจะ error
+# เจอ 21 ต.ค. 2569 · ตัวเปิดระบบตั้ง PYTHONUTF8 ให้แล้ว นี่คือกันซ้ำเมื่อเปิดด้วยวิธีอื่น (หน้าต่าง console ไม่แตะ)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if not _stream.isatty():
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+
 from checker import (
     STAFF_CHOICE_BY_ID,
     SIGNATURE_LAYOUT_WRONG,
     SIGNATURE_NAMES_WRONG,
     SIGNATURE_NAME_PROBLEMS,
     SIGNATURE_NAME_PROBLEM_LABEL,
+    REQUIREMENTS_TEXT,
+    REQUIREMENTS_TEXT_EN,
     late_fee,
     TURNITIN_LIMIT,
     turnitin_similarity,
@@ -934,13 +945,15 @@ async def rebuild_summary(job_id: str, request: Request):
     passed = [str(k) for k in (payload.get("passed") or [])][:200]
     # จุดที่ระบบตรวจเองไม่ได้ แล้วเจ้าหน้าที่กด "ผิด" (เช่น โครงสร้างหน้าลงนาม)
     staff = [str(k) for k in (payload.get("staff") or [])][:50]
+    # ปุ่มแนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ (อัปเดต 1.6) — เข้าเฉพาะข้อความสรุป ไม่แตะชีท ผลตรวจ และตัวเลข
+    requirements = payload.get("requirements") is True
     report = job["report"]
     # ส่งผลตรวจที่ปรับแล้วกลับไปด้วย หน้ารายงานใช้เลือกว่าจะโชว์หัวข้อค่าปรับอันไหน
     # (เล่มผ่านกับเล่มที่ต้องแก้ใช้ถ้อยคำคนละชุด) คำนวณฝั่งเดียวกับข้อความสรุปเสมอ
     # ตัวเลขสามกล่องบนหัวรายงานต้องตามคำตัดสินด้วย ไม่ใช่ค้างที่ผลของระบบ —
     # คิดฝั่งเซิร์ฟเวอร์ที่เดียวกับข้อความสรุป ไม่ให้หน้าเว็บนับเอง (นับคนละทางเมื่อไหร่
     # เจ้าหน้าที่จะเห็นตัวเลขที่ขัดกับข้อความสรุปโดยไม่มีอะไรบอกว่าอันไหนถูก)
-    return {"plain": plain_summary(report, failed, passed, staff),
+    return {"plain": plain_summary(report, failed, passed, staff, requirements=requirements),
             # ข้อความชุดที่จะลงช่องรายละเอียดในชีท (ไม่มีหัวเรื่องกับค่าปรับ) — หน้ารายงาน
             # ที่เปิดเป็นภาษาอังกฤษเอาไปแปลแล้วส่งกลับมาตอนกดบันทึก (ดู _sheet_details)
             "details": sheet_row(report, failed, passed, staff)["details"],
@@ -1178,6 +1191,8 @@ def result(request: Request, job_id: str):
         "has_book": _book_path(job) is not None,
         "has_turnitin": _turnitin_path(job) is not None,
         "sheet_enabled": SHEET_ENABLED,
+        # ย่อหน้าของปุ่มแนบข้อกำหนด สองภาษา — หน้าผลตรวจใช้คู่นี้แปลทั้งก้อนตอนสลับภาษา
+        "requirements": {"th": REQUIREMENTS_TEXT, "en": REQUIREMENTS_TEXT_EN},
     })
 
 
@@ -1343,7 +1358,10 @@ def _idle_tick(previous, now):
 
 
 def _stop_when_idle():
-    print("ปิดระบบอัตโนมัติ: ไม่มีหน้าเว็บของระบบเปิดอยู่", flush=True)
+    try:
+        print("ปิดระบบอัตโนมัติ: ไม่มีหน้าเว็บของระบบเปิดอยู่", flush=True)
+    except Exception:
+        pass  # เขียน log ไม่ได้ต้องไม่ขวางการลบเล่มและการปิดระบบ
     _remove_book_folder(BOOKS_DIR)
     os._exit(0)
 

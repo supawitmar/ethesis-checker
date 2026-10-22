@@ -2225,6 +2225,93 @@ class TheReportPageStaysReadable(unittest.TestCase):
         self.assertIn('data-en="Sign out"', form)
 
 
+class Update16RequirementsButton(unittest.TestCase):
+    """ปุ่มแนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์บนหน้าผลตรวจ (อัปเดต 1.6 เจ้าของยืนยัน 22 ต.ค. 2569)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        response = cls.client.post("/login", data={"password": "test-password", "next": "/"},
+                                   follow_redirects=False)
+        if response.status_code != 303:
+            raise RuntimeError("Test login failed")
+
+    def tearDown(self):
+        with main.JOBS_LOCK:
+            main.JOBS.clear()
+
+    def _seed(self):
+        import checker
+        rep = checker.Report()
+        rep.add("RED", "front_matter", "หน้าปก", 'ปีบนหน้าปกในเล่มเขียนว่า "2568"',
+                'ต้องแก้เป็น "2569" โดยอ้างอิงจากปีที่มีผลสอบผ่าน', "", "FRONT.COVER")
+        with main.JOBS_LOCK:
+            main.JOBS["req"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "roman"}),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        return "req"
+
+    def _summary(self, **payload):
+        response = self.client.post(f"/summary/{self._seed()}", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_pressing_the_button_adds_the_paragraph_above_the_fee_wording(self):
+        import checker
+        on = self._summary(staff=["LATE_FEE_YES"], requirements=True)
+        off = self._summary(staff=["LATE_FEE_YES"])
+        self.assertIn(checker.REQUIREMENTS_TEXT, on["plain"])
+        self.assertNotIn("electronic-file-requirements", off["plain"])
+        text = on["plain"]
+        self.assertLess(text.index("ปีบนหน้าปก"), text.index(checker.REQUIREMENTS_TEXT))
+        self.assertLess(text.index(checker.REQUIREMENTS_TEXT), text.index("นักศึกษามีค่าปรับ"))
+        # ลิงก์อยู่บรรทัดของตัวเอง
+        self.assertIn(chr(10) + "https://grad-as.my.canva.site/electronic-file-requirements-th" + chr(10), text)
+        # ไม่เปลี่ยนผลตรวจ ไม่เพิ่มจำนวนจุดแก้ และไม่ลงช่องรายละเอียดในชีท
+        self.assertEqual(on["counts"], off["counts"])
+        self.assertEqual(on["verdict"], off["verdict"])
+        self.assertEqual(on["details"], off["details"])
+        self.assertNotIn("electronic-file-requirements", on["details"])
+        self.assertTrue(text.startswith("กรุณาแก้ไขทั้งหมด 1 จุด"), text[:40])
+
+    def test_only_a_real_true_turns_it_on(self):
+        for value in ("true", 1, "1", None):
+            with self.subTest(value=value):
+                self.assertNotIn("electronic-file-requirements", self._summary(requirements=value)["plain"])
+
+    def test_the_button_sits_first_and_carries_both_languages(self):
+        html = self.client.get(f"/result/{self._seed()}").text
+        head = html.split('<summary class="copy-sum"', 1)[1].split("</summary>", 1)[0]
+        self.assertLess(head.index('id="req-btn"'), head.index('id="copy-btn"'))
+        for text in ('data-th="📎 แนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์"',
+                     'data-en="📎 Attach electronic file requirements"',
+                     'data-th-on="✓ แนบข้อกำหนดแล้ว (กดเพื่อเอาออก)"',
+                     'data-en-on="✓ Requirements attached (click to remove)"', 'aria-pressed="false"'):
+            self.assertIn(text, head)
+        # คู่แปลทั้งก้อน — ฉบับอังกฤษใช้ลิงก์ -en
+        data = html.split('<script id="requirements-data" type="application/json">', 1)[1].split("</script>", 1)[0]
+        pair = json.loads(data)
+        self.assertTrue(pair["en"].endswith("electronic-file-requirements-en"))
+        self.assertIn("requirements: REQUIREMENTS_ON", html)
+
+    def test_the_button_takes_the_push_and_stays_readable(self):
+        import re
+        css = (Path(__file__).resolve().parents[1] / "templates" / "report.html").read_text(encoding="utf-8")
+        self.assertLess(css.index(".copy-btn { margin-left:auto"), css.index(".req-btn + .copy-btn { margin-left:0"))
+        rule = re.search(r"\.req-btn \{[^}]*\}", css).group(0)
+        pressed = re.search(r"\.req-btn\.on \{[^}]*\}", css).group(0)
+        ratio = SmallTextIsReadable._ratio
+        # สีตามภาพจำลองที่เจ้าของอนุมัติ (22 ต.ค. 2569) — ปลายเข้มของไล่สีผ่าน 4.5:1 กับตัวขาว
+        # ปลายสว่าง #d97706 ได้ราว 3.2:1 ซึ่งเจ้าของเลือกเองให้ปุ่มเด่น (ไม่ใช่ป้ายตัวเล็กที่ต้องอ่าน)
+        self.assertIn("linear-gradient(135deg,#b45309 0%,#d97706 100%)", rule)
+        self.assertGreaterEqual(ratio("#ffffff", "#b45309"), 4.5)
+        ink = re.search(r"color:(#[0-9a-f]{6})", pressed).group(1)
+        paper = re.search(r"background:(#[0-9a-f]{6})", pressed).group(1)
+        self.assertGreaterEqual(ratio(ink, paper), 4.5)                     # กดแล้ว: ตัวส้มเข้มบนพื้นส้มอ่อน
+
+
 class SmallTextIsReadable(unittest.TestCase):
     """ข้อความตัวเล็กต้องได้ความต่างสี 4.5:1 (เกณฑ์ WCAG AA)
 

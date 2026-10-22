@@ -9644,6 +9644,34 @@ class ScannedSignaturePages(unittest.TestCase):
             self.assertEqual(checker_module.signature_preview(str(path)), [])
 
 
+class Update16RequirementsParagraph(unittest.TestCase):
+    """ย่อหน้าข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ในข้อความสรุป (อัปเดต 1.6 เจ้าของยืนยัน 22 ต.ค. 2569)"""
+
+    def _report(self):
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าปก", 'ปีบนหน้าปกในเล่มเขียนว่า "2568"',
+                'ต้องแก้เป็น "2569" โดยอ้างอิงจากปีที่มีผลสอบผ่าน', "", "FRONT.COVER")
+        return checker_module.check_result(rep, {"front_label_style": "roman"})
+
+    def test_the_wording_and_links_are_the_owners(self):
+        self.assertEqual(checker_module.REQUIREMENTS_TEXT.split(NEWLINE), [
+            "ศึกษาข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ และดาวน์โหลด template ตัวอย่างเพื่อใช้ประกอบการแก้ไขได้ที่",
+            "https://grad-as.my.canva.site/electronic-file-requirements-th"])
+        self.assertEqual(checker_module.REQUIREMENTS_TEXT_EN.split(NEWLINE), [
+            "The electronic file requirements and template are available at",
+            "https://grad-as.my.canva.site/electronic-file-requirements-en"])
+
+    def test_it_follows_the_closing_wording_and_never_reaches_the_sheet(self):
+        report = self._report()
+        self.assertNotIn(checker_module.REQUIREMENTS_TEXT, checker_module.plain_summary(report))
+        on = checker_module.plain_summary(report, staff=["LATE_FEE_YES"], requirements=True)
+        self.assertLess(on.index("กรุณาแก้ไขทั้งหมด 1 จุด"), on.index(checker_module.REQUIREMENTS_TEXT))
+        self.assertLess(on.index(checker_module.REQUIREMENTS_TEXT), on.index("นักศึกษามีค่าปรับ"))
+        self.assertNotIn(checker_module.REQUIREMENTS_TEXT,
+                         checker_module.plain_summary(report, with_verdict=False, with_closing=False,
+                                                      requirements=True))
+
+
 class Update14Turnitin(unittest.TestCase):
     """ไฟล์ Turnitin: Overall Similarity ต้องไม่เกิน 25% (อัปเดต 1.4)"""
 

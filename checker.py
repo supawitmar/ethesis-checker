@@ -4685,8 +4685,18 @@ def _summary_block(lines, items, number):
     return number
 
 
+# อัปเดต 1.6 (เจ้าของยืนยัน 22 ต.ค. 2569): ปุ่ม "แนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์" บนหน้าผลตรวจ
+# กดแล้วย่อหน้านี้เข้าข้อความสรุปหลังจุดที่ต้องแก้ทั้งหมด เหนือถ้อยคำปิดท้าย (เรื่องค่าปรับ) ลิงก์อยู่บรรทัดของตัวเอง
+# ไม่ใช่จุดที่ต้องแก้ จึงไม่นับ ไม่เปลี่ยนผลตรวจ และไม่ลงช่องรายละเอียดในชีท (ไปพร้อมถ้อยคำปิดท้าย)
+# หน้าผลตรวจแปลอังกฤษทั้งก้อน (ลิงก์ฉบับอังกฤษคนละลิงก์) จึงต้องมีคู่ภาษาอังกฤษที่นี่ด้วย
+REQUIREMENTS_TEXT = ("ศึกษาข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ และดาวน์โหลด template ตัวอย่างเพื่อใช้ประกอบการแก้ไขได้ที่\n"
+                     "https://grad-as.my.canva.site/electronic-file-requirements-th")
+REQUIREMENTS_TEXT_EN = ("The electronic file requirements and template are available at\n"
+                        "https://grad-as.my.canva.site/electronic-file-requirements-en")
+
+
 def plain_summary(report, failed=None, passed=None, staff=None,
-                  with_verdict=True, with_closing=True):
+                  with_verdict=True, with_closing=True, requirements=False):
     """สรุปจุดที่ต้องแก้เป็นข้อความล้วน จัดกลุ่มตามส่วนของเล่ม (ไว้คัดลอก/ให้ AI เรียบเรียง)
 
     เขียนเป็นประโยคภาษาคน ใช้คำเชื่อม ไม่ใช้เครื่องหมาย - หรือ → และไล่เลขทุกจุด
@@ -4702,6 +4712,8 @@ def plain_summary(report, failed=None, passed=None, staff=None,
     with_verdict / with_closing ปิดหัวเรื่อง "ผลการตรวจ: ..." และถ้อยคำปิดท้าย
     (ค่าปรับ วิธีส่งกลับ ช่องทางติดต่อ) ไว้สำหรับช่องรายละเอียดในชีท ซึ่งต้องการ
     เฉพาะ "จุดที่ต้องแก้" — ดู sheet_row()
+
+    requirements = ปุ่มแนบข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ (REQUIREMENTS_TEXT) ไปพร้อมถ้อยคำปิดท้าย
     """
     items = _dedupe_issues(issues_to_fix(report, failed, passed, staff))
     pending = _dedupe_issues(issues_pending(report, failed, passed))
@@ -4735,6 +4747,8 @@ def plain_summary(report, failed=None, passed=None, staff=None,
         lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
         number = _summary_block(lines, pending, number)
     if with_closing:
+        if requirements:
+            lines.append("\n" + REQUIREMENTS_TEXT)
         for text in closing:
             lines.append("\n" + text.strip())
     return "\n".join(lines).strip()
