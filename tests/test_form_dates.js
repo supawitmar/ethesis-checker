@@ -60,6 +60,40 @@ check('ว่าง (ยังไม่ได้เลือก)', thaiDate(''),
 check('ไม่ใช่ yyyy-mm-dd', thaiDate('30/09/2026'), '');
 check('ปีสองหลัก (Date.UTC ปัดเป็น 19xx)', thaiDate('0026-09-30'), '');
 
+// ---------------------------------------------------------------- ช่องพิมพ์ วว/ดด/ปปปป พ.ศ. (อัปเดต 1.6.2)
+// ค่าที่ส่งเซิร์ฟเวอร์ต้องเป็น yyyy-mm-dd ค.ศ. เหมือนเดิมทุกตัวอักษร (เจ้าของสั่ง "อย่าให้ส่วนนี้มีผลกับการตรวจ")
+const typingSandbox = {};
+vm.createContext(typingSandbox);
+for (const name of ['formatDateTyping', 'isoFromThaiText', 'thaiTextFromIso']) {
+  vm.runInContext(take(name), typingSandbox, { filename: 'index.html' });
+}
+const call = (name, arg) => vm.runInContext(`${name}(${JSON.stringify(arg)})`, typingSandbox);
+
+check('พิมพ์ตัวเลขล้วน ใส่ / ให้เอง', call('formatDateTyping', '26102569'), '26/10/2569');
+check('ยังพิมพ์ไม่ถึงเดือน ไม่ใส่ / ค้าง', call('formatDateTyping', '26'), '26');
+check('พิมพ์ถึงหลักแรกของเดือน', call('formatDateTyping', '261'), '26/1');
+check('ตัวที่ไม่ใช่ตัวเลขถูกตัดทิ้ง', call('formatDateTyping', '26-10-2569'), '26/10/2569');
+check('พิมพ์ / เองหลังเลขหลักเดียว เติม 0', call('formatDateTyping', '2/9/2569'), '02/09/2569');
+check('ยาวเกินถูกตัดที่ 8 หลัก', call('formatDateTyping', '261025691'), '26/10/2569');
+check('ว่าง', call('formatDateTyping', ''), '');
+
+check('พ.ศ. เป็น ค.ศ.', call('isoFromThaiText', '26/10/2569'), '2026-10-26');
+check('ต้นปี', call('isoFromThaiText', '01/01/2570'), '2027-01-01');
+check('29 ก.พ. ปีอธิกสุรทิน (2571 = 2028)', call('isoFromThaiText', '29/02/2571'), '2028-02-29');
+check('29 ก.พ. ปีธรรมดา (2569 = 2026) ไม่มีจริง', call('isoFromThaiText', '29/02/2569'), '');
+check('31 เม.ย. ไม่มีจริง', call('isoFromThaiText', '31/04/2569'), '');
+check('เดือน 13', call('isoFromThaiText', '01/13/2569'), '');
+check('วันที่ 0', call('isoFromThaiText', '00/10/2569'), '');
+check('พิมพ์ไม่ครบ', call('isoFromThaiText', '26/10/25'), '');
+check('พิมพ์ปี ค.ศ. มาแทน พ.ศ. ถือว่ายังไม่กรอก', call('isoFromThaiText', '26/10/2026'), '');
+check('ว่าง', call('isoFromThaiText', ''), '');
+
+check('ค.ศ. เป็น พ.ศ. (ตอนเลือกจากปฏิทิน)', call('thaiTextFromIso', '2026-10-26'), '26/10/2569');
+check('เติม 0 ตามที่เก็บ', call('thaiTextFromIso', '2027-01-05'), '05/01/2570');
+check('ไปกลับได้ค่าเดิม', call('isoFromThaiText', call('thaiTextFromIso', '2028-02-29')), '2028-02-29');
+check('วันที่ไม่มีจริงไม่ปั้นข้อความ', call('thaiTextFromIso', '2026-02-29'), '');
+check('ผิดรูป', call('thaiTextFromIso', '26/10/2026'), '');
+
 // ---------------------------------------------------------------- fillCheckedDate
 // เครื่องเวลา 06:30 น. วันที่ 30 ก.ย. 2026 (UTC+7) — UTC ยังเป็นเช้ามืดของวันที่ 29
 class MorningInBangkok {
@@ -75,25 +109,39 @@ class NewYearsDay {
   toISOString() { return '2027-01-04T17:30:00.000Z'; }
 }
 
+// อัปเดต 1.6.2: ช่องที่เห็น (checked-date) เป็น วว/ดด/ปปปป พ.ศ. ส่วนค่าที่ส่งอยู่ในช่องซ่อน checked-date-iso (ค.ศ.)
 function runFill({ existing = '', fieldExists = true, clock = MorningInBangkok } = {}) {
-  const field = { value: existing };
+  const field = { id: 'checked-date', value: existing, validity: '', setCustomValidity(msg) { this.validity = msg; } };
+  const hidden = { value: '' };
   let progressCalls = 0;
   const sandbox = {
-    Date: clock,
-    document: { getElementById: (id) => (id === 'checked-date' && fieldExists ? field : null) },
+    // new Date() = นาฬิกาปลอม · Date.UTC (ตัวแปลงวันที่ใช้ตรวจวันที่มีจริง) = ของจริง
+    Date: new Proxy(clock, {
+      construct: (target, args) => (args.length ? new Date(...args) : new target()),
+      get: (target, key) => (key === 'UTC' ? Date.UTC : target[key]),
+    }),
+    document: {
+      getElementById: (id) => (!fieldExists ? null
+        : id === 'checked-date' ? field : id === 'checked-date-iso' ? hidden : null),
+    },
     updateProgress: () => { progressCalls += 1; },
   };
   vm.createContext(sandbox);
+  for (const name of ['isoFromThaiText', 'thaiTextFromIso', 'syncDateField', 'setDateFromIso']) {
+    vm.runInContext(take(name), sandbox, { filename: 'index.html' });
+  }
   vm.runInContext(`(${take('fillCheckedDate')})()`, sandbox, { filename: 'index.html' });
-  return { value: field.value, progressCalls };
+  return { value: field.value, iso: hidden.value, validity: field.validity, progressCalls };
 }
 
 const morning = runFill();
-check('ก่อนเจ็ดโมงเช้าได้วันที่ในเครื่อง ไม่ใช่ UTC', morning.value, '2026-09-30');
+check('ก่อนเจ็ดโมงเช้าได้วันที่ในเครื่อง ไม่ใช่ UTC (ช่องที่เห็นเป็น พ.ศ.)', morning.value, '30/09/2569');
+check('ค่าที่ส่งเซิร์ฟเวอร์ยังเป็น ค.ศ. yyyy-mm-dd', morning.iso, '2026-09-30');
+check('เติมแล้วไม่ติดสถานะกรอกผิด', morning.validity, '');
 check('เติมแล้วนับความพร้อมใหม่', morning.progressCalls, 1);
-check('เดือน/วันหลักเดียวเติมศูนย์นำหน้า', runFill({ clock: NewYearsDay }).value, '2027-01-05');
-check('ช่องที่เจ้าหน้าที่กรอกไว้แล้วห้ามทับ', runFill({ existing: '2026-09-01' }).value, '2026-09-01');
-check('ไม่เติมทับแล้วไม่ต้องนับใหม่', runFill({ existing: '2026-09-01' }).progressCalls, 0);
+check('เดือน/วันหลักเดียวเติมศูนย์นำหน้า', runFill({ clock: NewYearsDay }).iso, '2027-01-05');
+check('ช่องที่เจ้าหน้าที่กรอกไว้แล้วห้ามทับ', runFill({ existing: '01/09/2569' }).value, '01/09/2569');
+check('ไม่เติมทับแล้วไม่ต้องนับใหม่', runFill({ existing: '01/09/2569' }).progressCalls, 0);
 check('ไม่มีช่องนี้ในหน้า ต้องไม่พัง', runFill({ fieldExists: false }).progressCalls, 0);
 
 if (failures) {

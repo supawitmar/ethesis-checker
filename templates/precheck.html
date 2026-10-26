@@ -276,12 +276,12 @@
 
       <section class="panel" aria-labelledby="fee-title">
         <h2 id="fee-title">ค่าปรับส่งเล่มล่าช้า</h2>
-        <p class="hint">ครบกำหนดส่ง = วันที่สอบผ่าน + 20 วัน · ส่งเข้าระบบหลังวันครบกำหนดมีค่าปรับ</p>
+        <p class="hint">ครบกำหนดส่ง = วันที่สอบผ่าน + 20 วัน · วันที่ใช้คำนวณค่าปรับหลังวันครบกำหนด = มีค่าปรับ</p>
         {% if fee %}
           <dl class="fee-grid">
             <dt>วันที่สอบผ่าน</dt><dd>{{ fee.exam }}{% if student.exam_date %} <span class="role">({{ student.exam_date }})</span>{% endif %}</dd>
             <dt>ครบกำหนดส่ง</dt><dd>{{ fee.due }}</dd>
-            <dt>วันที่ส่งเข้าระบบ</dt><dd>{{ fee.submitted }}</dd>
+            <dt>วันที่ใช้คำนวณค่าปรับ</dt><dd>{{ fee.submitted }}</dd>
           </dl>
           {% if fee.late %}
             <div class="fee-result late">มีค่าปรับ — ส่งเกินกำหนด {{ fee.days_late }} วัน</div>

@@ -435,8 +435,8 @@
             <b>{{ queue_date }}</b></span>{% endif %}
           {% if checked_date %}<span class="wdate"><span data-th="ตรวจเมื่อ" data-en="Checked">ตรวจเมื่อ</span>
             <b>{{ checked_date }}</b></span>{% endif %}
-          {# อัปเดต 1.4: ค่าปรับคิดจากวันที่สอบผ่าน + 20 วัน เทียบวันที่ส่งเข้าระบบ (main._fee_view) #}
-          {% if submitted_date %}<span class="wdate"><span data-th="ส่งเข้าระบบ" data-en="Submitted">ส่งเข้าระบบ</span>
+          {# อัปเดต 1.4: ค่าปรับคิดจากวันที่สอบผ่าน + 20 วัน เทียบวันที่ใช้คำนวณค่าปรับ (main._fee_view) · ชื่อใหม่ 1.6.2 #}
+          {% if submitted_date %}<span class="wdate"><span data-th="วันที่ใช้คำนวณค่าปรับ" data-en="Late-fee date">วันที่ใช้คำนวณค่าปรับ</span>
             <b>{{ submitted_date }}</b></span>{% endif %}
           {% if fee %}<span class="wdate fee-{{ 'late' if fee.late else 'ok' }}" id="fee-line">
             {% if fee.late %}<b data-th="มีค่าปรับ (ครบกำหนด {{ fee.due }} · เกิน {{ fee.days_late }} วัน)"

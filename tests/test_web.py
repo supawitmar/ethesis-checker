@@ -721,7 +721,7 @@ class Update14PrecheckFlow(unittest.TestCase):
         self.assertIn('<script id="precheck-data" type="application/json">'
                       '{"failed_items": [2], "name_items": []}</script>', html)
         self.assertIn('data-sig-item="2"', html)
-        self.assertIn("ไม่มีค่าปรับ (ครบกำหนด 06/08/2026)", html)
+        self.assertIn("ไม่มีค่าปรับ (ครบกำหนด 06/08/2569)", html)      # แสดงเป็น พ.ศ. ตั้งแต่อัปเดต 1.6.2
         report = main._get_job(job_id)["report"]
         reds = [i["found"] for i in report["issues_by_zone"]["RED"]]
         self.assertIn("ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity 28% ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน 25%)", reds)
@@ -986,6 +986,87 @@ class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
         self.assertNotIn('id="ethesis-source"', page.text)
 
 
+class Update162WorkingDates(unittest.TestCase):
+    """วันดำเนินการ: ชื่อ "วันที่ใช้คำนวณค่าปรับ" และช่องพิมพ์ วว/ดด/ปปปป พ.ศ. (อัปเดต 1.6.2 เจ้าของยืนยัน 26 ต.ค. 2569)
+
+    เจ้าของสั่ง "อย่าให้ส่วนนี้มีผลกับการตรวจ" — ค่าที่ส่ง /check ค่าปรับ และค่าที่ลงชีทต้องเหมือนเดิมทุกตัวอักษร
+    """
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        for job in list(main.JOBS.values()):
+            if job.get("pdf_path"):
+                main._remove_book(job["pdf_path"])
+        main.JOBS.clear()
+
+    def test_the_form_sends_the_old_names_from_hidden_fields(self):
+        import re
+        html = self.SOURCE.read_text(encoding="utf-8")
+        block = html.split('id="sec-dates"', 1)[1].split("</section>", 1)[0]
+        for name, base in (("submitted_date", "submitted-date"), ("queue_date", "queue-date"),
+                           ("checked_date", "checked-date")):
+            self.assertIn(f'<input type="hidden" name="{name}" id="{base}-iso">', block)
+            typed = re.search(rf'<input type="text" id="{base}"[^>]*>', block).group(0)
+            self.assertNotIn("name=", typed)                   # ช่องพิมพ์ไม่ถูกส่ง
+            self.assertIn("required", typed)
+            self.assertIn('placeholder="วว/ดด/ปปปป (พ.ศ.)"', typed)
+        self.assertEqual(block.count('class="date-pick"'), 3)
+        self.assertIn('<label for="submitted-date">วันที่ใช้คำนวณค่าปรับ</label>', block)
+        self.assertNotIn("วันที่ส่งเข้าระบบ", html)
+        self.assertIn("picker.showPicker()", html)
+
+    def test_the_label_shows_the_buddhist_year_only(self):
+        self.assertEqual(main._date_label("2026-10-26"), "26/10/2569")
+        self.assertEqual(main._date_label("2028-02-29"), "29/02/2571")
+        for bad in ("", None, "26/10/2569", "2026-10-26T00:00"):
+            self.assertEqual(main._date_label(bad), "")
+        # ค่าที่ใช้งานจริง (ชีท/ค่าปรับ) ยังเป็น ค.ศ. yyyy-mm-dd
+        self.assertEqual(main._iso_date("2026-10-26"), "2026-10-26")
+
+    def test_checking_fees_and_the_sheet_are_unchanged(self):
+        import checker
+        job_id = self.client.post("/check", data=FORM, files={
+            "pdf": ("b.pdf", make_pdf(), "application/pdf"), **turnitin_file()}).json()["job_id"]
+        job = main._get_job(job_id)
+        for key in ("queue_date", "checked_date", "submitted_date"):
+            self.assertEqual(job[key], FORM[key])            # ค.ศ. yyyy-mm-dd ตามที่ส่งมา
+        self.assertEqual(job["late_fee"], checker.late_fee(FORM["exam_date"], FORM["submitted_date"]))
+        page = self.client.get(f"/precheck/{job_id}").text
+        self.assertIn("<dt>วันที่ใช้คำนวณค่าปรับ</dt><dd>01/08/2569</dd>", page)
+        self.assertIn("<dt>ครบกำหนดส่ง</dt><dd>06/08/2569</dd>", page)
+        self.client.post(f"/precheck/{job_id}", json=PRECHECK_ALL_PASS)
+        for _ in range(500):
+            if main._get_job(job_id)["done"]:
+                break
+            time.sleep(0.01)
+        report = self.client.get(f"/result/{job_id}").text
+        self.assertIn('data-th="วันที่ใช้คำนวณค่าปรับ" data-en="Late-fee date"', report)
+        self.assertIn("<b>20/09/2569</b>", report)           # เข้าคิว แสดงเป็น พ.ศ.
+        sent = {}
+        with mock.patch.object(main, "SHEET_ENABLED", True), \
+                mock.patch.object(main, "SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/TEST/exec"), \
+                mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
+                mock.patch.object(main, "_post_to_sheet",
+                                  lambda body: sent.update(body) or {"ok": True, "tab": "กย69", "row": 3}):
+            self.client.post(f"/sheet/{job_id}", json={
+                "staff": ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"]})
+        self.assertEqual((sent.get("queue_date"), sent.get("checked_date")),
+                         (FORM["queue_date"], FORM["checked_date"]))
+
+    def test_a_missing_date_still_names_the_renamed_field(self):
+        undated = {k: v for k, v in FORM.items() if k != "submitted_date"}
+        refused = self.client.post("/check", data=undated, files={
+            "pdf": ("b.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("วันที่ใช้คำนวณค่าปรับ", refused.json()["detail"])
+
+
 class Update161UploadFieldNames(unittest.TestCase):
     """ชื่อช่องอัปโหลดใหม่ (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)"""
 
@@ -1164,7 +1245,8 @@ class AnIncompleteFormIsNeverChecked(unittest.TestCase):
             self.assertIn(f'id="{name}-th"', self.html)
             self.assertIn(f'aria-describedby="{name}-th"', self.html)
         code = self.html.split("function showDateEchoes()", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("thaiDate(field.value)", code)
+        # อ่านจากช่องซ่อน (ค่าที่ส่งเซิร์ฟเวอร์จริง) ตั้งแต่อัปเดต 1.6.2 ที่ช่องที่เห็นเป็น วว/ดด/ปปปป พ.ศ.
+        self.assertIn("thaiDate(iso.value)", code)
         self.assertIn("addEventListener('pageshow', showDateEchoes)", self.html)
 
     def test_the_date_of_checking_is_filled_again_after_the_form_is_reset(self):
@@ -2126,13 +2208,14 @@ class SavingTheResultToTheSheet(unittest.TestCase):
     def test_the_header_shows_the_working_dates(self):
         """เจ้าหน้าที่ขอ (ก.ย. 2569) ให้แสดงวันที่เข้าคิวกับวันที่ตรวจข้างปุ่มเปิดไฟล์รูปเล่ม
 
-        เขียนเป็น วัน/เดือน/ปี ค.ศ. แบบเดียวกับช่อง Queue ในชีท จะได้เทียบแถวได้ตรง ๆ
+        อัปเดต 1.6.2 (เจ้าของยืนยัน 26 ต.ค. 2569): แสดงเป็น วว/ดด/ปปปป พ.ศ. แบบเดียวกับช่องกรอกในหน้าแบบฟอร์ม
+        (เดิม ค.ศ.) — ค่าที่ส่งชีทยังเป็น yyyy-mm-dd ค.ศ. (ดู test_the_two_dates_come_from_the_form_not_the_report_page)
         """
         job = self._seed(queue="2026-09-02", checked="2026-09-24")
         html = self.client.get(f"/result/{job}").text
         head = html.split('data-th="ไฟล์ที่ตรวจ"', 1)[1].split("</div></div>", 1)[0]
-        self.assertIn("02/09/2026", head)
-        self.assertIn("24/09/2026", head)
+        self.assertIn("02/09/2569", head)
+        self.assertIn("24/09/2569", head)
         self.assertIn('data-th="เข้าคิว"', head)
         self.assertIn('data-th="ตรวจเมื่อ"', head)
 

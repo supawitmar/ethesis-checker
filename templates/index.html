@@ -101,6 +101,16 @@
      120px ในวงเล็บคือค่าสำรองตอนสคริปต์ไม่ทำงาน */
   html { scroll-padding-top:84px; scroll-padding-bottom:var(--bar-space, 120px); }
   .date-echo { margin:6px 2px 0; min-height:1.4em; font-size:.82rem; color:var(--ink-2); }
+  /* ช่องวันที่ วว/ดด/ปปปป ปี พ.ศ. (อัปเดต 1.6.2) — พิมพ์เอง หรือกดปุ่ม 📅 เปิดปฏิทินของช่อง date ที่ซ่อนไว้
+     ช่อง date ต้องยัง "อยู่บนหน้า" (ไม่ใช่ display:none) showPicker() จึงเปิดได้ ใช้ทึบใส 1px แทน */
+  .date-field { position:relative; }
+  .date-field .date-text { padding-right:52px; }
+  .date-pick { position:absolute; top:0; right:0; width:46px; height:100%; min-height:44px; border:none;
+       background:none; font-size:1.1rem; cursor:pointer; border-radius:0 10px 10px 0; }
+  .date-pick:hover { background:var(--navy-soft); }
+  .date-pick:focus-visible { outline:none; box-shadow:var(--ring); }
+  .date-picker { position:absolute; right:0; bottom:0; width:1px; height:1px; min-height:0; padding:0;
+       border:0; opacity:0; pointer-events:none; }
   select { appearance:none; -webkit-appearance:none; cursor:pointer; padding-right:36px;
        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%237a8797' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
   textarea { resize:vertical; line-height:1.5; }
@@ -341,20 +351,38 @@
          required ทำให้ทั้งชิปและการกดตรวจเล่มบังคับเองทั้งคู่ #}
       <div class="degree-block" id="sec-dates">
         <p class="block-title">🗓 วันดำเนินการ</p>
-        <p class="hint">วันที่ส่งเข้าระบบใช้คิดค่าปรับ (ครบกำหนด = วันที่สอบผ่าน + 20 วัน ส่งหลังจากนั้นมีค่าปรับ)
+        <p class="hint">วันที่ใช้คำนวณค่าปรับ (ครบกำหนด = วันที่สอบผ่าน + 20 วัน หลังจากนั้นมีค่าปรับ)
           · วันที่เข้าคิวชี้ว่าเป็นแถวไหนในชีทบันทึกการตรวจ (นักศึกษาคนเดียวส่งได้หลายรอบ)
-          · วันที่ตรวจเติมลงชีทให้ตามที่กรอก — ไม่กรอกครบสามช่อง ระบบจะไม่ตรวจ</p>
-        {# อัปเดต 1.4 (เจ้าของสั่ง 19 ต.ค. 2569): เพิ่มวันที่ส่งเข้าระบบ เรียงตามลำดับเวลา ส่ง → เข้าคิว → ตรวจ #}
+          · วันที่ตรวจเติมลงชีทให้ตามที่กรอก — ไม่กรอกครบสามช่อง ระบบจะไม่ตรวจ
+          · กรอกเป็น วว/ดด/ปปปป ปี พ.ศ. หรือกด 📅 เลือกจากปฏิทิน</p>
+        {# อัปเดต 1.4 (เจ้าของสั่ง 19 ต.ค. 2569): เพิ่มช่องวันที่ค่าปรับ เรียงตามลำดับเวลา ส่ง → เข้าคิว → ตรวจ
+           อัปเดต 1.6.2 (เจ้าของยืนยัน 26 ต.ค. 2569): ชื่อ "วันที่ใช้คำนวณค่าปรับ" · ช่องพิมพ์ วว/ดด/ปปปป พ.ศ. (ไม่มีชื่อ ไม่ถูกส่ง)
+           ค่าที่ส่งเซิร์ฟเวอร์อยู่ในช่องซ่อนชื่อเดิม เป็น yyyy-mm-dd ค.ศ. เหมือนเดิมทุกตัวอักษร (ดู syncDateField) #}
         <div style="margin-top:12px;">
-          <label for="submitted-date">วันที่ส่งเข้าระบบ</label>
-          <input type="date" name="submitted_date" id="submitted-date" required aria-describedby="submitted-date-th">
+          <label for="submitted-date">วันที่ใช้คำนวณค่าปรับ</label>
+          <div class="date-field">
+            <input type="text" id="submitted-date" class="date-text" inputmode="numeric" autocomplete="off"
+                   placeholder="วว/ดด/ปปปป (พ.ศ.)" maxlength="10" required aria-describedby="submitted-date-th">
+            <button type="button" class="date-pick" aria-label="เลือกวันที่ใช้คำนวณค่าปรับจากปฏิทิน">📅</button>
+            <input type="date" class="date-picker" tabindex="-1" aria-hidden="true">
+            <input type="hidden" name="submitted_date" id="submitted-date-iso"></div>
           <p class="date-echo" id="submitted-date-th" aria-live="polite"></p></div>
         <div class="grid-2" style="margin-top:12px;">
           <div><label for="queue-date">วันที่เข้าคิว</label>
-            <input type="date" name="queue_date" id="queue-date" required aria-describedby="queue-date-th">
+            <div class="date-field">
+              <input type="text" id="queue-date" class="date-text" inputmode="numeric" autocomplete="off"
+                     placeholder="วว/ดด/ปปปป (พ.ศ.)" maxlength="10" required aria-describedby="queue-date-th">
+              <button type="button" class="date-pick" aria-label="เลือกวันที่เข้าคิวจากปฏิทิน">📅</button>
+              <input type="date" class="date-picker" tabindex="-1" aria-hidden="true">
+              <input type="hidden" name="queue_date" id="queue-date-iso"></div>
             <p class="date-echo" id="queue-date-th" aria-live="polite"></p></div>
           <div><label for="checked-date">วันที่ตรวจ</label>
-            <input type="date" name="checked_date" id="checked-date" required aria-describedby="checked-date-th">
+            <div class="date-field">
+              <input type="text" id="checked-date" class="date-text" inputmode="numeric" autocomplete="off"
+                     placeholder="วว/ดด/ปปปป (พ.ศ.)" maxlength="10" required aria-describedby="checked-date-th">
+              <button type="button" class="date-pick" aria-label="เลือกวันที่ตรวจจากปฏิทิน">📅</button>
+              <input type="date" class="date-picker" tabindex="-1" aria-hidden="true">
+              <input type="hidden" name="checked_date" id="checked-date-iso"></div>
             <p class="date-echo" id="checked-date-th" aria-live="polite"></p></div>
         </div>
       </div>
@@ -712,6 +740,8 @@ function resetCheckForm() {
   });
   setStatus('', IMPORT_STATUS_DEFAULT);
   document.getElementById('overlay').style.display = 'none';
+  // reset() ไม่ล้างช่องซ่อน (ค่าของ type=hidden คือ attribute) — ตั้งช่องซ่อนตามช่องพิมพ์ที่เพิ่งว่างลง
+  syncAllDateFields();
   updateConditionalRequirements();
 }
 window.addEventListener('pageshow', resetCheckForm);
@@ -847,6 +877,89 @@ document.getElementById('f').addEventListener('drop', function(){
   }, 0);
 });
 window.addEventListener('pageshow', function(){ markMissing([], false); });
+// ---- ช่องวันที่ วว/ดด/ปปปป ปี พ.ศ. (อัปเดต 1.6.2 เจ้าของยืนยัน 26 ต.ค. 2569) ----
+// <input type="date"> เรียงวัน/เดือนตามภาษาเครื่อง (Windows อังกฤษขึ้น 10/26/2026) จึงให้พิมพ์ วว/ดด/ปปปป พ.ศ. เอง
+// ช่องพิมพ์ไม่มีชื่อ (ไม่ถูกส่ง) ค่าที่ส่งเซิร์ฟเวอร์อยู่ในช่องซ่อน <id>-iso ชื่อเดิม เป็น yyyy-mm-dd ค.ศ. —
+// /check ค่าปรับ และค่าที่ลงชีทไม่เปลี่ยนเลย (เจ้าของสั่ง "อย่าให้ส่วนนี้มีผลกับการตรวจ")
+// ใส่ / ให้เองตอนพิมพ์ · พิมพ์ / เองหลังเลขหลักเดียว ("2/") เติม 0 ให้ · ตัดตัวที่ไม่ใช่ตัวเลขทิ้ง
+function formatDateTyping(raw) {
+  const parts = String(raw || '').split('/');
+  let digits = '';
+  for (let i = 0; i < parts.length; i += 1) {
+    let part = parts[i].replace(/\D/g, '');
+    if (i < 2 && i < parts.length - 1 && part.length === 1) part = '0' + part;
+    digits += part;
+  }
+  digits = digits.slice(0, 8);
+  let out = digits.slice(0, 2);
+  if (digits.length > 2) out += '/' + digits.slice(2, 4);
+  if (digits.length > 4) out += '/' + digits.slice(4, 8);
+  return out;
+}
+// วว/ดด/ปปปป พ.ศ. -> yyyy-mm-dd ค.ศ. ('' = พิมพ์ไม่ครบ หรือวันที่ไม่มีจริง)
+// ตรวจวันที่หลังแปลงเป็น ค.ศ. แล้ว ปีอธิกสุรทินจึงถูก (29/02/2571 = 2028 มี · 29/02/2569 = 2026 ไม่มี)
+// ปีต้องอยู่ช่วง ค.ศ. 1900–2200 — พิมพ์ปี ค.ศ. มาแทน พ.ศ. (26/10/2026 = ค.ศ. 1483) ถือว่ายังไม่กรอก
+function isoFromThaiText(text) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(text || '').trim());
+  if (!m) return '';
+  const day = Number(m[1]), month = Number(m[2]), year = Number(m[3]) - 543;
+  if (year < 1900 || year > 2200) return '';
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1
+      || probe.getUTCDate() !== day) return '';
+  const pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  return year + '-' + pad(month) + '-' + pad(day);
+}
+// yyyy-mm-dd ค.ศ. -> วว/ดด/ปปปป พ.ศ. ('' = ผิดรูป) ใช้ตอนเติมวันนี้ และตอนเลือกจากปฏิทิน
+function thaiTextFromIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m || isoFromThaiText(m[3] + '/' + m[2] + '/' + (Number(m[1]) + 543)) !== iso) return '';
+  return m[3] + '/' + m[2] + '/' + (Number(m[1]) + 543);
+}
+// ช่องพิมพ์ -> ช่องซ่อน · พิมพ์ไม่ครบหรือวันที่ไม่มีจริง = ยังไม่กรอก (ชิปความพร้อมและการกดตรวจเล่มบังคับเหมือนเดิม)
+function syncDateField(field) {
+  const hidden = document.getElementById(field.id + '-iso');
+  const iso = isoFromThaiText(field.value);
+  if (hidden) hidden.value = iso;
+  field.setCustomValidity(field.value && !iso ? 'กรอกวันที่เป็น วว/ดด/ปปปป ปี พ.ศ. เช่น 26/10/2569' : '');
+}
+function setDateFromIso(id, iso) {
+  const field = document.getElementById(id);
+  if (!field) return;
+  field.value = thaiTextFromIso(iso);
+  syncDateField(field);
+}
+function syncAllDateFields() {
+  ['submitted-date', 'queue-date', 'checked-date'].forEach(function(id){
+    const field = document.getElementById(id);
+    if (field) syncDateField(field);
+  });
+}
+['submitted-date', 'queue-date', 'checked-date'].forEach(function(id){
+  const field = document.getElementById(id);
+  if (!field) return;
+  field.addEventListener('input', function(){
+    const typed = formatDateTyping(field.value);
+    if (typed !== field.value) field.value = typed;
+    syncDateField(field);
+  });
+  const box = field.closest('.date-field');
+  const button = box && box.querySelector('.date-pick');
+  const picker = box && box.querySelector('.date-picker');
+  if (!button || !picker) return;
+  button.addEventListener('click', function(){
+    picker.value = (document.getElementById(id + '-iso') || {}).value || '';
+    try { picker.showPicker(); } catch (e) { picker.focus(); picker.click(); }
+  });
+  picker.addEventListener('change', function(){
+    if (!picker.value) return;
+    setDateFromIso(id, picker.value);
+    // ชิปความพร้อม ข้อความไทยใต้ช่อง และกรอบแดง "ยังกรอกไม่ครบ" ตามทันที เหมือนพิมพ์เอง
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    field.focus();
+  });
+});
+
 // วันที่ตรวจ = วันนี้ตั้งแต่เปิดหน้า (เจ้าหน้าที่แก้เองได้ถ้าตรวจย้อนวัน)
 // คิดจากเวลาในเครื่อง ไม่ใช่ toISOString ซึ่งเป็นเวลา UTC — ก่อนเจ็ดโมงเช้าบ้านเรา
 // UTC ยังเป็นเมื่อวาน ถ้าใช้จะได้วันที่ผิดไปหนึ่งวันทุกเช้า
@@ -855,7 +968,7 @@ const fillCheckedDate = function fillCheckedDate(){
   if (!field || field.value) return;
   const now = new Date();
   const pad = function(n){ return (n < 10 ? '0' : '') + n; };
-  field.value = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  setDateFromIso('checked-date', now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()));
   updateProgress();
 };
 fillCheckedDate();
@@ -864,9 +977,9 @@ fillCheckedDate();
 // จึงต้องเติมซ้ำหลังล้าง listener ตัวนี้ลงทะเบียนทีหลัง จึงทำงานตามหลังตัวล้างเสมอ
 window.addEventListener('pageshow', fillCheckedDate);
 
-// อ่านวันที่ที่เลือกกลับเป็นข้อความไทย (พ.ศ.) ใต้ช่อง — ช่องวันที่ของเบราว์เซอร์เรียงวัน/เดือนตามภาษา
-// ของเครื่อง (เครื่องหนึ่งขึ้น 09/30/2026 อีกเครื่องขึ้น 30/09/2026) ส่วนวันที่เข้าคิวเป็นตัวชี้แถว
-// ในชีท อ่านสลับวันกับเดือนเมื่อไหร่ก็เขียนผิดแถว ข้อความไทยใต้ช่องอ่านสลับไม่ได้
+// อ่านวันที่ที่กรอกกลับเป็นข้อความไทย (พ.ศ.) ใต้ช่อง — วันที่เข้าคิวเป็นตัวชี้แถวในชีท อ่านสลับวันกับเดือน
+// เมื่อไหร่ก็เขียนผิดแถว ข้อความไทยใต้ช่องอ่านสลับไม่ได้ (คงไว้หลังเปลี่ยนเป็นช่องพิมพ์ วว/ดด/ปปปป ในอัปเดต 1.6.2)
+// อ่านจากช่องซ่อน (ค่าที่ส่งเซิร์ฟเวอร์จริง) ไม่ใช่ข้อความที่พิมพ์ — ข้อความใต้ช่องจึงตรงกับที่ระบบจะได้รับเสมอ
 // รายชื่อเดือนอยู่ในฟังก์ชันเอง เพื่อให้ tests/test_form_dates.js ดึงฟังก์ชันเดียวไปรันได้
 function thaiDate(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
@@ -881,12 +994,11 @@ function thaiDate(iso) {
   return day + ' ' + months[month - 1] + ' ' + (year + 543);
 }
 function showDateEchoes() {
-  [['submitted-date', 'submitted-date-th'], ['queue-date', 'queue-date-th'],
-   ['checked-date', 'checked-date-th']].forEach(function(pair){
-    const field = document.getElementById(pair[0]);
-    const echo = document.getElementById(pair[1]);
-    if (!field || !echo) return;
-    const text = thaiDate(field.value);
+  ['submitted-date', 'queue-date', 'checked-date'].forEach(function(id){
+    const iso = document.getElementById(id + '-iso');
+    const echo = document.getElementById(id + '-th');
+    if (!iso || !echo) return;
+    const text = thaiDate(iso.value);
     echo.textContent = text ? 'ตรงกับ ' + text : '';
   });
 }
