@@ -1634,9 +1634,11 @@ class AbstractCommitteeTests(unittest.TestCase):
         found = [i["found"] for i in rep.zones["RED"]]
         self.assertTrue(any("หน้านี้มี 1 ชื่อ แต่อนุมัติไว้ 2 ชื่อ" in f for f in found),
                         found)
-        # ต้องบอกด้วยว่าควรมีชื่ออะไรบ้าง (ดึงจากฟอร์มต้นทาง)
+        # บรรทัดที่ควรเป็นให้ตรวจกับ บฑ.1 โดยไม่ยกรายชื่อ (อัปเดต 1.6.1) — รายชื่ออยู่ในรายการสีม่วงแทน
         expected = [i["expected"] for i in rep.zones["RED"]]
-        self.assertTrue(any("ธเนศ ข" in e for e in expected), expected)
+        self.assertIn("กรุณาตรวจสอบรายชื่อกับ บฑ.1 อีกครั้ง", expected)
+        self.assertFalse(any("ธเนศ ข" in e for e in expected), expected)
+        self.assertIn("ธเนศ ข", " ".join(h["why"] for h in rep.human_checklist))
 
     def test_committee_list_is_printed_for_staff_to_check_by_eye(self):
         committees = {"advisory": [{"name": "คนางค์ ก", "role": ""}]}
@@ -3238,7 +3240,7 @@ class TheEnglishTextLeavesOutTheApprovedNames(unittest.TestCase):
 
     "ถ้าเป็นข้อความเฉพาะภาษาอังกฤษเอา รายชื่อตาม บฑ.1 หรือ 2. ออก" — ฟอร์มเก็บชื่อไทย
     (เล่มจริง 6838776 TMCT/M ได้ "The list must match GR.1 in full: 1. วิรงค์รอง เจียรกุล ...")
-    นักศึกษาต่างชาติอ่านไม่ออก ฉบับไทยยังยกรายชื่อครบเหมือนเดิม
+    นักศึกษาต่างชาติอ่านไม่ออก · อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569) ฉบับไทยก็ไม่ยกรายชื่อแล้ว
     """
 
     FORM = [{"name": "พญ. วิรงค์รอง เจียรกุล"}, {"name": "นพ. โลกเชษฐ์ ธนสุกาญจน์"}]
@@ -3258,16 +3260,27 @@ class TheEnglishTextLeavesOutTheApprovedNames(unittest.TestCase):
         checker_module._report_committee_count(rep, self.FORM, found, "บทคัดย่ออังกฤษ (หน้า iv)", form)
         return rep.zones["RED"][0]
 
-    def test_the_thai_text_still_lists_the_names(self):
+    def test_the_thai_text_no_longer_lists_the_names(self):
+        """อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569) — ฉบับไทยก็ไม่ยกรายชื่อแล้ว"""
         issue = self._count_issue(["A", "B", "C"], "บฑ.1")
-        self.assertIn("วิรงค์รอง เจียรกุล", issue["expected"])
-        self.assertIn("โลกเชษฐ์ ธนสุกาญจน์", issue["expected"])
+        self.assertEqual(issue["expected"], "กรุณาตรวจสอบรายชื่อกับ บฑ.1 อีกครั้ง")
+        self.assertNotIn("วิรงค์รอง เจียรกุล", issue["expected"])
 
     def test_the_english_red_line_has_no_names(self):
+        # ถ้อยคำอังกฤษของเจ้าของ (26 ต.ค. 2569 อัปเดต 1.6.1) — เรียกฟอร์มเป็นอังกฤษล้วน ไม่มีคำว่า บฑ
         for form, gr in (("บฑ.1", "GR.1"), ("บฑ.2", "GR.2")):
             for found in (["A", "B", "C"], ["A"]):
-                issue = self._count_issue(found, form)
-                self.assertEqual(self._en(issue["expected"]), f"The list must match {gr}")
+                en = self._en(self._count_issue(found, form)["expected"])
+                self.assertEqual(en, f"Please check the names against Form {gr} again.")
+                self.assertFalse(self.THAI.search(en), en)
+
+    def test_the_form_code_is_never_left_thai(self):
+        """ด่านคำแปลไม่ยกเว้น "บฑ" ไม่ว่ากรณีไหน (กติกา ส.ค. 2569 · เจ้าของยืนยันอีกครั้ง 26 ต.ค. 2569)"""
+        th = "กรุณาตรวจสอบรายชื่อกับ บฑ.2 อีกครั้ง"
+        self.assertEqual(self.i18n.translation_problems(th, "Please check the names against Form GR.2 again."), [])
+        for en in ("Please check the names against บฑ.2 again.",
+                   "Please check the names against บฑ.2 (Form GR.2) again."):
+            self.assertTrue(self.i18n.translation_problems(th, en), en)
 
     def test_the_english_purple_note_has_no_names(self):
         for status in ("counted", "unclear"):
@@ -3931,11 +3944,11 @@ class AShortCommitteeListIsReportedInRed(unittest.TestCase):
         for found in (["a"], [f"n{k}" for k in range(1, 6)]):
             issue = self._run(found).zones["RED"][0]
             self.assertIn("บฑ.2", issue["found"])
-            self.assertIn("บฑ.2", issue["expected"])
             self.assertIn("บฑ.2", issue["fix"])
-            # ต้องยกรายชื่อตามฟอร์มมาให้ครบ ไม่ใช่บอกแค่จำนวน
+            # ไม่ยกรายชื่อแล้ว ให้ตรวจกับฟอร์มเอง (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)
+            self.assertEqual(issue["expected"], "กรุณาตรวจสอบรายชื่อกับ บฑ.2 อีกครั้ง")
             for name in self.EXPECTED:
-                self.assertIn(name, issue["expected"])
+                self.assertNotIn(name, issue["expected"])
 
     def test_a_matching_count_reports_nothing(self):
         """ควบคุมเชิงลบ — ครบพอดีต้องเงียบ กฎนี้ไม่เทียบชื่อ"""
@@ -8339,12 +8352,13 @@ class CommitteeCountIsCheckedAgainstTheSourceForm(unittest.TestCase):
         self.assertIn("รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2", issue["found"])
         self.assertIn("หน้านี้มี 4 ชื่อ แต่อนุมัติไว้ 3 ชื่อ", issue["found"])
 
-    def test_the_finding_lists_who_should_be_there(self):
-        """เจ้าหน้าที่สั่งให้บอกด้วยว่าควรมีชื่ออะไรบ้าง ดึงจากฟอร์มต้นทาง"""
+    def test_the_finding_asks_to_check_against_the_form(self):
+        """เดิมยกรายชื่อตามฟอร์มต้นทางมาทั้งชุด — อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569) ให้ตรวจกับ บฑ. เอง"""
         issue = self._count(["ก ก", "ข ข"]).zones["RED"][0]
         for name in ("คนางค์ คันธมธุรพจน์", "ธเนศ เกษศิลป์", "สุภาภรณ์ สงค์ประชา"):
-            self.assertIn(name, issue["expected"], name)
-        self.assertIn("ตาม บฑ.2", issue["expected"])
+            self.assertNotIn(name, issue["expected"], name)
+        self.assertEqual(issue["expected"], "กรุณาตรวจสอบรายชื่อกับ บฑ.2 อีกครั้ง")
+        self.assertTrue(issue["found"].startswith("รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.2: หน้านี้มี 2 ชื่อ"))
 
     def test_the_right_count_says_nothing(self):
         rep = self._count(["ก ก", "ข ข", "ค ค"])
@@ -9629,8 +9643,12 @@ class ScannedSignaturePages(unittest.TestCase):
     def test_the_scanned_pages_are_not_reported_again_as_unreadable_pages(self):
         """เดิมได้สามข้อจากแผ่นสแกนชุดเดียว: ไม่พบหน้าลงนาม + อ่านเลขหน้าไม่ได้ + ดึงข้อความไม่ได้"""
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn("blank_idx in scanned_sig", source)
+        self.assertIn("skip=scanned_sig", source)
         self.assertIn("reported=list(sig_label_reported) + scanned_sig", source)
+        rep = Report()
+        checker_module._report_blank_runs(rep, [self.COVER, "", "", self.ACK], {}, {1, 2}, True,
+                                          lambda i: f"แผ่นที่ {i + 1}", skip=[1, 2])
+        self.assertEqual(rep.zones["ORANGE"] + rep.zones["YELLOW"], [])
 
     def test_the_step_1_preview_shows_the_scanned_pages(self):
         import tempfile
@@ -9670,6 +9688,161 @@ class Update16RequirementsParagraph(unittest.TestCase):
         self.assertNotIn(checker_module.REQUIREMENTS_TEXT,
                          checker_module.plain_summary(report, with_verdict=False, with_closing=False,
                                                       requirements=True))
+
+
+class Update161FacultyHeadNotice(unittest.TestCase):
+    """ช่องคณบดี หน้าลงนาม 2: บรรทัดให้ตรวจชื่อและคุณวุฒิกับหลักสูตร (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)"""
+
+    LINE = "กรุณาตรวจสอบชื่อและคุณวุฒิของอาจารย์กับทางหลักสูตรอีกครั้ง"
+
+    def _issue(self, bottom):
+        rep = Report()
+        checker_module._check_faculty_head_title(rep, bottom, "หน้าลงนาม 2 (หน้า ii)")
+        return rep.zones["RED"]
+
+    def test_the_line_sits_under_the_title_line_in_the_summary(self):
+        [issue] = self._issue("Asst. Prof. Somchai Jaidee,\nPh.D. (Public Health)\nProgram Director\nFaculty of Medicine")
+        self.assertEqual(issue["notice"], self.LINE)
+        lines = [l.strip() for l in checker_module._summary_sentence(issue).split(NEWLINE)]
+        at = lines.index('ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น')
+        self.assertEqual(lines[at + 1], self.LINE)
+
+    def test_the_english_wording_is_the_owners(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(self.LINE, pairs),
+                         "Please verify the name and qualifications of the faculty member with the program again.")
+
+    def test_a_dean_title_has_no_line(self):
+        self.assertEqual(self._issue("Prof. Somchai Jaidee,\nM.D.\nDean\nFaculty of Medicine"), [])
+
+
+class Update161PageNumbers(unittest.TestCase):
+    """เลขหน้า: ปกมีเลขหน้า และหน้าภาพที่อ่านเลขหน้าได้ (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)"""
+
+    @staticmethod
+    def _ref(i):
+        return f"หน้า {i + 1}"
+
+    def test_a_page_number_in_the_cover_header_is_one_item_on_the_cover(self):
+        self.assertEqual(checker_module.cover_page_label({0: "1"}, [["1"], []], 0), "1")
+        rep = Report()
+        checker_module._report_cover_page_label(rep, "1")
+        [issue] = rep.zones["ORANGE"]
+        self.assertEqual((issue["location"], issue["found"], issue["expected"]),
+                         ("หน้าปก", "หน้าปกมีเลขหน้า", "ต้องไม่มี"))
+
+    def test_a_year_on_the_last_line_of_the_cover_is_not_a_page_number(self):
+        # บรรทัดสุดท้ายของปกเป็นปี — อ่านได้เป็น "เลขหน้า" แต่ไม่อยู่ในแถบหัวกระดาษ
+        self.assertEqual(checker_module.cover_page_label({0: "2569"}, [["THESIS"], []], 0), "")
+        rep = Report()
+        checker_module._report_cover_page_label(rep, "")
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_the_cover_number_is_left_out_of_the_sequence_and_the_header_item(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if not (cover_label and i == cover_idx)", source)
+        self.assertIn("and not header_reported_elsewhere(i, front)", source)
+
+    def test_numbered_image_pages_are_a_notice_even_when_the_book_jumps_elsewhere(self):
+        pages = ["เนื้อหา" + NEWLINE + "10", "11", "12", "เนื้อหา" + NEWLINE + "15"]
+        rep = Report()
+        checker_module._report_blank_runs(rep, pages, {0: 10, 1: 11, 2: 12, 3: 15}, {1, 2},
+                                          False, self._ref)
+        self.assertEqual(rep.zones["ORANGE"], [])
+        [issue] = rep.zones["YELLOW"]
+        self.assertEqual(issue["found"], "ระบบดึงข้อความจากหน้านี้ไม่ได้ (มีเฉพาะเลขหน้ากับรูปภาพ "
+                                         "เป็นหน้ารูปภาพ/สแกน) แต่อ่านเลขหน้าได้ทุกหน้า")
+        self.assertNotIn("หน้าว่าง", issue["found"])
+        self.assertNotIn("ยืนยันลำดับ", issue["found"])
+
+    def test_pages_without_a_readable_number_still_go_to_staff(self):
+        rep = Report()
+        checker_module._report_blank_runs(rep, ["เนื้อหา" + NEWLINE + "10", "", ""], {0: 10}, set(),
+                                          False, self._ref)
+        [issue] = rep.zones["ORANGE"]
+        self.assertIn("ยืนยันลำดับเลขหน้าไม่ได้", issue["found"])
+
+    def test_a_blank_page_without_an_image_is_still_called_blank(self):
+        rep = Report()
+        checker_module._report_blank_runs(rep, ["เนื้อหา" + NEWLINE + "1", "2"], {0: 1, 1: 2}, set(),
+                                          True, self._ref)
+        [issue] = rep.zones["YELLOW"]
+        self.assertIn("มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น", issue["found"])
+        self.assertIn("แต่เลขหน้าเรียงต่อเนื่องถูกต้อง", issue["found"])
+
+
+class Update161WholeThaiWords(unittest.TestCase):
+    """จุดต่างของชื่อเรื่องไทยไม่ตัดกลางคำ (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569) — ชื่อเรื่องสมมติ"""
+
+    FOUND = "ผลของโปรแกรมฝึกสมองด้วยเกมกระดานในการชะลอภาวะสมองเสื่อมของผู้สูงอายุ"
+    APPROVED = "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดานในการชะลอภาวะสมองเสื่อมของผู้สูงอายุ"
+
+    def test_the_difference_and_the_words_around_it_are_whole(self):
+        analysis = checker_module.analyze_diff(self.FOUND, self.APPROVED)
+        self.assertEqual(analysis.text, 'ต่างที่ "ด้วย" ต้องเป็น "โดยใช้"')
+        self.assertEqual(analysis.steps, ('ให้แก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"',))
+
+    def test_the_step_can_be_followed(self):
+        [step] = checker_module.analyze_diff(self.FOUND, self.APPROVED).steps
+        got, want = re.findall(r'"([^"]+)"', step)
+        self.assertEqual(self.FOUND.replace(got, want), self.APPROVED)
+
+    def test_a_led_consonant_stays_with_its_syllable(self):
+        steps = checker_module.analyze_diff("การพัฒนาหลักสูตรฝึกอบรมครู", "การพัฒนาหลักสูตรการฝึกอบรมครู").steps
+        self.assertEqual(steps, ('ให้เติม "การ" หลัง "หลักสูตร"',))
+
+    def test_a_letter_starting_a_syllable_is_a_real_boundary(self):
+        """ควบคุมเชิงลบ — สองจุดที่คั่นด้วยพยางค์ขึ้นสระหน้า ("แอ") ยังเป็นสองจุด"""
+        text = checker_module.analyze_diff("ร่วมกัชแอพลิเคชัน", "ร่วมกับแอปพลิเคชัน").text
+        self.assertEqual(text, 'ต่างที่ "ช" ต้องเป็น "บ" และ ขาด "ป"')
+
+
+class Update161AbstractCommittee(unittest.TestCase):
+    """รายชื่อกรรมการในบทคัดย่อ: จุลภาคในวงเล็บสาขา และ ; คั่นชื่อ (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)"""
+
+    ADVISORY = {"advisory": [{"name": "สมชาย ใจดี"}, {"name": "มานี มีใจ"}, {"name": "ปิติ ยินดี"}]}
+
+    def _run(self, page, english=True):
+        rep = Report()
+        checker_module._check_abstract_committees(
+            rep, self.ADVISORY, [0] if english else [], [] if english else [0], [page],
+            lambda i: "หน้า iv", "THESIS")
+        return rep
+
+    def test_a_comma_inside_the_field_of_study_is_not_a_new_name(self):
+        block = ("SOMCHAI JAIDEE, Ph.D. (Nursing), MANEE MEEJAI, Ph.D. (Nursing), "
+                 "PITI YINDEE, Ph.D. (Educational Measurement, Evaluation and Research).")
+        names, degrees = checker_module.split_abstract_committee(block)
+        self.assertEqual(names, ["SOMCHAI JAIDEE", "MANEE MEEJAI", "PITI YINDEE"])
+        self.assertEqual(checker_module.abstract_committee_missing_commas(block), [])
+        rep = self._run(f"THESIS ADVISORY COMMITTEE: {block}" + NEWLINE + "ABSTRACT")
+        found = [i["found"] for zone in ("RED", "ORANGE", "YELLOW") for i in rep.zones[zone]]
+        brackets = [f for f in found if f.startswith("รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ")]
+        self.assertEqual(len(brackets), 1, found)          # ข้อสาขาในวงเล็บยังอยู่
+        others = [f for f in found if f not in brackets]
+        for wrong in ("(Educational Measurement", "หน้านี้มี 4 ชื่อ", "ตัวพิมพ์ใหญ่", "จุลภาค"):
+            self.assertFalse(any(wrong in f for f in others), (wrong, others))
+
+    def test_a_thai_field_of_study_with_a_comma_is_skipped_too(self):
+        block = "สมชาย ใจดี, ปร.ด. (การวัด, การประเมินผล), มานี มีใจ, ปร.ด., ปิติ ยินดี, ปร.ด."
+        self.assertEqual(checker_module.split_abstract_committee(block)[0],
+                         ["สมชาย ใจดี", "มานี มีใจ", "ปิติ ยินดี"])
+
+    def test_semicolons_are_one_item_without_names(self):
+        page = ("THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D.; MANEE MEEJAI, Ph.D.; "
+                "PITI YINDEE, Ph.D." + NEWLINE + "ABSTRACT")
+        rep = self._run(page)
+        commas = [i for i in rep.zones["YELLOW"] if i["rule_id"] == "FRONT.ABSTRACT_COMMA"]
+        self.assertEqual([(i["found"], i["expected"]) for i in commas], [("ใช้ ; คั่นชื่อ", "ต้องใช้ ,")])
+        self.assertFalse(any("หน้านี้มี" in i["found"] for i in rep.zones["RED"]))
+        self.assertFalse(any("MANEE" in i["found"] for i in commas))
+
+    def test_a_correct_list_has_no_comma_item(self):
+        """ควบคุมเชิงลบ"""
+        rep = self._run("THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D., MANEE MEEJAI, Ph.D., "
+                        "PITI YINDEE, Ph.D." + NEWLINE + "ABSTRACT")
+        self.assertEqual([i for i in rep.zones["YELLOW"] if i["rule_id"] == "FRONT.ABSTRACT_COMMA"], [])
 
 
 class Update14Turnitin(unittest.TestCase):

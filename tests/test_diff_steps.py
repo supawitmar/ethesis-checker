@@ -459,7 +459,8 @@ class TheStepsCanBeFollowedOneByOne(unittest.TestCase):
         insert = checker_module._Edit("insert", "", "การ", 0, 0, 0)
         steps, clash = checker_module._steps_once(fg, [insert])
         self.assertIsNone(clash)
-        self.assertEqual(steps, ['ให้แก้ "าบริห" เป็น "การาบริห"'])
+        # ตัวอ้างอิงไม่จบก่อนสระที่เริ่มคำไม่ได้ ("บริห|า" ตัดกลางพยางค์ — อัปเดต 1.6.1)
+        self.assertEqual(steps, ['ให้แก้ "าบริหา" เป็น "การาบริหา"'])
 
     def test_edits_whose_ranges_overlap_give_no_steps(self):
         """ไม่ควรเกิด แต่ถ้าเกิด รวมกันแล้วได้ข้อความผิด — ไม่ตอบดีกว่าตอบผิด"""

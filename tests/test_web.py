@@ -986,6 +986,31 @@ class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
         self.assertNotIn('id="ethesis-source"', page.text)
 
 
+class Update161UploadFieldNames(unittest.TestCase):
+    """ชื่อช่องอัปโหลดใหม่ (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)"""
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+
+    def test_the_two_slots_use_the_new_names_and_keep_their_tags(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        self.assertIn('ข้อมูลนักศึกษา (pdf. จากระบบ) <span class="tag">ไม่บังคับ</span>', html)
+        self.assertIn('รูปเล่มอิเล็กทรอนิกส์ <span class="tag req">จำเป็น</span>', html)
+        self.assertIn('<li data-sec="sec-files">รูปเล่มอิเล็กทรอนิกส์</li>', html)
+        self.assertIn("ไฟล์ผลตรวจ Turnitin", html)
+
+    def test_no_text_still_calls_them_by_the_old_names(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for old in ("ไฟล์เล่มวิทยานิพนธ์", ">ไฟล์เล่ม<", "ไฟล์ eThesis PDF", "เติมจากไฟล์ eThesis",
+                    "'ไฟล์ eThesis ระบุประเภทเล่ม", "ไฟล์ eThesis ใช้เติมแบบฟอร์ม", "อ่านจากไฟล์ eThesis"):
+            self.assertNotIn(old, html, old)
+
+    def test_the_source_system_is_still_called_ethesis(self):
+        """ควบคุมเชิงลบ — คำว่า eThesis ที่หมายถึงระบบต้นทางคงไว้"""
+        html = self.SOURCE.read_text(encoding="utf-8")
+        for kept in ("ช่องที่ระบบเติมจาก eThesis", "รายชื่อกรรมการจาก eThesis"):
+            self.assertIn(kept, html)
+
+
 class AnIncompleteFormIsNeverChecked(unittest.TestCase):
     """ไม่ครบ = ไม่ตรวจ (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้าไม่ครบ ต้องไม่ตรวจนะ")
 

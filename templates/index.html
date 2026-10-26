@@ -275,7 +275,7 @@
   </section>
   <div class="hero">
     <h1>ตรวจเล่มใหม่</h1>
-    <p>แนบไฟล์ eThesis เพื่อเติมข้อมูลอนุมัติให้อัตโนมัติ แนบไฟล์เล่ม ตรวจทานข้อมูล แล้วกดตรวจเล่ม</p>
+    <p>แนบข้อมูลนักศึกษา (pdf. จากระบบ) เพื่อเติมข้อมูลอนุมัติให้อัตโนมัติ แนบรูปเล่มอิเล็กทรอนิกส์ ตรวจทานข้อมูล แล้วกดตรวจเล่ม</p>
     <div class="callout">⚠️ <span>ข้อมูลในฟอร์มนี้คือ <b>"ความจริงอ้างอิง"</b> — กรอกให้ตรงเอกสารอนุมัติทุกตัวอักษร</span></div>
   </div>
 
@@ -284,17 +284,17 @@
 
     <section class="panel" id="sec-files">
       <div class="panel-head"><span class="step" aria-hidden="true">1</span>
-        <div><h2>ไฟล์</h2><p class="hint">ไฟล์ eThesis ใช้เติมแบบฟอร์มเท่านั้น · ไฟล์เล่มคือไฟล์ที่ระบบตรวจ · ไฟล์ Turnitin ใช้ตรวจค่า Overall Similarity</p></div></div>
+        <div><h2>ไฟล์</h2><p class="hint">ข้อมูลนักศึกษา (pdf. จากระบบ) ใช้เติมแบบฟอร์มเท่านั้น · รูปเล่มอิเล็กทรอนิกส์คือไฟล์ที่ระบบตรวจ · ไฟล์ Turnitin ใช้ตรวจค่า Overall Similarity</p></div></div>
       <div class="file-grid">
         {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสาร
            เพื่ออ่านข้อมูลพอ" — เหลือทางเดียว ตัวอ่านเดียว (ethesis_import.py ฝั่งเซิร์ฟเวอร์) #}
         <div class="import-panel" id="panel-file">
-          <div class="slot-label">ไฟล์ eThesis <span class="tag">ไม่บังคับ</span></div>
+          <div class="slot-label">ข้อมูลนักศึกษา (pdf. จากระบบ) <span class="tag">ไม่บังคับ</span></div>
           <label class="drop" id="drop-ethesis">
             <span class="drop-ico">📄</span>
             <span>
               <span class="drop-main">คลิกเลือก หรือลากไฟล์ PDF มาวาง</span>
-              <span class="drop-sub" id="drop-ethesis-name">หน้าข้อมูลนักศึกษาที่พิมพ์จากระบบ eThesis</span>
+              <span class="drop-sub" id="drop-ethesis-name">ไฟล์ข้อมูลนักศึกษา (pdf.) ที่พิมพ์จากระบบ eThesis</span>
             </span>
             <input type="file" id="ethesis-pdf" accept=".pdf">
           </label>
@@ -304,7 +304,7 @@
           </div>
         </div>
         <div>
-          <div class="slot-label">ไฟล์เล่มวิทยานิพนธ์ <span class="tag req">จำเป็น</span></div>
+          <div class="slot-label">รูปเล่มอิเล็กทรอนิกส์ <span class="tag req">จำเป็น</span></div>
           <label class="drop" id="drop-book">
             <span class="drop-ico">📕</span>
             <span>
@@ -447,7 +447,7 @@
       <input type="hidden" name="ethesis_doc_type" id="ethesis-doc-type">
       <div id="committee-box" class="committee-box" style="display:none;">
         <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
-          <span style="color:var(--ink-3);">อ่านจากไฟล์ eThesis เท่านั้น แก้ไม่ได้ —
+          <span style="color:var(--ink-3);">อ่านจากข้อมูลนักศึกษา (pdf. จากระบบ) เท่านั้น แก้ไม่ได้ —
           เล่มภาษาอังกฤษระบบจะถอดชื่อเป็นอังกฤษให้เองตอนตรวจ</span></div>
         <div id="committee-summary" class="committee-summary"></div>
       </div>
@@ -464,7 +464,7 @@
     <div class="action-card">
       <div class="side-title">ความพร้อมก่อนตรวจ <span id="progress-count">0/5</span></div>
       <ol class="progress" id="progress">
-        <li data-sec="sec-files">ไฟล์เล่ม</li>
+        <li data-sec="sec-files">รูปเล่มอิเล็กทรอนิกส์</li>
         <li data-sec="sec-type">โหมดการตรวจ</li>
         <li data-sec="sec-title">ชื่อเรื่อง</li>
         <li data-sec="sec-student">นักศึกษาและปริญญา</li>
@@ -563,7 +563,7 @@ function updateDocTypeNote() {
   note.hidden = !differs;
   if (!differs) { note.textContent = ''; return; }
   const option = Array.from(select.options).find(function(o){ return o.value === eth.value; });
-  note.textContent = 'ไฟล์ eThesis ระบุประเภทเล่มเป็น ' + (option ? option.textContent : eth.value) +
+  note.textContent = 'ข้อมูลนักศึกษา (pdf. จากระบบ) ระบุประเภทเล่มเป็น ' + (option ? option.textContent : eth.value) +
     ' ไม่ตรงกับที่เลือกไว้ ระบบจะตรวจเล่มตามประเภทที่เลือกไว้';
 }
 
@@ -623,7 +623,7 @@ function wireDrop(dropId, inputId, nameId, emptyText){
   });
 }
 wireDrop('drop-ethesis', 'ethesis-pdf', 'drop-ethesis-name',
-         'หน้าข้อมูลนักศึกษาที่พิมพ์จากระบบ eThesis');
+         'ไฟล์ข้อมูลนักศึกษา (pdf.) ที่พิมพ์จากระบบ eThesis');
 wireDrop('drop-book', 'book-pdf', 'drop-book-name', 'ยังไม่ได้เลือกไฟล์');
 wireDrop('drop-turnitin', 'turnitin-pdf', 'drop-turnitin-name', 'ยังไม่ได้เลือกไฟล์');
 
@@ -649,9 +649,9 @@ async function withBusy(btn, label, fn){
 document.getElementById('parse-ethesis-pdf').addEventListener('click', function(){
   const btn = this;
   const file = document.getElementById('ethesis-pdf').files[0];
-  if (!file) { setStatus('err', 'กรุณาเลือกไฟล์ eThesis PDF ก่อน'); return; }
+  if (!file) { setStatus('err', 'กรุณาเลือกไฟล์ข้อมูลนักศึกษา (pdf. จากระบบ) ก่อน'); return; }
   withBusy(btn, 'กำลังอ่านไฟล์...', async function(){
-    setStatus('', 'กำลังอ่านไฟล์ eThesis PDF...');
+    setStatus('', 'กำลังอ่านข้อมูลนักศึกษา (pdf. จากระบบ)...');
     try {
       const body = new FormData();
       body.append('pdf', file);
@@ -668,7 +668,7 @@ document.getElementById('parse-ethesis-pdf').addEventListener('click', function(
         return;
       }
       setStatus(data.format ? 'ok' : 'warn',
-        `เติมจากไฟล์ eThesis แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานก่อนตรวจเล่ม` +
+        `เติมจากข้อมูลนักศึกษา (pdf. จากระบบ) แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานก่อนตรวจเล่ม` +
         (data.format ? '' : ' — ไม่พบเครื่องหมายติ๊กรูปแบบในไฟล์ กรุณาเลือกรูปแบบเอง'),
         filled);
     } catch(err) {

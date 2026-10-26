@@ -1300,12 +1300,9 @@ def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
     ราชบัณฑิตฯ แล้วตรงกับที่เล่มพิมพ์ 0 คน — "จันทราทิตย์" ถอดได้ "Chanthrathit"
     แต่เจ้าตัวสะกด "Chantratita")
 
-    "ควรมีชื่ออะไรบ้าง" อยู่ในบรรทัดที่ควรเป็น ดึงจากฟอร์มต้นทางโดยตรง
-
     **จำนวนไม่ตรง = แดงทั้งสองทาง** (เจ้าหน้าที่สั่ง ก.ย. 2569 — เดิมขาดเป็นส้ม)
 
     ทั้งขาดและเกินต้องแจ้งสีแดง และต้องอ้างถึง บฑ.1 / บฑ.2 ให้ชัดว่าเทียบกับอะไร
-    ข้อความจึงยกรายชื่อตามฟอร์มมาไว้ในบรรทัด "ควรเป็น" ทุกครั้ง
 
     **ข้อควรระวังที่ยอมรับแล้ว:** จำนวนที่นับได้ขึ้นกับว่าระบบอ่านตารางลายเซ็นออกครบไหม
     ถ้าอ่านไม่ครบจะได้ชื่อ *น้อยกว่า* ความจริง แล้วฟ้องแดงทั้งที่เล่มถูก — เจ้าหน้าที่
@@ -1315,18 +1312,19 @@ def _report_committee_count(rep, expected, found_names, loc, form="บฑ.1",
     (Tran Kiem Hao กับ Karl Peltzer บรรทัดคุณวุฒิเขียน "Ph.D." กับ "PhD" ต่างกัน)
     จึงได้ 7 ชื่อจากที่อนุมัติไว้ 5 — ของเดิมเป็นส้มพร้อมคำแนะนำว่า "ถ้าครบแล้วแปลว่า
     ระบบอ่านบางช่องไม่ออก ให้ผ่านได้" ซึ่งชี้ผิดทางสำหรับกรณีเกิน
+
+    อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569): บรรทัดที่ควรเป็น **ไม่ยกรายชื่อ** แล้ว เหลือ "กรุณาตรวจสอบรายชื่อกับ บฑ.x
+    อีกครั้ง" (ทั้งหน้าผลตรวจ ข้อความสรุป และชีท) — รายชื่อตามฟอร์มยังอยู่ในรายการสีม่วงให้เจ้าหน้าที่ทาน
     """
     want = _committee_names(expected)
     if not want or len(found_names) == len(want):
         return
-    listed = "  ".join(f'{k}. {_display_committee_name(n)}'
-                       for k, n in enumerate(want, start=1))
     short = len(found_names) < len(want)
     lead = (f"รายชื่อไม่ครบตามที่ได้รับอนุมัติใน {form}" if short else
             f"รายชื่อเกินจากที่ได้รับอนุมัติใน {form}")
     rep.add("RED", "front_matter", loc,
             f"{lead}: หน้านี้มี {len(found_names)} ชื่อ แต่อนุมัติไว้ {len(want)} ชื่อ",
-            f"ต้องมีรายชื่อครบตาม {form} คือ {listed}",
+            f"กรุณาตรวจสอบรายชื่อกับ {form} อีกครั้ง",
             (f"เพิ่มรายชื่อที่ขาดให้ครบตาม {form}" if short else
              f"ลบรายชื่อที่เกินออก ให้เหลือเฉพาะรายชื่อตาม {form}"),
             rule_id)
@@ -1388,6 +1386,71 @@ def scanned_signature_pages(page_texts, cover_idx, sig_pages, image_pages):
             found.append(i)
         i += 1
     return found
+
+
+def cover_page_label(page_labels, header_words, cover_idx):
+    """เลขหน้าที่พิมพ์ไว้ที่หัวกระดาษของหน้าปก ('' ถ้าไม่มี) — หน้าปกต้องไม่มีเลขหน้า
+
+    เล่มจริง (เจ้าของยืนยัน 26 ต.ค. 2569 — อัปเดต 1.6.1) พิมพ์ "1" ที่หัวกระดาษปก แล้วไปขึ้นที่บทที่ 1 ว่า "เลขหน้าไม่ต่อเนื่อง
+    หน้าก่อนหน้านี้พิมพ์เลข 1" พร้อมข้อหัวกระดาษส่วนนำ (หน้า 1) อีกข้อ จากต้นเหตุเดียว
+    นับเฉพาะเลขที่อยู่ในแถบหัวกระดาษจริง (header_words) — บรรทัดสุดท้ายของปกบางแบบเป็นปี ("2569") ซึ่งไม่ใช่เลขหน้า
+    """
+    label = page_labels.get(cover_idx, "")
+    words = header_words[cover_idx] if 0 <= cover_idx < len(header_words) else ()
+    return label if label and label in words else ""
+
+
+def _report_cover_page_label(rep, label):
+    """ข้อเดียวที่หน้าปก ถ้อยคำเจ้าของ "หน้าปกมีเลขหน้า ต้องไม่มี" · ส้มเหมือนสองข้อเดิมที่ข้อนี้มาแทน"""
+    if label:
+        rep.add("ORANGE", "front_matter", "หน้าปก", "หน้าปกมีเลขหน้า", "ต้องไม่มี",
+                "ลบเลขหน้าออกจากหน้าปก", "PAGE.NUMBERING")
+
+
+def _report_blank_runs(rep, pages, printed, image_pages, sequence_ok, page_ref, skip=(),
+                       sequence_reported=True):
+    """หน้าที่ดึงข้อความไม่ได้ (หรือมีแค่เลขหน้า) รวมหน้าติดกันเป็นข้อเดียว ไม่ฟ้องแยกทีละหน้า
+
+    ยืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ = ข้อสังเกต · อ่านเลขหน้าไม่ได้ = ให้เจ้าหน้าที่ตรวจแทนการฟันธง
+    อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569):
+      - ช่วงที่อ่านเลขหน้าได้ทุกหน้า ไม่บอกว่า "ยืนยันลำดับเลขหน้าไม่ได้" อีก แม้ลำดับทั้งเล่มจะมีจุดกระโดด เพราะจุดกระโดด
+        แจ้งแยกเป็น PAGE.NUMBERING_SEQUENCE แล้ว (sequence_reported) — เล่มจริงมีภาคผนวกภาพ 89 หน้าขึ้นส้มทั้งช่วง
+      - หน้าที่มีภาพ (image_pages) เรียกว่าหน้ารูปภาพ/สแกน ไม่ใช่ "อาจเป็นหน้าว่าง"
+    skip = หน้าที่แจ้งเป็นข้ออื่นไปแล้ว (แผ่นสแกนตรงหน้าลงนาม)
+    """
+    runs = []
+    for idx, page_text in enumerate(pages):
+        if not _is_blank_page_text(page_text) or idx in skip:
+            continue
+        if runs and runs[-1][-1] == idx - 1:
+            runs[-1].append(idx)
+        else:
+            runs.append([idx])
+    for run in runs:
+        run_ref = page_ref(run[0]) if len(run) == 1 else \
+            f"{page_ref(run[0])} ถึง {page_ref(run[-1])} ({len(run)} หน้า)"
+        if any(not (pages[i] or '').strip() for i in run):
+            kind = "ไม่มีข้อความให้ดึงเลย อาจเป็นหน้ารูปภาพ/สแกน เช่น ภาคผนวก"
+        elif any(i in image_pages for i in run):
+            kind = "มีเฉพาะเลขหน้ากับรูปภาพ เป็นหน้ารูปภาพ/สแกน"
+        else:
+            kind = "มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น"
+        all_numbered = all(i in printed for i in run)
+        if all_numbered and sequence_ok:
+            rep.add(BLANK_PAGE_ZONE, "body/end", run_ref,
+                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง",
+                    "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
+                    "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "PAGE.BLANK")
+        elif all_numbered and sequence_reported:
+            rep.add(BLANK_PAGE_ZONE, "body/end", run_ref,
+                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) แต่อ่านเลขหน้าได้ทุกหน้า",
+                    "หน้าลักษณะนี้เป็นข้อสังเกตและผ่านได้ จุดที่เลขหน้าไม่ต่อเนื่องแจ้งแยกไว้แล้ว",
+                    "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "PAGE.BLANK")
+        else:
+            rep.add(UNCERTAIN_ZONE, "-", run_ref,
+                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) และยืนยันลำดับเลขหน้าไม่ได้",
+                    "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
+                    "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
 
 def _report_signature_page_count(rep, sig_pages, scanned, label_style=None):
@@ -1865,6 +1928,9 @@ def faculty_head_choice(bottom_text):
     return None
 
 
+FACULTY_HEAD_CHECK_NOTICE = "กรุณาตรวจสอบชื่อและคุณวุฒิของอาจารย์กับทางหลักสูตรอีกครั้ง"
+
+
 def _check_faculty_head_title(rep, bottom_text, loc):
     """หน้าลงนาม 2 มุมล่างขวาต้องเป็นตำแหน่ง Dean หรือ Director ไม่ใช่ Program Director
 
@@ -1885,11 +1951,13 @@ def _check_faculty_head_title(rep, bottom_text, loc):
     if found:
         title, lang = found
         heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+        # บรรทัดของตัวเองใต้บรรทัด "ตำแหน่งต้องเป็น ..." (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569) — ช่องนี้มักคัด
+        # ชื่อและคุณวุฒิมาจากหน้าลงนาม 1 ทั้งช่อง นักศึกษาต้องไปถามหลักสูตรว่าหัวหน้าส่วนงานคือใคร
         rep.add("RED", "front_matter", loc,
                 f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{title}"',
                 f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
                 "ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1",
-                "FRONT.COMMITTEE")
+                "FRONT.COMMITTEE", notice=FACULTY_HEAD_CHECK_NOTICE)
     # ช่องเดียวกันนี้ template พิมพ์ "Dean/Director" ไว้ให้เลือกเอาคำเดียว (เจ้าหน้าที่ 30 ก.ย. 2569
     # ส่งเล่มที่ยังเป็น "Dean/Director" ทั้งสองคำมาว่าระบบไม่ฟ้อง) — สีแดงเหมือนข้อบน และเหมือนข้อ
     # "REFERENCES/BIBLIOGRAPHY" ที่ยังไม่ได้เลือกคำเดียว: คำตำแหน่งอ่านได้แน่นอน ไม่ใช่การเทียบข้อความ
@@ -2263,17 +2331,53 @@ def _closest_student_id(page_text, expected):
                key=lambda s: difflib.SequenceMatcher(None, target, norm(s)).ratio())
 
 
+def _committee_tokens(block):
+    """แยกรายชื่อกรรมการเป็นช่อง ๆ ที่จุลภาค (หรือ ;) ซึ่งไม่ได้อยู่ในวงเล็บ
+
+    สาขาวิชาในวงเล็บมีจุลภาคได้ — เล่มจริงเขียน "Ph.D. (Educational Measurement, Evaluation and Research)"
+    แยกที่จุลภาคทุกตัวแล้ว "(Educational Measurement" กลายเป็นชื่อคนที่ 4 ได้สามข้อผิด ๆ (ไม่เป็นตัวพิมพ์ใหญ่ /
+    รายชื่อเกิน / ไม่มีจุลภาคหน้าชื่อ) — วงเล็บมีข้อฟ้องของตัวเองอยู่แล้ว (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)
+    ; ที่ใช้คั่นชื่อแทนจุลภาคนับเป็นตัวคั่นด้วย (ข้อ "ใช้ ; คั่นชื่อ" ฟ้องแยก ดู committee_semicolons)
+    """
+    tokens, depth, start = [], 0, 0
+    text = block or ""
+    for k, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch in ",;" and not depth:
+            tokens.append(text[start:k])
+            start = k + 1
+    tokens.append(text[start:])
+    return [t.strip() for t in tokens]
+
+
+def committee_semicolons(block):
+    """รายชื่อกรรมการใช้ ; คั่นช่องแทนจุลภาคไหม (นับเฉพาะนอกวงเล็บ)"""
+    depth = 0
+    for ch in block or "":
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == ";" and not depth:
+            return True
+    return False
+
+
 def _committee_entry_complete(line):
     """บรรทัดนี้จบ "ชื่อ, คุณวุฒิ" ของคนล่าสุดครบแล้วหรือยัง
 
     ใช้ตัดสินว่าบรรทัดถัดไปเป็น "ชื่อที่ห่อคำมา" หรือเป็นเนื้อความที่ไม่เกี่ยวแล้ว
     โดยดูจากตัวข้อความเอง ไม่ใช่นับบรรทัด — ท่อนสุดท้ายเป็นคุณวุฒิ = ครบ,
     เป็นชื่อคน = ยังค้าง (คุณวุฒิของคนนั้นถูกห่อไปบรรทัดถัดไป)
+    ผู้เรียกส่งข้อความที่รวมมาถึงบรรทัดนี้ วงเล็บสาขาที่ห่อข้ามบรรทัดจึงยังเป็นช่องเดียวกัน (_committee_tokens)
     """
     tail = soft(line).rstrip()
-    if tail.endswith(","):
+    if tail.endswith((",", ";")):
         return False
-    return _is_degree_only(tail.split(",")[-1].strip())
+    return _is_degree_only(_committee_tokens(tail)[-1])
 
 
 def abstract_committee_block(page_text):
@@ -2300,7 +2404,7 @@ def abstract_committee_block(page_text):
         # ยังอยู่ในรายชื่อได้สองแบบ: บรรทัดนี้มีคุณวุฒิอยู่ในตัว หรือบรรทัดก่อนหน้า
         # ยังค้างอยู่กลางรายการ (ยังไม่จบด้วยคุณวุฒิ) แปลว่าบรรทัดนี้คือส่วนที่ห่อคำมา
         continues = (_DEGREE_ABBR_TOKEN.search(soft(line))
-                     or not _committee_entry_complete(block_lines[-1]))
+                     or not _committee_entry_complete(" ".join(block_lines)))
         if not continues:
             break
         block_lines.append(line)
@@ -2411,7 +2515,7 @@ def _scan_abstract_committee(block):
     """
     expect_name = True
     seen_name = False
-    for tok in [t.strip() for t in (block or "").split(",") if t.strip()]:
+    for tok in [t for t in _committee_tokens(block) if t]:
         if expect_name:
             # คุณวุฒิตัวที่ 2 ของคนเดิม (เช่น "..., M.D., Ph.D., ชื่อคนถัดไป, ...")
             # ไม่ใช่ชื่อคนใหม่ ถ้านับผิดจะเลื่อนสลับ ชื่อ/คุณวุฒิ ไปทั้งชุด
@@ -2578,6 +2682,11 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
             # รูปแบบ 1.1: ต้องมีจุลภาคคั่นระหว่างคุณวุฒิของคนก่อนกับชื่อคนถัดไป
             # เจ้าหน้าที่สั่ง ส.ค. 2569 ว่าเรื่องจุลภาคให้แจ้งเป็นสีเหลือง — ยังบอกให้
             # ครบว่าขาดตรงไหนและต้องเป็นอะไร แต่ไม่ทำให้เล่มไม่ผ่าน
+            # ใช้ ; คั่นชื่อ = ข้อเดียวต่อหน้า ไม่ยกชื่อมา (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569 — เดิมขึ้น
+            # 'ไม่มีจุลภาคคั่นหน้าชื่อ "; ชื่อ…"' ทีละคน)
+            if committee_semicolons(block):
+                rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc, "ใช้ ; คั่นชื่อ", "ต้องใช้ ,",
+                        "แก้เครื่องหมาย ; ที่คั่นรายชื่อเป็นจุลภาค (,)", "FRONT.ABSTRACT_COMMA")
             for nm in abstract_committee_missing_commas(block):
                 rep.add(ABSTRACT_COMMA_ZONE, "front_matter", loc,
                         f'ไม่มีจุลภาคคั่นหน้าชื่อ "{nm}"',
@@ -5333,6 +5442,8 @@ _DISPLAY_GRAPHEME = re.compile(
 # ตัวที่ขึ้นต้นคำไม่ได้ — ถ้าจุดอ้างอิงเริ่มที่ตัวพวกนี้ แปลว่าตัดกลางคำ ให้ถอยไปอีกตัว
 _NOT_A_WORD_START = re.compile(rf'^[ะาๆฯำ{_TH_ABOVE_BELOW}]')
 _LEAD_VOWEL_START = re.compile(rf'^[{_TH_LEAD_VOWEL}]')
+# อักษรต่ำเดี่ยวที่ ห นำได้ (หง หญ หน หม หย หร หล หว)
+_LED_BY_HO = "งญนมยรลว"
 
 # text = จุดต่างเป็นประโยคบอกเล่า (ต่อท้าย "ที่พบ" บนการ์ด)
 # steps = วิธีแก้เป็นคำสั่งทีละบรรทัด ("ให้ลบ ... ออก") ที่ข้อความสรุปส่งนักศึกษาใช้
@@ -5341,7 +5452,8 @@ DiffAnalysis = namedtuple('DiffAnalysis', 'text steps marks_only', defaults=(Fal
 _NO_DIFF = DiffAnalysis('', ())
 # kind = delete / insert / replace / space_extra (ก้อนที่รวมหลายจุด = chunk) · pos, end = ตำแหน่งใน graphemes
 # ของข้อความที่พบ · lo, hi = ช่วงที่ข้อความบอกวิธีแก้ยกมาอ้าง (ใช้เฉพาะช่องว่างเกิน ที่ต้องยกคำรอบ ๆ มาชี้)
-_Edit = namedtuple('_Edit', 'kind got want pos end order lo hi', defaults=(None, None))
+# small = รวมมาจากจุดต่างเล็ก ๆ (ไม่เกินสองตัว) หลายจุดในคำเดียวกัน — บอกวิธีแก้แบบยกคำรอบข้างมาทั้งก้อน (typo_step)
+_Edit = namedtuple('_Edit', 'kind got want pos end order lo hi small', defaults=(None, None, False))
 # จุดต่างเกินนี้แปลว่าต่างกันมากจนไล่ทีละจุดไม่ช่วย ให้ดูข้อความที่ถูกต้องแทน
 _MAX_STEPS = 6
 # ความยาวของ "ตัวอ้างอิงตำแหน่ง" (กี่ตัวอักษรที่คนมองเห็น) — เริ่มสั้นแล้วยืดจนไม่ซ้ำกับที่อื่น
@@ -5406,6 +5518,38 @@ def _grow_to_syllables(fa, ea, lo, hi, lo2, hi2):
     return lo, hi, lo2, hi2
 
 
+# ตัวอ้างอิงรอบข้างที่จบที่พยางค์หน้าของคำ (กระ ประ) ยืดไปถึงรอยต่อคำได้ไม่เกินกี่ตัว
+_ANCHOR_WORD_REACH = 4
+
+
+def _at_word_edge(seq, i):
+    """ตำแหน่ง i ของลำดับตัวอักษรที่คนมองเห็นเป็นรอยต่อคำที่มองเห็นได้โดยไม่ต้องมีพจนานุกรม
+
+    ต้น/ท้ายข้อความ · ช่องว่าง · ต้นพยางค์ที่ขึ้นด้วยสระหน้า (เ แ โ ใ ไ ซึ่งเริ่มพยางค์ใหม่เสมอ) · รอยต่ออักษรไทยกับอังกฤษ
+    """
+    if i <= 0 or i >= len(seq) or not seq[i].strip() or not seq[i - 1].strip():
+        return True
+    return bool(_LEAD_VOWEL_START.match(seq[i])) or _is_latin(seq[i]) != _is_latin(seq[i - 1])
+
+
+def _thai_island(fa, fi, start, stop):
+    """ข้อความเหมือนที่คั่นระหว่างจุดต่างสองจุด [start, stop) เป็นแค่ตัวเดียวกลางคำไทยไหม
+
+    เล่มจริงเขียน "สมองด้วยเกมกระดาน" อนุมัติ "สมองโดยใช้เกมกระดาน" ตัวเทียบจับ "ย" ตัวเดียวที่บังเอิญตรงกัน
+    แล้วแตกเป็น 'ต่างที่ "ด้ว" ต้องเป็น "โด" และ ขาด "ใช้"' ซึ่งตัดกลางคำ — ตัวเดียวที่คั่นอยู่แบบนี้ไม่ใช่ข้อความที่
+    ตรงกันจริง ให้รวมสองจุดเป็นจุดเดียว 'ต่างที่ "ด้วย" ต้องเป็น "โดยใช้"' (อัปเดต 1.6.1 เจ้าของยืนยัน 26 ต.ค. 2569)
+    ไม่รวมข้ามช่องว่าง (เป็นรอยต่อคำจริง) · ตัวที่คั่นและตัวสองข้างต้องเป็นอักษรไทย (อังกฤษมีตัวรวมเป็นคำของตัวเองแล้ว)
+    · ตัวที่คั่นขึ้นด้วยสระหน้าไม่รวม เพราะสระหน้าเริ่มพยางค์ใหม่เสมอ ("กัช|แอ|พลิ" เป็นสองจุดจริง)
+    """
+    if stop - start != 1 or not (0 < start < len(fa)) or stop >= len(fa):
+        return False
+    if fi[start] - fi[start - 1] > 1 or fi[stop] - fi[stop - 1] > 1:
+        return False
+    if _LEAD_VOWEL_START.match(fa[start]):
+        return False
+    return all(_THAI_LETTER.search(fa[k]) for k in (start - 1, start, stop))
+
+
 def _extra_gaps(fa, ea, fi, ei, i1, i2, j1):
     """ช่องว่างที่เล่มมีแต่ข้อมูลอนุมัติไม่มี ระหว่างอักษรไทยสองตัวในช่วงที่ข้อความตรงกัน
 
@@ -5444,7 +5588,7 @@ def _thai_edits(found_s, expected_s, spaces):
     def grow(core):
         return _grow_to_syllables(fa, ea, *_grow_to_latin_words(fa, ea, fi, ei, *core))
 
-    cores, spans, gaps = [], [], []
+    cores, spans, gaps, pieces = [], [], [], []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             if spaces:
@@ -5452,18 +5596,22 @@ def _thai_edits(found_s, expected_s, spaces):
             continue
         core = (i1, i2, j1, j2)
         span = grow(core)
+        # ขนาดของจุดต่างจริงแต่ละจุดที่รวมอยู่ในก้อนนี้ (ดู small ของ _Edit)
+        piece = [max(i2 - i1, j2 - j1)]
         # จุดต่างสองจุดที่ขยายแล้วชนกัน ต้องรวมที่ "แกน" (ส่วนที่ต่างจริง + ข้อความเหมือนที่คั่นอยู่) แล้วขยายใหม่
         # ห้ามรวมปลายของแต่ละฝั่งแยกกัน: ขยายของจุดแรกอาจกลืนแกนของจุดหลังไปครึ่งหนึ่ง ปลายสองฝั่งจึงไม่
         # สอดคล้องกัน (เล่มจริงลักษณะ "vaccine ne booster" เคยทำให้ "ne" ที่เกินมาหายไปจากรายงานเงียบ ๆ)
-        while spans and span[0] <= spans[-1][1]:
+        while spans and (span[0] <= spans[-1][1] or _thai_island(fa, fi, spans[-1][1], span[0])):
             prev = cores.pop()
             spans.pop()
+            piece = pieces.pop() + piece
             core = (prev[0], core[1], prev[2], core[3])
             span = grow(core)
         cores.append(core)
         spans.append(span)
+        pieces.append(piece)
     edits = []
-    for lo, hi, lo2, hi2 in spans:
+    for (lo, hi, lo2, hi2), piece in zip(spans, pieces):
         got = ''.join(fg[fi[lo]:fi[hi - 1] + 1]) if lo < hi else ''
         want = ''.join(eg[ei[lo2]:ei[hi2 - 1] + 1]) if lo2 < hi2 else ''
         if lo < hi:
@@ -5472,7 +5620,10 @@ def _thai_edits(found_s, expected_s, spaces):
             pos = fi[lo - 1] + 1 if lo > 0 else 0
             end = pos
         kind = 'replace' if got and want else ('delete' if got else 'insert')
-        edits.append(_Edit(kind, got, want, pos, end, lo))
+        # จุดต่างเล็ก ๆ หลายจุดที่รวมเป็นคำเดียว ("ด้ว"→"โด" + ขาด "ใช้" = "ด้วย"→"โดยใช้") บอกวิธีแก้แบบยกคำรอบข้าง
+        # เหมือนตอนที่แต่ละจุดยังแยกกัน (เจ้าของยืนยัน 26 ต.ค. 2569: 'ให้แก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"')
+        small = len(piece) > 1 and max(piece) <= 2
+        edits.append(_Edit(kind, got, want, pos, end, lo, small=small))
     for p in gaps:
         # คำรอบช่องว่างที่ยกมาบอก ไม่ให้ขึ้นต้นด้วยสระลอย ๆ หรือจบกลางพยางค์ (เหมือนตัวอ้างอิงตำแหน่ง)
         # และไม่ข้ามช่องว่างอื่น: ลบช่องว่างแรกไปแล้ว ข้อความที่อีกข้อยกมาอ้างซึ่งมีช่องว่างนั้นอยู่ก็หาไม่เจอ
@@ -5516,6 +5667,9 @@ def _snap_anchor_start(fg, start):
         start -= 1
     if start > 0 and _needs_next(fg[start - 1]):
         start -= 1
+    # ห นำอักษรต่ำ (หล หน หม หญ ...) อยู่พยางค์เดียวกับตัวที่ตามมา — "ลักสูตร" ต้องเป็น "หลักสูตร" (อัปเดต 1.6.1)
+    if start > 0 and fg[start - 1] == 'ห' and fg[start][:1] in _LED_BY_HO:
+        start -= 1
     if not _LEAD_VOWEL_START.match(fg[start]):
         for extra in (1, 2):
             if start - extra >= 0 and _LEAD_VOWEL_START.match(fg[start - extra]):
@@ -5524,13 +5678,25 @@ def _snap_anchor_start(fg, start):
 
 
 def _snap_anchor_end(fg, stop):
-    """ขยับจุดสิ้นสุดของตัวอ้างอิงไม่ให้ลงท้ายกลางพยางค์ (เช่น "นามั" ที่ขาดตัวสะกด ย) หรือกลางคำอังกฤษ"""
+    """ขยับจุดสิ้นสุดของตัวอ้างอิงไม่ให้ลงท้ายกลางพยางค์ (เช่น "นามั" ที่ขาดตัวสะกด ย) หรือกลางคำอังกฤษ
+
+    อัปเดต 1.6.1 (เจ้าของยืนยัน 26 ต.ค. 2569): ห้ามจบก่อนสระ/เครื่องหมายที่เริ่มคำไม่ได้ ("เกมกร|ะ") และพยางค์ที่ลงท้าย
+    ด้วย ะ โดยไม่มีสระหน้า (กระ ประ ตระ) เป็นพยางค์หน้าของคำ ไม่ใช่ท้ายคำ — ยืดไปถึงรอยต่อคำที่มองเห็นได้ (_at_word_edge)
+    ถ้าอยู่ไม่เกิน _ANCHOR_WORD_REACH ตัว: "เกมกระดาน" ไม่ใช่ "เกมกร" · พยางค์ที่จบแล้ว ("อนามัย") ยังจบตรงนั้น
+    """
     while stop < len(fg) and _is_latin(fg[stop - 1]) and _is_latin(fg[stop]):
         stop += 1
     for _ in range(2):
         if stop >= len(fg) or not _needs_next(fg[stop - 1]):
             break
         stop += 1
+    while stop < len(fg) and _NOT_A_WORD_START.match(fg[stop]):
+        stop += 1
+    if (1 < stop < len(fg) and fg[stop - 1] == 'ะ' and not _LEAD_VOWEL_START.match(fg[stop - 2])
+            and not _at_word_edge(fg, stop)):
+        for step in range(1, _ANCHOR_WORD_REACH + 1):
+            if _at_word_edge(fg, stop + step):
+                return min(stop + step, len(fg))
     return min(stop, len(fg))
 
 
@@ -5635,8 +5801,8 @@ def _steps_once(fg, edits):
 
     def letter_step(edit):
         """วิธีแก้ของจุดแก้หนึ่งจุด -> (ข้อความ, จุดเริ่ม, จุดสิ้นสุด) ของข้อความที่ข้อนี้ยกมาอ้างจากเล่ม"""
-        if edit.kind == 'chunk' or max(len(_display_graphemes(edit.got)),
-                                       len(_display_graphemes(edit.want))) <= 2:
+        if edit.kind == 'chunk' or edit.small or max(len(_display_graphemes(edit.got)),
+                                                     len(_display_graphemes(edit.want))) <= 2:
             return typo_step(edit)
         if edit.kind == 'insert':
             # "เติมหลัง L" ต้องชี้ตำแหน่งได้ด้วย L ตัวเดียว (ถ้า L มีหลายที่ นักศึกษาไม่รู้ว่าที่ไหน)
@@ -7364,7 +7530,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     pages = []
     header_words = []    # คำในแถบหัวกระดาษต่อหน้า — ตัดสินทีหลังเมื่อรู้ว่าหน้าไหนเป็นส่วนนำ
     font_damaged = []          # ดัชนีหน้าที่ฟอนต์ในไฟล์ทำให้อ่านข้อความเพี้ยน
-    image_pages = set()        # หน้าต้นเล่มที่มีภาพ — ใช้แยกหน้าลงนามที่สแกนมาออกจาก "ไม่พบหน้าลงนาม"
+    # หน้าที่มีภาพ — แยกหน้าลงนามที่สแกนมาออกจาก "ไม่พบหน้าลงนาม" และเรียกหน้าที่มีแค่เลขหน้ากับภาพว่า
+    # หน้ารูปภาพ/สแกน ไม่ใช่หน้าว่าง (อัปเดต 1.6.1 — เล่มจริงมีภาคผนวกเป็นภาพ 89 หน้า)
+    image_pages = set()
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -7381,7 +7549,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             except Exception:
                 pass
             try:
-                if _i < 20 and _pg.images:
+                if _pg.images:
                     image_pages.add(_i)
             except Exception:
                 pass
@@ -7534,7 +7702,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "ลบหน้าที่อยู่ก่อนหน้าปกออก หรือย้ายหน้าปกขึ้นเป็นแผ่นแรก",
                 "FRONT.COVER_FIRST")
 
-    seq = sorted(printed.items())
+    # หน้าปกต้องไม่มีเลขหน้า — ข้อเดียวที่หน้าปก ไม่นับเลขบนปกในลำดับเลขหน้าอารบิก/หัวกระดาษส่วนนำ (อัปเดต 1.6.1)
+    cover_label = cover_page_label(page_labels, header_words, cover_idx)
+    _report_cover_page_label(rep, cover_label)
+    seq = sorted((i, v) for i, v in printed.items() if not (cover_label and i == cover_idx))
     arabic_sequence_ok = bool(seq) and seq[0][1] == 1 and all(
         seq[k][1] == seq[k - 1][1] + 1 for k in range(1, len(seq))
     )
@@ -7560,35 +7731,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "PAGE.NUMBERING_SEQUENCE")
     last_arabic = max(printed.values()) if printed else None
 
-    # หน้าว่าง: ถ้ายืนยันเลขหน้าอารบิกและลำดับต่อเนื่องได้ เป็นเพียงข้อสังเกต
-    # หากไม่มีเลขหน้าที่อ่านได้ ให้เจ้าหน้าที่ตรวจสอบแทนการฟันธง
-    # หน้าที่ไม่มีข้อความให้ดึงเลยมักเป็นหน้ารูปภาพ/สแกน (เช่น ภาคผนวก)
-    # จึงรวมหน้าติดกันเป็นรายการเดียว ไม่ฟ้องแยกทีละหน้า
-    blank_runs = []
-    for blank_idx, page_text in enumerate(pages):
-        # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
-        if not _is_blank_page_text(page_text) or blank_idx in scanned_sig:
-            continue
-        if blank_runs and blank_runs[-1][-1] == blank_idx - 1:
-            blank_runs[-1].append(blank_idx)
-        else:
-            blank_runs.append([blank_idx])
-    for run in blank_runs:
-        run_ref = page_ref(run[0]) if len(run) == 1 else \
-            f"{page_ref(run[0])} ถึง {page_ref(run[-1])} ({len(run)} หน้า)"
-        image_like = any(not (pages[i] or '').strip() for i in run)
-        kind = ("ไม่มีข้อความให้ดึงเลย อาจเป็นหน้ารูปภาพ/สแกน เช่น ภาคผนวก"
-                if image_like else "มีเฉพาะเลขหน้า อาจเป็นหน้าว่างที่ตั้งใจเว้น")
-        if all(i in printed for i in run) and arabic_sequence_ok:
-            rep.add(BLANK_PAGE_ZONE, "body/end", run_ref,
-                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) แต่เลขหน้าเรียงต่อเนื่องถูกต้อง",
-                    "หน้าลักษณะนี้ที่การเรียงเลขหน้ายังคงถูกต้องเป็นข้อสังเกตและผ่านได้",
-                    "ตรวจว่าเป็นหน้าภาพหรือหน้าว่างที่ตั้งใจเว้นไว้", "PAGE.BLANK")
-        else:
-            rep.add(UNCERTAIN_ZONE, "-", run_ref,
-                    f"ระบบดึงข้อความจากหน้านี้ไม่ได้ ({kind}) และยืนยันลำดับเลขหน้าไม่ได้",
-                    "เจ้าหน้าที่ตรวจสอบว่าเป็นหน้าภาพ/หน้าว่าง และเลขหน้ายังเรียงถูกต้อง",
-                    "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
+    # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
+    _report_blank_runs(rep, pages, printed, image_pages, arabic_sequence_ok, page_ref,
+                       skip=scanned_sig, sequence_reported=BODY_RULES['check_page_sequence'])
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
     _report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)
@@ -7961,8 +8106,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
              "หัวกระดาษส่วนเนื้อหา และส่วนท้าย ต้องมีเพียงเลขหน้าอารบิก เท่านั้น",
              "ลบข้อความอื่น (เช่น ชื่อบท/running head) ออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้าอารบิก"),
         )
+        def header_reported_elsewhere(i, front):
+            # หัวกระดาษปกที่มีแค่เลขหน้า แจ้งไว้แล้วในข้อ "หน้าปกมีเลขหน้า" (อัปเดต 1.6.1) — ไม่แจ้งซ้ำที่นี่
+            return front and cover_label and i == cover_idx and header_extra_at(i, front) == cover_label
+
         for part, label, span, front, found, expected, fix in header_spans:
-            header_bad = [i for i in span if header_extra_at(i, front)]
+            header_bad = [i for i in span if header_extra_at(i, front)
+                          and not header_reported_elsewhere(i, front)]
             if not header_bad:
                 continue
             # ส่วนนำมีไม่กี่หน้า บอกเลขหน้าในวงเล็บได้ ส่วนเนื้อหา/ส่วนท้ายบางเล่มเป็นร้อยหน้า

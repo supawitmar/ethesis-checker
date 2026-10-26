@@ -610,7 +610,7 @@ async def parse_ethesis(pdf: UploadFile = File(...)):
         try:
             data = await asyncio.to_thread(parse_ethesis_pdf, tmp_path)
         except Exception:
-            raise HTTPException(status_code=422, detail="อ่านไฟล์ eThesis PDF ไม่สำเร็จ")
+            raise HTTPException(status_code=422, detail="อ่านไฟล์ข้อมูลนักศึกษา (pdf. จากระบบ) ไม่สำเร็จ")
         return JSONResponse({"data": data})
     finally:
         if tmp_path:
