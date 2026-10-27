@@ -41,6 +41,9 @@ ABSTRACT_BOLD_ZONE = rule_zone("FORMAT.ABSTRACT_BOLD", "YELLOW")
 BLANK_PAGE_ZONE = rule_zone("PAGE.BLANK", "YELLOW")
 UNCERTAIN_ZONE = rule_zone("UNCERTAIN.REVIEW", "ORANGE")
 TOC_PAGE_ZONE = rule_zone("FRONT.TOC_PAGE_REF", "YELLOW")
+# อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): หน้าว่างจริง · สารบัญระบุเลขหน้าเป็นช่วง — ส้ม กดไม่ผ่านแล้วใช้ fail_text
+EMPTY_PAGE_ZONE = rule_zone("PAGE.EMPTY", "ORANGE")
+TOC_RANGE_ZONE = rule_zone("FRONT.TOC_PAGE_RANGE", "ORANGE")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
@@ -1453,6 +1456,42 @@ def _report_blank_runs(rep, pages, printed, image_pages, sequence_ok, page_ref, 
                     "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
 
+EMPTY_PAGE_INTRO = "พบหน้าว่าง (ไม่มีข้อความ รูป หรือเลขหน้า)"
+
+
+def _report_empty_pages(rep, empty_pages, page_labels):
+    """หน้าว่างจริงทุกส่วนของเล่ม — ข้อเดียวทั้งเล่ม สีส้ม (อัปเดต 1.7 กฎใหม่ เจ้าของยืนยัน 27 ต.ค. 2569)
+
+    หน้าว่างจริง = ไม่มีข้อความ รูป เส้นหรือกราฟิก และไม่มีเลขหน้า (ต่างจาก PAGE.BLANK ซึ่งเป็นหน้าภาพ/สแกน
+    หรือหน้าที่มีแค่เลขหน้า) · "แผ่นที่ N ของไฟล์ PDF" = ลำดับแผ่นใน PDF นับจาก 1 รวมปก ส่วน "หน้า X ของไฟล์รูปเล่ม"
+    = เลขหน้าที่พิมพ์ — ห้ามใช้สลับกัน · พบแผ่นเดียวบอกด้วยว่าอยู่ระหว่างหน้าไหน (ก่อนหน้าแรก/หลังหน้าสุดท้ายที่มีเลข
+    บอกฝั่งเดียว) · หลายแผ่นไม่ต้องบอก · กดไม่ผ่าน = "ลบหน้าว่างที่แผ่นที่ … ของไฟล์ PDF ออก" (fail_text)
+    """
+    empty = sorted(empty_pages)
+    if not empty:
+        return
+    sheets = ", ".join(str(i + 1) for i in empty)
+    if len(empty) == 1:
+        idx = empty[0]
+        before = next((page_labels[i] for i in sorted(page_labels, reverse=True) if i < idx), "")
+        after = next((page_labels[i] for i in sorted(page_labels) if i > idx), "")
+        if before and after:
+            where = f" อยู่ระหว่างหน้า {before} และหน้า {after} ของไฟล์รูปเล่ม"
+        elif before:
+            where = f" อยู่ต่อจากหน้า {before} ของไฟล์รูปเล่ม"
+        elif after:
+            where = f" อยู่ก่อนหน้า {after} ของไฟล์รูปเล่ม"
+        else:
+            where = ""
+        found = f"{EMPTY_PAGE_INTRO} ที่แผ่นที่ {sheets} ของไฟล์ PDF{where}"
+    else:
+        found = f"{EMPTY_PAGE_INTRO} {len(empty)} แผ่น ที่แผ่นที่ {sheets} ของไฟล์ PDF"
+    remove = f"ลบหน้าว่างที่แผ่นที่ {sheets} ของไฟล์ PDF ออก"
+    rep.add(EMPTY_PAGE_ZONE, "-", "หน้าว่าง", found,
+            "ไฟล์รูปเล่มต้องไม่มีหน้าว่างที่ไม่มีข้อความ รูป หรือเลขหน้า", remove, "PAGE.EMPTY",
+            fail_text=remove)
+
+
 def _report_signature_page_count(rep, sig_pages, scanned, label_style=None):
     """หน้าลงนามต้องมี 2 หน้าต่อจากหน้าปก — แผ่นสแกนที่อ่านไม่ได้แจ้งเป็นข้อเดียวว่าอ่านไม่ได้"""
     # เจ้าหน้าที่ทัก (19 ต.ค. 2569) เล่มที่ข้ามจากปกไปกิตติกรรมประกาศเลยได้ "พบหน้าลงนาม 0 หน้า /
@@ -1831,6 +1870,58 @@ def _right_institution_box_read(kind, bottom_text):
     return th >= 2 or len(_HEAD_ROLE_EN.findall(text)) >= 2
 
 
+def programme_name(degree, english):
+    """ชื่อหลักสูตรเต็มที่ช่องประธานหลักสูตรต้องพิมพ์ — จากชื่อปริญญาบนปกตามข้อมูลอนุมัติ "ปริญญา (สาขา)"
+
+    ไทย "<ชื่อปริญญา> สาขาวิชา<ชื่อสาขา>" · อังกฤษ "<Degree> Program in <Subject>" (template อังกฤษ เล่มทดสอบ 1-2)
+    ค่าที่บอกให้แก้ใช้ "สาขาวิชา" เสมอ (เจ้าของยืนยัน 27 ต.ค. 2569) · '' ถ้าไม่มีชื่อสาขาในวงเล็บ
+    """
+    subject = _degree_subject(degree)
+    degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
+    if not subject or not degree_name:
+        return ""
+    if english:
+        return f"{degree_name} Program in {subject}"
+    return f"{degree_name} สาขาวิชา{subject}"
+
+
+def _check_programme_name(rep, degree, bottom_text, english, box_read, loc):
+    """หน้าลงนาม 1 ช่องประธานหลักสูตร: ชื่อหลักสูตรเต็ม (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
+
+    เดิมตรวจแยกสองข้อ (ชื่อสาขา / ชื่อปริญญา) — ตอนนี้ข้อเดียว 'ระบุชื่อหลักสูตรผิด' + 'ต้องแก้เป็น "<ชื่อเต็ม>"'
+    โดยไม่มีบรรทัด "เขียนว่า …" หรือ "ต่างที่ …" · รับทั้ง "สาขาวิชา" และ "สาขา" (อังกฤษ Program/Programme in)
+    วงเล็บท้ายชื่อ เช่น "(ภาคพิเศษ)" "(International Program)" ไม่ดู (ค้นแบบ substring อยู่แล้ว)
+
+    แถวล่างสุดอ่านได้สองแบบต่อกัน (ลำดับการอ่าน + แยกคอลัมน์ ดู signature_committee_slots) ช่องซ้ายอาจคั่นกลาง
+    ระหว่างชื่อปริญญากับ "สาขาวิชา…" ได้ (เล่มจริง: "พยาบาลศาสตรมหาบัณฑิต บัณฑิตวิทยาลัย … สาขาวิชา…") จึงถือว่าถูก
+    เมื่อพบชื่อเต็มติดกัน หรือพบชื่อปริญญา และ "สาขาวิชา/สาขา<ชื่อสาขา>" ติดกันสะกดตรงครบทุกตัว — ชื่อสาขาเดี่ยว ๆ ไม่นับ
+    เพราะชื่อคณะมักมีชื่อสาขาอยู่ด้วย ("Faculty of Tropical Medicine") การฟ้องเกินทั้งที่เล่มถูกเสียหายกว่า (หลักเดิม)
+    สะกดผิด/ไม่มี = แดง · อ่านช่องนี้ไม่ได้ (box_read=False) และหาไม่เจอ = ส้ม (ตรรกะเดิม)
+    """
+    want = programme_name(degree, english)
+    if not want:
+        return
+    subject = _degree_subject(degree)
+    degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
+    joints = ("Program in", "Programme in") if english else ("สาขาวิชา", "สาขา")
+    full = [f"{degree_name} {joint} {subject}" if english else f"{degree_name} {joint}{subject}"
+            for joint in joints]
+    if any(spelled_in(text, bottom_text) for text in full):
+        return
+    tails = [f"{joint} {subject}" for joint in joints]
+    if spelled_in(degree_name, bottom_text) and any(spelled_in(tail, bottom_text) for tail in tails):
+        return
+    # เจอชื่อหลักสูตรแบบหยาบ (ตัดวรรณยุกต์/สระ) แต่สะกดไม่ตรง = สะกดผิด แดงเสมอ
+    rough = any(norm(text) in norm(bottom_text) for text in full) or \
+        (norm(degree_name) in norm(bottom_text) and any(norm(tail) in norm(bottom_text) for tail in tails))
+    zone = "RED" if (rough or box_read) else "ORANGE"
+    shown = match_printed_case(want, bottom_text) if english else want
+    rep.add(zone, "front_matter", loc,
+            "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด",
+            f'ต้องแก้เป็น "{shown}"',
+            "แก้ชื่อหลักสูตรในช่องประธานหลักสูตรให้ตรงตามที่ได้รับอนุมัติ", "FRONT.COMMITTEE")
+
+
 def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
                                  loc_prefix="", loc_suffix=""):
     """ช่องสถาบันแถวล่างสุดของหน้าลงนาม — บทบาทต่างกันในสองหน้า (ยืนยันจาก template ทางการ)
@@ -1842,30 +1933,12 @@ def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
     รับ bottom_text ที่เรียงตามลำดับการอ่านมาแล้ว (ดู signature_committee_slots)
     จึงค้นจากข้อความทั้งแถวล่างรวมกัน — ช่องซ้ายเป็นบัณฑิตวิทยาลัยเสมอ จึงไม่ชนกัน
     """
-    found_text = norm(bottom_text)
     box_read = _right_institution_box_read(kind, bottom_text)
     if kind == "advisory":
         degree = approved.get("degree_cover_th" if not english_book else "degree_cover_en", "") \
             or approved.get("degree_cover_en", "")
-        subject = _degree_subject(degree)
-        # มีบรรทัดหลักสูตรอยู่ไหม หาแบบหยาบ (norm) — ส่วนการตัดสินว่าสะกดตรงต้องครบทุกตัวรวมวรรณยุกต์/สระ/ำ
-        # (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) ชื่อสาขาที่ผิดแค่วรรณยุกต์จึงยังนับว่าเจอบรรทัด และยังตรวจชื่อปริญญาต่อได้
-        subject_found = not subject or norm(subject) in found_text
-        if subject and not spelled_in(subject, bottom_text):
-            _institution_mismatch(
-                rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อสาขา", subject,
-                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE", box_read)
-        # ชื่อปริญญาหน้าวงเล็บก็พิมพ์อยู่ในช่องนี้ ("ศิลปศาสตรมหาบัณฑิต สาขาวิชา..." /
-        # "Doctor of Philosophy Program in ...") — เดิมเทียบแค่ชื่อสาขา เล่มจริง repo 3 พิมพ์
-        # "ศิลปศาสตรมหาบัณทิต" (ฑ เป็น ท) แล้วไม่มีใครเห็น ตรวจทุกช่องในแบบฟอร์ม (ก.ย. 2569)
-        # วัดกับเล่มจริง 8 เล่ม: 7 เล่มพิมพ์ตรง อีกเล่มคือ repo 3 ที่สะกดผิดจริง
-        # เทียบเฉพาะเมื่อเจอชื่อสาขาแล้ว — ถ้าทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว
-        # ไม่ต้องได้สองข้อจากช่องเดียวกัน
-        degree_name = re.sub(r"\s*\(.*$", "", soft(degree)).strip()
-        if subject_found and degree_name and not spelled_in(degree_name, bottom_text):
-            _institution_mismatch(
-                rep, f"{loc_prefix}ประธานหลักสูตร{loc_suffix}", "ชื่อปริญญา", degree_name,
-                bottom_text, "ช่องประธานหลักสูตร (มุมล่างขวา)", "FRONT.COMMITTEE", box_read)
+        _check_programme_name(rep, degree, bottom_text, english_book, box_read,
+                              f"{loc_prefix}ประธานหลักสูตร{loc_suffix}")
         return
     # เล่มอังกฤษเทียบชื่อคณะไม่ได้ เพราะชื่อคณะจาก eThesis เป็นภาษาไทย
     faculty = approved.get("faculty", "")
@@ -2838,7 +2911,7 @@ def _expected_front_label_style(program_language):
 
 
 def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
-                              expected_style=None, page_texts=None, reported=()):
+                              expected_style=None, page_texts=None, reported=(), ignore=()):
     """เลขหน้าส่วนนำ: ชนิดต้องตรงภาษาเล่ม และเรียงต่อเนื่อง ไม่ซ้ำ ไม่ข้าม
 
     เดิมตรวจเฉพาะค่าเลขหน้าของหน้าลงนาม 2 หน้าแรก (i/ii หรือ ก/ข) หน้าอื่นของส่วนนำ
@@ -2851,12 +2924,18 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
     (ก.ย. 2569) "ข้อ 8 กับ 2 ตรวจเหมือนกัน เอาตามข้อ 2 ก็พอ" — ตรงกับกติกา ส.ค. 2569
     ที่ให้เลขหน้าหน้าลงนามเป็นสีส้มเพื่อไม่ให้ฟ้องสองข้อจากความผิดเดียว
     หน้าที่ฟ้องไปแล้วยังนับเป็นหน้าคั่นในการตรวจความต่อเนื่องเหมือนเดิม
+
+    ignore = หน้าว่างจริง (อัปเดต 1.7) ไม่มีเลขหน้าแน่นอนและแจ้งเป็นข้อ PAGE.EMPTY แล้ว — ไม่นับทั้งเป็นหน้าที่อ่านเลข
+    ไม่ได้และเป็นหน้าคั่นตอนตรวจความต่อเนื่อง
     """
     if stop_idx is None or stop_idx <= start_idx:
         return
     reported = set(reported or ())
+    ignore = set(ignore or ())
     entries, unread = [], []
     for i in range(start_idx, stop_idx):
+        if i in ignore:
+            continue
         label = page_labels.get(i, "")
         style, value = _page_label_order(label)
         if style is None:
@@ -2898,7 +2977,7 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         for k in range(1, len(seq)):
             prev_i, prev_lab, _ps, prev_v = seq[k - 1]
             cur_i, cur_lab, _cs, cur_v = seq[k]
-            gap = cur_i - prev_i - 1
+            gap = sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore)
             if cur_v != prev_v:
                 dup_run = 1
                 if cur_v != prev_v + gap + 1:
@@ -4278,7 +4357,12 @@ def turnitin_similarity(pdf_path, max_pages=6):
 
 
 def _report_turnitin(rep, turnitin):
-    """ข้อของไฟล์ Turnitin ในผลตรวจ — turnitin = {"similarity": int|None} หรือ None (ไม่ได้ส่งมา = ไม่ตรวจ)"""
+    """ข้อของไฟล์ Turnitin ในผลตรวจ — turnitin = {"similarity": int|None} หรือ None (ไม่ได้ส่งมา = ไม่ตรวจ)
+
+    อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): ระบบอ่านค่าไม่ได้ เจ้าหน้าที่ตัดสินที่ขั้นที่ 1 (apply_turnitin_answer)
+      by_staff=True    = ค่าที่เจ้าหน้าที่กรอกเอง ตัดสินเหมือนค่าที่ระบบอ่านได้ทุกอย่าง และรายงานบอกว่ากรอกเอง
+      not_turnitin=True = ไฟล์ที่แนบไม่ใช่ผลตรวจ Turnitin = แดง
+    """
     if not turnitin:
         return
     value = turnitin.get("similarity")
@@ -4286,6 +4370,18 @@ def _report_turnitin(rep, turnitin):
     # เนื้อหาหลัก = บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย · ไม่บอกช่องทางส่ง (ส่งช่องทางเดิม) แต่บอกว่าติดต่อหอสมุดฯ
     # ขั้นตอน (1) (2) และบรรทัดหอสมุดฯ อยู่ใน notice ให้เป็นบรรทัดของตัวเองในข้อความสรุป
     main_content = "เนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย)"
+    if turnitin.get("not_turnitin"):
+        # ต่อยอดจากถ้อยคำที่เจ้าหน้าที่รีวิวแล้ว (19 ต.ค. 2569) — ถ้อยคำเจ้าของ 27 ต.ค. 2569
+        rep.add("RED", "-", "ไฟล์ Turnitin", "ไฟล์ที่แนบมาไม่ใช่ผลตรวจ Turnitin",
+                "กรุณาแนบไฟล์ผลตรวจ Turnitin ที่ถูกต้อง ดังนี้",
+                "แนบไฟล์ผลตรวจ Turnitin ที่มีทั้งหน้าปกและหน้า Overall Similarity",
+                "TURNITIN.SIMILARITY",
+                notice=("(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity\n"
+                        f"(2) ตรวจ{main_content} โดยค่า Overall Similarity ต้องไม่เกิน {TURNITIN_LIMIT}%"))
+        return
+    if value is not None and turnitin.get("by_staff"):
+        rep.add_info("-", "ไฟล์ Turnitin",
+                     f"ค่า Overall Similarity {value}% เจ้าหน้าที่กรอกเองที่ขั้นที่ 1 (ระบบอ่านค่าจากไฟล์ไม่ได้)")
     if value is None:
         rep.add("ORANGE", "-", "ไฟล์ Turnitin",
                 "ระบบอ่านค่า Overall Similarity จากไฟล์ Turnitin ไม่ได้",
@@ -4306,6 +4402,54 @@ def _report_turnitin(rep, turnitin):
                         "และหน้า Overall Similarity\n"
                         "กรณีที่ไม่สามารถปรับแก้ไขร้อยละการคัดลอกได้ กรุณาติดต่อหอสมุดฯ "
                         "เพื่อขอยกเว้น (Exclude) คำที่เป็นคำศัพท์เฉพาะได้"))
+
+
+def turnitin_answer(raw):
+    """คำตอบเรื่อง Turnitin จากหน้าขั้นที่ 1 -> {"choice": "value", "similarity": n} / {"choice": "not_turnitin"} / None
+
+    None = ยังไม่เลือก (คงข้อส้มเดิม) · ValueError = ค่าที่ส่งมาใช้ไม่ได้ (ค่า % ต้องเป็นจำนวนเต็ม 0–100)
+    """
+    if raw in (None, "", {}):
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("turnitin")
+    choice = raw.get("choice")
+    if choice == "not_turnitin":
+        return {"choice": "not_turnitin"}
+    if choice == "value":
+        value = raw.get("similarity")
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+            raise ValueError("similarity")
+        return {"choice": "value", "similarity": value}
+    raise ValueError("choice")
+
+
+def apply_turnitin_answer(report, answer):
+    """ผลตรวจหลังเจ้าหน้าที่ตัดสินไฟล์ Turnitin ที่ระบบอ่านค่าไม่ได้ ที่ขั้นที่ 1 (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
+
+    ใช้เฉพาะเมื่อผลตรวจมีข้อส้ม "ระบบอ่านค่า Overall Similarity ... ไม่ได้" — ระบบอ่านค่าได้ = คืนผลเดิม
+    เอาข้อส้มนั้นออก แล้วใส่ผลตามที่เจ้าหน้าที่เลือกด้วยกฎเดียวกับตอนระบบอ่านได้ (_report_turnitin) จากนั้น
+    สร้างผลตรวจใหม่ทั้งชุดผ่าน check_result (สี ตัวเลข ข้อความสรุป และชีทจึงตามไปทางเดียวกัน)
+    """
+    choice = (answer or {}).get("choice")
+    zones = (report or {}).get("issues_by_zone") or {}
+    unread = [issue for issue in zones.get("ORANGE") or []
+              if issue.get("rule_id") == "TURNITIN.SIMILARITY"]
+    if not unread or choice not in ("value", "not_turnitin"):
+        return report
+    rep = Report()
+    rep.zones = {zone: [dict(issue) for issue in zones.get(zone) or []
+                        if not (zone == "ORANGE" and issue in unread)]
+                 for zone in ("RED", "ORANGE", "YELLOW")}
+    rep.info = [dict(item) for item in report.get("info") or []]
+    rep.human_checklist = [dict(item) for item in report.get("human_checklist") or []]
+    rep.verification = [{**group, "checks": [dict(c) for c in group.get("checks") or []]}
+                        for group in report.get("verification") or []]
+    if choice == "value":
+        _report_turnitin(rep, {"similarity": answer["similarity"], "by_staff": True})
+    else:
+        _report_turnitin(rep, {"similarity": None, "not_turnitin": True})
+    return check_result(rep, report.get("context"), report.get("not_checked") or NOT_CHECKED)
 
 
 # ---------- ค่าปรับส่งเล่มล่าช้า (อัปเดต 1.4) ----------
@@ -4503,11 +4647,23 @@ def issues_to_fix(report, failed=None, passed=None, staff=None):
     items += staff_section_issues(report, staff)
     for index, issue in enumerate(report["issues_by_zone"].get("ORANGE") or []):
         if f"ORANGE:{index}" in failed:
-            items.append(issue)
+            items.append(_as_failed(issue))
     for index, issue in enumerate(report["issues_by_zone"].get("YELLOW") or []):
         if f"YELLOW:{index}" in failed:
-            items.append(issue)
+            items.append(_as_failed(issue))
     return items
+
+
+def _as_failed(issue):
+    """ข้อส้ม/เหลืองที่เจ้าหน้าที่กด "ไม่ผ่าน" — ข้อที่มีถ้อยคำเมื่อไม่ผ่าน (fail_text) ใช้ถ้อยคำนั้นแทนบรรทัดที่ควรเป็น
+
+    อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): เดิมกดไม่ผ่านแล้วข้อความสรุปใช้ถ้อยคำตอนรอยืนยันทั้งหมด ข้อหน้าว่าง
+    กับข้อสารบัญระบุเลขหน้าเป็นช่วงต้องบอกนักศึกษาว่าต้องทำอะไร ("ลบหน้าว่างที่แผ่นที่ … ออก")
+    """
+    text = issue.get("fail_text")
+    if not text:
+        return issue
+    return {**issue, "expected": text, "fix": text, "notice": "", "diff_tail": "", "fix_steps": []}
 
 
 def issues_pending(report, failed=None, passed=None):
@@ -5677,6 +5833,40 @@ def _snap_anchor_start(fg, start):
     return 0 if start <= 3 else start
 
 
+def _past_karan(fg, stop):
+    """ห้ามจบก่อนการันต์ หรือก่อนตัวที่ตามด้วยการันต์ (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
+
+    ตัวการันต์อยู่พยางค์เดียวกับตัวหน้า — "ศาสต|ร์" ต้องเป็น "ศาสตร์" · "จัน|ทร์" ต้องเป็น "จันทร์"
+    """
+    while stop < len(fg):
+        if '์' in fg[stop]:
+            stop += 1
+        elif (stop + 1 < len(fg) and '์' in fg[stop + 1]
+              and re.fullmatch('[ก-ฮ]', fg[stop])):
+            stop += 2
+        else:
+            break
+    return min(stop, len(fg))
+
+
+# คำเชื่อม/บุพบทที่ขึ้นต้นข้อความรอบจุดแก้ได้โดยไม่ช่วยชี้ตำแหน่ง — ตัดทิ้งถ้าที่เหลือยังชี้ตำแหน่งได้ไม่ซ้ำ (อัปเดต 1.7)
+_LEADING_FILLERS = ("และ", "หรือ", "ของ", "ใน", "กับ", "ที่", "โดย", "เพื่อ", "ต่อ", "จาก", "แห่ง", "ตาม",
+                    "สำหรับ", "ระหว่าง")
+
+
+def _drop_leading_filler(fg, lo, limit):
+    """จุดเริ่มใหม่หลังตัดคำเชื่อมที่ขึ้นต้นข้อความรอบจุดแก้ (คืน lo เดิมถ้าไม่ได้ขึ้นต้นด้วยคำพวกนี้)
+
+    จุดแก้ "ย์" ใน "และมนุษย์ศาสตร์" ถอยไปต้นพยางค์แล้วได้ 'ให้แก้ "และมนุษย์ศาสต" ...' ทั้งที่ "มนุษย์ศาสตร์" ก็ชี้
+    ตำแหน่งได้แล้ว (เจ้าของยืนยัน 27 ต.ค. 2569: ไม่ลากคำนำหน้าที่ไม่จำเป็น) — ผู้เรียกตรวจเองว่าที่เหลือยังไม่ซ้ำ
+    """
+    for word in _LEADING_FILLERS:
+        size = len(_display_graphemes(word))
+        if lo + size < limit and ''.join(fg[lo:lo + size]) == word:
+            return lo + size
+    return lo
+
+
 def _snap_anchor_end(fg, stop):
     """ขยับจุดสิ้นสุดของตัวอ้างอิงไม่ให้ลงท้ายกลางพยางค์ (เช่น "นามั" ที่ขาดตัวสะกด ย) หรือกลางคำอังกฤษ
 
@@ -5692,6 +5882,7 @@ def _snap_anchor_end(fg, stop):
         stop += 1
     while stop < len(fg) and _NOT_A_WORD_START.match(fg[stop]):
         stop += 1
+    stop = _past_karan(fg, stop)
     if (1 < stop < len(fg) and fg[stop - 1] == 'ะ' and not _LEAD_VOWEL_START.match(fg[stop - 2])
             and not _at_word_edge(fg, stop)):
         for step in range(1, _ANCHOR_WORD_REACH + 1):
@@ -5795,6 +5986,10 @@ def _steps_once(fg, edits):
             left, right = ''.join(fg[lo:edit.pos]), ''.join(fg[edit.end:hi])
             found_part = (left + edit.got + right).strip()
             if found_part and occurs(found_part) == 1:
+                trimmed = _drop_leading_filler(fg, lo, edit.pos)
+                shorter = (''.join(fg[trimmed:edit.pos]) + edit.got + right).strip()
+                if trimmed != lo and occurs(shorter) == 1:
+                    lo, left, found_part = trimmed, ''.join(fg[trimmed:edit.pos]), shorter
                 break
         fixed_part = (left + edit.want + right).strip()
         return f'ให้แก้ "{found_part}" เป็น "{fixed_part}"', lo, hi
@@ -6602,6 +6797,53 @@ _TOC_DOT_LEADER = re.compile(
     re.I)
 
 
+_TOC_RANGE_TAIL = re.compile(rf'\s({_TOC_PAGE_TOKEN})\s*[-–—]\s*({_TOC_PAGE_TOKEN})\s*$', re.I)
+
+
+def toc_entry_page_range(line, n_pages):
+    """หัวข้อในสารบัญที่ระบุเลขหน้าเป็นช่วง ("12-15" "12–15" "ก-ข" "xi-xii") → (หน้าแรก, หน้าสุดท้าย) หรือ None
+
+    อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): เลขหน้าของหัวข้อต้องเป็นหน้าแรกของหัวข้อนั้นเท่านั้น
+    นับเป็นช่วงเลขหน้าเฉพาะเมื่อสองข้างเป็นเลขหน้าชนิดเดียวกันและเรียงจากน้อยไปมาก และเลขอารบิกต้องไม่เกินจำนวน
+    แผ่นของไฟล์ — ชื่อหัวข้อที่ห่อบรรทัดแล้วจบด้วยช่วงปี ("ปี พ.ศ. 2560-2565") จึงไม่ถูกนับ
+    (_toc_page_label ยังอ่านช่วงเลขหน้าแบบเดิม คือยึดหน้าแรก)
+    """
+    match = _TOC_RANGE_TAIL.search(space_dot_leader(line))
+    if not match:
+        return None
+    first, last = match.group(1), match.group(2)
+    (style, low), (style2, high) = [_page_label_order(str(int(t)) if t.isdigit() else t.lower())
+                                    for t in (first, last)]
+    if style is None or style != style2 or low >= high:
+        return None
+    if style == "arabic" and high > n_pages:
+        return None
+    return first, last
+
+
+def _report_toc_page_ranges(rep, sources, pages, page_ref, n_pages):
+    """สารบัญ สารบัญตาราง สารบัญรูปภาพ ที่ระบุเลขหน้าของหัวข้อเป็นช่วง — ส้มข้อเดียว ระบุหัวข้อที่พบ (อัปเดต 1.7)
+
+    sources = [(ชื่อส่วน, ดัชนีหน้า)] · กดไม่ผ่าน = "ให้ระบุเฉพาะเลขหน้าแรกของหัวข้อนั้น ๆ" (fail_text)
+    """
+    found, where = [], {}
+    for name, idx in sources:
+        for line in (pages[idx] if idx < len(pages) else "").split("\n"):
+            if toc_entry_page_range(line, n_pages):
+                found.append(space_dot_leader(line).strip())
+                where.setdefault(name, idx)
+    if not found:
+        return
+    shown = ", ".join(f'"{entry}"' for entry in found[:5])
+    more = f" และอีก {len(found) - 5} หัวข้อ" if len(found) > 5 else ""
+    location = " และ".join(f"{name} ({page_ref(idx)})" for name, idx in where.items())
+    first_only = "ให้ระบุเฉพาะเลขหน้าแรกของหัวข้อนั้น ๆ"
+    rep.add(TOC_RANGE_ZONE, "front_matter", location,
+            f"หัวข้อในสารบัญระบุเลขหน้าเป็นช่วง: {shown}{more}",
+            "เลขหน้าของหัวข้อในสารบัญต้องเป็นหน้าแรกของหัวข้อนั้นเท่านั้น",
+            first_only, "FRONT.TOC_PAGE_RANGE", fail_text=first_only)
+
+
 def space_dot_leader(text):
     """แทนจุดไข่ปลาด้วยช่องว่างเดียว เพื่อให้เลขหน้าแยกออกจากชื่อหัวข้อเสมอ"""
     return _TOC_DOT_LEADER.sub(' ', soft(text)).strip()
@@ -7300,12 +7542,15 @@ class Report:
                                 "detail": soft(detail)})
 
     def add(self, zone, part, loc, found, expected, fix="", rule_id=None,
-            system_note=False, notice=""):
+            system_note=False, notice="", fail_text=""):
         """system_note=True = ข้อจำกัดของระบบ ไม่ใช่จุดที่นักศึกษาแก้ได้
 
         ยังแสดงในรายงานฝั่งเจ้าหน้าที่ตามปกติ แต่ไม่นับเป็น "จุดที่ต้องแก้" ในข้อความ
         สรุปที่ส่งให้นักศึกษา (เช่น ช่องข้อมูลอนุมัติที่เจ้าหน้าที่ยังไม่ได้กรอก ระบบจึง
         ข้ามการเทียบ — เป็นเรื่องของการกรอกฟอร์ม นักศึกษาทำอะไรกับเล่มก็ไม่หาย)
+
+        fail_text = ถ้อยคำที่ใช้แทนบรรทัด "ควรเป็น" เมื่อเจ้าหน้าที่กด "ไม่ผ่าน" ข้อส้ม/เหลืองข้อนี้ (อัปเดต 1.7)
+        ตอนรอยืนยันข้อความสรุปยังใช้บรรทัด "ควรเป็น" เดิม ดู issues_to_fix
         """
         rule_id = rule_id or DEFAULT_RULE_BY_PART.get(part, "FORM.REQUIRED")
         if zone == "RED" and self.marks_doubtful(getattr(found, "marks_only", False), found):
@@ -7332,6 +7577,7 @@ class Report:
             # ใส่ได้หลายบรรทัด แต่ละบรรทัดถูกแปลเป็นอังกฤษแยกกัน
             "notice": notice,
             "system_note": system_note,
+            "fail_text": fail_text,
             **rule_reference(rule_id),
         })
 
@@ -7533,6 +7779,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # หน้าที่มีภาพ — แยกหน้าลงนามที่สแกนมาออกจาก "ไม่พบหน้าลงนาม" และเรียกหน้าที่มีแค่เลขหน้ากับภาพว่า
     # หน้ารูปภาพ/สแกน ไม่ใช่หน้าว่าง (อัปเดต 1.6.1 — เล่มจริงมีภาคผนวกเป็นภาพ 89 หน้า)
     image_pages = set()
+    empty_pages = set()        # หน้าว่างจริง — ข้อ PAGE.EMPTY (อัปเดต 1.7)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -7551,6 +7798,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             try:
                 if _pg.images:
                     image_pages.add(_i)
+            except Exception:
+                pass
+            try:
+                # หน้าว่างจริง (อัปเดต 1.7): ไม่มีข้อความ รูป เส้นหรือกราฟิก — ไม่มีเลขหน้าด้วยเพราะเลขหน้าก็เป็นข้อความ
+                if not (pages[-1] or "").strip() and not (
+                        _pg.chars or _pg.images or _pg.lines or _pg.rects or _pg.curves):
+                    empty_pages.add(_i)
             except Exception:
                 pass
             try:
@@ -7719,7 +7973,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้ ยังนับเป็นหน้าของเล่ม — ถ้าไม่นับ
             # เล่มที่พิมพ์ 71, (อ่านไม่ออก), 73 จะถูกฟ้องผิดว่า "กระโดด 71 ไป 73"
             # ทั้งที่หน้าที่คั่นคือ 72 พอดี (การตรวจเพี้ยนเพราะหาเลขหน้าไม่เจอ)
-            gap = cur_idx - prev_idx - 1
+            # ยกเว้นหน้าว่างจริง (อัปเดต 1.7) ซึ่งไม่มีเลขหน้าแน่นอน — 32, (ว่าง), 33 ต่อเนื่องแล้ว แจ้งแยกเป็น PAGE.EMPTY
+            gap = sum(1 for j in range(prev_idx + 1, cur_idx) if j not in empty_pages)
             want = a + gap + 1
             if b != want:
                 # ตำแหน่งคือหน้าที่พิมพ์เลขผิด ส่วน "พบ" บอกว่าหน้าก่อนหน้าเป็นเลขอะไร
@@ -7732,8 +7987,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     last_arabic = max(printed.values()) if printed else None
 
     # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
+    # หน้าว่างจริงแจ้งเป็นข้อ PAGE.EMPTY ข้อเดียวทั้งเล่ม ไม่ซ้อนกับ PAGE.BLANK บนแผ่นเดียวกัน (อัปเดต 1.7)
     _report_blank_runs(rep, pages, printed, image_pages, arabic_sequence_ok, page_ref,
-                       skip=scanned_sig, sequence_reported=BODY_RULES['check_page_sequence'])
+                       skip=list(scanned_sig) + sorted(empty_pages),
+                       sequence_reported=BODY_RULES['check_page_sequence'])
+    _report_empty_pages(rep, empty_pages, page_labels)
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
     _report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)
@@ -7755,6 +8013,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         toc_page_indices = []
     toc_lines = [(page_idx, line) for page_idx in toc_page_indices
                  for line in pages[page_idx].split('\n')]
+    # สารบัญ สารบัญตาราง สารบัญรูปภาพ ระบุเลขหน้าเป็นช่วง (อัปเดต 1.7) — หน้าสารบัญตาราง/รูปภาพนับหน้าต่อด้วย
+    range_sources = [("สารบัญ", idx) for idx in toc_page_indices]
+    front_marks = sorted(set(sig_pages + abs_th_pages + abs_en_pages + ack_pages + toc_pages + list_pages))
+    for list_start in list_pages:
+        if any(idx == list_start for _name, idx in range_sources):
+            continue
+        name = soft(front_section_kind(pages[list_start])[1]) or "สารบัญตาราง/รูปภาพ"
+        later = [b for b in front_marks if b > list_start]
+        for idx in _toc_continuation_pages(pages, list_start, min(later) if later else n):
+            range_sources.append((name, idx))
+    _report_toc_page_ranges(rep, range_sources, pages, page_ref, n)
     toc_text = "\n".join(line for _page_idx, line in toc_lines)
     toc_entries = []
     for source_page_idx, line in toc_lines:
@@ -8218,7 +8487,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         sig_pages[0] if sig_pages else 1,
         body_ch[0][2] if body_ch else None,
         front_label_style,
-        page_texts=pages, reported=list(sig_label_reported) + scanned_sig)
+        page_texts=pages, reported=list(sig_label_reported) + scanned_sig, ignore=empty_pages)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]

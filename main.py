@@ -49,7 +49,9 @@ from checker import (
     SIGNATURE_NAME_PROBLEM_LABEL,
     REQUIREMENTS_TEXT,
     REQUIREMENTS_TEXT_EN,
+    apply_turnitin_answer,
     late_fee,
+    turnitin_answer,
     TURNITIN_LIMIT,
     turnitin_similarity,
     plain_summary,
@@ -463,6 +465,20 @@ def _get_job(job_id):
         return dict(job) if job else None
 
 
+def _settle_turnitin(job_id):
+    """ผลตรวจที่ใช้แสดง สรุป และลงชีท = ผลของระบบ (report_system) + คำตอบเรื่อง Turnitin จากขั้นที่ 1 (อัปเดต 1.7)
+
+    การตรวจเบื้องหลังกับการตอบขั้นที่ 1 เสร็จก่อนหลังกันได้ทั้งสองทาง จึงเรียกจากทั้งสองที่ และทำใต้ JOBS_LOCK
+    สร้างจาก report_system ทุกครั้ง ตอบขั้นที่ 1 ใหม่กี่รอบก็ไม่ซ้อนผลกัน
+    """
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job or not job.get("report_system"):
+            return
+        answer = (job.get("precheck") or {}).get("turnitin")
+        job["report"] = apply_turnitin_answer(job["report_system"], answer)
+
+
 def _prune_jobs():
     """ทิ้งผลตรวจเก่า โดยเก็บ "เล่มล่าสุด" ไว้เสมอ
 
@@ -516,7 +532,8 @@ def _run_job(job_id, tmp_path, approved, chapters_mode, turnitin=None):
     try:
         report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress,
                            turnitin=turnitin)
-        _update_job(job_id, report=report, stage="เสร็จสิ้น")
+        _update_job(job_id, report=report, report_system=report, stage="เสร็จสิ้น")
+        _settle_turnitin(job_id)        # ตอบขั้นที่ 1 เรื่อง Turnitin ไว้ก่อนตรวจเสร็จ (อัปเดต 1.7)
     except Exception:
         tb = traceback.format_exc()
         print(f"job {job_id} failed\n{tb}", flush=True)
@@ -915,8 +932,21 @@ async def precheck_answer(job_id: str, request: Request):
         return JSONResponse({"error": "ข้อรายชื่อที่ติ้กไม่ถูกต้อง กรุณาโหลดหน้าใหม่แล้วติ้กอีกครั้ง"},
                             status_code=400)
     name_items = sorted({int(n) for n in names})
-    _update_job(job_id, precheck={"failed_items": failed, "name_items": name_items})
-    return {"ok": True, "failed_items": failed, "name_items": name_items}
+    # ไฟล์ Turnitin ที่ระบบอ่านค่าไม่ได้ เจ้าหน้าที่ตัดสินที่นี่ (อัปเดต 1.7) — ไม่เลือก = คงข้อส้มเดิม
+    # ระบบอ่านค่าได้อยู่แล้ว = ไม่มีส่วนนี้บนหน้า คำตอบที่ส่งมาก็ไม่ใช้
+    try:
+        turnitin = turnitin_answer(payload.get("turnitin"))
+    except ValueError:
+        return JSONResponse({"error": "ค่า Overall Similarity ต้องเป็นจำนวนเต็ม 0–100 กรุณากรอกใหม่"},
+                            status_code=400)
+    if (job.get("turnitin") or {}).get("similarity") is not None or not job.get("turnitin"):
+        turnitin = None
+    answer = {"failed_items": failed, "name_items": name_items}
+    if turnitin:
+        answer["turnitin"] = turnitin
+    _update_job(job_id, precheck=answer)
+    _settle_turnitin(job_id)
+    return {"ok": True, **answer}
 
 
 @app.get("/progress/{job_id}")

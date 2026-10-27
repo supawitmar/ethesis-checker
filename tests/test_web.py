@@ -2482,3 +2482,148 @@ class SmallTextIsReadable(unittest.TestCase):
             for old in ("#8091a6", "#7a8797"):
                 with self.subTest(page=name, colour=old):
                     self.assertNotIn(old, text)
+
+
+class Update17TurnitinAnswerInStepOne(unittest.TestCase):
+    """อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): ไฟล์ Turnitin ที่ระบบอ่านค่าไม่ได้ เจ้าหน้าที่ตัดสินที่ขั้นที่ 1
+
+    ก "ไฟล์ถูกต้อง แต่ระบบอ่านค่าไม่ได้" = กรอกค่า 0–100 ตัดสินเหมือนค่าที่ระบบอ่านได้
+    ข "ไม่ใช่ไฟล์ผลตรวจ Turnitin" = แดง · ไม่เลือก = คงข้อส้มเดิม · ผลต้องเข้ารายงาน ข้อความสรุป และชีท
+    """
+
+    UNREAD = "ORANGE TURNITIN"
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        for job in list(main.JOBS.values()):
+            if job.get("pdf_path"):
+                main._remove_book(job["pdf_path"])
+        main.JOBS.clear()
+
+    def _job(self, turnitin_text="A document without the similarity line"):
+        files = {"pdf": ("b.pdf", make_pdf(), "application/pdf"),
+                 "turnitin": ("turnitin.pdf", make_pdf(turnitin_text), "application/pdf")}
+        return self.client.post("/check", data=FORM, files=files).json()["job_id"]
+
+    def _answer(self, job_id, turnitin):
+        return self.client.post(f"/precheck/{job_id}", json={**PRECHECK_ALL_PASS, "turnitin": turnitin})
+
+    def _done(self, job_id):
+        for _ in range(500):
+            if main._get_job(job_id)["done"]:
+                break
+            time.sleep(0.01)
+        return main._get_job(job_id)
+
+    @staticmethod
+    def _turnitin_items(report, zone):
+        return [i for i in report["issues_by_zone"][zone] if i["rule_id"] == "TURNITIN.SIMILARITY"]
+
+    def test_the_step_one_page_asks_only_when_the_value_was_not_read(self):
+        unread = self.client.get(f"/precheck/{self._job()}").text
+        self.assertIn('name="tii" value="value"', unread)
+        self.assertIn('name="tii" value="not_turnitin"', unread)
+        self.assertIn('id="tii-similarity"', unread)
+        read = self.client.get(f"/precheck/{self._job('28% Overall Similarity')}").text
+        self.assertNotIn('id="tii-similarity"', read)
+        self.assertNotIn('value="not_turnitin"', read)
+
+    def test_a_staff_value_over_the_limit_is_red_everywhere(self):
+        job_id = self._job()
+        response = self._answer(job_id, {"choice": "value", "similarity": 32})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["turnitin"], {"choice": "value", "similarity": 32})
+        job = self._done(job_id)
+        report = job["report"]
+        [red] = self._turnitin_items(report, "RED")
+        self.assertIn("Overall Similarity 32%", red["found"])
+        self.assertEqual(self._turnitin_items(report, "ORANGE"), [])
+        self.assertTrue(any("เจ้าหน้าที่กรอกเองที่ขั้นที่ 1" in str(i["detail"]) for i in report["info"]))
+        # ผลของระบบเก็บไว้ไม่แตะ ตอบใหม่จึงไม่ซ้อนผล
+        self.assertEqual(len(self._turnitin_items(job["report_system"], "ORANGE")), 1)
+        staff = ["SIGNATURE_LAYOUT_OK", "PASS_FEE_NONE", "LATE_FEE_NONE"]
+        data = self.client.post(f"/summary/{job_id}", json={"staff": staff}).json()
+        self.assertIn("Overall Similarity 32%", data["plain"])
+        self.assertIn("Overall Similarity 32%", data["details"])         # ข้อความที่ลงชีท
+        self.assertIn("Overall Similarity 32%", self.client.get(f"/result/{job_id}").text)
+
+    def test_a_staff_value_within_the_limit_clears_the_item(self):
+        job_id = self._job()
+        self._answer(job_id, {"choice": "value", "similarity": 20})
+        report = self._done(job_id)["report"]
+        self.assertEqual(self._turnitin_items(report, "RED") + self._turnitin_items(report, "ORANGE"), [])
+        self.assertTrue(any("ค่า Overall Similarity 20%" in str(i["detail"]) for i in report["info"]))
+
+    def test_not_a_turnitin_report_is_red_with_both_lines(self):
+        job_id = self._job()
+        self._answer(job_id, {"choice": "not_turnitin"})
+        report = self._done(job_id)["report"]
+        [red] = self._turnitin_items(report, "RED")
+        self.assertEqual(red["found"], "ไฟล์ที่แนบมาไม่ใช่ผลตรวจ Turnitin")
+        self.assertEqual(red["expected"], "กรุณาแนบไฟล์ผลตรวจ Turnitin ที่ถูกต้อง ดังนี้")
+        plain = self.client.post(f"/summary/{job_id}", json={}).json()["plain"]
+        self.assertIn("(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity", plain)
+        self.assertIn("(2) ตรวจเนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย) โดยค่า Overall Similarity "
+                      "ต้องไม่เกิน 25%", plain)
+
+    def test_no_choice_keeps_the_orange_item_and_answering_again_does_not_stack(self):
+        job_id = self._job()
+        self._answer(job_id, {"choice": "not_turnitin"})
+        self._done(job_id)
+        response = self._answer(job_id, None)
+        self.assertNotIn("turnitin", response.json())
+        report = main._get_job(job_id)["report"]
+        self.assertEqual(len(self._turnitin_items(report, "ORANGE")), 1)
+        self.assertEqual(self._turnitin_items(report, "RED"), [])
+
+    def test_a_bad_value_is_refused(self):
+        job_id = self._job()
+        for bad in ({"choice": "value", "similarity": 101}, {"choice": "value", "similarity": -1},
+                    {"choice": "value", "similarity": "32"}, {"choice": "value", "similarity": 32.5},
+                    {"choice": "value", "similarity": True}, {"choice": "value"},
+                    {"choice": "maybe"}, "32", [32]):
+            with self.subTest(bad=bad):
+                self.assertEqual(self._answer(job_id, bad).status_code, 400)
+        self.assertIsNone(main._get_job(job_id)["precheck"])
+
+    def test_an_answer_for_a_file_that_was_read_is_ignored(self):
+        job_id = self._job("28% Overall Similarity")
+        response = self._answer(job_id, {"choice": "value", "similarity": 5})
+        self.assertNotIn("turnitin", response.json())
+        report = self._done(job_id)["report"]
+        [red] = self._turnitin_items(report, "RED")
+        self.assertIn("Overall Similarity 28%", red["found"])
+
+
+class Update17FailTextOnTheCard(unittest.TestCase):
+    """อัปเดต 1.7: ข้อส้มหน้าว่าง/เลขหน้าเป็นช่วงในสารบัญ กด "ไม่ผ่าน" แล้วเห็นบรรทัดแดงที่จะเข้าข้อความสรุป"""
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        main.JOBS.clear()
+
+    def test_the_card_carries_the_fail_line_and_the_summary_uses_it(self):
+        import checker
+        rep = checker.Report()
+        checker._report_empty_pages(rep, {44}, {43: "32", 45: "33"})
+        with main.JOBS_LOCK:
+            main.JOBS["empty"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "roman"}),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        html = self.client.get("/result/empty").text
+        self.assertIn('<div class="fail-text">', html)
+        self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", html)
+        self.assertIn(".issue.state-fail .fail-text { display:block; }", html)
+        plain = self.client.post("/summary/empty", json={"failed": ["ORANGE:0"]}).json()["plain"]
+        self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", plain)
+        self.assertNotIn("ไฟล์รูปเล่มต้องไม่มีหน้าว่าง", plain)

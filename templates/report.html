@@ -161,6 +161,11 @@
   .issue.state-pass .bar { background:var(--green); }
   .issue.state-fail { background:var(--red-bg); border-color:#f0ccc7; }
   .issue.state-fail .bar { background:var(--red); }
+  /* ถ้อยคำเมื่อกดไม่ผ่าน (อัปเดต 1.7) — ขึ้นเฉพาะการ์ดที่กดไม่ผ่านแล้ว */
+  .issue .fail-text { display:none; font-size:.84rem; margin-top:8px; padding:8px 10px; border-radius:8px;
+       background:#fff; border:1px solid #f0ccc7; color:#8a2f24; }
+  .issue.state-fail .fail-text { display:block; }
+  .issue .fail-text strong { color:var(--red); }
   .rule-source { font-size:.76rem; color:#617184; margin-top:8px; padding-top:8px; border-top:1px dashed rgba(60,80,100,.18); }
   .rule-source b { color:var(--navy); }
   .rule-source ul { margin:3px 0 0; padding-left:19px; }
@@ -599,6 +604,10 @@
              เทียบ "ทั้งบรรทัด" กับกฎ ถ้ายัดหลายบรรทัดไว้ในก้อนเดียวจะไม่มีกฎไหนตรง #}
           {% if it.notice %}<div class="notice"><strong data-th="ต้องดำเนินการเพิ่มเติม:" data-en="Further action required:">ต้องดำเนินการเพิ่มเติม:</strong>
             {% for line in it.notice.split('\n') %}<div class="tr-dyn">{{ line }}</div>{% endfor %}</div>{% endif %}
+          {# อัปเดต 1.7: ถ้อยคำที่เข้าข้อความสรุปเมื่อกด "ไม่ผ่าน" (checker._as_failed) — โชว์เมื่อกดไม่ผ่านแล้วเท่านั้น
+             ให้เห็นว่าข้อนี้กลายเป็นจุดที่ต้องแก้ (สีแดง) และนักศึกษาจะได้ข้อความอะไร #}
+          {% if it.fail_text %}<div class="fail-text"><strong data-th="ต้องแก้ (สีแดง):" data-en="Must fix (red):">ต้องแก้ (สีแดง):</strong>
+            <span class="tr-dyn">{{ it.fail_text }}</span></div>{% endif %}
           {% if zone in ['ORANGE', 'YELLOW'] %}
           <div class="issue-decide">
             <span class="lbl" data-th="ผลพิจารณาของเจ้าหน้าที่:" data-en="Staff decision:">ผลพิจารณาของเจ้าหน้าที่:</span>
@@ -1686,6 +1695,46 @@ var TR = [
   [/^เปิดไฟล์ Turnitin ดูค่า Overall Similarity ด้วยตา ถ้าไม่เกินเกณฑ์ให้กดผ่าน$/g,
    'Open the Turnitin file and read the Overall Similarity yourself; mark it as passed if it is within the limit'],
   [/^ไฟล์ Turnitin$/g, 'Turnitin report'],
+  // อัปเดต 1.7: ไฟล์ Turnitin ที่เจ้าหน้าที่ตัดสินที่ขั้นที่ 1
+  [/^ไฟล์ที่แนบมาไม่ใช่ผลตรวจ Turnitin$/g, 'The attached file is not a Turnitin report'],
+  [/^กรุณาแนบไฟล์ผลตรวจ Turnitin ที่ถูกต้อง ดังนี้$/g, 'Please attach a correct Turnitin report as follows'],
+  [/^แนบไฟล์ผลตรวจ Turnitin ที่มีทั้งหน้าปกและหน้า Overall Similarity$/g,
+   'Attach a Turnitin report that includes both the cover page and the Overall Similarity page'],
+  [/^(\(\d+\) )?ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก \(Cover page\) และหน้า Overall Similarity$/g,
+   '$1The Turnitin report must include both the cover page and the Overall Similarity page.'],
+  [/^(\(\d+\) )?ตรวจเนื้อหาหลัก \(บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย\) โดยค่า Overall Similarity ต้องไม่เกิน (\d+)%$/g,
+   '$1Check the main content (the abstract and Chapter 1 to the last chapter); the Overall Similarity must not exceed $2%.'],
+  [/^ค่า Overall Similarity (\d+)% เจ้าหน้าที่กรอกเองที่ขั้นที่ 1 \(ระบบอ่านค่าจากไฟล์ไม่ได้\)$/g,
+   'The Overall Similarity of $1% was entered by staff in step 1 (the system could not read it from the file)'],
+  // อัปเดต 1.7: หน้าว่างจริง (PAGE.EMPTY)
+  [/^หน้าว่าง$/g, 'Blank page'],
+  [/^พบหน้าว่าง \(ไม่มีข้อความ รูป หรือเลขหน้า\) ที่แผ่นที่ (\d+) ของไฟล์ PDF อยู่ระหว่างหน้า (\S+) และหน้า (\S+) ของไฟล์รูปเล่ม$/g,
+   'A blank page (no text, images or page number) was found at sheet $1 of the PDF file, between pages $2 and $3 of the document'],
+  [/^พบหน้าว่าง \(ไม่มีข้อความ รูป หรือเลขหน้า\) ที่แผ่นที่ (\d+) ของไฟล์ PDF อยู่ต่อจากหน้า (\S+) ของไฟล์รูปเล่ม$/g,
+   'A blank page (no text, images or page number) was found at sheet $1 of the PDF file, after page $2 of the document'],
+  [/^พบหน้าว่าง \(ไม่มีข้อความ รูป หรือเลขหน้า\) ที่แผ่นที่ (\d+) ของไฟล์ PDF อยู่ก่อนหน้า (\S+) ของไฟล์รูปเล่ม$/g,
+   'A blank page (no text, images or page number) was found at sheet $1 of the PDF file, before page $2 of the document'],
+  [/^พบหน้าว่าง \(ไม่มีข้อความ รูป หรือเลขหน้า\) ที่แผ่นที่ (\d+) ของไฟล์ PDF$/g,
+   'A blank page (no text, images or page number) was found at sheet $1 of the PDF file'],
+  [/^พบหน้าว่าง \(ไม่มีข้อความ รูป หรือเลขหน้า\) (\d+) แผ่น ที่แผ่นที่ ([\d, ]+) ของไฟล์ PDF$/g,
+   '$1 blank pages (no text, images or page number) were found at sheets $2 of the PDF file'],
+  [/^ไฟล์รูปเล่มต้องไม่มีหน้าว่างที่ไม่มีข้อความ รูป หรือเลขหน้า$/g,
+   'The document must not contain blank pages without text, images or a page number'],
+  [/^ลบหน้าว่างที่แผ่นที่ ([\d, ]+) ของไฟล์ PDF ออก$/g, 'Remove the blank page(s) at sheet(s) $1 of the PDF file'],
+  // อัปเดต 1.7: สารบัญระบุเลขหน้าเป็นช่วง (FRONT.TOC_PAGE_RANGE)
+  [/^หัวข้อในสารบัญระบุเลขหน้าเป็นช่วง: ((?:"[^"]*"(?:, )?)+) และอีก (\d+) หัวข้อ$/g,
+   'Table-of-contents entries give a page range: $1 and $2 more'],
+  [/^หัวข้อในสารบัญระบุเลขหน้าเป็นช่วง: ((?:"[^"]*"(?:, )?)+)$/g,
+   'Table-of-contents entries give a page range: $1'],
+  [/^เลขหน้าของหัวข้อในสารบัญต้องเป็นหน้าแรกของหัวข้อนั้นเท่านั้น$/g,
+   'The page number of each entry must be the first page of that section only'],
+  [/^ให้ระบุเฉพาะเลขหน้าแรกของหัวข้อนั้น ๆ$/g, 'Give only the first page number of each section'],
+  [/^สารบัญ \(หน้า (\S+)\)$/g, 'Table of contents (page $1)'],
+  // อัปเดต 1.7: ชื่อหลักสูตรเต็มในช่องประธานหลักสูตร
+  [/^ช่องประธานหลักสูตร \(มุมล่างขวา\) ระบุชื่อหลักสูตรผิด$/g,
+   'The programme director box (bottom right) shows the wrong programme name'],
+  [/^แก้ชื่อหลักสูตรในช่องประธานหลักสูตรให้ตรงตามที่ได้รับอนุมัติ$/g,
+   'Correct the programme name in the programme director box to match the approved programme'],
   [/ปี = ปีที่มีผลสอบผ่าน/g, 'Year = the exam pass year'],
   [/^ปีบนหน้าปกในเล่มเขียนว่า ("[^"]+")$/g, 'The year on the cover reads $1'],
   [/^ต้องแก้เป็น ("[^"]+") โดยอ้างอิงจากปีที่มีผลสอบผ่าน$/g, 'Must be changed to $1, based on the exam pass year'],

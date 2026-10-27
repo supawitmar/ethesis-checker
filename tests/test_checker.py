@@ -1734,7 +1734,7 @@ class SignatureInstitutionCellTests(unittest.TestCase):
                        "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้อม")
         self.assertEqual(ok, [])
         bad = self._run("advisory", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร")
-        self.assertTrue(any("ไม่พบชื่อสาขา" in b for b in bad))
+        self.assertTrue(any("ระบุชื่อหลักสูตรผิด" in b for b in bad))          # อัปเดต 1.7
 
     def test_exam_page_wants_faculty_not_subject(self):
         # หน้ากรรมการสอบมีแต่ชื่อคณะ ไม่มีชื่อสาขา — ต้องไม่ฟ้อง (เดิมฟ้องผิดทุกเล่ม)
@@ -1758,9 +1758,11 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         bad = self._run("advisory",
                         "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
                         "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม")
+        # อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): ข้อเดียว "ระบุชื่อหลักสูตรผิด" + ชื่อเต็มที่ต้องแก้เป็น
+        # ไม่มีบรรทัด "เขียนว่า …" หรือ "ต่างที่ …" แล้ว
         self.assertEqual(len(bad), 1)
-        self.assertIn("เขียนว่า", bad[0])
-        self.assertIn("สังคมศาสตร์สิ่งแวดล้ม", bad[0])       # ค่าที่พบจริงในเล่ม
+        self.assertIn("ระบุชื่อหลักสูตรผิด", bad[0])
+        self.assertNotIn("เขียนว่า", bad[0])
         self.assertNotIn("ไม่พบ", bad[0])
 
     def _zones(self, kind, bottom, english=False):
@@ -1793,11 +1795,14 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         self.assertFalse(checker_module._right_institution_box_read(
             "exam", "Dean Faculty of Graduate Studies, Mahidol University"))
 
-    def test_completely_absent_subject_still_says_not_found(self):
-        """ไม่มีอะไรใกล้เคียงเลย ต้องคงข้อความ "ไม่พบ" ไว้ ไม่ใช่เดาสุ่มมาโชว์"""
-        bad = self._run("advisory", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร")
-        self.assertEqual(len(bad), 1)
-        self.assertIn("ไม่พบชื่อสาขา", bad[0])
+    def test_completely_absent_subject_is_one_item_with_the_full_name(self):
+        """ไม่มีอะไรใกล้เคียงเลย = ข้อเดียวเหมือนสะกดผิด บอกชื่อหลักสูตรเต็มที่ต้องเป็น ไม่เดาสุ่มมาโชว์ (อัปเดต 1.7)"""
+        rep = Report()
+        _check_signature_institution(rep, "advisory", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร",
+                                     self.APPROVED, False)
+        [issue] = rep.zones["RED"] + rep.zones["ORANGE"]
+        self.assertEqual(issue["found"], "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด")
+        self.assertIn("สาขาวิชาสังคมศาสตร์สิ่งแวดล้อม", issue["expected"])
 
 
 class SignaturePlaceholderTests(unittest.TestCase):
@@ -7434,7 +7439,8 @@ class EveryFormFieldThatTheBookPrintsIsCompared(unittest.TestCase):
     def test_the_degree_name_in_the_programme_chair_box_is_checked(self):
         found = self._chair(self.THAI_CHAIR, "degree_cover_th", "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
         self.assertEqual(len(found), 1)
-        self.assertIn('สะกดชื่อปริญญาผิด เขียนว่า "ศิลปศาสตรมหาบัณทิต"', found[0])
+        # อัปเดต 1.7: ข้อเดียว "ระบุชื่อหลักสูตรผิด" ไม่มีบรรทัด "เขียนว่า …" (ถ้อยคำเจ้าของ 27 ต.ค. 2569)
+        self.assertIn("ระบุชื่อหลักสูตรผิด", found[0])
         # ควบคุมเชิงบวก — สะกดถูกแล้วไม่ฟ้อง
         self.assertEqual(self._chair(self.THAI_CHAIR.replace("มหาบัณทิต", "มหาบัณฑิต"),
                                      "degree_cover_th", "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)"), [])
@@ -7457,11 +7463,11 @@ class EveryFormFieldThatTheBookPrintsIsCompared(unittest.TestCase):
             self.assertEqual(self._chair(bottom, "degree_cover_en", degree, english=True), [], degree)
 
     def test_a_missing_programme_line_is_one_item_not_two(self):
-        """ทั้งบรรทัดหลักสูตรหายไป ข้อชื่อสาขาบอกอยู่แล้ว ไม่ต้องเพิ่มข้อชื่อปริญญาจากช่องเดียวกัน"""
+        """ทั้งบรรทัดหลักสูตรหายไป = ข้อเดียว (อัปเดต 1.7: ข้อชื่อหลักสูตรเต็มแทนข้อชื่อสาขา + ข้อชื่อปริญญา)"""
         found = self._chair("บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร", "degree_cover_th",
                             "ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์สิ่งแวดล้อม)")
         self.assertEqual(len(found), 1)
-        self.assertIn("ชื่อสาขา", found[0])
+        self.assertIn("ระบุชื่อหลักสูตรผิด", found[0])
 
     def test_free_mode_still_compares_the_format(self):
         """โหมด free ใช้รูปแบบตามที่เลือกตรวจต่อ เดิมจึงไม่เคยเทียบกับเล่ม — ต้องแจ้งเป็นสีส้ม"""
@@ -9643,7 +9649,7 @@ class ScannedSignaturePages(unittest.TestCase):
     def test_the_scanned_pages_are_not_reported_again_as_unreadable_pages(self):
         """เดิมได้สามข้อจากแผ่นสแกนชุดเดียว: ไม่พบหน้าลงนาม + อ่านเลขหน้าไม่ได้ + ดึงข้อความไม่ได้"""
         source = inspect.getsource(checker_module.run_check)
-        self.assertIn("skip=scanned_sig", source)
+        self.assertIn("skip=list(scanned_sig)", source)
         self.assertIn("reported=list(sig_label_reported) + scanned_sig", source)
         rep = Report()
         checker_module._report_blank_runs(rep, [self.COVER, "", "", self.ACK], {}, {1, 2}, True,
@@ -9843,6 +9849,269 @@ class Update161AbstractCommittee(unittest.TestCase):
         rep = self._run("THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D., MANEE MEEJAI, Ph.D., "
                         "PITI YINDEE, Ph.D." + NEWLINE + "ABSTRACT")
         self.assertEqual([i for i in rep.zones["YELLOW"] if i["rule_id"] == "FRONT.ABSTRACT_COMMA"], [])
+
+
+class Update17TurnitinStaffAnswer(unittest.TestCase):
+    """ไฟล์ Turnitin ที่ระบบอ่านค่าไม่ได้ เจ้าหน้าที่ตัดสินที่ขั้นที่ 1 (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)"""
+
+    def _report(self, similarity=None):
+        rep = Report()
+        checker_module._report_turnitin(rep, {"similarity": similarity})
+        rep.add("RED", "front_matter", "หน้าปก", 'ปีบนหน้าปกในเล่มเขียนว่า "2568"',
+                'ต้องแก้เป็น "2569"', "", "FRONT.COVER")
+        return checker_module.check_result(rep, {"front_label_style": "roman"})
+
+    def test_the_answer_is_checked(self):
+        parse = checker_module.turnitin_answer
+        self.assertIsNone(parse(None))
+        self.assertEqual(parse({"choice": "value", "similarity": 32}), {"choice": "value", "similarity": 32})
+        self.assertEqual(parse({"choice": "not_turnitin"}), {"choice": "not_turnitin"})
+        for bad in ({"choice": "value", "similarity": 101}, {"choice": "value", "similarity": -1},
+                    {"choice": "value", "similarity": "30"}, {"choice": "value", "similarity": 30.5},
+                    {"choice": "value", "similarity": True}, {"choice": "value"}, {"choice": "x"}, "value"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                parse(bad)
+
+    def test_a_value_over_the_limit_is_red_like_a_read_value(self):
+        report = checker_module.apply_turnitin_answer(self._report(), {"choice": "value", "similarity": 32})
+        reds = [i for i in report["issues_by_zone"]["RED"] if i["rule_id"] == "TURNITIN.SIMILARITY"]
+        self.assertEqual([i["found"] for i in reds],
+                         ["ผลตรวจ Turnitin ที่แนบมามีค่า Overall Similarity 32% ซึ่งเกินเกณฑ์ที่กำหนด (ต้องไม่เกิน 25%)"])
+        self.assertEqual([i for i in report["issues_by_zone"]["ORANGE"] if i["rule_id"] == "TURNITIN.SIMILARITY"], [])
+        self.assertIn("ค่า Overall Similarity 32% เจ้าหน้าที่กรอกเองที่ขั้นที่ 1 (ระบบอ่านค่าจากไฟล์ไม่ได้)",
+                      [i["detail"] for i in report["info"]])
+        self.assertIn("Overall Similarity 32%", report["plain_summary"])
+        self.assertEqual(report["verdict"], "ไม่ผ่าน")
+
+    def test_a_value_within_the_limit_clears_the_orange_item(self):
+        before = self._report()
+        report = checker_module.apply_turnitin_answer(before, {"choice": "value", "similarity": 20})
+        self.assertEqual(len(before["issues_by_zone"]["ORANGE"]), 1)
+        self.assertEqual(report["issues_by_zone"]["ORANGE"], [])
+        self.assertEqual(len(report["issues_by_zone"]["RED"]), 1)            # ข้อปีบนปกยังอยู่
+        self.assertTrue(any("20%" in i["detail"] for i in report["info"]))
+
+    def test_not_a_turnitin_file_is_red_with_the_owners_wording(self):
+        report = checker_module.apply_turnitin_answer(self._report(), {"choice": "not_turnitin"})
+        [issue] = [i for i in report["issues_by_zone"]["RED"] if i["rule_id"] == "TURNITIN.SIMILARITY"]
+        self.assertEqual(issue["found"], "ไฟล์ที่แนบมาไม่ใช่ผลตรวจ Turnitin")
+        self.assertEqual(issue["expected"], "กรุณาแนบไฟล์ผลตรวจ Turnitin ที่ถูกต้อง ดังนี้")
+        self.assertEqual(issue["notice"].split(NEWLINE), [
+            "(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity",
+            "(2) ตรวจเนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย) โดยค่า Overall Similarity ต้องไม่เกิน 25%"])
+        text = checker_module._summary_sentence(issue, skip_location=True).split(NEWLINE)
+        self.assertEqual([line.strip() for line in text], [issue["found"], issue["expected"]]
+                         + issue["notice"].split(NEWLINE))
+
+    def test_the_english_wording_is_complete(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th, en in (("ไฟล์ที่แนบมาไม่ใช่ผลตรวจ Turnitin", "The attached file is not a Turnitin report"),
+                       ("กรุณาแนบไฟล์ผลตรวจ Turnitin ที่ถูกต้อง ดังนี้", "Please attach a correct Turnitin report as follows"),
+                       ("(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity",
+                        "(1) The Turnitin report must include both the cover page and the Overall Similarity page."),
+                       ("(2) ตรวจเนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย) โดยค่า Overall Similarity ต้องไม่เกิน 25%",
+                        "(2) Check the main content (the abstract and Chapter 1 to the last chapter); "
+                        "the Overall Similarity must not exceed 25%.")):
+            self.assertEqual(i18n.tr_en(th, pairs), en)
+
+    def test_a_read_value_or_no_answer_leaves_the_report_alone(self):
+        read = self._report(similarity=12)
+        self.assertIs(checker_module.apply_turnitin_answer(read, {"choice": "not_turnitin"}), read)
+        unread = self._report()
+        self.assertIs(checker_module.apply_turnitin_answer(unread, None), unread)
+
+
+class Update17EmptyPages(unittest.TestCase):
+    """หน้าว่างจริงทุกส่วนของเล่ม — ส้มข้อเดียว (อัปเดต 1.7 กฎใหม่ เจ้าของยืนยัน 27 ต.ค. 2569)"""
+
+    LABELS = {1: "ก", 2: "ข", 10: "32", 12: "33", 20: "248"}
+
+    def _issue(self, empty, labels=None):
+        rep = Report()
+        checker_module._report_empty_pages(rep, empty, self.LABELS if labels is None else labels)
+        return rep.zones["ORANGE"]
+
+    def test_one_sheet_says_where_it_sits(self):
+        [issue] = self._issue({11})
+        self.assertEqual(issue["found"], "พบหน้าว่าง (ไม่มีข้อความ รูป หรือเลขหน้า) ที่แผ่นที่ 12 ของไฟล์ PDF "
+                                         "อยู่ระหว่างหน้า 32 และหน้า 33 ของไฟล์รูปเล่ม")
+        self.assertEqual(issue["rule_id"], "PAGE.EMPTY")
+        self.assertEqual(issue["fail_text"], "ลบหน้าว่างที่แผ่นที่ 12 ของไฟล์ PDF ออก")
+        [after] = self._issue({21})
+        self.assertTrue(after["found"].endswith("ที่แผ่นที่ 22 ของไฟล์ PDF อยู่ต่อจากหน้า 248 ของไฟล์รูปเล่ม"))
+        [before] = self._issue({0})
+        self.assertTrue(before["found"].endswith("ที่แผ่นที่ 1 ของไฟล์ PDF อยู่ก่อนหน้า ก ของไฟล์รูปเล่ม"))
+
+    def test_several_sheets_are_one_item_without_neighbours(self):
+        [issue] = self._issue({44, 57, 74})
+        self.assertEqual(issue["found"],
+                         "พบหน้าว่าง (ไม่มีข้อความ รูป หรือเลขหน้า) 3 แผ่น ที่แผ่นที่ 45, 58, 75 ของไฟล์ PDF")
+        self.assertEqual(issue["fail_text"], "ลบหน้าว่างที่แผ่นที่ 45, 58, 75 ของไฟล์ PDF ออก")
+        self.assertEqual(self._issue(set()), [])
+
+    def test_failing_it_puts_the_removal_in_the_summary(self):
+        rep = Report()
+        checker_module._report_empty_pages(rep, {44}, self.LABELS)
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        pending = checker_module.plain_summary(report)
+        self.assertIn("รอยืนยัน 1 จุด", pending)
+        self.assertNotIn("ลบหน้าว่าง", pending)
+        failed = checker_module.plain_summary(report, failed=["ORANGE:0"])
+        self.assertIn("กรุณาแก้ไขทั้งหมด 1 จุด", failed)
+        self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", failed)
+        self.assertNotIn("ไฟล์รูปเล่มต้องไม่มีหน้าว่าง", failed)
+        self.assertEqual(checker_module.zone_counts(report, failed=["ORANGE:0"])["RED"], 1)
+        self.assertIn("ลบหน้าว่าง", checker_module.sheet_row(report, failed=["ORANGE:0"])["details"])
+
+    def test_an_empty_sheet_is_not_a_numbering_gap_in_the_front_matter(self):
+        rep = Report()
+        labels = {1: "ก", 3: "ข", 4: "ค"}
+        checker_module._check_front_page_numbers(rep, labels, lambda i: f"แผ่นที่ {i + 1}", 1, 5, "thai",
+                                                 page_texts=["x", "x", "", "x", "x"], ignore={2})
+        self.assertEqual(rep.zones["RED"] + rep.zones["ORANGE"], [])
+
+    def test_a_real_empty_sheet_is_found_and_not_reported_twice(self):
+        import tempfile
+        cover = "THESIS TITLE" + NEWLINE + "A THESIS SUBMITTED" + NEWLINE + "MAHIDOL UNIVERSITY"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([cover, "1" + NEWLINE + "CHAPTER 1 INTRODUCTION",
+                                              "", "2" + NEWLINE + "Some text", None]))
+            result = checker_module.run_check(str(path), None)
+        issues = [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+        empty = [i for i in issues if i["rule_id"] == "PAGE.EMPTY"]
+        self.assertEqual([i["found"] for i in empty],
+                         ["พบหน้าว่าง (ไม่มีข้อความ รูป หรือเลขหน้า) ที่แผ่นที่ 3 ของไฟล์ PDF "
+                          "อยู่ระหว่างหน้า 1 และหน้า 2 ของไฟล์รูปเล่ม"])
+        # แผ่นภาพ (แผ่นที่ 5) ยังเป็นข้อหน้าภาพตามเดิม · แผ่นว่างไม่ซ้อนเป็นข้อดึงข้อความไม่ได้ และไม่ทำให้เลขหน้ากระโดด
+        self.assertFalse(any("แผ่นที่ 3" in i["location"] or "หน้า 2" == i["location"]
+                             for i in issues if i["rule_id"] in ("PAGE.BLANK", "UNCERTAIN.REVIEW",
+                                                                 "PAGE.NUMBERING_SEQUENCE")), issues)
+
+
+class Update17TocPageRanges(unittest.TestCase):
+    """สารบัญระบุเลขหน้าเป็นช่วง (อัปเดต 1.7 กฎใหม่ เจ้าของยืนยัน 27 ต.ค. 2569)"""
+
+    def test_ranges_of_every_page_style_are_found(self):
+        find = checker_module.toc_entry_page_range
+        self.assertEqual(find("บทที่ 1 บทนำ ......... 1-5", 120), ("1", "5"))
+        self.assertEqual(find("บทที่ 2 วรรณกรรม 12–15", 120), ("12", "15"))
+        self.assertEqual(find("LIST OF TABLES xi-xii", 120), ("xi", "xii"))
+        self.assertEqual(find("สารบัญตาราง ฎ-ฏ", 120), ("ฎ", "ฏ"))
+
+    def test_things_that_are_not_page_ranges(self):
+        find = checker_module.toc_entry_page_range
+        for line in ("บทที่ 1 บทนำ 1", "ผลการดำเนินงานปี พ.ศ. 2560-2565", "บทที่ 3 วิธีวิจัย 15-12",
+                     "ภาคผนวก x-12", "1-5"):
+            with self.subTest(line=line):
+                self.assertIsNone(find(line, 120))
+        # _toc_page_label ยังอ่านช่วงเลขหน้าแบบเดิม (ยึดหน้าแรก)
+        self.assertEqual(checker_module._toc_page_label("LIST OF TABLES xi-xii"), "xi")
+
+    def test_one_orange_item_names_the_entries(self):
+        pages = ["สารบัญ" + NEWLINE + "บทที่ 1 บทนำ 1-5" + NEWLINE + "บทที่ 2 วรรณกรรม 6",
+                 "สารบัญตาราง" + NEWLINE + "ตารางที่ 1 ข้อมูล 7-8"]
+        rep = Report()
+        checker_module._report_toc_page_ranges(rep, [("สารบัญ", 0), ("สารบัญตาราง", 1)], pages,
+                                               lambda i: f"หน้า {'ฉช'[i]}", 50)
+        [issue] = rep.zones["ORANGE"]
+        self.assertEqual(issue["location"], "สารบัญ (หน้า ฉ) และสารบัญตาราง (หน้า ช)")
+        self.assertEqual(issue["found"],
+                         'หัวข้อในสารบัญระบุเลขหน้าเป็นช่วง: "บทที่ 1 บทนำ 1-5", "ตารางที่ 1 ข้อมูล 7-8"')
+        self.assertEqual(issue["fail_text"], "ให้ระบุเฉพาะเลขหน้าแรกของหัวข้อนั้น ๆ")
+        report = checker_module.check_result(rep, {})
+        self.assertIn("ให้ระบุเฉพาะเลขหน้าแรกของหัวข้อนั้น ๆ",
+                      checker_module.plain_summary(report, failed=["ORANGE:0"]))
+
+    def test_a_clean_toc_has_no_item(self):
+        rep = Report()
+        checker_module._report_toc_page_ranges(rep, [("สารบัญ", 0)], ["บทที่ 1 บทนำ 1"], str, 50)
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+
+class Update17ProgrammeName(unittest.TestCase):
+    """หน้าลงนาม 1 ช่องประธานหลักสูตร: ชื่อหลักสูตรเต็ม ข้อเดียว (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)"""
+
+    TH = "ศิลปศาสตรมหาบัณฑิต (อาชญาวิทยาและงานยุติธรรม)"
+    EN = "DOCTOR OF PHILOSOPHY (TROPICAL MEDICINE)"
+
+    def _check(self, bottom, degree=None, english=False, box_read=True):
+        rep = Report()
+        checker_module._check_programme_name(rep, degree or (self.EN if english else self.TH), bottom,
+                                             english, box_read, "หน้าลงนาม 1 ประธานหลักสูตร (หน้า ก)")
+        return rep.zones["RED"] + rep.zones["ORANGE"]
+
+    def test_the_full_name(self):
+        self.assertEqual(checker_module.programme_name(self.TH, False),
+                         "ศิลปศาสตรมหาบัณฑิต สาขาวิชาอาชญาวิทยาและงานยุติธรรม")
+        self.assertEqual(checker_module.programme_name(self.EN, True),
+                         "DOCTOR OF PHILOSOPHY Program in TROPICAL MEDICINE")
+
+    def test_correct_boxes_are_quiet(self):
+        for bottom in ("ประธานหลักสูตร ศิลปศาสตรมหาบัณฑิต สาขาวิชาอาชญาวิทยาและงานยุติธรรม",
+                       "ประธานหลักสูตร ศิลปศาสตรมหาบัณฑิต สาขาอาชญาวิทยาและงานยุติธรรม (ภาคพิเศษ)",
+                       # ช่องซ้ายคั่นกลาง (อ่านตามลำดับบรรทัด) แต่ชื่อปริญญา คำว่าสาขา และชื่อสาขาสะกดครบ
+                       "ประธานหลักสูตร ศิลปศาสตรมหาบัณฑิต บัณฑิตวิทยาลัย สาขาวิชาอาชญาวิทยาและงานยุติธรรม"):
+            with self.subTest(bottom=bottom):
+                self.assertEqual(self._check(bottom), [])
+        self.assertEqual(self._check("Program Director Doctor of Philosophy Program in Tropical Medicine "
+                                     "(International Program) Faculty of Tropical Medicine", english=True), [])
+
+    def test_a_misspelt_degree_is_one_red_item_with_the_full_name(self):
+        [issue] = self._check("ประธานหลักสูตร ศิลปศาสตรมหาบัณทิต สาขาวิชาอาชญาวิทยาและงานยุติธรรม")
+        self.assertEqual(issue["found"], "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด")
+        self.assertEqual(issue["expected"], 'ต้องแก้เป็น "ศิลปศาสตรมหาบัณฑิต สาขาวิชาอาชญาวิทยาและงานยุติธรรม"')
+        self.assertEqual(issue["rule_id"], "FRONT.COMMITTEE")
+        self.assertNotIn("เขียนว่า", issue["found"])
+        self.assertNotIn("ต่างที่", issue["found"])
+        lines = checker_module._summary_sentence(issue, skip_location=True).split(NEWLINE)
+        self.assertEqual(lines[-1].strip(), 'ต้องแก้เป็น "ศิลปศาสตรมหาบัณฑิต สาขาวิชาอาชญาวิทยาและงานยุติธรรม"')
+
+    def test_wrong_degree_and_subject_are_still_one_item(self):
+        issues = self._check("ประธานหลักสูตร วิทยาศาสตรมหาบัณฑิต สาขาวิชาสังคมวิทยา")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["zone"] if "zone" in issues[0] else "RED", "RED")
+
+    def test_an_unreadable_box_stays_orange(self):
+        rep = Report()
+        checker_module._check_programme_name(rep, self.TH, "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล", False, False, "x")
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_an_english_book_is_told_the_english_name(self):
+        [issue] = self._check("Program Director Doctor of Philosophy Program in Tropical Health "
+                              "Faculty of Tropical Medicine", english=True)
+        self.assertEqual(issue["expected"], 'ต้องแก้เป็น "Doctor of Philosophy Program in Tropical Medicine"')
+
+
+class Update17FacultyFixStep(unittest.TestCase):
+    """ข้อความแก้ชื่อคณะ (หน้าลงนาม 2) ตัดคำอ่านรู้เรื่อง (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569) — ข้อมูลสมมติ"""
+
+    def test_the_faculty_name_step_keeps_the_karan_and_drops_the_conjunction(self):
+        analysis = checker_module.analyze_diff("คณะสังคมศาสตร์และมนุษย์ศาสตร์", "คณะสังคมศาสตร์และมนุษยศาสตร์")
+        self.assertEqual(analysis.steps, ('ให้แก้ "มนุษย์ศาสตร์" เป็น "มนุษยศาสตร์"',))
+        rep = Report()
+        checker_module._institution_mismatch(
+            rep, "หน้าลงนาม 2 คณบดีคณะ (หน้า ข)", "ชื่อคณะ", "คณะสังคมศาสตร์และมนุษยศาสตร์",
+            "คณบดีบัณฑิตวิทยาลัย คณบดีคณะสังคมศาสตร์และมนุษย์ศาสตร์ มหาวิทยาลัยมหิดล",
+            "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE", True)
+        lines = [l.strip() for l in checker_module._summary_sentence(rep.zones["RED"][0]).split(NEWLINE)]
+        self.assertEqual(lines[-2:], ['ให้แก้ "มนุษย์ศาสตร์" เป็น "มนุษยศาสตร์"',
+                                      'ต้องแก้เป็น "คณะสังคมศาสตร์และมนุษยศาสตร์"'])
+
+    def test_an_anchor_never_ends_before_a_karan(self):
+        graphemes = checker_module._display_graphemes("ศาสตร์และ")
+        self.assertEqual("".join(graphemes[:checker_module._past_karan(graphemes, 4)]), "ศาสตร์")
+        graphemes = checker_module._display_graphemes("จันทร์เพ็ญ")
+        self.assertEqual("".join(graphemes[:checker_module._past_karan(graphemes, 2)]), "จันทร์")
+
+    def test_a_conjunction_stays_when_it_is_needed_to_point(self):
+        """ควบคุมเชิงลบ — คำที่จะแก้ซ้ำกับที่อื่น ตัดคำเชื่อมแล้วชี้ตำแหน่งไม่ได้ จึงคงไว้"""
+        steps = checker_module.analyze_diff("มนุษย์ศาสตร์และมนุษย์ศาสตร์", "มนุษย์ศาสตร์และมนุษยศาสตร์").steps
+        self.assertEqual(len(steps), 1)
+        got = re.findall(r'"([^"]+)"', steps[0])[0]
+        self.assertEqual("มนุษย์ศาสตร์และมนุษย์ศาสตร์".count(got), 1)
 
 
 class Update14Turnitin(unittest.TestCase):
