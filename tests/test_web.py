@@ -2627,3 +2627,48 @@ class Update17FailTextOnTheCard(unittest.TestCase):
         plain = self.client.post("/summary/empty", json={"failed": ["ORANGE:0"]}).json()["plain"]
         self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", plain)
         self.assertNotIn("ไฟล์รูปเล่มต้องไม่มีหน้าว่าง", plain)
+
+class Update17TwoLinesInTheSummaryAndTheSheet(unittest.TestCase):
+    """อัปเดต 1.7 ข้อเพิ่ม (เจ้าของยืนยัน 27 ต.ค. 2569): ทุกข้อในข้อความสรุปและในชีท = พบอะไร + ต้องแก้เป็นอะไร
+
+    ข้อมูลสมมติ · การ์ดบนหน้าผลตรวจยังแสดงคำสั่งแก้ทีละจุดครบเหมือนเดิม
+    """
+
+    WANT = "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดานในผู้สูงอายุ"
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        main.JOBS.clear()
+
+    def test_the_summary_and_the_sheet_use_the_two_line_items(self):
+        import checker
+        rep = checker.Report()
+        compared = checker.compare_values("ผลของโปรแกรมฝึกสมองด้วยเกมกระดานในผู้สูงอายุ", self.WANT, "title")
+        rep.add("RED", "front_matter", "หน้าปก", checker.title_mismatch_detail("ชื่อเรื่อง", compared, self.WANT),
+                f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.WANT}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ",
+                "FORM.APPROVED_MATCH")
+        checker._check_signature_institution(
+            rep, "exam", "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณบดี คณะสังคมศาสตร์และมนุษย์ศาสตร์",
+            {"faculty": "คณะสังคมศาสตร์และมนุษยศาสตร์"}, False, "หน้าลงนาม 2 ", " (หน้า ข)")
+        with main.JOBS_LOCK:
+            main.JOBS["two"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "thai"}),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        data = self.client.post("/summary/two", json={}).json()
+        for text in (data["plain"], data["details"]):
+            self.assertIn('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"\n'
+                          f'   ชื่อเรื่องที่ถูกต้อง: "{self.WANT}"', text)
+            self.assertIn('สะกดชื่อคณะผิด เขียนว่า "คณะสังคมศาสตร์และมนุษย์ศาสตร์"\n'
+                          '   ต้องแก้เป็น "คณะสังคมศาสตร์และมนุษยศาสตร์"', text)
+            self.assertNotIn("ให้แก้", text)
+        # การ์ดบนหน้าผลตรวจยังแสดงสิ่งที่พบเต็ม (รวมท่อนจุดต่าง) เหมือนเดิม
+        html = self.client.get("/result/two").text
+        for issue in main.JOBS["two"]["report"]["issues_by_zone"]["RED"]:
+            self.assertIn("ต่างที่", issue["found"])
+            self.assertIn(issue["found"].replace('"', "&#34;"), html)

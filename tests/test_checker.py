@@ -10096,9 +10096,12 @@ class Update17FacultyFixStep(unittest.TestCase):
             rep, "หน้าลงนาม 2 คณบดีคณะ (หน้า ข)", "ชื่อคณะ", "คณะสังคมศาสตร์และมนุษยศาสตร์",
             "คณบดีบัณฑิตวิทยาลัย คณบดีคณะสังคมศาสตร์และมนุษย์ศาสตร์ มหาวิทยาลัยมหิดล",
             "ช่องคณบดีคณะ (มุมล่างขวา)", "FRONT.COMMITTEE", True)
-        lines = [l.strip() for l in checker_module._summary_sentence(rep.zones["RED"][0]).split(NEWLINE)]
-        self.assertEqual(lines[-2:], ['ให้แก้ "มนุษย์ศาสตร์" เป็น "มนุษยศาสตร์"',
-                                      'ต้องแก้เป็น "คณะสังคมศาสตร์และมนุษยศาสตร์"'])
+        [issue] = rep.zones["RED"]
+        # คำสั่งแก้ทีละจุดอยู่บนการ์ด · ข้อความสรุปเหลือ "พบอะไร" + "ต้องแก้เป็นอะไร" (อัปเดต 1.7 ข้อเพิ่ม)
+        self.assertEqual(issue["fix_steps"], ['ให้แก้ "มนุษย์ศาสตร์" เป็น "มนุษยศาสตร์"'])
+        lines = [l.strip() for l in checker_module._summary_sentence(issue).split(NEWLINE)]
+        self.assertEqual(lines[1:], ['ช่องคณบดีคณะ (มุมล่างขวา) สะกดชื่อคณะผิด เขียนว่า "คณะสังคมศาสตร์และมนุษย์ศาสตร์"',
+                                     'ต้องแก้เป็น "คณะสังคมศาสตร์และมนุษยศาสตร์"'])
 
     def test_an_anchor_never_ends_before_a_karan(self):
         graphemes = checker_module._display_graphemes("ศาสตร์และ")

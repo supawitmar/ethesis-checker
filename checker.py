@@ -4777,6 +4777,38 @@ def is_staff_only_line(text):
     return any(word in text for word in _STAFF_ONLY_WORDS) or text.startswith(_STAFF_ONLY_LEADS)
 
 
+_PLAIN_EDIT = re.compile(r'แก้ "[^"]*" เป็น "[^"]*"')
+
+
+def _joined_fix(steps):
+    """วิธีแก้ทีละคำสั่งรวมเป็นท่อนเดียว: ['ให้แก้ "A" เป็น "B"', 'ให้แก้ "C" เป็น "D"']
+    -> 'ต้องแก้ "A" เป็น "B" และ "C" เป็น "D"' (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
+
+    คำสั่ง "แก้ ... เป็น ..." ที่ต่อกันไม่พูดคำว่า "แก้" ซ้ำ · คำสั่งชนิดอื่น (เติม ลบ) คงคำกริยาไว้
+    """
+    clauses = []
+    for step in steps:
+        clause = step[len("ให้"):] if step.startswith("ให้") else step
+        if clauses and _PLAIN_EDIT.fullmatch(clause) and _PLAIN_EDIT.fullmatch(clauses[-1][1]):
+            clauses.append((f' และ {clause[len("แก้ "):]}', clause))
+        else:
+            clauses.append((f' และ{clause}' if clauses else clause, clause))
+    return "ต้อง" + "".join(text for text, _clause in clauses)
+
+
+def _title_summary_lines(issue, steps, value):
+    """ข้อชื่อเรื่องในข้อความสรุป = สองบรรทัด (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
+
+        ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"
+        ชื่อเรื่องที่ถูกต้อง: "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดานในผู้สูงอายุ"
+
+    ไม่ยกชื่อเรื่องเต็มที่ผิด (นักศึกษามีอยู่ในเล่มแล้ว) · ชี้จุดไม่ได้ (ต่างกันมาก) = บรรทัดแรกเหลือแค่ประโยคนำ
+    """
+    lead = issue["title_lead"]
+    return [f"{lead} {_joined_fix(steps)}" if steps else lead,
+            f'ชื่อเรื่องที่ถูกต้อง: "{value}"']
+
+
 def _summary_sentence(issue, skip_location=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
@@ -4788,6 +4820,12 @@ def _summary_sentence(issue, skip_location=False):
     ก่อนเสมอ ถ้ายัดสามท่อนไว้ในบรรทัดเดียว จะไม่มีกฎไหนตรงทั้งประโยค แล้วตกไปใช้
     การแทนที่แบบเศษคำซึ่งให้ผลเพี้ยน (เคยได้ "page after page 93 Change to:Page 94")
     พอแยกบรรทัด แต่ละบรรทัดกลายเป็นข้อความเดี่ยวที่มีกฎเต็มประโยครองรับอยู่แล้ว
+
+    อัปเดต 1.7 (เจ้าของยืนยัน 27 ต.ค. 2569): ใต้ตำแหน่งเหลือสองบรรทัด "พบอะไร" + "ต้องแก้เป็นอะไร"
+      - ชื่อเรื่อง = จุดที่ต้องแก้ + ชื่อเรื่องที่ถูกต้อง (_title_summary_lines)
+      - ข้ออื่นที่มีค่าที่ถูกต้อง ('ต้องแก้เป็น "..."') ไม่มีคำสั่งแก้ทีละจุด ("ให้แก้ ... เป็น ...") แล้ว
+        ข้อที่ไม่มีค่าให้ ยังคงคำสั่งแก้ไว้ ให้มีบรรทัดบอกวิธีแก้เสมอ
+      - บรรทัดขั้นตอนเพิ่ม (notice) ยังต่อท้ายเหมือนเดิม · การ์ดบนหน้าผลตรวจแสดงครบเหมือนเดิม
     """
     # ถ้อยคำที่เจ้าหน้าที่กำหนดมาทั้งย่อหน้า (จุดที่กดเพิ่มเอง) พิมพ์ตรงตัวทุกคำ
     # ห้ามประกอบใหม่หรือย่อ และย่อหน้าบรรทัดต่อ ๆ ไปให้ตรงกับข้ออื่นในสรุป
@@ -4804,15 +4842,16 @@ def _summary_sentence(issue, skip_location=False):
                          for i, line in enumerate(out))
     lines = [] if skip_location else [_prose_location(issue.get("location"))]
     found, steps = _found_and_steps(issue)
-    if found:
-        lines.append(found)
-    # วิธีแก้ทีละคำสั่ง (ให้ลบ ... ออก) คั่นระหว่างบรรทัดที่พบกับ "ต้องแก้เป็น" — แต่ละคำสั่งเป็น
-    # บรรทัดเดี่ยว ตัวแปลอังกฤษจึงมีกฎเต็มประโยครองรับ (ดูหัวข้อของฟังก์ชันนี้ว่าทำไมต้องแยกบรรทัด)
-    lines += steps
     value = _corrected_value(issue)
-    if value:
-        lines.append(f'ต้องแก้เป็น "{value}"')
+    if issue.get("title_lead") and value:
+        lines += _title_summary_lines(issue, steps, value)
+    elif value:
+        # มีค่าที่ถูกต้องเต็ม ๆ แล้ว คำสั่งแก้ทีละจุดเป็นบรรทัดที่สาม ไม่ต้องมี (อัปเดต 1.7)
+        lines += [found, f'ต้องแก้เป็น "{value}"']
     else:
+        # วิธีแก้ทีละคำสั่ง (ให้ลบ ... ออก) ต่อจากบรรทัดที่พบ — แต่ละคำสั่งเป็นบรรทัดเดี่ยว ตัวแปลอังกฤษจึงมี
+        # กฎเต็มประโยครองรับ (ดูหัวข้อของฟังก์ชันนี้ว่าทำไมต้องแยกบรรทัด)
+        lines += [found] + steps
         # ไม่มีค่าเดี่ยวให้ดึง (เช่น มี 2 ตัวเลือก "ก/i") — ใช้ประโยค expected/fix เต็ม ๆ
         # ซึ่งเขียนไว้ในรูป "ต้องเป็น ..." อยู่แล้ว จึงไม่ต้องเติมคำนำอะไรอีก
         directive = next(
@@ -6276,6 +6315,8 @@ class DetailText(str):
     fix_steps = ()
     # ต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์/ำ — Report.add ใช้ตัดสินสีเมื่อฟอนต์ของเล่มเพี้ยน
     marks_only = False
+    # ข้อชื่อเรื่อง: ประโยคนำของข้อความสรุป (title_mismatch_detail) — ข้ออื่นว่าง
+    title_lead = ""
 
     def __new__(cls, text, diff_tail="", fix_steps=(), marks_only=False):
         obj = super().__new__(cls, text)
@@ -6587,8 +6628,13 @@ def title_mismatch_detail(label, compared, expected=''):
             analysis = analyze_case_diff(compared['actual'], expected)
         if not analysis.text:
             analysis = analyze_word_diff(compared['actual'], expected)
-        return found_with_diff(detail, analysis)
-    return DetailText(detail, marks_only=compared.get('marks_only', False))
+        found = found_with_diff(detail, analysis)
+    else:
+        found = DetailText(detail, marks_only=compared.get('marks_only', False))
+    # ข้อความสรุปไม่ยกชื่อเรื่องเต็มที่ผิด (นักศึกษามีอยู่ในเล่มแล้ว) — ขึ้นด้วยประโยคนี้ต่อด้วยจุดที่ต้องแก้
+    # แล้วตามด้วยชื่อเรื่องที่ถูกต้อง (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569 ดู _title_summary_lines)
+    found.title_lead = f'{label}ไม่ตรงกับข้อมูลในระบบ'
+    return found
 
 
 def find_signature_date(text):
@@ -7571,6 +7617,8 @@ class Report:
             # แล้วเขียนวิธีแก้เป็นคำสั่งทีละบรรทัดแทน — ข้อที่ไม่ได้มาจากการเทียบข้อความไม่มีสองช่องนี้
             "diff_tail": getattr(found, "diff_tail", ""),
             "fix_steps": list(getattr(found, "fix_steps", ())),
+            # ข้อชื่อเรื่อง: ข้อความสรุปใช้ประโยคนี้ + จุดที่ต้องแก้ แทนบรรทัดที่พบ (อัปเดต 1.7)
+            "title_lead": getattr(found, "title_lead", ""),
             "fix": fix,
             # ข้อความที่ต้องส่งถึง "นักศึกษา" ต่อท้ายข้อนั้น (คนละอย่างกับ fix ซึ่งเป็น
             # คำแนะนำสั้น ๆ บนการ์ด) — เช่นขั้นตอนขออนุมัติที่ต้องทำนอกเล่ม

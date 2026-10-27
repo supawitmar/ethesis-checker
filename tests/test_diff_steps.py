@@ -617,7 +617,11 @@ def _summary_of(*issues):
 
 
 class TheSummaryLayout(unittest.TestCase):
-    """หนึ่งจุด = ตำแหน่ง / สิ่งที่พบ / วิธีแก้ทีละคำสั่ง / ต้องแก้เป็น"""
+    """หนึ่งจุด = ตำแหน่ง / สิ่งที่พบ / ต้องแก้เป็น (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569 — ข้อมูลสมมติ)
+
+    ชื่อเรื่อง = ประโยคนำ + จุดที่ต้องแก้ / ชื่อเรื่องที่ถูกต้อง · ข้ออื่นที่มีค่าเต็มไม่มีคำสั่งแก้ทีละจุด
+    ข้อที่ไม่มีค่าเต็มยังคงคำสั่งแก้ไว้ (เดิมทุกข้อมีคำสั่งแก้คั่นระหว่างสิ่งที่พบกับ "ต้องแก้เป็น")
+    """
 
     def _title_issue(self):
         compared = compare_reference_text(ABSTRACT_PAGE, APPROVED_TITLE, "title")
@@ -628,14 +632,64 @@ class TheSummaryLayout(unittest.TestCase):
                 f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{APPROVED_TITLE}"',
                 "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
 
-    def test_the_summary_says_how_to_fix_between_what_was_found_and_the_answer(self):
+    def test_a_title_is_the_fix_points_then_the_correct_title(self):
         lines = _summary_of(self._title_issue()).splitlines()
         at = next(i for i, line in enumerate(lines) if line.startswith("1. "))
-        self.assertEqual(lines[at], "1. บทคัดย่อภาษาไทย (หน้า vi)")
-        self.assertTrue(lines[at + 1].startswith('   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ: "'), lines[at + 1])
-        self.assertTrue(lines[at + 1].endswith('ขององค์กรตัวอย่าง"'), lines[at + 1])
-        self.assertEqual(lines[at + 2], '   ให้ลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก')
-        self.assertEqual(lines[at + 3], f'   ต้องแก้เป็น "{APPROVED_TITLE}"')
+        self.assertEqual(lines[at:at + 3], [
+            "1. บทคัดย่อภาษาไทย (หน้า vi)",
+            '   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก',
+            f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"'])
+        self.assertTrue(at + 3 == len(lines) or not lines[at + 3].startswith("   "), lines[at + 3:])
+
+    def test_a_title_does_not_quote_the_wrong_title_back(self):
+        issue = self._title_issue()
+        wrong = issue[3].split('"')[1]                     # ชื่อเรื่องตามที่เล่มพิมพ์ (บนการ์ดยังมีครบ)
+        self.assertNotEqual(wrong, APPROVED_TITLE)
+        self.assertNotIn(f'"{wrong}"', _summary_of(issue))
+
+    def test_a_title_that_cannot_be_pointed_at_is_the_lead_alone(self):
+        compared = {"status": "mismatch", "score": 0.3, "actual": "ชื่อเรื่องอื่นที่ไม่ใกล้เคียงเลย"}
+        text = _summary_of(("RED", "front_matter", "หน้าปก",
+                            title_mismatch_detail("ชื่อเรื่อง", compared, APPROVED_TITLE),
+                            f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{APPROVED_TITLE}"',
+                            "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH"))
+        # ตำแหน่งเดียวกับหัวกลุ่ม ("หน้าปก") ไม่พิมพ์ซ้ำ บรรทัดที่พบจึงขึ้นเลขข้อ
+        self.assertIn('1. ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ\n'
+                      f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"', text)
+        self.assertNotIn("ชื่อเรื่องอื่นที่ไม่ใกล้เคียงเลย", text)
+
+    def test_other_items_are_what_was_found_and_the_full_value(self):
+        compared = {"status": "typo", "score": 0.95, "actual": "SOMCHAI JAIDE"}
+        found = checker_module.mismatch_detail("ชื่อนักศึกษา", compared, "SOMCHAI JAIDEE")
+        self.assertEqual(found.fix_steps, ('ให้แก้ "JAIDE" เป็น "JAIDEE"',))     # อยู่บนการ์ด
+        text = _summary_of(("RED", "front_matter", "หน้าปก", found,
+                            'ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: "SOMCHAI JAIDEE"', "แก้การสะกดชื่อ",
+                            "FORM.APPROVED_MATCH"))
+        self.assertIn('1. ชื่อนักศึกษาในเล่มเขียนว่า "SOMCHAI JAIDE"\n'
+                      '   ต้องแก้เป็น "SOMCHAI JAIDEE"', text)
+        self.assertNotIn("ให้แก้", text)
+
+    def test_an_item_without_a_full_value_keeps_its_steps(self):
+        """ควบคุมเชิงลบ — ไม่มีค่าเต็มให้ ต้องยังมีบรรทัดบอกวิธีแก้"""
+        found = checker_module.found_with_diff('ข้อความเขียนว่า "นับเป็นส่วนหนึ่ง"',
+                                               analyze_diff("นับเป็นส่วนหนึ่ง", "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่ง"))
+        text = _summary_of(("RED", "front_matter", "หน้าลงนาม 1 (หน้า i)", found,
+                            "ข้อความต้องตรง template ทางการ", "", "FRONT.APPROVAL"))
+        self.assertIn('   ข้อความเขียนว่า "นับเป็นส่วนหนึ่ง"\n'
+                      '   ให้เติม "ได้รับการพิจารณาให้" หน้า "นับเป็น"\n'
+                      '   ข้อความต้องตรง template ทางการ', text)
+
+    def test_notice_lines_still_follow(self):
+        compared = {"status": "typo", "score": 0.95, "actual": "SOMCHAI JAIDE"}
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าปก",
+                checker_module.mismatch_detail("ชื่อนักศึกษา", compared, "SOMCHAI JAIDEE"),
+                'ต้องสะกดตรงข้อมูลอนุมัติทุกหน้า: "SOMCHAI JAIDEE"', "", "FORM.APPROVED_MATCH",
+                notice="(1) บรรทัดขั้นตอนเพิ่มเติม")
+        lines = checker_module._summary_sentence(rep.zones["RED"][0]).split("\n")
+        self.assertEqual([line.strip() for line in lines[1:]],
+                         ['ชื่อนักศึกษาในเล่มเขียนว่า "SOMCHAI JAIDE"', 'ต้องแก้เป็น "SOMCHAI JAIDEE"',
+                          "(1) บรรทัดขั้นตอนเพิ่มเติม"])
 
     def test_the_old_unhelpful_wording_is_gone(self):
         text = _summary_of(self._title_issue())
@@ -649,16 +703,26 @@ class TheSummaryLayout(unittest.TestCase):
                             'ตามประกาศ 2569 ควรเป็น "RESULTS"', "", "BODY.OPTION1"))
         self.assertIn('   ชื่อบทในเล่มเขียนว่า "RESEARCH RESULTS"\n   ต้องแก้เป็น "RESULTS"', text)
 
-    def test_two_steps_are_two_lines(self):
+    def test_two_fix_points_share_the_first_line(self):
         compared = {"status": "typo", "score": 0.97, "actual": ARealExtraSpaceIsNamed.TYPED}
         issue = ("RED", "front_matter", "บทคัดย่อภาษาไทย (หน้า vi)",
                  title_mismatch_detail("ชื่อเรื่องอีกภาษา", compared, APPROVED_TITLE),
                  f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{APPROVED_TITLE}"',
                  "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
         text = _summary_of(issue)
-        self.assertIn('   ให้ลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก\n'
-                      '   ให้ลบช่องว่างระหว่าง "ในระบบ" กับ "บริหาร"\n'
-                      '   ต้องแก้เป็น', text)
+        self.assertIn('   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก '
+                      'และลบช่องว่างระหว่าง "ในระบบ" กับ "บริหาร"\n'
+                      f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"', text)
+
+    def test_the_fix_points_are_joined_without_repeating_the_verb(self):
+        self.assertEqual(checker_module._joined_fix(['ให้แก้ "A" เป็น "B"', 'ให้แก้ "C" เป็น "D"']),
+                         'ต้องแก้ "A" เป็น "B" และ "C" เป็น "D"')
+        self.assertEqual(checker_module._joined_fix(['ให้แก้ "A" เป็น "B"', 'ให้เติม "X" หลัง "Y"']),
+                         'ต้องแก้ "A" เป็น "B" และเติม "X" หลัง "Y"')
+        # คำสั่ง "แก้" ที่มีตำแหน่งอ้างอิง คงคำกริยาไว้ ไม่ย่อเป็น '"C" ที่อยู่หลัง ...'
+        self.assertEqual(checker_module._joined_fix(['ให้แก้ "A" เป็น "B"',
+                                                     'ให้แก้ "C" ที่อยู่หลัง "Y" เป็น "D"']),
+                         'ต้องแก้ "A" เป็น "B" และแก้ "C" ที่อยู่หลัง "Y" เป็น "D"')
 
 
 class TheEnglishSummaryHasNoThaiLeftOver(unittest.TestCase):
@@ -699,6 +763,36 @@ class TheEnglishSummaryHasNoThaiLeftOver(unittest.TestCase):
              'Fix the letter case: change "CAMELINA" to "Camelina"'),
             ('ให้ลบช่องว่างระหว่าง "ในระบบ" กับ "บริหาร"',
              'Remove the space between "ในระบบ" and "บริหาร"'),
+        ):
+            with self.subTest(thai=thai):
+                self.assertEqual(self._english(thai), english)
+                self.assertIsNotNone(self.i18n.whole_rule(thai, self.pairs),
+                                     "ต้องเป็นกฎเต็มประโยค ไม่พึ่งเศษคำ")
+
+    def test_the_title_lines_are_whole_sentences(self):
+        """อัปเดต 1.7: บรรทัดข้อชื่อเรื่องในข้อความสรุป ทั้งประโยคนำ จุดที่ต้องแก้ และชื่อเรื่องที่ถูกต้อง"""
+        for thai, english in (
+            ('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ', 'Title does not match the approved record'),
+            ('ชื่อเรื่องภาษาอังกฤษในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ',
+             'The English title in the document does not match the approved record'),
+            ('ชื่อเรื่องภาษาไทยในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ',
+             'The Thai title in the document does not match the approved record'),
+            ('ชื่อเรื่องที่ถูกต้อง: "ก ข"', 'Correct title: "ก ข"'),
+            ('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ "A" เป็น "B"',
+             'Title does not match the approved record: change "A" to "B"'),
+            ('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ "A" เป็น "B" และ "C" เป็น "D"',
+             'Title does not match the approved record: change "A" to "B" and "C" to "D"'),
+            # ค่าในเครื่องหมายคำพูดมี " และ" ได้ ต้องไม่ถูกตัดเป็นสองคำสั่ง
+            ('ชื่อเรื่องภาษาไทยในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ ต้องแก้ "ความรู้ และทัศนคติ" เป็น "ความรู้และทัศนคติ" '
+             'และเติม "ของ" หลัง "ผล"',
+             'The Thai title in the document does not match the approved record: '
+             'change "ความรู้ และทัศนคติ" to "ความรู้และทัศนคติ" and add "ของ" after "ผล"'),
+            ('ชื่อเรื่องภาษาอังกฤษในรูปเล่ม ไม่ตรงกับข้อมูลในระบบ ต้องลบ "THE" ที่อยู่หลัง "OF" ออก '
+             'และลบช่องว่างระหว่าง "ใน" กับ "ระบบ"',
+             'The English title in the document does not match the approved record: '
+             'delete "THE" that follows "OF" and remove the space between "ใน" and "ระบบ"'),
+            ('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ตัวพิมพ์เล็ก-ใหญ่ "NI-BASED" เป็น "Ni-BASED"',
+             'Title does not match the approved record: change the letter case of "NI-BASED" to "Ni-BASED"'),
         ):
             with self.subTest(thai=thai):
                 self.assertEqual(self._english(thai), english)
