@@ -3044,7 +3044,7 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 
     seq = [e for e in entries if e[2] == main_style]
     if len(seq) > 1:
-        problems, _first = _sequence_problems([(i, lab, v) for i, lab, _s, v in seq], ignore)
+        problems, _first = _sequence_problems([(i, lab, v) for i, lab, _s, v in seq], ignore, main_style)
         if problems:
             observed = ", ".join(lab for _i, lab, _s, _v in seq)
             rep.add(PAGE_SEQUENCE_ZONE, "front_matter", "ส่วนนำ",
@@ -3083,31 +3083,68 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
                     f"ทุกหน้าต้องมีเลขหน้าเป็น{want}", fix, rule_id)
 
 
-def _sequence_problems(seq, ignore=()):
+def _int_to_roman(value):
+    """เลขโรมันตัวเล็ก (4 → "iv") — ใช้แสดงช่วงเลขหน้าส่วนนำ"""
+    out = ""
+    for number, symbol in ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+                           (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
+        while value >= number:
+            out += symbol
+            value -= number
+    return out
+
+
+def _page_label_of(style, value):
+    """ลำดับเลขหน้า → ป้ายตามชนิดของเล่ม (ย้อนกลับของ _page_label_order) เช่น ("thai", 3) → "ค" """
+    if style == "thai" and 1 <= value <= len(_THAI_PAGE_LETTERS):
+        return _THAI_PAGE_LETTERS[value - 1]
+    if style == "roman" and value >= 1:
+        return _int_to_roman(value)
+    return str(value)
+
+
+def _sequence_problems(seq, ignore=(), style="arabic"):
     """จุดที่เลขหน้าเรียงไม่ต่อเนื่อง — seq = [(ดัชนีหน้า, เลขที่พิมพ์, ลำดับ)] เรียงตามหน้า
 
     คืน (รายการจุด, ดัชนีหน้าแรกที่พบ) ใช้ทั้งส่วนนำและส่วนเนื้อหา/ส่วนท้าย (อัปเดต 1.8)
     หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้/ใช้ชนิดผิด ยังนับเป็นหน้าของเล่ม — เดิมส่วนนำ "ข้ามไปเลย" (continue) การตรวจ
     ความต่อเนื่องจึงเงียบทั้งช่วง ตอนนี้นับจำนวนหน้าที่คั่นแทน จึงยังฟันธงได้ว่าต่อเนื่องหรือไม่โดยไม่ต้องเดาว่า
-    หน้าที่อ่านไม่ออกพิมพ์เลขอะไร · ยกเว้นหน้าว่างจริง (ignore อัปเดต 1.7) · หลายหน้าใช้เลขเดียวกัน = จุดเดียว
+    หน้าที่อ่านไม่ออกพิมพ์เลขอะไร · ยกเว้นหน้าว่างจริง (ignore อัปเดต 1.7)
+
+    ถ้อยคำแต่ละจุด (อัปเดต 1.8.1 เจ้าของยืนยัน 28 ต.ค. 2569 — เดิม "กระโดดจาก A ไป B" ทุกแบบ ไม่บอกว่าซ้ำหรือขาดเลขอะไร)
+      เลขเดียวกันติดกัน    'เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า' (หลายหน้า = จุดเดียว)
+      ย้อนกลับ            'เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)' ช่วง = เลขใหม่ถึงเลขก่อนหน้า
+      ข้าม                'ข้ามเลขหน้า 153–154 (จาก "152" ไป "155")' เลขที่ขาด = จากเลขที่ควรเป็น (นับหน้าที่คั่นแล้ว)
+      น้อยกว่าที่ควร       'เลขหน้า "12" ควรเป็น "13"' (มากกว่าเลขก่อนหน้า แต่มีหน้าที่คั่นอยู่ซึ่งอ่านเลขไม่ได้)
+    ช่วงเลขแสดงเป็นชนิดเดียวกับเล่ม (style: "arabic" / "thai" ค–ง / "roman" iii–iv) คั่นด้วย "–"
     """
     ignore = set(ignore or ())
+
+    def span(lo, hi):
+        return _page_label_of(style, lo) if lo == hi else f"{_page_label_of(style, lo)}–{_page_label_of(style, hi)}"
+
     problems, first, dup_run = [], None, 1
     for k in range(1, len(seq)):
         prev_i, prev_lab, prev_v = seq[k - 1]
         cur_i, cur_lab, cur_v = seq[k]
-        gap = sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore)
-        if cur_v != prev_v:
-            dup_run = 1
-            if cur_v != prev_v + gap + 1:
-                problems.append(f'กระโดดจาก "{prev_lab}" ไป "{cur_lab}"')
+        if cur_v == prev_v:
+            dup_run += 1
+            if k == len(seq) - 1 or seq[k + 1][2] != cur_v:
+                problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
                 first = cur_i if first is None else first
+                dup_run = 1
             continue
-        dup_run += 1
-        if k == len(seq) - 1 or seq[k + 1][2] != cur_v:
-            problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
-            first = cur_i if first is None else first
-            dup_run = 1
+        dup_run = 1
+        want = prev_v + sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore) + 1
+        if cur_v == want:
+            continue
+        if cur_v < prev_v:
+            problems.append(f'เลขหน้า {span(cur_v, prev_v)} ซ้ำ (หลังหน้า "{prev_lab}" กลับไปเริ่ม "{cur_lab}" ใหม่)')
+        elif cur_v > want:
+            problems.append(f'ข้ามเลขหน้า {span(want, cur_v - 1)} (จาก "{prev_lab}" ไป "{cur_lab}")')
+        else:
+            problems.append(f'เลขหน้า "{cur_lab}" ควรเป็น "{_page_label_of(style, want)}"')
+        first = cur_i if first is None else first
     return problems, first
 
 

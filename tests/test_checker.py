@@ -2199,7 +2199,7 @@ class ThePageSequenceFindingIsOrange(unittest.TestCase):
         checker_module._check_front_page_numbers(rep, {1: "i", 2: "ii", 3: "iv"}, lambda i: f"แผ่นที่ {i + 1}",
                                                  1, 4, "roman", page_texts=["c", "i", "ii", "iv"])
         [issue] = rep.zones["ORANGE"]
-        self.assertEqual(issue["found"], 'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "ii" ไป "iv"')
+        self.assertEqual(issue["found"], 'เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า iii (จาก "ii" ไป "iv")')
         self.assertEqual(issue["rule_id"], "PAGE.NUMBERING_SEQUENCE")
         self.assertEqual(rep.zones["RED"], [])
 
@@ -2287,7 +2287,8 @@ class FrontPageNumberTests(unittest.TestCase):
         rep = self._run(["", "i", "ii", "v", "vi"], style="roman")
         found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
         self.assertEqual(len(found), 1)
-        self.assertIn('กระโดดจาก "ii" ไป "v"', found[0])
+        # อัปเดต 1.8.1: บอกเลขที่ขาดเป็นชนิดของเล่ม (เดิม 'กระโดดจาก "ii" ไป "v"')
+        self.assertIn('ข้ามเลขหน้า iii–iv (จาก "ii" ไป "v")', found[0])
 
     def test_arabic_in_front_matter_flagged(self):
         rep = self._run(["", "i", "ii", "3", "4"], style="roman")
@@ -2342,7 +2343,8 @@ class FrontPageNumberTests(unittest.TestCase):
         # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
         bad = self._run(["", "i", "", "v", "vi"], style="roman",
                         texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
-        self.assertTrue(any('กระโดดจาก "i" ไป "v"' in i["found"]
+        # เลขที่ขาดคิดจากเลขที่ควรเป็น (หน้าที่คั่น = ii) จึงขาด iii–iv (อัปเดต 1.8.1)
+        self.assertTrue(any('ข้ามเลขหน้า iii–iv (จาก "i" ไป "v")' in i["found"]
                             for i in bad.zones[checker_module.PAGE_SEQUENCE_ZONE]))
 
     def test_skipped_when_body_start_unknown(self):
@@ -10654,10 +10656,12 @@ class Update18BodyPageSequenceIsOneYellowItem(unittest.TestCase):
         seq = [(0, "1", 1), (1, "3", 3), (2, "3", 3), (3, "5", 5), (4, "7", 7), (5, "9", 9), (6, "11", 11), (7, "13", 13)]
         problems, first = checker_module._sequence_problems(seq)
         self.assertEqual(first, 1)
-        self.assertEqual(problems[:3], ['กระโดดจาก "1" ไป "3"', 'เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า', 'กระโดดจาก "3" ไป "5"'])
+        self.assertEqual(problems[:3], ['ข้ามเลขหน้า 2 (จาก "1" ไป "3")', 'เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า',
+                                        'ข้ามเลขหน้า 4 (จาก "3" ไป "5")'])
         self.assertEqual(checker_module.sequence_found(problems),
-                         'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "1" ไป "3" และ เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า และ '
-                         'กระโดดจาก "3" ไป "5" และ กระโดดจาก "5" ไป "7" และ กระโดดจาก "7" ไป "9" และอีก 2 จุด')
+                         'เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า 2 (จาก "1" ไป "3") และ เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า และ '
+                         'ข้ามเลขหน้า 4 (จาก "3" ไป "5") และ ข้ามเลขหน้า 6 (จาก "5" ไป "7") และ '
+                         'ข้ามเลขหน้า 8 (จาก "7" ไป "9") และอีก 2 จุด')
 
     def test_an_unreadable_page_between_is_still_a_page(self):
         problems, _first = checker_module._sequence_problems([(0, "71", 71), (2, "73", 73)])
@@ -10678,4 +10682,90 @@ class Update18BodyPageSequenceIsOneYellowItem(unittest.TestCase):
                   if i["rule_id"].startswith("PAGE.NUMBERING_SEQUENCE")]
         self.assertEqual([(z, i["rule_id"], i["location"], i["found"]) for z, i in issues],
                          [("YELLOW", "PAGE.NUMBERING_SEQUENCE_BODY", "หน้า 4",
-                           'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "2" ไป "4" และ กระโดดจาก "5" ไป "7"')])
+                           'เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า 3 (จาก "2" ไป "4") และ ข้ามเลขหน้า 6 (จาก "5" ไป "7")')])
+
+
+class Update181SequenceWording(unittest.TestCase):
+    """ถ้อยคำจุดเลขหน้าไม่ต่อเนื่อง (อัปเดต 1.8.1 เจ้าของยืนยัน 28 ต.ค. 2569) — ข้อมูลสมมติ ทั้งอารบิก ไทย และโรมัน
+
+    เดิมทุกแบบเป็น 'กระโดดจาก "A" ไป "B"' — เล่มที่นับซ้ำทั้งช่วงได้ 'กระโดดจาก "227" ไป "226"' และเล่มที่ข้ามเลข
+    ได้ 'กระโดดจาก "152" ไป "155"' ซึ่งไม่บอกว่าซ้ำหรือขาดเลขอะไร
+    """
+
+    @staticmethod
+    def _problems(labels, style="arabic", ignore=(), gaps=()):
+        """labels = ป้ายตามลำดับหน้า · gaps = ดัชนีของ labels ที่มีหน้าคั่น (อ่านเลขไม่ได้) อยู่ก่อนหน้า 1 หน้า"""
+        seq, idx = [], 0
+        for k, label in enumerate(labels):
+            idx += 1 + (1 if k in gaps else 0)
+            seq.append((idx, label, checker_module._page_label_order(label)[1]))
+        return checker_module._sequence_problems(seq, ignore, style)[0]
+
+    def test_counting_back_names_the_repeated_range(self):
+        self.assertEqual(self._problems(["225", "226", "227", "226", "227", "228"]),
+                         ['เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)'])
+        self.assertEqual(self._problems(["ข", "ค", "ง", "ค"], "thai"),
+                         ['เลขหน้า ค–ง ซ้ำ (หลังหน้า "ง" กลับไปเริ่ม "ค" ใหม่)'])
+        self.assertEqual(self._problems(["iii", "iv", "v", "iii"], "roman"),
+                         ['เลขหน้า iii–v ซ้ำ (หลังหน้า "v" กลับไปเริ่ม "iii" ใหม่)'])
+
+    def test_a_skip_names_the_missing_labels(self):
+        self.assertEqual(self._problems(["152", "155"]), ['ข้ามเลขหน้า 153–154 (จาก "152" ไป "155")'])
+        self.assertEqual(self._problems(["152", "154"]), ['ข้ามเลขหน้า 153 (จาก "152" ไป "154")'])
+        self.assertEqual(self._problems(["ข", "จ"], "thai"), ['ข้ามเลขหน้า ค–ง (จาก "ข" ไป "จ")'])
+        self.assertEqual(self._problems(["ii", "v"], "roman"), ['ข้ามเลขหน้า iii–iv (จาก "ii" ไป "v")'])
+        self.assertEqual(self._problems(["ix", "xi"], "roman"), ['ข้ามเลขหน้า x (จาก "ix" ไป "xi")'])
+
+    def test_the_missing_labels_count_a_page_that_could_not_be_read(self):
+        # 152, (อ่านไม่ออก = 153), 156 → ขาด 154–155
+        self.assertEqual(self._problems(["152", "156"], gaps={1}), ['ข้ามเลขหน้า 154–155 (จาก "152" ไป "156")'])
+
+    def test_less_than_expected_but_not_counting_back(self):
+        # 11, (อ่านไม่ออก), 12 → หน้านี้ควรเป็น 13
+        self.assertEqual(self._problems(["11", "12"], gaps={1}), ['เลขหน้า "12" ควรเป็น "13"'])
+        self.assertEqual(self._problems(["ก", "ข"], "thai", gaps={1}), ['เลขหน้า "ข" ควรเป็น "ค"'])
+        self.assertEqual(self._problems(["i", "ii"], "roman", gaps={1}), ['เลขหน้า "ii" ควรเป็น "iii"'])
+
+    def test_the_same_label_on_pages_in_a_row_is_unchanged(self):
+        self.assertEqual(self._problems(["2", "3", "3", "3", "4"]), ['เลขหน้า "3" ถูกใช้ซ้ำ 3 หน้า'])
+        self.assertEqual(self._problems(["ค", "ค", "ง"], "thai"), ['เลขหน้า "ค" ถูกใช้ซ้ำ 2 หน้า'])
+
+    def test_continuous_numbering_and_empty_sheets_are_still_fine(self):
+        self.assertEqual(self._problems(["1", "2", "3"]), [])
+        self.assertEqual(self._problems(["71", "73"], gaps={1}), [])                 # หน้าที่คั่นคือ 72
+        self.assertEqual(self._problems(["32", "33"], gaps={1}, ignore={2}), [])     # หน้าว่างจริงไม่นับ
+
+    def test_labels_convert_back_to_the_book_style(self):
+        self.assertEqual([checker_module._page_label_of("roman", v) for v in (1, 4, 9, 14, 40)],
+                         ["i", "iv", "ix", "xiv", "xl"])
+        self.assertEqual([checker_module._page_label_of("thai", v) for v in (1, 3, 4)], ["ก", "ค", "ง"])
+        self.assertEqual(checker_module._page_label_of("arabic", 153), "153")
+
+    def test_every_form_has_a_whole_sentence_english_rule(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        for thai, english in (
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)',
+             'The page numbers are not continuous: page labels 226–227 are repeated '
+             '(after page "227" the numbering starts again at "226")'),
+            ('เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า 153–154 (จาก "152" ไป "155")',
+             'The page numbers are not continuous: page labels 153–154 are skipped (from "152" to "155")'),
+            ('เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า iii (จาก "ii" ไป "iv")',
+             'The page numbers are not continuous: page label iii is skipped (from "ii" to "iv")'),
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้า "12" ควรเป็น "13"',
+             'The page numbers are not continuous: page label "12" should be "13"'),
+            ('เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า ค–ง (จาก "ข" ไป "จ") และ เลขหน้า "ค" ถูกใช้ซ้ำ 2 หน้า',
+             'The page numbers are not continuous: page labels ค–ง are skipped (from "ข" to "จ") '
+             'and page label "ค" is used on 2 pages'),
+            ('เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า 2 (จาก "1" ไป "3") และ ข้ามเลขหน้า 4 (จาก "3" ไป "5") และ '
+             'ข้ามเลขหน้า 6 (จาก "5" ไป "7") และ ข้ามเลขหน้า 8 (จาก "7" ไป "9") และ '
+             'เลขหน้า 9–10 ซ้ำ (หลังหน้า "10" กลับไปเริ่ม "9" ใหม่) และอีก 2 จุด',
+             'The page numbers are not continuous: page label 2 is skipped (from "1" to "3") and page label 4 is '
+             'skipped (from "3" to "5") and page label 6 is skipped (from "5" to "7") and page label 8 is skipped '
+             '(from "7" to "9") and page labels 9–10 are repeated (after page "10" the numbering starts again '
+             'at "9") and 2 more'),
+        ):
+            with self.subTest(thai=thai):
+                self.assertEqual(check_i18n.tr_en(thai, pairs), english)
+                self.assertIsNotNone(check_i18n.whole_rule(thai, pairs))
