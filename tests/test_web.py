@@ -2672,3 +2672,96 @@ class Update17TwoLinesInTheSummaryAndTheSheet(unittest.TestCase):
         for issue in main.JOBS["two"]["report"]["issues_by_zone"]["RED"]:
             self.assertIn("ต่างที่", issue["found"])
             self.assertIn(issue["found"].replace('"', "&#34;"), html)
+
+class Update18PassAllYellow(unittest.TestCase):
+    """ปุ่ม "✓ ผ่านทั้งหมด" ที่หัวกลุ่มรอยืนยัน (ส้ม) และข้อสังเกต (เหลือง) — อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569 · ข้อมูลสมมติ
+
+    พฤติกรรมของปุ่มบนเบราว์เซอร์ (กด / ยกเลิก / กดไม่ผ่านทีละใบหลังผ่านทั้งหมด) ลองบนเบราว์เซอร์จริง · ชุดนี้คุมหน้าเว็บ
+    และกุญแจที่ส่งไปฝั่งเซิร์ฟเวอร์ ซึ่งเป็นตัวตัดสินผลจริง
+    """
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        main.JOBS.clear()
+
+    def tearDown(self):
+        main.JOBS.clear()
+
+    def _job(self, yellow=2, orange=1, same_orange=False):
+        import checker
+        rep = checker.Report()
+        for k in range(yellow):
+            rep.add("YELLOW", "body/end", f"หน้า {40 + k}", "ระบบดึงข้อความจากหน้านี้ไม่ได้", "ผ่านได้", "",
+                    "PAGE.BLANK")
+        for k in range(orange):
+            # same_orange = การ์ดเหมือนกันทุกช่อง (เล่มจริงมีแบบนี้ 7 ใบ)
+            where = "สารบัญ (หน้า ซ)" if same_orange else f"สารบัญ (หน้า {'ซฌญ'[k % 3]})"
+            rep.add("ORANGE", "front_matter", where, "หัวข้อหลักไม่เป็นตัวหนา", "ตัวหนา", "", "FORMAT.BOLD")
+        checker._report_empty_pages(rep, {44}, {43: "32", 45: "33"})          # การ์ดส้มที่มี fail_text
+        with main.JOBS_LOCK:
+            main.JOBS["groups"] = {
+                "stage": "เสร็จ", "done": True, "error": None,
+                "report": checker.check_result(rep, {"front_label_style": "roman"}),
+                "pdf_name": "book.pdf", "approved": {}, "ts": time.time(),
+            }
+        return "groups"
+
+    def _html(self, **kw):
+        return self.client.get(f"/result/{self._job(**kw)}").text
+
+    def test_each_group_has_its_own_button(self):
+        html = self._html()
+        for zone in ("ORANGE", "YELLOW"):
+            with self.subTest(zone=zone):
+                start = html.index(f'<section class="panel zone-panel {zone}">')
+                button = html.index(f'id="{zone.lower()}-pass-all"')
+                self.assertLess(start, button)
+                self.assertLess(button, html.index("</h2>", start))
+                self.assertIn(f'data-pass-all="{zone}"', html)
+                self.assertIn(f"onclick=\"passAll('{zone}')\"", html)
+        self.assertNotIn('id="red-pass-all"', html)
+        self.assertEqual(html.count('data-th="✓ ผ่านทั้งหมด" data-en="✓ Pass all"'), 2)
+
+    def test_an_empty_group_has_no_button(self):
+        html = self._html(yellow=0)
+        self.assertNotIn('id="yellow-pass-all"', html)
+        self.assertIn('id="orange-pass-all"', html)          # ส้มยังมีการ์ดหน้าว่าง
+
+    def test_the_script_touches_only_its_group_and_can_undo(self):
+        html = self._html()
+        script = html[html.index("function zoneCards"):html.index("function renderPassAll")]
+        self.assertIn(".issue[data-zone=\"' + zone + '\"]", script)
+        self.assertIn("scheduleSummaryRefresh()", script)
+        self.assertNotIn(".note-view", script)                 # ไม่แตะความเห็นในการ์ด
+        self.assertIn("'ยกเลิกผ่านทั้งหมด'", html)
+        # ปุ่มทีละใบอัปเดตปุ่มรวมของกลุ่มนั้น — กดไม่ผ่านหลังผ่านทั้งหมด ปุ่มกลับเป็น "ผ่านทั้งหมด" ทันที
+        set_pf = html[html.index("function setPF"):html.index("function zoneCards")]
+        self.assertIn("renderPassAll(zone)", set_pf)
+
+    def test_cards_that_look_the_same_have_their_own_index(self):
+        """เล่มจริง: การ์ดส้ม 7 ใบที่เหมือนกันทุกช่องได้ data-idx ซ้ำ กดผ่านครบแล้วยังค้าง "รอยืนยัน" """
+        import re
+        html = self._html(yellow=0, orange=3, same_orange=True)
+        orange = re.findall(r'data-zone="ORANGE" data-idx="(\d+)"', html)
+        self.assertEqual(sorted(orange), ["0", "1", "2", "3"])
+        data = self.client.post("/summary/groups", json={"passed": [f"ORANGE:{i}" for i in orange]}).json()
+        self.assertEqual(data["verdict"], "ผ่าน")
+        self.assertEqual(data["counts"]["ORANGE"], 0)
+
+    def test_passing_all_keeps_a_fail_text_card_out_of_the_summary(self):
+        job = self._job()
+        report = main.JOBS[job]["report"]
+        keys = [f"{z}:{i}" for z in ("ORANGE", "YELLOW") for i in range(len(report["issues_by_zone"][z]))]
+        passed = self.client.post(f"/summary/{job}", json={"passed": keys}).json()
+        self.assertEqual(passed["verdict"], "ผ่าน")
+        self.assertNotIn("ลบหน้าว่าง", passed["plain"])
+        # กดไม่ผ่านใบเดียวหลังผ่านทั้งหมด = ไม่ผ่านจริงทุกอย่าง ถ้อยคำ fail_text เข้าสรุปและชีท
+        empty = next(i for i, it in enumerate(report["issues_by_zone"]["ORANGE"]) if it["rule_id"] == "PAGE.EMPTY")
+        failed = self.client.post(f"/summary/{job}", json={
+            "passed": [k for k in keys if k != f"ORANGE:{empty}"], "failed": [f"ORANGE:{empty}"]}).json()
+        self.assertEqual(failed["verdict"], "ไม่ผ่าน")
+        self.assertEqual(failed["counts"]["RED"], 1)
+        self.assertEqual(failed["counts"]["ORANGE"], 0)
+        self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", failed["plain"])
+        self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", failed["details"])

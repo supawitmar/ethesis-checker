@@ -2195,20 +2195,21 @@ class ThePageSequenceFindingIsOrange(unittest.TestCase):
         self.assertEqual(checker_module.PAGE_SEQUENCE_ZONE, "ORANGE")
 
     def test_the_finding_uses_that_zone(self):
-        source = inspect.getsource(checker_module)
-        block = source.split('"เลขหน้าไม่ต่อเนื่อง: " + " และ "', 1)[0][-260:]
-        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", block)
-        self.assertNotIn('rep.add("RED", "front_matter", "ส่วนนำ",' + NEWLINE
-                         + '                    "เลขหน้าไม่ต่อเนื่อง', source)
+        rep = Report()
+        checker_module._check_front_page_numbers(rep, {1: "i", 2: "ii", 3: "iv"}, lambda i: f"แผ่นที่ {i + 1}",
+                                                 1, 4, "roman", page_texts=["c", "i", "ii", "iv"])
+        [issue] = rep.zones["ORANGE"]
+        self.assertEqual(issue["found"], 'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "ii" ไป "iv"')
+        self.assertEqual(issue["rule_id"], "PAGE.NUMBERING_SEQUENCE")
+        self.assertEqual(rep.zones["RED"], [])
 
-    def test_the_body_page_sequence_is_orange_too(self):
-        """เจ้าหน้าที่สั่งเพิ่ม (ก.ย. 2569) ว่าเลขหน้าเนื้อหาที่กระโดดก็เป็นสีส้ม
-        เหมือนส่วนนำ — เป็นเรื่องเดียวกันคือความต่อเนื่องของเลขหน้า
+    def test_the_body_page_sequence_is_yellow(self):
+        """อัปเดต 1.8 (เจ้าของสั่ง 28 ต.ค. 2569): เลขหน้าส่วนเนื้อหา/ส่วนท้ายที่ไม่ต่อเนื่อง = สีเหลือง ข้อเดียวของส่วนนี้
+        (ก.ย. 2569 เคยสั่งให้เป็นส้มเหมือนส่วนนำ) — ส่วนนำยังเป็นส้ม จึงแยกรหัสกฎ
         """
-        source = inspect.getsource(checker_module)
-        before = source.split(
-            'f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}"', 1)[0][-200:]
-        self.assertIn("rep.add(PAGE_SEQUENCE_ZONE", before)
+        self.assertEqual(RULE_CATALOG["PAGE.NUMBERING_SEQUENCE_BODY"]["failure_zone"], "YELLOW")
+        self.assertEqual(checker_module.PAGE_SEQUENCE_BODY_ZONE, "YELLOW")
+        self.assertIn("rep.add(PAGE_SEQUENCE_BODY_ZONE", inspect.getsource(checker_module))
 
     def test_the_other_page_number_rules_stay_red(self):
         """ควบคุมเชิงลบ — ห้ามลากข้ออื่นของเลขหน้าเป็นสีส้มไปด้วย
@@ -9987,7 +9988,8 @@ class Update17EmptyPages(unittest.TestCase):
         # แผ่นภาพ (แผ่นที่ 5) ยังเป็นข้อหน้าภาพตามเดิม · แผ่นว่างไม่ซ้อนเป็นข้อดึงข้อความไม่ได้ และไม่ทำให้เลขหน้ากระโดด
         self.assertFalse(any("แผ่นที่ 3" in i["location"] or "หน้า 2" == i["location"]
                              for i in issues if i["rule_id"] in ("PAGE.BLANK", "UNCERTAIN.REVIEW",
-                                                                 "PAGE.NUMBERING_SEQUENCE")), issues)
+                                                                 "PAGE.NUMBERING_SEQUENCE",
+                                                                 "PAGE.NUMBERING_SEQUENCE_BODY")), issues)
 
 
 class Update17TocPageRanges(unittest.TestCase):
@@ -10469,3 +10471,211 @@ class TheSheetRowFollowsTheReport(unittest.TestCase):
         self.assertEqual(len(checker_module.sheet_undecided(report, failed=["ORANGE:0"])), 1)
         self.assertEqual(
             checker_module.sheet_undecided(report, failed=["ORANGE:0"], passed=["YELLOW:0"]), [])
+
+
+class Update18UnnumberedBodyPages(unittest.TestCase):
+    """ส่วนเนื้อหาและส่วนท้าย: หน้าที่มีข้อความแต่ไม่ได้พิมพ์เลขหน้า = แดงข้อเดียว (อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569)
+
+    ข้อมูลสมมติทั้งหมด · แบบเดียวกับกลุ่ม "ไม่ได้พิมพ์เลขหน้าไว้" ของส่วนนำ
+    """
+
+    PAGES = ["cover", "i" + NEWLINE + "front", "1" + NEWLINE + "CHAPTER 1 INTRODUCTION",
+             "Body text without a page number", "3" + NEWLINE + "More text", "", "5", "iv" + NEWLINE + "text"]
+    LABELS = {1: "i", 2: "1", 4: "3", 6: "5", 7: "iv"}
+
+    def _items(self, pages=None, labels=None, edge=(), skip=()):
+        rep = Report()
+        checker_module._report_unnumbered_body_pages(rep, self.PAGES if pages is None else pages,
+                                                     self.LABELS if labels is None else labels, 2,
+                                                     set(edge), skip=skip)
+        return rep.zones["RED"] + rep.zones["ORANGE"] + rep.zones["YELLOW"]
+
+    def test_a_page_with_text_and_no_number_is_one_red_item(self):
+        [issue] = self._items()
+        self.assertEqual(issue["found"], "1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์")
+        self.assertEqual(issue["expected"], "ทุกหน้าต้องมีเลขหน้าอารบิก")
+        self.assertEqual(issue["fix"], "เพิ่มเลขหน้าให้ครบทุกหน้า")
+        self.assertEqual(issue["rule_id"], "PAGE.NUMBERING")
+        self.assertEqual(issue["location"], "ส่วนเนื้อหา และส่วนท้าย")
+        rep = Report()
+        checker_module._report_unnumbered_body_pages(rep, self.PAGES, self.LABELS, 2, set())
+        self.assertEqual(len(rep.zones["RED"]), 1)
+
+    def test_pages_that_are_not_counted(self):
+        """หน้าว่าง / มีแค่เลขหน้า / อ่านเลขชนิดอื่นได้ / แถบขอบมีสิ่งที่อาจเป็นเลขหน้า / หน้าที่สั่งข้าม"""
+        self.assertEqual(self._items(edge={3}), [])
+        self.assertEqual(self._items(skip={3}), [])
+        only_blank = ["cover", "x", "1" + NEWLINE + "CHAPTER 1", "", "2", "iv" + NEWLINE + "text"]
+        self.assertEqual(self._items(pages=only_blank, labels={2: "1", 4: "2", 5: "iv"}), [])
+
+    def test_more_than_five_sheets_are_counted_not_listed(self):
+        pages = ["cover", "x"] + ["text"] * 7
+        [issue] = self._items(pages=pages, labels={})
+        self.assertEqual(issue["found"],
+                         "7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3, 4, 5, 6 และ 7 ของไฟล์ และอีก 2 หน้า")
+
+    def test_the_front_matter_wording_is_unchanged(self):
+        rep = Report()
+        checker_module._check_front_page_numbers(rep, {1: "i"}, lambda i: f"แผ่นที่ {i + 1}", 1, 4, "roman",
+                                                 page_texts=["c", "i", "text", "text"])
+        [issue] = rep.zones["RED"]
+        self.assertEqual(issue["found"], "2 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3 และ 4 ของไฟล์")
+
+
+class Update18EdgePageNumberHint(unittest.TestCase):
+    """สิ่งที่อาจเป็นเลขหน้าในแถบหัว/ท้ายกระดาษ — เล่มจริงพิมพ์เลขครบแต่อ่านจากบรรทัดแรก/สุดท้ายไม่ได้ (ข้อมูลสมมติ)"""
+
+    @staticmethod
+    def _word(text, top, height=842):
+        return {"text": text, "top": top, "bottom": top + 12}
+
+    def test_a_number_beside_a_running_head_counts(self):
+        words = [self._word("RUNNING", 40), self._word("HEAD", 40), self._word("12", 40)]
+        self.assertTrue(checker_module.edge_page_number_hint(words, 595, 842))
+
+    def test_a_landscape_page_number_just_below_eight_percent_counts(self):
+        # 8% ของความสูงหน้าแนวนอน (595) = 47.6 — เลขอยู่ที่ 48 ยังอยู่ในแถบที่วัดจากด้านยาว (67)
+        self.assertTrue(checker_module.edge_page_number_hint([self._word("27", 48)], 842, 595))
+
+    def test_a_number_glued_to_another_character_counts(self):
+        self.assertTrue(checker_module.edge_page_number_hint([self._word("x58", 40)], 595, 842))
+
+    def test_a_number_the_font_turned_into_letters_counts(self):
+        self.assertTrue(checker_module.edge_page_number_hint([self._word("JK", 40)], 595, 842))
+
+    def test_a_number_in_the_footer_counts(self):
+        self.assertTrue(checker_module.edge_page_number_hint([self._word("7", 800)], 595, 842))
+
+    def test_body_text_and_a_wordy_header_do_not_count(self):
+        self.assertFalse(checker_module.edge_page_number_hint(
+            [self._word("หัวกระดาษ", 40), self._word("RESULTS", 40), self._word("12", 300)], 595, 842))
+        self.assertFalse(checker_module.edge_page_number_hint([], 595, 842))
+
+    def test_a_synthetic_book_reports_the_unnumbered_body_page(self):
+        import tempfile
+        cover = "THESIS TITLE" + NEWLINE + "A THESIS SUBMITTED" + NEWLINE + "MAHIDOL UNIVERSITY"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            # หัวบทต้องมีชื่อบทบรรทัดถัดไป ระบบจึงรู้ว่าเนื้อหาเริ่มหน้าไหน
+            path.write_bytes(_pdf_with_pages([cover, "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION",
+                                              "Some text without a number", "3" + NEWLINE + "More text"]))
+            result = checker_module.run_check(str(path), None)
+        issues = [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+        body = [i for i in issues if i["rule_id"] == "PAGE.NUMBERING" and i["part"] == "body/end"]
+        self.assertEqual([(i["found"], i in result["issues_by_zone"]["RED"]) for i in body],
+                         [("1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3 ของไฟล์", True)])
+        # หน้านั้นยังเป็นหน้าคั่นในการตรวจความต่อเนื่อง — 1, (ไม่มีเลข), 3 ไม่ใช่เลขหน้ากระโดด
+        self.assertFalse([i for i in issues if i["rule_id"].startswith("PAGE.NUMBERING_SEQUENCE")])
+
+class Update18BodyPageNumberWordingIsTranslated(unittest.TestCase):
+    """ถ้อยคำข้อ "ไม่ได้พิมพ์เลขหน้าไว้" ของส่วนเนื้อหา/ส่วนท้าย มีคำแปลเต็มประโยค (อัปเดต 1.8)"""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        cls.i18n = check_i18n
+        _block, cls.pairs = check_i18n.load_tr()
+
+    def test_the_lines_are_whole_sentences(self):
+        for thai, english in (
+            ("ส่วนเนื้อหา และส่วนท้าย", "Content and end matter"),
+            ("ทุกหน้าต้องมีเลขหน้าอารบิก", "Every page must carry an Arabic page number"),
+            ("1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์", "1 page(s) carry no page number: sheet 4 of the file"),
+            ("7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3, 4, 5, 6 และ 7 ของไฟล์ และอีก 2 หน้า",
+             "7 page(s) carry no page number: sheet 3, 4, 5, 6 and 7 of the file and 2 more"),
+            # ข้อเลขหน้าไม่ต่อเนื่องของส่วนเนื้อหา/ส่วนท้าย (รวมข้อ อัปเดต 1.8)
+            ('เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "2" ไป "4" และ เลขหน้า "5" ถูกใช้ซ้ำ 2 หน้า',
+             'The page numbers are not continuous: jumps from "2" to "4" and page label "5" is used on 2 pages'),
+            ('เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "1" ไป "3" และ กระโดดจาก "3" ไป "5" และอีก 4 จุด',
+             'The page numbers are not continuous: jumps from "1" to "3" and jumps from "3" to "5" and 4 more'),
+            ("เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม",
+             "The page numbers must run one by one without repeats or gaps"),
+        ):
+            with self.subTest(thai=thai):
+                self.assertEqual(self.i18n.tr_en(thai, self.pairs), english)
+                self.assertIsNotNone(self.i18n.whole_rule(thai, self.pairs))
+
+
+class Update18RotatedPageNumbers(unittest.TestCase):
+    """เลขหน้าที่พิมพ์เป็นอักษรหมุนบนหน้าแนวนอน (อัปเดต 1.8 จากรายงานจริงของเจ้าของ 28 ต.ค. 2569) — ข้อมูลสมมติ
+
+    เดิมอ่านได้หลักเดียว ("44" → "4", "103" → "3") แล้วฟ้องเลขหน้าไม่ต่อเนื่องผิด 13 ข้อ
+    """
+
+    @staticmethod
+    def _word(text, x0, top, upright=False, width=10):
+        return {"text": text, "x0": x0, "x1": x0 + width, "top": top, "bottom": top + 10, "upright": upright}
+
+    def test_a_rotated_number_at_the_edge_is_read_whole(self):
+        words = [self._word("44", 742, 527), self._word("Table", 100, 80, upright=True, width=40)]
+        self.assertEqual(checker_module.rotated_page_label(words, 792, 612), "44")
+        self.assertEqual(checker_module.rotated_page_label([self._word("103", 742, 520)], 792, 612), "103")
+
+    def test_upright_numbers_and_rotated_numbers_inside_the_page_are_not_page_labels(self):
+        self.assertEqual(checker_module.rotated_page_label([self._word("44", 742, 527, upright=True)], 792, 612), "")
+        self.assertEqual(checker_module.rotated_page_label([self._word("12", 400, 300)], 792, 612), "")
+        self.assertEqual(checker_module.rotated_page_label([self._word("A1", 742, 527)], 792, 612), "")
+
+    def test_the_whole_number_replaces_the_single_digit(self):
+        labels, edge = {57: "4", 62: "9", 116: "3", 10: "12"}, set()
+        checker_module.merge_rotated_labels(labels, {57: "44", 62: "49", 116: "103", 10: "7"}, edge)
+        self.assertEqual(labels, {57: "44", 62: "49", 116: "103", 10: "12"})   # "7" ไม่ใช่หัว/ท้ายของ "12" = คงเดิม
+        self.assertEqual(edge, set())
+
+    def test_a_rotated_number_on_a_page_without_a_label_only_counts_as_numbered(self):
+        labels, edge = {}, set()
+        checker_module.merge_rotated_labels(labels, {5: "45"}, edge)
+        self.assertEqual(labels, {})
+        self.assertEqual(edge, {5})
+
+
+class Update18AbstractPageCount(unittest.TestCase):
+    """จำนวนหน้ารวมท้ายบทคัดย่อ ใช้บรรทัดที่เป็นจำนวนหน้าทั้งบรรทัด (อัปเดต 1.8) — ข้อมูลสมมติ"""
+
+    def test_a_sentence_that_mentions_pages_is_not_the_count(self):
+        lines = ["งานวิจัยนี้จัดเป็น 3 หน้าที่เชิงกลยุทธ์ของหน่วยงาน", "คำสำคัญ: ก / ข / ค", "154 หน้า"]
+        self.assertEqual(checker_module.abstract_page_count(lines), 154)
+
+    def test_english_and_the_last_whole_line_wins(self):
+        self.assertEqual(checker_module.abstract_page_count(["The study covers 2 pages of tables", "97 pages"]), 97)
+        self.assertEqual(checker_module.abstract_page_count(["(97 pages)", "98 pages"]), 98)
+
+    def test_a_count_printed_with_other_text_still_counts(self):
+        """ควบคุมเชิงลบ — เล่มที่พิมพ์จำนวนหน้าไว้บรรทัดเดียวกับข้อความอื่น ต้องไม่กลายเป็น "ไม่พบการระบุจำนวนหน้า" """
+        self.assertEqual(checker_module.abstract_page_count(["KEYWORDS: A / B / C 120 pages"]), 120)
+        self.assertIsNone(checker_module.abstract_page_count(["no count here"]))
+
+
+class Update18BodyPageSequenceIsOneYellowItem(unittest.TestCase):
+    """เลขหน้าไม่ต่อเนื่องส่วนเนื้อหา/ส่วนท้าย = เหลืองข้อเดียว (อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569) — ข้อมูลสมมติ"""
+
+    def test_jumps_and_repeats_are_listed_five_then_counted(self):
+        seq = [(0, "1", 1), (1, "3", 3), (2, "3", 3), (3, "5", 5), (4, "7", 7), (5, "9", 9), (6, "11", 11), (7, "13", 13)]
+        problems, first = checker_module._sequence_problems(seq)
+        self.assertEqual(first, 1)
+        self.assertEqual(problems[:3], ['กระโดดจาก "1" ไป "3"', 'เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า', 'กระโดดจาก "3" ไป "5"'])
+        self.assertEqual(checker_module.sequence_found(problems),
+                         'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "1" ไป "3" และ เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า และ '
+                         'กระโดดจาก "3" ไป "5" และ กระโดดจาก "5" ไป "7" และ กระโดดจาก "7" ไป "9" และอีก 2 จุด')
+
+    def test_an_unreadable_page_between_is_still_a_page(self):
+        problems, _first = checker_module._sequence_problems([(0, "71", 71), (2, "73", 73)])
+        self.assertEqual(problems, [])
+        problems, _first = checker_module._sequence_problems([(0, "32", 32), (2, "33", 33)], ignore={1})
+        self.assertEqual(problems, [])
+
+    def test_a_synthetic_book_gets_one_yellow_item_at_the_first_jump(self):
+        import tempfile
+        cover = "THESIS TITLE" + NEWLINE + "A THESIS SUBMITTED" + NEWLINE + "MAHIDOL UNIVERSITY"
+        body = ["1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION", "2" + NEWLINE + "text",
+                "4" + NEWLINE + "text", "5" + NEWLINE + "text", "7" + NEWLINE + "text"]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([cover] + body))
+            result = checker_module.run_check(str(path), None)
+        issues = [(zone, i) for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]
+                  if i["rule_id"].startswith("PAGE.NUMBERING_SEQUENCE")]
+        self.assertEqual([(z, i["rule_id"], i["location"], i["found"]) for z, i in issues],
+                         [("YELLOW", "PAGE.NUMBERING_SEQUENCE_BODY", "หน้า 4",
+                           'เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "2" ไป "4" และ กระโดดจาก "5" ไป "7"')])

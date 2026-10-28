@@ -60,6 +60,8 @@ MARKS_UNRELIABLE_FIX = ("ระบบอ่านวรรณยุกต์แ�
 # กฎอื่นของ PAGE.NUMBERING (ชนิดเลขหน้าผิด / ไม่มีเลขหน้า / เลขหน้าอารบิกไม่เริ่มที่บทที่ 1)
 # ยังเป็นแดงเหมือนเดิม จึงต้องแยกรหัสกฎ ไม่ใช่ใส่ failure_zone ให้ PAGE.NUMBERING ทั้งก้อน
 PAGE_SEQUENCE_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE", "ORANGE")
+# ส่วนเนื้อหา/ส่วนท้าย = ข้อสังเกต (อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569) — ส่วนนำยังส้ม
+PAGE_SEQUENCE_BODY_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE_BODY", "YELLOW")
 
 # ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
 # ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
@@ -526,18 +528,18 @@ def _is_header_page_label(token, front=False, front_style=None):
     return bool(re.fullmatch(r'\d{1,4}', token))
 
 
-def header_tokens(pdf_page):
+def header_tokens(pdf_page, words=None):
     """คำทั้งหมดในแถบหัวกระดาษ (บนสุดของหน้า) เรียงตามที่ pdfplumber อ่านได้
 
     เลขหน้าอยู่ในระยะขอบบน (~5-6% ของความสูง) ส่วนเนื้อความเริ่ม ~9%+ จึงตัดที่ 8%
-    เพื่อดูเฉพาะแถบหัวกระดาษ
+    เพื่อดูเฉพาะแถบหัวกระดาษ · words = คำของหน้าที่ดึงไว้แล้ว (ไม่ต้องดึงซ้ำ)
     """
     height = float(getattr(pdf_page, 'height', 0) or 0)
     if not height:
         return []
     cutoff = height * 0.08
     tokens = []
-    for word in (pdf_page.extract_words() or []):
+    for word in (pdf_page.extract_words() if words is None else words) or []:
         if float(word.get('top', height)) >= cutoff:
             continue
         # รหัส PUA ของฟอนต์ไทยที่ดึงมาเป็นกล่อง แปลงกลับเป็นอักษรจริงก่อน (thai_text.fix_thai_pua)
@@ -545,6 +547,61 @@ def header_tokens(pdf_page):
         if token:
             tokens.append(token)
     return tokens
+
+
+def edge_page_number_hint(words, width, height):
+    """แถบหัว/ท้ายกระดาษมีอะไรที่อาจเป็นเลขหน้าไหม — กันข้อ "ไม่ได้พิมพ์เลขหน้าไว้" ของส่วนเนื้อหา (อัปเดต 1.8)
+
+    _extract_page_label อ่านเลขหน้าเฉพาะบรรทัดแรก/สุดท้ายที่เป็นเลขล้วน เล่มจริง (ต.ค. 2569) พิมพ์เลขหน้าครบทุกหน้า
+    แต่อ่านไม่ได้ 63 หน้า: เลขอยู่บรรทัดเดียวกับ running head (52) · หน้าแนวนอนที่เลขเลยแถบ 8% ของความสูงไปนิด (8) ·
+    เลขติดกับตัวอักษรข้างหน้า (3) — ข้อนี้เป็นสีแดง จึงนับว่า "มีเลขหน้า" เมื่อแถบขอบบน/ล่างมีตัวเลข หรือมีคำอังกฤษ
+    สั้น ๆ (ฟอนต์ที่ map ตัวเลขเป็นตัวอักษร ดู unreadable_id_digits) · วัดแถบจากด้านยาวของหน้า หน้าแนวนอนจึงได้แถบเท่าหน้าตั้ง
+    """
+    if not height:
+        return False
+    band = 0.08 * max(width or 0, height)
+    for word in words or ():
+        if not (float(word.get('top', band)) < band or float(word.get('bottom', 0)) > height - band):
+            continue
+        token = fix_thai_pua(word.get('text', '') or '').strip()
+        if re.search(r'\d', token) or re.fullmatch(r'[A-Za-z]{1,4}', token):
+            return True
+    return False
+
+
+def rotated_page_label(words, width, height):
+    """เลขหน้าที่พิมพ์เป็นตัวอักษรหมุน (upright=False) ที่ขอบหน้า — '' ถ้าไม่มี (อัปเดต 1.8)
+
+    หน้าตารางแนวนอนของเล่มจริง (ต.ค. 2569) พิมพ์เลขหน้าแนวตั้งที่ขอบขวา _page_text จัดบรรทัดตาม top อักษรหมุน
+    แต่ละตัวจึงเป็นบรรทัดของตัวเอง _extract_page_label ได้แค่หลักเดียว ("44" → "4", "103" → "3") แล้วฟ้องเลขหน้า
+    ไม่ต่อเนื่องผิด 13 ข้อ — คำของ pdfplumber รวมอักษรหมุนเป็นคำเดียวถูกต้อง จึงอ่านเลขจากคำ (ตัวเลขล้วน ที่ขอบ 12%)
+    """
+    edge_x, edge_y = 0.12 * (width or 0), 0.12 * (height or 0)
+    for word in words or ():
+        if word.get('upright', True):
+            continue
+        token = (word.get('text') or '').strip()
+        if not re.fullmatch(r'\d{1,4}', token):
+            continue
+        if (float(word.get('x0', edge_x)) < edge_x or float(word.get('x1', 0)) > (width or 0) - edge_x
+                or float(word.get('top', edge_y)) < edge_y or float(word.get('bottom', 0)) > (height or 0) - edge_y):
+            return str(int(token))
+    return ""
+
+
+def merge_rotated_labels(page_labels, rotated_labels, edge_numbered):
+    """ใช้เลขหน้าอักษรหมุน (rotated_page_label) แทนเลขที่อ่านจากข้อความ — แก้ page_labels / edge_numbered ในที่
+
+    ข้อความของหน้าเหลือหลักเดียวของเลขนั้นที่บรรทัดแรก/สุดท้าย ("44" อ่านได้ "4") จึงใช้ทั้งคำเมื่อเลขที่อ่านได้เป็นหัว
+    หรือท้ายของมัน · อ่านจากข้อความไม่ได้เลย = ไม่เชื่อเป็นเลขหน้า (อาจเป็นตัวเลขในตารางที่หมุน) แต่ก็ไม่นับว่าหน้านั้น
+    ไม่ได้พิมพ์เลขหน้า (_report_unnumbered_body_pages) · หน้าที่ไม่มีอักษรหมุนไม่เปลี่ยน
+    """
+    for i, label in rotated_labels.items():
+        read = page_labels.get(i, "")
+        if read and (label.startswith(read) or label.endswith(read)):
+            page_labels[i] = label
+        elif not read:
+            edge_numbered.add(i)
 
 
 def header_extra_text(pdf_page, front=False, tokens=None, front_style=None):
@@ -2322,6 +2379,24 @@ def is_page_count_line(line):
                 or re.search(r'(\d{1,4})(หนา)', norm(line)))
 
 
+_PAGE_COUNT_WHOLE_LINE = re.compile(r'(\d{1,4})(?:PAGES?|หนา)')
+
+
+def abstract_page_count(lines):
+    """จำนวนหน้ารวมที่ระบุท้ายบทคัดย่อ ("154 หน้า" / "97 pages") — None ถ้าไม่พบ (อัปเดต 1.8)
+
+    ใช้บรรทัดที่เป็นจำนวนหน้าทั้งบรรทัด บรรทัดท้ายสุดก่อน — เดิมเอาบรรทัดแรกที่มี "N หน้า" อยู่ตรงไหนก็ได้
+    เล่มจริง (ต.ค. 2569) เนื้อความบทคัดย่อมี "จัดเป็น 3 หน้าที่…" อยู่ก่อนบรรทัด "154 หน้า" จึงได้ "ระบุจำนวนหน้า 3"
+    ไม่มีบรรทัดแบบนั้น = ใช้บรรทัดท้ายสุดที่มี "N หน้า/N pages" ปนข้อความอื่น (เล่มที่พิมพ์ไว้ในบรรทัดเดียวกับข้อความอื่น)
+    """
+    whole = [m for m in (_PAGE_COUNT_WHOLE_LINE.fullmatch(norm(line)) for line in lines) if m]
+    if whole:
+        return int(whole[-1].group(1))
+    loose = [m for line in lines
+             if (m := re.search(r'(\d{1,4})\s*PAGES?', line, re.I) or re.search(r'(\d{1,4})(หนา)', norm(line)))]
+    return int(loose[-1].group(1)) if loose else None
+
+
 def unreadable_id_digits(page_text, student_id, names=()):
     """ข้อความที่ยืนอยู่ตรงตำแหน่งตัวเลขรหัสนักศึกษา แต่ไม่ใช่ตัวเลข (คืน "" ถ้าปกติ)
 
@@ -2969,30 +3044,11 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
 
     seq = [e for e in entries if e[2] == main_style]
     if len(seq) > 1:
-        # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้/ใช้ชนิดผิด ยังนับเป็นหน้าของเล่ม
-        # เดิมเจอหน้าพวกนี้แล้ว "ข้ามไปเลย" (continue) การตรวจความต่อเนื่องจึงเงียบ
-        # ทั้งช่วง เล่มที่เลขหน้าผิดจริงเลยรอดไปได้ — ตอนนี้นับจำนวนหน้าที่คั่นแทน
-        # จึงยังฟันธงได้ว่าต่อเนื่องหรือไม่ โดยไม่ต้องเดาว่าหน้าที่อ่านไม่ออกพิมพ์เลขอะไร
-        problems, dup_run = [], 1
-        for k in range(1, len(seq)):
-            prev_i, prev_lab, _ps, prev_v = seq[k - 1]
-            cur_i, cur_lab, _cs, cur_v = seq[k]
-            gap = sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore)
-            if cur_v != prev_v:
-                dup_run = 1
-                if cur_v != prev_v + gap + 1:
-                    problems.append(f'กระโดดจาก "{prev_lab}" ไป "{cur_lab}"')
-                continue
-            # หลายหน้าใช้เลขเดียวกัน — รวมเป็นข้อความเดียว ไม่ฟ้องทีละคู่
-            dup_run += 1
-            if k == len(seq) - 1 or seq[k + 1][3] != cur_v:
-                problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
-                dup_run = 1
+        problems, _first = _sequence_problems([(i, lab, v) for i, lab, _s, v in seq], ignore)
         if problems:
-            more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
             observed = ", ".join(lab for _i, lab, _s, _v in seq)
             rep.add(PAGE_SEQUENCE_ZONE, "front_matter", "ส่วนนำ",
-                    "เลขหน้าไม่ต่อเนื่อง: " + " และ ".join(problems[:5]) + more,
+                    sequence_found(problems),
                     f"เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม (ที่พบ: {observed})",
                     "", "PAGE.NUMBERING_SEQUENCE")
 
@@ -3021,13 +3077,75 @@ def _check_front_page_numbers(rep, page_labels, page_ref, start_idx, stop_idx,
         ):
             if not group:
                 continue
-            sheets = [str(i + 1) for i in group[:5]]
-            shown = " และ ".join([", ".join(sheets[:-1]), sheets[-1]]) if len(sheets) > 1 \
-                else sheets[0]
-            more = f" และอีก {len(group) - 5} หน้า" if len(group) > 5 else ""
+            shown, more = _sheet_list(group)
             rep.add(zone, "front_matter", "ส่วนนำ",
                     f"{len(group)} หน้า{detail} คือแผ่นที่ {shown} ของไฟล์{more}",
                     f"ทุกหน้าต้องมีเลขหน้าเป็น{want}", fix, rule_id)
+
+
+def _sequence_problems(seq, ignore=()):
+    """จุดที่เลขหน้าเรียงไม่ต่อเนื่อง — seq = [(ดัชนีหน้า, เลขที่พิมพ์, ลำดับ)] เรียงตามหน้า
+
+    คืน (รายการจุด, ดัชนีหน้าแรกที่พบ) ใช้ทั้งส่วนนำและส่วนเนื้อหา/ส่วนท้าย (อัปเดต 1.8)
+    หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้/ใช้ชนิดผิด ยังนับเป็นหน้าของเล่ม — เดิมส่วนนำ "ข้ามไปเลย" (continue) การตรวจ
+    ความต่อเนื่องจึงเงียบทั้งช่วง ตอนนี้นับจำนวนหน้าที่คั่นแทน จึงยังฟันธงได้ว่าต่อเนื่องหรือไม่โดยไม่ต้องเดาว่า
+    หน้าที่อ่านไม่ออกพิมพ์เลขอะไร · ยกเว้นหน้าว่างจริง (ignore อัปเดต 1.7) · หลายหน้าใช้เลขเดียวกัน = จุดเดียว
+    """
+    ignore = set(ignore or ())
+    problems, first, dup_run = [], None, 1
+    for k in range(1, len(seq)):
+        prev_i, prev_lab, prev_v = seq[k - 1]
+        cur_i, cur_lab, cur_v = seq[k]
+        gap = sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore)
+        if cur_v != prev_v:
+            dup_run = 1
+            if cur_v != prev_v + gap + 1:
+                problems.append(f'กระโดดจาก "{prev_lab}" ไป "{cur_lab}"')
+                first = cur_i if first is None else first
+            continue
+        dup_run += 1
+        if k == len(seq) - 1 or seq[k + 1][2] != cur_v:
+            problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
+            first = cur_i if first is None else first
+            dup_run = 1
+    return problems, first
+
+
+def sequence_found(problems):
+    """ข้อความ "พบ" ของข้อเลขหน้าไม่ต่อเนื่อง — 5 จุดแรก + "และอีก N จุด\""""
+    more = f" และอีก {len(problems) - 5} จุด" if len(problems) > 5 else ""
+    return "เลขหน้าไม่ต่อเนื่อง: " + " และ ".join(problems[:5]) + more
+
+
+def _sheet_list(group, limit=5):
+    """แผ่นในไฟล์แบบที่ข้อเลขหน้าใช้ ("2, 3 และ 4") — คืน (รายการ, ท่อน " และอีก N หน้า" ถ้าเกิน limit)"""
+    sheets = [str(i + 1) for i in group[:limit]]
+    shown = " และ ".join([", ".join(sheets[:-1]), sheets[-1]]) if len(sheets) > 1 else sheets[0]
+    more = f" และอีก {len(group) - limit} หน้า" if len(group) > limit else ""
+    return shown, more
+
+
+def _report_unnumbered_body_pages(rep, pages, page_labels, start_idx, edge_numbered, skip=()):
+    """ส่วนเนื้อหาและส่วนท้าย: หน้าที่มีข้อความแต่ไม่ได้พิมพ์เลขหน้า — แดงข้อเดียว (อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569)
+
+    แบบเดียวกับกลุ่ม "ไม่ได้พิมพ์เลขหน้าไว้" ของส่วนนำ (_check_front_page_numbers) เดิมส่วนนี้ไม่มีข้อเทียบเท่า
+    หน้าพวกนี้ถูกนับเป็นหน้าคั่นในการตรวจความต่อเนื่องแล้วผ่านไปเงียบ ๆ (ยังนับเป็นหน้าคั่นเหมือนเดิม)
+    ไม่นับ: หน้าว่างจริง (PAGE.EMPTY) · หน้าที่ดึงข้อความไม่ได้หรือมีแค่เลขหน้า/ภาพ (PAGE.BLANK / UNCERTAIN ตามเดิม) ·
+    หน้าที่อ่านเลขหน้าได้แม้เป็นชนิดอื่น (PAGE.HEADER ฟ้องอยู่แล้ว) · หน้าที่แถบหัว/ท้ายกระดาษมีสิ่งที่อาจเป็นเลขหน้า
+    (edge_page_number_hint — เลขปน running head / หน้าแนวนอน / เลขติดตัวอักษร)
+    สำรวจเล่มจริง 5 เล่ม (28 ต.ค. 2569): ไม่มีหน้าที่ template ตั้งใจไม่พิมพ์เลข — หน้าแรกของบท หน้าแนวนอน
+    หน้าคั่นภาคผนวก และหน้าประวัติมีเลขหน้าทุกหน้า
+    """
+    skip = set(skip or ())
+    missing = [i for i in range(start_idx, len(pages))
+               if i not in skip and i not in edge_numbered and not page_labels.get(i)
+               and not _is_blank_page_text(pages[i])]
+    if not missing:
+        return
+    shown, more = _sheet_list(missing)
+    rep.add("RED", "body/end", "ส่วนเนื้อหา และส่วนท้าย",
+            f"{len(missing)} หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ {shown} ของไฟล์{more}",
+            "ทุกหน้าต้องมีเลขหน้าอารบิก", "เพิ่มเลขหน้าให้ครบทุกหน้า", "PAGE.NUMBERING")
 
 
 def strip_name_prefix(name):
@@ -7828,6 +7946,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # หน้ารูปภาพ/สแกน ไม่ใช่หน้าว่าง (อัปเดต 1.6.1 — เล่มจริงมีภาคผนวกเป็นภาพ 89 หน้า)
     image_pages = set()
     empty_pages = set()        # หน้าว่างจริง — ข้อ PAGE.EMPTY (อัปเดต 1.7)
+    edge_numbered = set()      # หน้าที่แถบหัว/ท้ายกระดาษมีสิ่งที่อาจเป็นเลขหน้า (edge_page_number_hint อัปเดต 1.8)
+    rotated_labels = {}        # เลขหน้าที่พิมพ์เป็นอักษรหมุน (rotated_page_label อัปเดต 1.8)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -7856,9 +7976,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             except Exception:
                 pass
             try:
-                header_words.append(header_tokens(_pg))
+                _words = _pg.extract_words()
+                header_words.append(header_tokens(_pg, words=_words))
+                if edge_page_number_hint(_words, float(_pg.width or 0), float(_pg.height or 0)):
+                    edge_numbered.add(_i)
+                _rotated = rotated_page_label(_words, float(_pg.width or 0), float(_pg.height or 0))
+                if _rotated:
+                    rotated_labels[_i] = _rotated
             except Exception:
                 header_words.append([])
+                edge_numbered.add(_i)          # อ่านแถบขอบไม่ได้ = ไม่ฟันธงว่าไม่มีเลขหน้า
             try:
                 _pg.flush_cache()
             except Exception:
@@ -7969,6 +8096,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     _p("ตรวจเลขหน้าและความต่อเนื่อง")
     page_labels = {i: label for i, text in enumerate(pages)
                    if (label := _extract_page_label(text))}
+    merge_rotated_labels(page_labels, rotated_labels, edge_numbered)
     printed = {i: int(label) for i, label in page_labels.items() if label.isdigit()}
 
     def page_ref(page_index):
@@ -8015,23 +8143,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if seq and seq[0][1] != 1:
             rep.add("RED", "body", page_ref(seq[0][0]), f"เลขหน้าอารบิกแรกที่พบคือ {seq[0][1]}",
                     "เลขหน้าอารบิกต้องเริ่มที่ 1 ณ บทที่ 1", "แก้การตั้งเลขหน้า", "PAGE.NUMBERING")
-        for k in range(1, len(seq)):
-            prev_idx, a = seq[k - 1]
-            cur_idx, b = seq[k]
-            # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้ ยังนับเป็นหน้าของเล่ม — ถ้าไม่นับ
-            # เล่มที่พิมพ์ 71, (อ่านไม่ออก), 73 จะถูกฟ้องผิดว่า "กระโดด 71 ไป 73"
-            # ทั้งที่หน้าที่คั่นคือ 72 พอดี (การตรวจเพี้ยนเพราะหาเลขหน้าไม่เจอ)
-            # ยกเว้นหน้าว่างจริง (อัปเดต 1.7) ซึ่งไม่มีเลขหน้าแน่นอน — 32, (ว่าง), 33 ต่อเนื่องแล้ว แจ้งแยกเป็น PAGE.EMPTY
-            gap = sum(1 for j in range(prev_idx + 1, cur_idx) if j not in empty_pages)
-            want = a + gap + 1
-            if b != want:
-                # ตำแหน่งคือหน้าที่พิมพ์เลขผิด ส่วน "พบ" บอกว่าหน้าก่อนหน้าเป็นเลขอะไร
-                # (เดิมตำแหน่งเขียนว่า "ช่วงเลขหน้า 71 ถึง 70" ซึ่งพูดเรื่องเดียวกับ
-                #  ข้อความ "เลขหน้ากระโดดจาก 71 ไป 70" ซ้ำสองรอบ)
-                rep.add(PAGE_SEQUENCE_ZONE, "body/end", page_ref(cur_idx),
-                        f"เลขหน้าไม่ต่อเนื่อง หน้าก่อนหน้านี้พิมพ์เลข {a}",
-                        f"หน้านี้ต้องเป็นหน้า {want}", "",
-                        "PAGE.NUMBERING_SEQUENCE")
+        # หน้าที่คั่นอยู่แต่อ่านเลขไม่ได้ ยังนับเป็นหน้าของเล่ม — 71, (อ่านไม่ออก), 73 ต่อเนื่องแล้ว ·
+        # หน้าว่างจริงไม่นับ (อัปเดต 1.7) · อัปเดต 1.8 (เจ้าของสั่ง 28 ต.ค. 2569): สีเหลือง ข้อเดียวของส่วนนี้แบบส่วนนำ
+        # ตำแหน่งคือหน้าแรกที่พบ — เดิมส้มข้อละจุด เล่มจริงที่อ่านเลขหน้าแนวนอนผิดได้ 13 ข้อ ("หน้า 0" ซ้ำ 7 ข้อ)
+        problems, first_bad = _sequence_problems([(i, str(v), v) for i, v in seq], empty_pages)
+        if problems:
+            rep.add(PAGE_SEQUENCE_BODY_ZONE, "body/end", page_ref(first_bad),
+                    sequence_found(problems),
+                    "เลขหน้าต้องเรียงต่อเนื่องทีละหน้า ไม่ซ้ำ ไม่ข้าม", "",
+                    "PAGE.NUMBERING_SEQUENCE_BODY")
     last_arabic = max(printed.values()) if printed else None
 
     # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
@@ -8536,6 +8656,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         body_ch[0][2] if body_ch else None,
         front_label_style,
         page_texts=pages, reported=list(sig_label_reported) + scanned_sig, ignore=empty_pages)
+    # ส่วนเนื้อหาและส่วนท้าย: หน้าที่มีข้อความแต่ไม่ได้พิมพ์เลขหน้า (อัปเดต 1.8)
+    if body_ch:
+        _report_unnumbered_body_pages(rep, pages, page_labels, body_ch[0][2], edge_numbered,
+                                      skip=empty_pages)
 
     def span_of(start):
         nxt = [b for b in boundaries if b > start] + [first_chapter]
@@ -8562,19 +8686,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         span_pgs = list(range(ai, min(ai + span_of(ai), n)))
         lbl = f"{abstract_page_label(ai, abs_en_pages, abs_th_pages)} ({page_ref(ai)})"
         # จำนวนหน้า "xxx pages / xxx หน้า" — ค้นทุกหน้าในช่วง (มักอยู่หน้าสุดท้ายของบทคัดย่อ)
-        m2 = None
-        for sp in span_pgs:
-            for raw in pages[sp].split('\n'):
-                m2 = re.search(r'(\d{1,4})\s*PAGES?', raw, re.I) or \
-                     re.search(r'(\d{1,4})(หนา)', norm(raw))
-                if m2:
-                    break
-            if m2:
-                break
-        if not m2:
+        stated = abstract_page_count([raw for sp in span_pgs for raw in pages[sp].split('\n')])
+        if stated is None:
             count_missing.append(lbl)
-        elif last_arabic is not None and int(m2.group(1)) != last_arabic:
-            count_wrong.append((lbl, int(m2.group(1))))
+        elif last_arabic is not None and stated != last_arabic:
+            count_wrong.append((lbl, stated))
         # keywords ≤5 — ค้นทุกหน้าในช่วง
         for sp in span_pgs:
             done_kw = False
