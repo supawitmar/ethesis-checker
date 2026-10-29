@@ -10975,9 +10975,16 @@ class Update182DegreeAbbreviations(unittest.TestCase):
         self.assertEqual(ethesis_import._degree_abbr("Doctor of Applied Thai Traditional Medicine"), "D.ATM.")
         self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์ดุษฎีบัณฑิต"), "พทป.ด.")
 
-    def test_the_unconfirmed_master_level_is_not_guessed(self):
-        self.assertEqual(ethesis_import._degree_abbr("MASTER OF APPLIED THAI TRADITIONAL MEDICINE"), "")
-        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์มหาบัณฑิต"), "")
+    def test_the_confirmed_master_abbreviations(self):
+        """เจ้าของยืนยันระดับมหาบัณฑิตเพิ่ม 29 ต.ค. 2569 — เดิมเทสต์นี้ล็อกว่าไม่เดา (ยังไม่มีใครยืนยัน)"""
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF APPLIED THAI TRADITIONAL MEDICINE"), "M.ATM.")
+        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์มหาบัณฑิต"), "พทป.ม.")
+        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์มหาบัณฑิต (สาขาสมมติ)"),
+                         "พทป.ม. (สาขาสมมติ)")
+
+    def test_a_degree_nobody_confirmed_is_still_not_guessed(self):
+        self.assertEqual(ethesis_import._degree_abbr("BACHELOR OF APPLIED THAI TRADITIONAL MEDICINE"), "")
+        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์บัณฑิต"), "")
 
     def test_the_stem_table_is_unchanged(self):
         self.assertEqual(ethesis_import._degree_abbr_th("ปรัชญาดุษฎีบัณฑิต"), "ปร.ด.")
