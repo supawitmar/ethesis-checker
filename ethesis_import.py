@@ -35,6 +35,7 @@ DEGREE_ABBR = {
     'DOCTOR OF NURSING SCIENCE': 'D.N.S.',      # ยืนยันจากเล่มจริง (เล่มที่ 6)
     'DOCTOR OF PUBLIC ADMINISTRATION': 'D.P.A.',
     'DOCTOR OF PUBLIC HEALTH': 'Dr. P.H.',      # ไม่ใช่ D.P.H. — เจ้าหน้าที่ยืนยัน ส.ค. 2569
+    'DOCTOR OF APPLIED THAI TRADITIONAL MEDICINE': 'D.ATM.',    # เจ้าของยืนยัน 28 ต.ค. 2569 (อัปเดต 1.8.2)
     'MASTER OF CLINICAL TROPICAL MEDICINE': 'M.C.T.M.',   # เจ้าหน้าที่พบในแบบฟอร์ม ก.ย. 2569
     'MASTER OF ENGINEERING': 'M.Eng.',
     'MASTER OF SCIENCE': 'M.Sc.',
@@ -67,6 +68,12 @@ DEGREE_ABBR_TH_STEM = {
     'อักษรศาสตร': 'อ',
     'นิเทศศาสตร': 'นศ',
     'เทคโนโลยีสารสนเทศ': 'ทส',
+}
+
+# ตัวย่อไทยที่ยืนยันเฉพาะชื่อเต็มทั้งชื่อ (สาขา + ระดับ) — ไม่ใส่ใน DEGREE_ABBR_TH_STEM เพราะ stem ใช้กับทั้งสองระดับ
+# แล้วจะได้ระดับที่ไม่มีใครยืนยัน (เช่น "พทป.ม.")
+DEGREE_ABBR_TH_FULL = {
+    'การแพทย์แผนไทยประยุกต์ดุษฎีบัณฑิต': 'พทป.ด.',     # เจ้าของยืนยัน 28 ต.ค. 2569 (อัปเดต 1.8.2)
 }
 
 
@@ -218,10 +225,12 @@ def _degree_abbr_th(value):
     if not m:
         return ''
     stem, level, field = m.group(1), m.group(2), m.group(3).strip()
-    abbr = DEGREE_ABBR_TH_STEM.get(stem)
-    if not abbr:
-        return ''
-    base = f"{abbr}.{'ด' if level == 'ดุษฎีบัณฑิต' else 'ม'}."
+    base = DEGREE_ABBR_TH_FULL.get(stem + level)
+    if not base:
+        abbr = DEGREE_ABBR_TH_STEM.get(stem)
+        if not abbr:
+            return ''
+        base = f"{abbr}.{'ด' if level == 'ดุษฎีบัณฑิต' else 'ม'}."
     return f'{base} ({field})' if field else base
 
 
@@ -513,10 +522,12 @@ def parse_ethesis_pdf(pdf_path):
         english = next((c for c in candidates
                         if re.search(r'[A-Za-z]', c) and not re.search(r'[ก-๙]', c)), '')
         thai = next((c for c in candidates if re.search(r'[ก-๙]', c)), '')
-        # แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis ตรง ๆ, หน้าลงนาม = Sentence
+        # แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis เป็นตัวพิมพ์ใหญ่เสมอ, หน้าลงนาม = Sentence
         # case สำหรับอังกฤษ (ไทยคงเดิม), บทคัดย่อ = ตัวย่อ
+        # ปกอังกฤษ .upper() เสมอ (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569) — ไฟล์ eThesis บางคนพิมพ์
+        # "Doctor of Applied Thai Traditional Medicine" ตัวเล็กปนใหญ่ ข้อหน้าปกจึงสั่งให้แก้เป็น "Doctor of…"
         if english:
-            data['degree_cover_en'] = _spaced_degree(english)
+            data['degree_cover_en'] = _spaced_degree(english).upper()
             data['degree_sig_en'] = _degree_name(english)
             abbr = _degree_abbr(english)
             if abbr:

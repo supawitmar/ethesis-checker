@@ -62,6 +62,8 @@ MARKS_UNRELIABLE_FIX = ("ระบบอ่านวรรณยุกต์แ�
 PAGE_SEQUENCE_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE", "ORANGE")
 # ส่วนเนื้อหา/ส่วนท้าย = ข้อสังเกต (อัปเดต 1.8 เจ้าของสั่ง 28 ต.ค. 2569) — ส่วนนำยังส้ม
 PAGE_SEQUENCE_BODY_ZONE = rule_zone("PAGE.NUMBERING_SEQUENCE_BODY", "YELLOW")
+# หน้าลงนามเป็นไฟล์สแกน = ส้ม (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569 — 1.5.2 เป็นแดง) · ไม่พบหน้าลงนามยังแดง
+SCANNED_SIGNATURE_ZONE = rule_zone("FRONT.APPROVAL_SCANNED", "ORANGE")
 
 # ความใกล้เคียงขั้นต่ำที่ยอมให้ยก "ช่วงข้อความในเล่ม" มาอ้างว่าเป็นประโยค template
 # ของหน้าลงนาม — สูงกว่าค่าปกติของ _closest_run เพราะชื่อปริญญาอยู่ต่อท้ายประโยคนี้
@@ -1054,7 +1056,14 @@ def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule
 
     # ตัวพิมพ์ผิดบนหน้าปก/บทคัดย่อ = ชัดเจน ฟันธงแดงได้ (เทียบกับกฎชื่อกรรมการที่แดงอยู่แล้ว)
     # ส่วนหน้าลงนามและกรณีมีแต่คำนำหน้าเกิน = ส้ม ให้เจ้าหน้าที่ตัดสิน
-    zone = "RED" if (bad_case and kind != "signature") else "ORANGE"
+    # ยกเว้นหน้าลงนามที่มีแต่คำนำหน้าเกิน (ตัวพิมพ์ถูก) = เหลือง เล่มผ่านได้ (เจ้าของสั่ง 28 ต.ค. 2569
+    # "ชื่อนักศึกษาในหน้าลงนาม มีคำนำหน้านาม เดิมสีส้มปรับเป็นเหลือง") — หน้าปก/บทคัดย่อยังส้ม
+    if bad_case and kind != "signature":
+        zone = "RED"
+    elif kind == "signature" and not bad_case:
+        zone = "YELLOW"
+    else:
+        zone = "ORANGE"
     # ชื่อภาษาไทยไม่มีตัวพิมพ์ใหญ่-เล็ก — บอกเฉพาะเรื่องคำนำหน้า ไม่พูดถึง UPPERCASE/Sentence Case ที่ไม่เกี่ยว
     # (หน้าลงนามเล่มไทยเริ่มถูกตรวจคำนำหน้า ต.ค. 2569 ถ้อยคำเดิมจะสั่งให้ชื่อไทยเป็น "Sentence Case")
     if english:
@@ -1063,7 +1072,7 @@ def _report_student_name_style(rep, page_text, core_name, loc, label, kind, rule
     else:
         expected = f'{label}ต้องเป็นชื่อ-นามสกุลเท่านั้น ไม่มีคำนำหน้านามหรือยศ คือ "{want_text}"'
     rep.add_verification("ชื่อนักศึกษา", loc,
-                         "fail" if zone == "RED" else "pending", "; ".join(reasons))
+                         {"RED": "fail", "YELLOW": "notice"}.get(zone, "pending"), "; ".join(reasons))
     rep.add(zone, "front_matter", loc,
             f'{label}บนหน้านี้พิมพ์ว่า "{seen}" ' + " และ ".join(reasons),
             expected, f'แก้{label}บนหน้านี้เป็น "{want_text}"', rule_id)
@@ -1428,20 +1437,46 @@ def signature_page_position(sig_pages, page_index):
         return "หน้าลงนาม"
 
 
-def scanned_signature_pages(page_texts, cover_idx, sig_pages, image_pages):
+SCAN_IMAGE_SHARE = 0.85      # ภาพเดียวครอบพื้นที่หน้าอย่างน้อยเท่านี้ = แผ่นสแกนเต็มหน้า (อัปเดต 1.8.2)
+
+
+def full_page_image(pdf_page):
+    """แผ่นนี้มีภาพเดียวที่ครอบเกือบทั้งหน้า (SCAN_IMAGE_SHARE) ไหม — แผ่นสแกนที่มีชั้นข้อความ OCR ก็ยังเป็นภาพเต็มหน้า
+
+    สำรวจเล่มจริง 9 เล่ม (28 ต.ค. 2569): แผ่นต้นเล่มของเล่มปกติไม่มีภาพเลย (โลโก้บนหน้าลงนามไม่มี) ภาพใหญ่สุด
+    ทั้งเล่มของเล่มอื่นครอบ 72% ของหน้า (ภาคผนวก) · หน้าลงนามสแกนของเล่มที่เจ้าของส่งครอบ 100%
+    """
+    width, height = float(pdf_page.width or 0), float(pdf_page.height or 0)
+    if width <= 0 or height <= 0:
+        return False
+    for image in pdf_page.images or ():
+        w = min(float(image["x1"]), width) - max(float(image["x0"]), 0.0)
+        h = min(float(image["bottom"]), height) - max(float(image["top"]), 0.0)
+        if w > 0 and h > 0 and w * h >= SCAN_IMAGE_SHARE * width * height:
+            return True
+    return False
+
+
+def scanned_signature_pages(page_texts, cover_idx, sig_pages, image_pages, full_image_pages=()):
     """แผ่นภาพสแกนที่อยู่ตรงตำแหน่งหน้าลงนาม (ถัดจากหน้าปก) — ระบบอ่านข้อความบนแผ่นนั้นไม่ได้
 
     เจ้าของทัก (21 ต.ค. 2569): เล่มที่สแกนหน้าลงนามที่เซ็นแล้วมาใส่เป็นภาพ ได้ "ไม่พบหน้าลงนามในเล่ม"
     ทั้งที่มีหน้าลงนาม แค่อ่านไม่ได้ ต้องแจ้งว่าอ่านไม่ได้และให้แนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม
-    นับเฉพาะแผ่นที่มีภาพและไม่มีข้อความ (หรือมีแค่เลขหน้า) ไล่จากแผ่นถัดจากปกจนเจอแผ่นที่มีข้อความ
+    นับแผ่นที่มีภาพและไม่มีข้อความ (หรือมีแค่เลขหน้า) ไล่จากแผ่นถัดจากปกจนเจอแผ่นที่มีข้อความ
     รวมกับหน้าลงนามที่อ่านได้แล้วไม่เกิน 2 แผ่น · หน้าขาวล้วนที่ไม่มีภาพไม่นับ (คงเป็น "ไม่พบหน้าลงนาม")
+    อัปเดต 1.8.2 (เจ้าของสั่ง 28 ต.ค. 2569): แผ่นสแกนที่มีชั้นข้อความ OCR เพี้ยนติดมา ("THEE FFECOTFS…") มีข้อความ
+    จึงไม่เคยเข้าเงื่อนไข เล่มจริงได้ "ไม่พบหน้าลงนาม" + "ไม่ได้พิมพ์เลขหน้า" + หัวกระดาษ — แผ่นภาพเต็มหน้า
+    (full_image_pages) นับเป็นแผ่นสแกนไม่ว่าจะมีข้อความหรือไม่ รวมทั้งแผ่นที่ข้อความ OCR อ่านออกเป็นหน้าลงนามได้
+    (ผู้เรียกตัดแผ่นที่คืนไปออกจากหน้าลงนามที่อ่านได้)
     """
-    if len(sig_pages) >= 2:
+    full = set(full_image_pages or ())
+    readable = [i for i in sig_pages if i not in full]
+    if len(readable) >= 2:
         return []
     found, i = [], cover_idx + 1
-    while i < len(page_texts) and len(found) + len(sig_pages) < 2:
-        if i not in sig_pages:
-            if i not in image_pages or not _is_blank_page_text(page_texts[i]):
+    while i < len(page_texts) and len(found) + len(readable) < 2:
+        if i not in readable:
+            if i not in full and (i not in image_pages or not _is_blank_page_text(page_texts[i])):
                 break
             found.append(i)
         i += 1
@@ -1555,11 +1590,14 @@ def _report_signature_page_count(rep, sig_pages, scanned, label_style=None):
     # ต้องมี 2 หน้า (Advisory + Examination)" ซึ่งอ่านไม่รู้เรื่อง — บอกตรง ๆ ว่าไม่พบ และต้องมีอะไรตรงไหน
     sig_labels = {"thai": "ก - ข", "roman": "i - ii"}.get(label_style, "i - ii หรือ ก - ข")
     if scanned:
+        # ส้ม ไม่ใช่แดง (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569 "มีหน้าลงนาม แต่เป็นไฟล์สแกน สีส้ม") — กดไม่ผ่าน =
+        # จุดที่ต้องแก้ ใช้บรรทัดที่ควรเป็นเดิม (fail_text)
         sheets = " และ ".join(str(i + 1) for i in scanned)
-        rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
-                f"อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ {sheets} ของไฟล์)",
-                f"กรุณาแนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม (หน้า {sig_labels}) แทนหน้าที่สแกน",
-                "แทนหน้าที่สแกนด้วยหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม", "FRONT.APPROVAL")
+        attach = f"กรุณาแนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม (หน้า {sig_labels}) แทนหน้าที่สแกน"
+        rep.add(SCANNED_SIGNATURE_ZONE, "front_matter", "หน้าลงนาม",
+                f"อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ {sheets} ของไฟล์)", attach,
+                "แทนหน้าที่สแกนด้วยหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม", "FRONT.APPROVAL_SCANNED",
+                fail_text=attach)
         return
     if len(sig_pages) != 2:
         rep.add(FRONT_FAILURE_ZONE, "front_matter", "หน้าลงนาม",
@@ -3111,11 +3149,17 @@ def _sequence_problems(seq, ignore=(), style="arabic"):
     ความต่อเนื่องจึงเงียบทั้งช่วง ตอนนี้นับจำนวนหน้าที่คั่นแทน จึงยังฟันธงได้ว่าต่อเนื่องหรือไม่โดยไม่ต้องเดาว่า
     หน้าที่อ่านไม่ออกพิมพ์เลขอะไร · ยกเว้นหน้าว่างจริง (ignore อัปเดต 1.7)
 
-    ถ้อยคำแต่ละจุด (อัปเดต 1.8.1 เจ้าของยืนยัน 28 ต.ค. 2569 — เดิม "กระโดดจาก A ไป B" ทุกแบบ ไม่บอกว่าซ้ำหรือขาดเลขอะไร)
+    ถ้อยคำแต่ละจุด (อัปเดต 1.8.2 เจ้าของยืนยัน 28 ต.ค. 2569 — เดิม "กระโดดจาก A ไป B" ทุกแบบ ไม่บอกว่าซ้ำหรือขาดเลขอะไร)
       เลขเดียวกันติดกัน    'เลขหน้า "3" ถูกใช้ซ้ำ 2 หน้า' (หลายหน้า = จุดเดียว)
-      ย้อนกลับ            'เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)' ช่วง = เลขใหม่ถึงเลขก่อนหน้า
+      ย้อนกลับ            'เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)' ช่วง = เลขที่พิมพ์ไว้แล้วในส่วนนั้น
+                          และพิมพ์อีกครั้งในช่วงที่ย้อนกลับ (ช่วงนั้นเรียงต่อเนื่องจากเลขใหม่) — เพิ่มเข้า 1.8.2 เจ้าของสั่ง
+                          28 ต.ค. 2569: เดิมช่วง = เลขใหม่ถึงเลขก่อนหน้า 1, 2, 5, 1, 2 จึงได้ "1–5 ซ้ำ" ทั้งที่ 3–4 ไม่เคยพิมพ์ ·
+                          เลขที่ซ้ำไม่ต่อเนื่องหรือไม่มีเลย 'เลขหน้าย้อนกลับ (หลังหน้า "5" กลับไปเริ่ม "1" ใหม่)' ไม่บอกช่วง
       ข้าม                'ข้ามเลขหน้า 153–154 (จาก "152" ไป "155")' เลขที่ขาด = จากเลขที่ควรเป็น (นับหน้าที่คั่นแล้ว)
       น้อยกว่าที่ควร       'เลขหน้า "12" ควรเป็น "13"' (มากกว่าเลขก่อนหน้า แต่มีหน้าที่คั่นอยู่ซึ่งอ่านเลขไม่ได้)
+      สลับกันคู่เดียว       'เลขหน้า "12" กับ "13" สลับกัน (พิมพ์ "13" ก่อน "12")' (เพิ่มเข้า 1.8.2 28 ต.ค. 2569) — ควรเป็น X
+                          แต่พบ X+1 แล้วหน้าถัดไปติดกันเป็น X และหน้าหลังจากนั้นกลับมาตรง (หรือคู่นี้เป็นท้ายส่วน)
+                          เดิมได้ 3 จุด ข้าม/ซ้ำ/ข้าม · สลับเกินคู่เดียวติดกันใช้ถ้อยคำแบบอื่นตามเดิม
     ช่วงเลขแสดงเป็นชนิดเดียวกับเล่ม (style: "arabic" / "thai" ค–ง / "roman" iii–iv) คั่นด้วย "–"
     """
     ignore = set(ignore or ())
@@ -3123,28 +3167,47 @@ def _sequence_problems(seq, ignore=(), style="arabic"):
     def span(lo, hi):
         return _page_label_of(style, lo) if lo == hi else f"{_page_label_of(style, lo)}–{_page_label_of(style, hi)}"
 
-    problems, first, dup_run = [], None, 1
-    for k in range(1, len(seq)):
+    def between(a, b):
+        """จำนวนหน้าที่คั่นระหว่างดัชนีหน้า a กับ b (ไม่นับหน้าว่างจริง)"""
+        return sum(1 for j in range(a + 1, b) if j not in ignore)
+
+    problems, first, dup_run, k = [], None, 1, 1
+    while k < len(seq):
         prev_i, prev_lab, prev_v = seq[k - 1]
         cur_i, cur_lab, cur_v = seq[k]
+        k += 1
         if cur_v == prev_v:
             dup_run += 1
-            if k == len(seq) - 1 or seq[k + 1][2] != cur_v:
+            if k == len(seq) or seq[k][2] != cur_v:
                 problems.append(f'เลขหน้า "{cur_lab}" ถูกใช้ซ้ำ {dup_run} หน้า')
                 first = cur_i if first is None else first
                 dup_run = 1
             continue
         dup_run = 1
-        want = prev_v + sum(1 for j in range(prev_i + 1, cur_i) if j not in ignore) + 1
+        want = prev_v + between(prev_i, cur_i) + 1
         if cur_v == want:
             continue
+        first = cur_i if first is None else first
+        nxt = seq[k] if k < len(seq) else None
+        if (nxt and cur_v == want + 1 and nxt[2] == want and not between(cur_i, nxt[0])
+                and (k + 1 == len(seq) or seq[k + 1][2] == want + 2 + between(nxt[0], seq[k + 1][0]))):
+            problems.append(f'เลขหน้า "{nxt[1]}" กับ "{cur_lab}" สลับกัน (พิมพ์ "{cur_lab}" ก่อน "{nxt[1]}")')
+            k += 2                      # หน้าที่สลับและหน้าหลังจากนั้นตรวจแล้ว
+            continue
         if cur_v < prev_v:
-            problems.append(f'เลขหน้า {span(cur_v, prev_v)} ซ้ำ (หลังหน้า "{prev_lab}" กลับไปเริ่ม "{cur_lab}" ใหม่)')
+            end = k
+            while end < len(seq) and seq[end][2] == seq[end - 1][2] + between(seq[end - 1][0], seq[end][0]) + 1:
+                end += 1
+            again = sorted({v for _i, _lab, v in seq[k - 1:end]} & {v for _i, _lab, v in seq[:k - 1]})
+            restart = f'(หลังหน้า "{prev_lab}" กลับไปเริ่ม "{cur_lab}" ใหม่)'
+            if again and again[-1] - again[0] == len(again) - 1:
+                problems.append(f'เลขหน้า {span(again[0], again[-1])} ซ้ำ {restart}')
+            else:
+                problems.append(f'เลขหน้าย้อนกลับ {restart}')
         elif cur_v > want:
             problems.append(f'ข้ามเลขหน้า {span(want, cur_v - 1)} (จาก "{prev_lab}" ไป "{cur_lab}")')
         else:
             problems.append(f'เลขหน้า "{cur_lab}" ควรเป็น "{_page_label_of(style, want)}"')
-        first = cur_i if first is None else first
     return problems, first
 
 
@@ -5625,7 +5688,10 @@ def _looks_like_degree_line(line):
                                or _FULL_DEGREE_NAME.search(text))
 
 
-_FULL_DEGREE_NAME = re.compile(r'^\s*(?:MASTER|DOCTOR|BACHELOR)\s+OF\s+\S|มหาบัณฑิต|ดุษฎีบัณฑิต', re.I)
+# "DEGREE OF" นำหน้า และระดับที่สะกดผิด ("DOCTORAL OF") ก็ยังเป็นบรรทัดชื่อปริญญา — เล่มจริง (อัปเดต 1.8.2 28 ต.ค. 2569)
+# พิมพ์ "DEGREE OF DOCTORAL OF APPLIED THAI TRADITIONAL MEDICINE" ตรงบรรทัดที่ต้องเป็น "D.ATM." แล้วได้ "ไม่พบบรรทัด"
+_FULL_DEGREE_NAME = re.compile(
+    r'^\s*(?:DEGREE\s+OF\s+)?(?:MASTER|DOCTOR|BACHELOR)[A-Z]*\s+OF\s+\S|มหาบัณฑิต|ดุษฎีบัณฑิต', re.I)
 
 
 def _degree_search_text(page_text, abstract=False):
@@ -7848,7 +7914,7 @@ def signature_preview(pdf_path, limit=20):
     แผ่นสแกนตรงตำแหน่งหน้าลงนาม (scanned_signature_pages) ได้ "scanned": True ด้วย — ระบบอ่านไม่ได้
     แต่เจ้าหน้าที่ยังดูรายชื่อจากภาพได้ ผลตรวจแจ้งให้แนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม
     """
-    texts, sig, images = [], [], set()
+    texts, sig, images, full = [], [], set(), set()
     with pdfplumber.open(pdf_path) as pdf:
         for i, pg in enumerate(pdf.pages[:limit]):
             texts.append(_page_text(pg))
@@ -7858,15 +7924,20 @@ def signature_preview(pdf_path, limit=20):
             try:
                 if pg.images:
                     images.add(i)
+                    if full_page_image(pg):
+                        full.add(i)
             except Exception:
                 pass
             try:
                 pg.flush_cache()
             except Exception:
                 pass
-    scanned = scanned_signature_pages(texts, find_cover_page(texts), sig, images)
-    return [{"index": i, "label": _extract_page_label(texts[i]), **({"scanned": True} if i in scanned else {})}
-            for i in sorted(sig + scanned)]
+    scanned = scanned_signature_pages(texts, find_cover_page(texts), sig, images, full)
+    # แผ่นสแกนที่ข้อความ OCR อ่านออกเป็นหน้าลงนาม ได้ "scanned" เหมือนแผ่นสแกนอื่น (อัปเดต 1.8.2) — ไม่นับซ้ำ
+    # เลขหน้าจากชั้น OCR ของแผ่นภาพเต็มหน้าเชื่อไม่ได้ ("1i") จึงไม่แสดง
+    return [{"index": i, "label": "" if i in scanned and i in full else _extract_page_label(texts[i]),
+             **({"scanned": True} if i in scanned else {})}
+            for i in sorted(set(sig) | set(scanned))]
 
 
 _ROMAN_FRONT_LABELS = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x")
@@ -7982,6 +8053,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # หน้าที่มีภาพ — แยกหน้าลงนามที่สแกนมาออกจาก "ไม่พบหน้าลงนาม" และเรียกหน้าที่มีแค่เลขหน้ากับภาพว่า
     # หน้ารูปภาพ/สแกน ไม่ใช่หน้าว่าง (อัปเดต 1.6.1 — เล่มจริงมีภาคผนวกเป็นภาพ 89 หน้า)
     image_pages = set()
+    full_image_pages = set()   # แผ่นภาพเต็มหน้า (full_page_image) — หน้าลงนามสแกนที่มีชั้นข้อความ OCR (อัปเดต 1.8.2)
     empty_pages = set()        # หน้าว่างจริง — ข้อ PAGE.EMPTY (อัปเดต 1.7)
     edge_numbered = set()      # หน้าที่แถบหัว/ท้ายกระดาษมีสิ่งที่อาจเป็นเลขหน้า (edge_page_number_hint อัปเดต 1.8)
     rotated_labels = {}        # เลขหน้าที่พิมพ์เป็นอักษรหมุน (rotated_page_label อัปเดต 1.8)
@@ -8003,6 +8075,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             try:
                 if _pg.images:
                     image_pages.add(_i)
+                    if _i < 20 and full_page_image(_pg):      # ใช้เฉพาะตำแหน่งหน้าลงนามต้นเล่ม
+                        full_image_pages.add(_i)
             except Exception:
                 pass
             try:
@@ -8081,7 +8155,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # บอกสาเหตุจริงเลย และบางข้ออ่านแล้วสับสน เช่นยกชื่อเรื่องมาอ้างว่าเป็นชื่อนักศึกษา
     cover_idx = find_cover_page(pages)
     cover_text = pages[cover_idx] if pages else ""
-    scanned_sig = scanned_signature_pages(pages, cover_idx, sig_pages, image_pages)
+    scanned_sig = scanned_signature_pages(pages, cover_idx, sig_pages, image_pages, full_image_pages)
+    # แผ่นสแกนที่ชั้นข้อความ OCR อ่านออกเป็นหน้าลงนาม ไม่ตรวจเป็นหน้าลงนามที่อ่านได้ — แจ้งข้อเดียวว่าเป็นไฟล์สแกน
+    # เหมือนแผ่นสแกนอื่น (อัปเดต 1.8.2) ข้อความ OCR เพี้ยนจะฟ้องชื่อ/กรรมการผิดทั้งหน้า
+    sig_pages[:] = [i for i in sig_pages if i not in scanned_sig]
     want_language = (approved_book_language(approved)
                      if approved and same_student and not skip_identity_check else "")
     if want_language:
@@ -8582,6 +8659,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         )
         def header_reported_elsewhere(i, front):
             # หัวกระดาษปกที่มีแค่เลขหน้า แจ้งไว้แล้วในข้อ "หน้าปกมีเลขหน้า" (อัปเดต 1.6.1) — ไม่แจ้งซ้ำที่นี่
+            # แผ่นสแกนตรงหน้าลงนามแจ้งเป็นข้อเดียวแล้ว — ข้อความ OCR บนหัวกระดาษไม่ใช่สิ่งที่เล่มพิมพ์ (อัปเดต 1.8.2)
+            if i in scanned_sig:
+                return True
             return front and cover_label and i == cover_idx and header_extra_at(i, front) == cover_label
 
         for part, label, span, front, found, expected, fix in header_spans:
@@ -9365,6 +9445,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
         # ตรวจชื่อปริญญาแบบย่อในบทคัดย่อ — เล่มหลักสูตรไทย/ไทย-อังกฤษ ต้องตรวจทั้ง
         # บทคัดย่ออังกฤษ (M.Sc./Ph.D.) และบทคัดย่อไทย (วท.ม./ปร.ด.) จึงทำเป็น helper
+        # ตัวย่อ = ค่าที่เจ้าหน้าที่กรอกในฟอร์มเสมอ — ช่องว่างไม่ถึงตรงนี้ เพราะฟอร์มและ /check บังคับกรอกช่องตัวย่อของ
+        # บทคัดย่อทุกภาษาที่หลักสูตรมี และทุกภาษาที่มีชื่อปริญญา (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569)
         def _check_degree_abbr(abbr, abstract_idx, lang):
             if not abbr or abstract_idx is None:
                 return

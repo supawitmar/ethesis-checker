@@ -693,6 +693,13 @@ async def check(
     }
     required_fields = FRONT_MATTER_RULES["required_form_fields"][program_language]
     missing = [FORM_FIELD_LABELS[name] for name in required_fields if not form_values[name]]
+    # มีชื่อปริญญาภาษาไหน ตัวย่อภาษานั้นต้องกรอกด้วย — หน้าฟอร์มบังคับแบบเดียวกัน (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569:
+    # ระบบไม่มีตัวย่อของปริญญานั้น ช่องว่างหลังนำเข้า "เจ้าหน้าที่จะ input เข้าไปให้")
+    for lang in ("en", "th"):
+        abbr = f"degree_abbr_{lang}"
+        if ((form_values[f"degree_cover_{lang}"] or form_values[f"degree_sig_{lang}"])
+                and not form_values[abbr] and FORM_FIELD_LABELS[abbr] not in missing):
+            missing.append(FORM_FIELD_LABELS[abbr])
     if missing:
         raise HTTPException(
             status_code=400,

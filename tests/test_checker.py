@@ -2287,7 +2287,7 @@ class FrontPageNumberTests(unittest.TestCase):
         rep = self._run(["", "i", "ii", "v", "vi"], style="roman")
         found = [i["found"] for i in rep.zones[checker_module.PAGE_SEQUENCE_ZONE]]
         self.assertEqual(len(found), 1)
-        # อัปเดต 1.8.1: บอกเลขที่ขาดเป็นชนิดของเล่ม (เดิม 'กระโดดจาก "ii" ไป "v"')
+        # อัปเดต 1.8.2: บอกเลขที่ขาดเป็นชนิดของเล่ม (เดิม 'กระโดดจาก "ii" ไป "v"')
         self.assertIn('ข้ามเลขหน้า iii–iv (จาก "ii" ไป "v")', found[0])
 
     def test_arabic_in_front_matter_flagged(self):
@@ -2343,7 +2343,7 @@ class FrontPageNumberTests(unittest.TestCase):
         # i, (อ่านไม่ออก), v -> ต่อให้หน้าที่คั่นเป็น ii ก็ยังข้ามจาก ii ไป v อยู่ดี
         bad = self._run(["", "i", "", "v", "vi"], style="roman",
                         texts=["ปก", "หน้า i", "", "หน้า v", "หน้า vi"])
-        # เลขที่ขาดคิดจากเลขที่ควรเป็น (หน้าที่คั่น = ii) จึงขาด iii–iv (อัปเดต 1.8.1)
+        # เลขที่ขาดคิดจากเลขที่ควรเป็น (หน้าที่คั่น = ii) จึงขาด iii–iv (อัปเดต 1.8.2)
         self.assertTrue(any('ข้ามเลขหน้า iii–iv (จาก "i" ไป "v")' in i["found"]
                             for i in bad.zones[checker_module.PAGE_SEQUENCE_ZONE]))
 
@@ -9577,18 +9577,27 @@ class SignaturePreviewTabLabels(unittest.TestCase):
 
 
 def _pdf_with_pages(pages):
-    """PDF เล็ก ๆ ในหน่วยความจำ — แต่ละหน้าเป็นข้อความ (str) หรือภาพเต็มหน้าไม่มีข้อความ (None)"""
+    """PDF เล็ก ๆ ในหน่วยความจำ — แต่ละหน้าเป็นข้อความ (str) หรือภาพเต็มหน้าไม่มีข้อความ (None)
+
+    หรือ (ข้อความ, "w 0 0 h x y") = ภาพตามตำแหน่งนั้นใต้ชั้นข้อความ เช่น แผ่นสแกนที่มีชั้นข้อความ OCR
+    ("595 0 0 842 0 0" เต็มหน้า) หรือโลโก้เล็ก (อัปเดต 1.8.2)
+    """
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None,
                b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
                b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray "
                b"/BitsPerComponent 8 /Length 1 >>\nstream\n\x80\nendstream"]
     kids = []
     for text in pages:
+        image = None
+        if isinstance(text, tuple):
+            text, image = text
         if text is None:
             stream = b"q 595 0 0 842 0 0 cm /Im1 Do Q"
         else:
             lines = " ".join(f"({line}) Tj 0 -16 Td" for line in text.split(NEWLINE))
             stream = f"BT /F1 12 Tf 72 760 Td {lines} ET".encode("ascii")
+            if image:
+                stream = f"q {image} cm /Im1 Do Q ".encode("ascii") + stream
         objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
                        + stream + b"\nendstream")
         objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
@@ -9634,18 +9643,23 @@ class ScannedSignaturePages(unittest.TestCase):
         self.assertEqual(checker_module.scanned_signature_pages([self.COVER, self.ACK, ""], 0, [], {2}), [])
 
     def test_scanned_pages_say_they_cannot_be_read_and_ask_for_the_unsigned_original(self):
+        """อัปเดต 1.8.2 (เจ้าของสั่ง 28 ต.ค. 2569 "มีหน้าลงนาม แต่เป็นไฟล์สแกน สีส้ม"): แดง → ส้ม ถ้อยคำเดิม
+        กดไม่ผ่าน = บรรทัดที่ควรเป็นเดิม (fail_text) · รหัสกฎแยกเป็น FRONT.APPROVAL_SCANNED"""
         rep = Report()
         checker_module._report_signature_page_count(rep, [], [1, 2], "roman")
-        [issue] = rep.zones["RED"]
+        self.assertEqual(rep.zones["RED"], [])
+        [issue] = rep.zones["ORANGE"]
         self.assertEqual(issue["location"], "หน้าลงนาม")
         self.assertEqual(issue["found"], "อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ 2 และ 3 ของไฟล์)")
         self.assertEqual(issue["expected"],
                          "กรุณาแนบหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม (หน้า i - ii) แทนหน้าที่สแกน")
-        self.assertEqual(issue["rule_id"], "FRONT.APPROVAL")
+        self.assertEqual(issue["fail_text"], issue["expected"])
+        self.assertEqual(issue["rule_id"], "FRONT.APPROVAL_SCANNED")
+        self.assertEqual(checker_module.rule_zone("FRONT.APPROVAL_SCANNED"), "ORANGE")
         self.assertNotIn("ไม่พบหน้าลงนาม", issue["found"])
         rep = Report()
         checker_module._report_signature_page_count(rep, [1], [2], "thai")
-        [issue] = rep.zones["RED"]
+        [issue] = rep.zones["ORANGE"]
         self.assertEqual(issue["found"], "อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ 3 ของไฟล์)")
         self.assertIn("(หน้า ก - ข)", issue["expected"])
 
@@ -10685,8 +10699,8 @@ class Update18BodyPageSequenceIsOneYellowItem(unittest.TestCase):
                            'เลขหน้าไม่ต่อเนื่อง: ข้ามเลขหน้า 3 (จาก "2" ไป "4") และ ข้ามเลขหน้า 6 (จาก "5" ไป "7")')])
 
 
-class Update181SequenceWording(unittest.TestCase):
-    """ถ้อยคำจุดเลขหน้าไม่ต่อเนื่อง (อัปเดต 1.8.1 เจ้าของยืนยัน 28 ต.ค. 2569) — ข้อมูลสมมติ ทั้งอารบิก ไทย และโรมัน
+class Update182SequenceWording(unittest.TestCase):
+    """ถ้อยคำจุดเลขหน้าไม่ต่อเนื่อง (อัปเดต 1.8.2 เจ้าของยืนยัน 28 ต.ค. 2569) — ข้อมูลสมมติ ทั้งอารบิก ไทย และโรมัน
 
     เดิมทุกแบบเป็น 'กระโดดจาก "A" ไป "B"' — เล่มที่นับซ้ำทั้งช่วงได้ 'กระโดดจาก "227" ไป "226"' และเล่มที่ข้ามเลข
     ได้ 'กระโดดจาก "152" ไป "155"' ซึ่งไม่บอกว่าซ้ำหรือขาดเลขอะไร
@@ -10704,9 +10718,10 @@ class Update181SequenceWording(unittest.TestCase):
     def test_counting_back_names_the_repeated_range(self):
         self.assertEqual(self._problems(["225", "226", "227", "226", "227", "228"]),
                          ['เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)'])
-        self.assertEqual(self._problems(["ข", "ค", "ง", "ค"], "thai"),
+        # นับต่อจากเลขที่ย้อนกลับไปจนเลยเลขเดิม แบบเล่มจริง (ช่วงที่ซ้ำ = เลขที่พิมพ์สองครั้ง — เพิ่มเข้า 1.8.2)
+        self.assertEqual(self._problems(["ข", "ค", "ง", "ค", "ง", "จ"], "thai"),
                          ['เลขหน้า ค–ง ซ้ำ (หลังหน้า "ง" กลับไปเริ่ม "ค" ใหม่)'])
-        self.assertEqual(self._problems(["iii", "iv", "v", "iii"], "roman"),
+        self.assertEqual(self._problems(["iii", "iv", "v", "iii", "iv", "v", "vi"], "roman"),
                          ['เลขหน้า iii–v ซ้ำ (หลังหน้า "v" กลับไปเริ่ม "iii" ใหม่)'])
 
     def test_a_skip_names_the_missing_labels(self):
@@ -10769,3 +10784,255 @@ class Update181SequenceWording(unittest.TestCase):
             with self.subTest(thai=thai):
                 self.assertEqual(check_i18n.tr_en(thai, pairs), english)
                 self.assertIsNotNone(check_i18n.whole_rule(thai, pairs))
+
+
+class Update182SwappedAndGoingBack(unittest.TestCase):
+    """เพิ่มเข้า 1.8.2 (เจ้าของสั่ง 28 ต.ค. 2569 "ข้อสังเกต 2 กรณีที่เกิดได้ยาก") — ข้อมูลสมมติ ทั้งอารบิก ไทย และโรมัน
+
+    หน้าสลับกัน 10, 11, 13, 12, 14 เดิมได้ 3 จุด (ข้าม 12 / 12–13 ซ้ำ / ข้าม 13) · ข้ามแล้วย้อนกลับ 1, 2, 5, 1, 2 เดิมได้
+    "เลขหน้า 1–5 ซ้ำ" ทั้งที่ 3–4 ไม่เคยพิมพ์
+    """
+
+    _problems = staticmethod(Update182SequenceWording._problems)
+
+    def test_one_swapped_pair_is_one_point(self):
+        self.assertEqual(self._problems(["10", "11", "13", "12", "14"]),
+                         ['เลขหน้า "12" กับ "13" สลับกัน (พิมพ์ "13" ก่อน "12")'])
+        self.assertEqual(self._problems(["ข", "ค", "จ", "ง", "ฉ"], "thai"),
+                         ['เลขหน้า "ง" กับ "จ" สลับกัน (พิมพ์ "จ" ก่อน "ง")'])
+        self.assertEqual(self._problems(["i", "ii", "iv", "iii", "v"], "roman"),
+                         ['เลขหน้า "iii" กับ "iv" สลับกัน (พิมพ์ "iv" ก่อน "iii")'])
+
+    def test_a_swapped_pair_at_the_end_of_the_part(self):
+        self.assertEqual(self._problems(["10", "11", "13", "12"]),
+                         ['เลขหน้า "12" กับ "13" สลับกัน (พิมพ์ "13" ก่อน "12")'])
+
+    def test_the_page_after_the_pair_counts_a_page_that_could_not_be_read(self):
+        # 10, 11, 13, 12, (อ่านไม่ออก = 14), 15
+        self.assertEqual(self._problems(["10", "11", "13", "12", "15"], gaps={4}),
+                         ['เลขหน้า "12" กับ "13" สลับกัน (พิมพ์ "13" ก่อน "12")'])
+
+    def test_a_swapped_pair_is_found_among_other_points(self):
+        self.assertEqual(self._problems(["1", "2", "2", "3", "5", "4", "6", "8"]),
+                         ['เลขหน้า "2" ถูกใช้ซ้ำ 2 หน้า', 'เลขหน้า "4" กับ "5" สลับกัน (พิมพ์ "5" ก่อน "4")',
+                          'ข้ามเลขหน้า 7 (จาก "6" ไป "8")'])
+
+    def test_not_a_swap_keeps_the_other_wording(self):
+        # มีหน้าคั่นระหว่างคู่ · หน้าหลังคู่ไม่ตรง · สลับเกินคู่เดียวติดกัน
+        self.assertNotIn("สลับกัน", " ".join(self._problems(["10", "11", "13", "12", "14"], gaps={3})))
+        self.assertEqual(self._problems(["10", "11", "13", "12", "16"]),
+                         ['ข้ามเลขหน้า 12 (จาก "11" ไป "13")', 'เลขหน้าย้อนกลับ (หลังหน้า "13" กลับไปเริ่ม "12" ใหม่)',
+                          'ข้ามเลขหน้า 13–15 (จาก "12" ไป "16")'])
+        for labels in (["10", "11", "13", "12", "15", "14", "16"], ["10", "13", "12", "11", "14"]):
+            with self.subTest(labels=labels):
+                self.assertNotIn("สลับกัน", " ".join(self._problems(labels)))
+
+    def test_going_back_names_only_the_labels_printed_twice(self):
+        self.assertEqual(self._problems(["1", "2", "5", "1", "2"]),
+                         ['ข้ามเลขหน้า 3–4 (จาก "2" ไป "5")', 'เลขหน้า 1–2 ซ้ำ (หลังหน้า "5" กลับไปเริ่ม "1" ใหม่)'])
+        self.assertEqual(self._problems(["ก", "ข", "จ", "ก", "ข"], "thai"),
+                         ['ข้ามเลขหน้า ค–ง (จาก "ข" ไป "จ")', 'เลขหน้า ก–ข ซ้ำ (หลังหน้า "จ" กลับไปเริ่ม "ก" ใหม่)'])
+        self.assertEqual(self._problems(["i", "ii", "v", "i", "ii"], "roman"),
+                         ['ข้ามเลขหน้า iii–iv (จาก "ii" ไป "v")', 'เลขหน้า i–ii ซ้ำ (หลังหน้า "v" กลับไปเริ่ม "i" ใหม่)'])
+        # หน้าสุดท้ายย้อนกลับไปเลขเดียว
+        self.assertEqual(self._problems(["iii", "iv", "v", "iii"], "roman"),
+                         ['เลขหน้า iii ซ้ำ (หลังหน้า "v" กลับไปเริ่ม "iii" ใหม่)'])
+
+    def test_the_real_book_pattern_is_unchanged(self):
+        self.assertEqual(self._problems(["225", "226", "227", "226", "227", "228"]),
+                         ['เลขหน้า 226–227 ซ้ำ (หลังหน้า "227" กลับไปเริ่ม "226" ใหม่)'])
+        self.assertEqual(self._problems(["151", "152", "155", "156", "157", "156", "157", "158"]),
+                         ['ข้ามเลขหน้า 153–154 (จาก "152" ไป "155")',
+                          'เลขหน้า 156–157 ซ้ำ (หลังหน้า "157" กลับไปเริ่ม "156" ใหม่)'])
+
+    def test_going_back_without_a_clear_repeated_range(self):
+        # เลขที่ซ้ำไม่ต่อเนื่อง (3 กับ 5 — 4 ไม่เคยพิมพ์) · ไม่มีเลขที่ซ้ำเลย (3–4 เพิ่งพิมพ์ครั้งแรก)
+        self.assertEqual(self._problems(["1", "2", "3", "5", "6", "7", "3", "4", "5"]),
+                         ['ข้ามเลขหน้า 4 (จาก "3" ไป "5")', 'เลขหน้าย้อนกลับ (หลังหน้า "7" กลับไปเริ่ม "3" ใหม่)'])
+        self.assertEqual(self._problems(["1", "2", "5", "3", "4"]),
+                         ['ข้ามเลขหน้า 3–4 (จาก "2" ไป "5")', 'เลขหน้าย้อนกลับ (หลังหน้า "5" กลับไปเริ่ม "3" ใหม่)'])
+        self.assertEqual(self._problems(["ก", "ข", "ค", "จ", "ฉ", "ค", "ง", "จ"], "thai")[-1],
+                         'เลขหน้าย้อนกลับ (หลังหน้า "ฉ" กลับไปเริ่ม "ค" ใหม่)')
+
+    def test_english(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        for thai, english in (
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้า "12" กับ "13" สลับกัน (พิมพ์ "13" ก่อน "12")',
+             'The page numbers are not continuous: page labels "12" and "13" are swapped ("13" printed before "12")'),
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้าย้อนกลับ (หลังหน้า "5" กลับไปเริ่ม "1" ใหม่)',
+             'The page numbers are not continuous: page numbering goes back (after page "5" it starts again at "1")'),
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้า iii ซ้ำ (หลังหน้า "v" กลับไปเริ่ม "iii" ใหม่)',
+             'The page numbers are not continuous: page label iii is repeated '
+             '(after page "v" the numbering starts again at "iii")'),
+            ('เลขหน้าไม่ต่อเนื่อง: เลขหน้า "ง" กับ "จ" สลับกัน (พิมพ์ "จ" ก่อน "ง") และ '
+             'เลขหน้าย้อนกลับ (หลังหน้า "ฉ" กลับไปเริ่ม "ค" ใหม่) และ เลขหน้า ก ซ้ำ (หลังหน้า "ข" กลับไปเริ่ม "ก" ใหม่)',
+             'The page numbers are not continuous: page labels "ง" and "จ" are swapped ("จ" printed before "ง") and '
+             'page numbering goes back (after page "ฉ" it starts again at "ค") and page label ก is repeated '
+             '(after page "ข" the numbering starts again at "ก")'),
+        ):
+            with self.subTest(thai=thai):
+                self.assertEqual(check_i18n.tr_en(thai, pairs), english)
+                self.assertIsNotNone(check_i18n.whole_rule(thai, pairs))
+
+FULL_PAGE = "595 0 0 842 0 0"          # ภาพเต็มหน้า A4 (แผ่นสแกน)
+LOGO = "60 0 0 60 268 760"             # ภาพเล็กหัวกระดาษ (โลโก้)
+
+
+class Update182ScannedSignatureWithOcrText(unittest.TestCase):
+    """หน้าลงนามสแกนที่มีชั้นข้อความ OCR เพี้ยนติดมา (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569) — ข้อมูลสมมติ
+
+    เล่มจริงได้ "ไม่พบหน้าลงนาม" + "ไม่ได้พิมพ์เลขหน้า แผ่นที่ 2 และ 3" + หัวกระดาษส่วนนำ เพราะตัวจับแผ่นสแกนของ 1.5.2
+    นับเฉพาะแผ่นที่ไม่มีข้อความ · แผ่นภาพเต็มหน้าต่อจากปกนับเป็นแผ่นสแกนไม่ว่าจะมีข้อความหรือไม่
+    """
+
+    COVER = ScannedSignaturePages.COVER
+    ACK = ScannedSignaturePages.ACK
+    OCR_1 = "Thesis" + NEWLINE + "THEE FFECOTFS ON EXAMPEL" + NEWLINE + "wassu bmitted"
+    OCR_2 = "1i" + NEWLINE + "Thesis" + NEWLINE + "THE EFFECTS OF EXAMPLE" + NEWLINE + "was"
+
+    @staticmethod
+    def _pdf(pages):
+        import tempfile
+        folder = tempfile.TemporaryDirectory()
+        path = Path(folder.name) / "book.pdf"
+        path.write_bytes(_pdf_with_pages(pages))
+        return folder, path
+
+    def _full(self, page):
+        import pdfplumber
+        folder, path = self._pdf([page])
+        with folder, pdfplumber.open(str(path)) as pdf:
+            return checker_module.full_page_image(pdf.pages[0])
+
+    def test_a_full_page_image_with_a_text_layer_is_a_scan(self):
+        self.assertTrue(self._full((self.OCR_1, FULL_PAGE)))
+        self.assertTrue(self._full(None))
+
+    def test_a_logo_or_text_only_page_is_not_a_scan(self):
+        self.assertFalse(self._full((self.ACK, LOGO)))
+        self.assertFalse(self._full(self.ACK))
+        # ภาพเกือบเต็มหน้าแต่ต่ำกว่าเกณฑ์ (80%) ก็ไม่นับ
+        self.assertFalse(self._full((self.ACK, "595 0 0 673 0 0")))
+
+    def test_full_page_images_after_the_cover_are_the_scanned_signature_pages(self):
+        pages = [self.COVER, self.OCR_1, self.OCR_2, self.ACK]
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [], {1, 2}, {1, 2}), [1, 2])
+        # ไม่มีชุดภาพเต็มหน้า = กติกาเดิม (แผ่นที่มีข้อความไม่ใช่แผ่นสแกน)
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [], {1, 2}), [])
+        # หน้าลงนามที่อ่านได้หนึ่งหน้า + แผ่นสแกนอีกหน้า
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [2], {1}, {1}), [1])
+
+    def test_a_scan_whose_ocr_reads_as_a_signature_page_is_still_a_scan(self):
+        pages = [self.COVER, self.OCR_1, self.OCR_2, self.ACK]
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [1, 2], {1, 2}, {1, 2}), [1, 2])
+        # หน้าลงนามที่อ่านได้จริง (ไม่ใช่ภาพเต็มหน้า) หนึ่งหน้า + แผ่นสแกนหนึ่งหน้า
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [1, 2], {2}, {2}), [2])
+        # หน้าลงนามอ่านได้ครบสองหน้า ไม่ใช่ภาพเต็มหน้า = ไม่มีแผ่นสแกน
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [1, 2], {1, 2}, set()), [])
+
+    def test_a_full_page_image_after_a_text_page_is_not_at_the_signature_position(self):
+        pages = [self.COVER, self.ACK, self.OCR_1]
+        self.assertEqual(checker_module.scanned_signature_pages(pages, 0, [], {2}, {2}), [])
+
+    def test_the_step_1_preview_shows_the_ocr_scans(self):
+        folder, path = self._pdf([self.COVER, (self.OCR_1, FULL_PAGE), (self.OCR_2, FULL_PAGE), self.ACK])
+        with folder:
+            self.assertEqual(checker_module.signature_preview(str(path)),
+                             [{"index": 1, "label": "", "scanned": True},
+                              {"index": 2, "label": "", "scanned": True}])
+
+    def test_a_synthetic_book_gets_one_orange_scan_item_and_nothing_else_for_those_sheets(self):
+        folder, path = self._pdf([self.COVER, (self.OCR_1, FULL_PAGE), (self.OCR_2, FULL_PAGE), self.ACK,
+                                  "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION", "2" + NEWLINE + "More text"])
+        with folder:
+            result = checker_module.run_check(str(path), None)
+        issues = [(zone, i) for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+        scans = [(zone, i["found"]) for zone, i in issues if i["rule_id"] == "FRONT.APPROVAL_SCANNED"]
+        self.assertEqual(scans, [("ORANGE", "อ่านหน้าลงนามไม่ได้ เนื่องจากเป็นไฟล์สแกน (แผ่นที่ 2 และ 3 ของไฟล์)")])
+        self.assertFalse([i for _z, i in issues if "ไม่พบหน้าลงนาม" in i["found"]])
+        for _zone, issue in issues:
+            if issue["rule_id"] in ("PAGE.NUMBERING", "PAGE.HEADER"):
+                self.assertNotRegex(issue["location"] + issue["found"], r"แผ่นที่ (2|3)\b", issue)
+
+    def test_the_scan_item_translates(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        rep = Report()
+        checker_module._report_signature_page_count(rep, [], [1, 2], "roman")
+        issue = rep.zones["ORANGE"][0]
+        for thai in (issue["found"], issue["expected"], issue["fix"]):
+            self.assertIsNotNone(check_i18n.whole_rule(thai, pairs), thai)
+
+
+class Update182DegreeAbbreviations(unittest.TestCase):
+    """ตัวย่อปริญญาที่เจ้าของยืนยัน + ปกอังกฤษเป็นตัวพิมพ์ใหญ่เสมอ + บรรทัด "DEGREE OF …" (อัปเดต 1.8.2 28 ต.ค. 2569)"""
+
+    def test_the_confirmed_doctorate_abbreviations(self):
+        self.assertEqual(ethesis_import._degree_abbr("DOCTOR OF APPLIED THAI TRADITIONAL MEDICINE"), "D.ATM.")
+        self.assertEqual(ethesis_import._degree_abbr("Doctor of Applied Thai Traditional Medicine"), "D.ATM.")
+        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์ดุษฎีบัณฑิต"), "พทป.ด.")
+
+    def test_the_unconfirmed_master_level_is_not_guessed(self):
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF APPLIED THAI TRADITIONAL MEDICINE"), "")
+        self.assertEqual(ethesis_import._degree_abbr_th("การแพทย์แผนไทยประยุกต์มหาบัณฑิต"), "")
+
+    def test_the_stem_table_is_unchanged(self):
+        self.assertEqual(ethesis_import._degree_abbr_th("ปรัชญาดุษฎีบัณฑิต"), "ปร.ด.")
+        self.assertEqual(ethesis_import._degree_abbr_th("วิทยาศาสตรมหาบัณฑิต (ชีวเคมี)"), "วท.ม. (ชีวเคมี)")
+
+    def _imported(self, english):
+        lines = ["ชื่อปริญญา", english, "ปรัชญาดุษฎีบัณฑิต"]
+        with mock.patch.object(ethesis_import, "_lines_from_pages", return_value=lines), \
+                mock.patch.object(ethesis_import, "_detect_format", return_value=""), \
+                mock.patch.object(ethesis_import, "_cell_value", return_value=""), \
+                mock.patch.object(ethesis_import.pdfplumber, "open", return_value=mock.MagicMock()):
+            return ethesis_import.parse_ethesis_pdf("unused.pdf")
+
+    def test_the_cover_degree_is_always_uppercase(self):
+        data = self._imported("Doctor of Imaginary Studies(Example Field)")
+        self.assertEqual(data["degree_cover_en"], "DOCTOR OF IMAGINARY STUDIES (EXAMPLE FIELD)")
+        self.assertEqual(data["degree_sig_en"], "Doctor of Imaginary Studies (Example Field)")
+        self.assertEqual(self._imported("DOCTOR OF PHILOSOPHY")["degree_cover_en"], "DOCTOR OF PHILOSOPHY")
+
+    def test_a_full_degree_name_line_with_degree_of_is_a_degree_line(self):
+        for line in ("DEGREE OF DOCTORAL OF APPLIED THAI TRADITIONAL MEDICINE",
+                     "DOCTOR OF PHILOSOPHY", "MASTER OF CLINICAL TROPICAL MEDICINE"):
+            self.assertTrue(checker_module._looks_like_degree_line(line), line)
+        for line in ("SOMCHAI EXAMPLE 6700000 SITT/D", "DEGREE PROGRAMME COMMITTEE", "iv"):
+            self.assertFalse(checker_module._looks_like_degree_line(line), line)
+
+
+class Update182AbstractUsesTheFormAbbreviation(unittest.TestCase):
+    """ตัวย่อบนบทคัดย่อตรวจด้วยค่าที่เจ้าหน้าที่กรอกในฟอร์ม (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569 "เจ้าหน้าที่จะ input
+    เข้าไปให้ ให้ระบบอ่านค่าตามที่ input ใน form") — ข้อมูลสมมติ · ช่องว่างไม่มีการ์ด (ฟอร์มและ /check บังคับกรอก)"""
+
+    ABSTRACT = ("iv" + NEWLINE + "AN EXAMPLE TITLE" + NEWLINE + "SOMCHAI EXAMPLE 6700000 SITT/D" + NEWLINE
+                + "DEGREE OF DOCTORAL OF IMAGINARY STUDIES" + NEWLINE + "ABSTRACT" + NEWLINE + "Some text.")
+
+    def _run(self, **approved):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([ScannedSignaturePages.COVER, self.ABSTRACT,
+                                              "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION"]))
+            result = checker_module.run_check(str(path), {
+                "program_language": "international", "degree_sig_en": "Doctor of Imaginary Studies",
+                "degree_cover_en": "DOCTOR OF IMAGINARY STUDIES", **approved}, skip_identity_check=True)
+        return [(zone, i) for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]
+                if "ชื่อปริญญาแบบย่อ" in i["found"] or "ตัวย่อ" in i["found"]]
+
+    def test_the_typed_abbreviation_is_what_the_abstract_is_compared_with(self):
+        for typed in ("D.IS.", "D.Im.S."):
+            [(zone, issue)] = self._run(degree_abbr_en=typed)
+            self.assertEqual(zone, "RED")
+            self.assertEqual(issue["found"],
+                             'ชื่อปริญญาแบบย่อในเล่มเขียนว่า "DEGREE OF DOCTORAL OF IMAGINARY STUDIES"')
+            self.assertIn(f'"{typed}"', issue["expected"])
+
+    def test_no_orange_card_for_an_empty_abbreviation(self):
+        import ethesis_rules
+        self.assertEqual(self._run(), [])
+        self.assertNotIn("FORM.DEGREE_ABBR_MISSING", ethesis_rules.RULE_CATALOG)

@@ -2765,3 +2765,41 @@ class Update18PassAllYellow(unittest.TestCase):
         self.assertEqual(failed["counts"]["ORANGE"], 0)
         self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", failed["plain"])
         self.assertIn("ลบหน้าว่างที่แผ่นที่ 45 ของไฟล์ PDF ออก", failed["details"])
+
+
+class Update182AbbreviationIsRequiredWithItsDegreeName(unittest.TestCase):
+    """ระบบไม่มีตัวย่อของปริญญาที่นำเข้า = ช่องตัวย่อภาษานั้นต้องกรอก ไม่ใช่การ์ดในผลตรวจ (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569
+    "เจ้าหน้าที่จะ input เข้าไปให้ ให้ระบบอ่านค่าตามที่ input ใน form")"""
+
+    SOURCE = AnIncompleteFormIsNeverChecked.SOURCE
+    setUpClass = classmethod(AnIncompleteFormIsNeverChecked.setUpClass.__func__)
+    tearDown = AnIncompleteFormIsNeverChecked.tearDown
+
+    def _check(self, **changes):
+        return self.client.post("/check", data={**FORM, **changes},
+                                files={"pdf": ("test.pdf", make_pdf(), "application/pdf"), **turnitin_file()})
+
+    def test_the_server_refuses_a_thai_degree_name_without_its_abbreviation(self):
+        response = self._check(degree_cover_th="ปริญญาสมมติดุษฎีบัณฑิต", degree_sig_th="ปริญญาสมมติดุษฎีบัณฑิต")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ชื่อปริญญาแบบย่อในบทคัดย่อ (ไทย)", response.json()["detail"])
+        self.assertEqual(main.JOBS, {})
+
+    def test_the_server_refuses_an_empty_english_abbreviation_once(self):
+        detail = self._check(degree_abbr_en="").json()["detail"]
+        self.assertEqual(detail.count("ชื่อปริญญาแบบย่อในบทคัดย่อ (อังกฤษ)"), 1)
+
+    def test_a_typed_abbreviation_is_accepted(self):
+        response = self._check(degree_cover_th="ปริญญาสมมติดุษฎีบัณฑิต", degree_abbr_th="ปส.ด.")
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_form_explains_an_abbreviation_the_import_could_not_fill(self):
+        for lang in ("en", "th"):
+            self.assertIn(f'<small class="abbr-hint" id="degree-abbr-{lang}-hint" hidden>'
+                          "ระบบไม่มีตัวย่อของปริญญานี้ กรุณากรอกตัวย่อตามหลักสูตร</small>", self.html)
+            self.assertIn(f'aria-describedby="degree-abbr-{lang}-hint"', self.html)
+        script = self.html.split("<script>", 1)[1]
+        self.assertIn("required = requiresThai || hasDegreeName('th')", script)
+        self.assertIn("&& !parsed[`degree_abbr_${lang}`]", script)
+        # ตั้ง required ก่อนตัวอัปเดตชิปความพร้อม — ชิปจึงไม่ครบจนกว่าจะกรอก
+        self.assertLess(script.index("updateAbbrHints();\n    }"), script.index("addEventListener(ev, updateProgress)"))

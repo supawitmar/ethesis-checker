@@ -172,6 +172,9 @@
   .dg-row small { display:block; font-weight:400; font-size:.74rem; color:var(--ink-3); }
   .dg-cell { display:block; margin:0; font-weight:400; }
   .dg-lang { display:none; }
+  /* ระบบไม่มีตัวย่อของปริญญาที่นำเข้า (อัปเดต 1.8.2) — บอกใต้ช่องว่าทำไมช่องว่าง */
+  .abbr-hint { display:block; margin:4px 0 0; font-size:.76rem; line-height:1.35; color:#8c5a00; }
+  .abbr-hint[hidden] { display:none; }
 
   .committee-box { background:var(--navy-soft); border:1px solid #d6e2f1; border-radius:12px;
        padding:12px 16px; margin-top:16px; }
@@ -260,8 +263,10 @@
     .degree-grid { grid-template-columns:minmax(0,1fr); gap:6px; }
     .dg-head { display:none; }
     .dg-row { margin-top:10px; }
-    .dg-cell { display:flex; align-items:center; gap:8px; }
+    .dg-cell { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
     .dg-lang { display:block; flex:none; width:26px; font-size:.72rem; font-weight:700; color:var(--ink-3); }
+    .dg-cell input { flex:1 1 0; min-width:0; }
+    .abbr-hint { flex:0 0 calc(100% - 34px); margin:0 0 0 34px; }
   }
 </style>
 </head>
@@ -455,8 +460,8 @@
           <label class="dg-cell"><span class="dg-lang">EN</span><input name="degree_sig_en" id="degree-sig-en" aria-label="ชื่อปริญญาหน้าลงนาม (อังกฤษ)" placeholder="Master of Engineering (Civil Engineering)"></label>
           <label class="dg-cell"><span class="dg-lang">TH</span><input name="degree_sig_th" id="degree-sig-th" aria-label="ชื่อปริญญาหน้าลงนาม (ไทย)" placeholder="วิศวกรรมศาสตรมหาบัณฑิต (วิศวกรรมอุตสาหการสมาร์ต)"></label>
           <div class="dg-row">บทคัดย่อ<small>แบบย่อ</small></div>
-          <label class="dg-cell"><span class="dg-lang">EN</span><input name="degree_abbr_en" id="degree-abbr-en" aria-label="ชื่อปริญญาแบบย่อในบทคัดย่อ (อังกฤษ)" placeholder="M.Eng. (CIVIL ENGINEERING)"></label>
-          <label class="dg-cell"><span class="dg-lang">TH</span><input name="degree_abbr_th" id="degree-abbr-th" aria-label="ชื่อปริญญาแบบย่อในบทคัดย่อ (ไทย)" placeholder="วศ.ม. (วิศวกรรมอุตสาหการสมาร์ต)"></label>
+          <label class="dg-cell"><span class="dg-lang">EN</span><input name="degree_abbr_en" id="degree-abbr-en" aria-label="ชื่อปริญญาแบบย่อในบทคัดย่อ (อังกฤษ)" aria-describedby="degree-abbr-en-hint" placeholder="M.Eng. (CIVIL ENGINEERING)"><small class="abbr-hint" id="degree-abbr-en-hint" hidden>ระบบไม่มีตัวย่อของปริญญานี้ กรุณากรอกตัวย่อตามหลักสูตร</small></label>
+          <label class="dg-cell"><span class="dg-lang">TH</span><input name="degree_abbr_th" id="degree-abbr-th" aria-label="ชื่อปริญญาแบบย่อในบทคัดย่อ (ไทย)" aria-describedby="degree-abbr-th-hint" placeholder="วศ.ม. (วิศวกรรมอุตสาหการสมาร์ต)"><small class="abbr-hint" id="degree-abbr-th-hint" hidden>ระบบไม่มีตัวย่อของปริญญานี้ กรุณากรอกตัวย่อตามหลักสูตร</small></label>
         </div>
       </div>
 
@@ -576,7 +581,27 @@ function clearImportedFields() {
   });
   const oldCommittees = document.getElementById('committee-box');
   if (oldCommittees) oldCommittees.style.display = 'none';
+  abbrNotFound = {en: false, th: false};
+  updateAbbrHints();
   updateDocTypeNote();
+}
+
+// ชื่อปริญญาที่ระบบไม่มีตัวย่อ (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569 "เจ้าหน้าที่จะ input เข้าไปให้ ให้ระบบอ่านค่า
+// ตามที่ input ใน form") — นำเข้าได้ชื่อปริญญาแต่ช่องตัวย่อว่าง ให้บอกใต้ช่องว่าทำไมว่าง ช่องนั้นต้องกรอก
+// (updateConditionalRequirements) และชิปความพร้อมไม่ครบจนกว่าจะกรอก · /check บังคับแบบเดียวกัน
+let abbrNotFound = {en: false, th: false};
+function hasDegreeName(lang) {
+  return ['degree_cover_', 'degree_sig_'].some(function(prefix){
+    const field = document.querySelector(`[name="${prefix}${lang}"]`);
+    return !!field && field.value.trim() !== '';
+  });
+}
+function updateAbbrHints() {
+  ['en', 'th'].forEach(function(lang){
+    const hint = document.getElementById(`degree-abbr-${lang}-hint`);
+    const field = document.querySelector(`[name="degree_abbr_${lang}"]`);
+    if (hint && field) hint.hidden = !(abbrNotFound[lang] && field.value.trim() === '');
+  });
 }
 
 // ระบบตรวจตามประเภทที่เลือกไว้ในช่องนี้เสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569 "ถ้าข้อมูลที่อ่านมา
@@ -617,6 +642,15 @@ function applyParsed(parsed) {
     field.dispatchEvent(new Event('change', {bubbles:true}));
     filled.push(IMPORT_LABELS[name] || name);
   });
+  ['en', 'th'].forEach(function(lang){
+    abbrNotFound[lang] = !!(parsed[`degree_cover_${lang}`] || parsed[`degree_sig_${lang}`])
+                         && !parsed[`degree_abbr_${lang}`];
+  });
+  updateAbbrHints();
+  // ตั้ง required ของช่องตัวย่อใหม่หลังรู้ชื่อปริญญาครบ — ตัวฟัง change ของฟอร์ม (updateConditionalRequirements)
+  // รับต่อ ช่องที่ล้างแล้วไม่มีเหตุการณ์ของตัวเอง ค่า required ของคนก่อนจึงไม่ค้าง
+  const abbrTh = document.querySelector('[name="degree_abbr_th"]');
+  if (abbrTh) abbrTh.dispatchEvent(new Event('change', {bubbles:true}));
   updateDocTypeNote();
   return filled;
 }
@@ -717,11 +751,22 @@ function updateConditionalRequirements() {
   document.querySelector('[name="degree_cover_en"]').required = !thaiOnly;
   document.querySelector('[name="degree_sig_en"]').required = !thaiOnly;
   // บทคัดย่ออังกฤษมีทุกหลักสูตร ส่วนบทคัดย่อไทยมีเฉพาะเล่มไทย/ไทย-อังกฤษ
+  // มีชื่อปริญญาภาษาไหน ตัวย่อภาษานั้นก็ต้องกรอก (อัปเดต 1.8.2 — ระบบไม่มีตัวย่อ ช่องจึงว่างหลังนำเข้า)
   document.querySelector('[name="degree_abbr_en"]').required = true;
-  document.querySelector('[name="degree_abbr_th"]').required = requiresThai;
+  document.querySelector('[name="degree_abbr_th"]').required = requiresThai || hasDegreeName('th');
 }
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
+// ต้องมาก่อนตัวอัปเดตชิปความพร้อม (updateProgress) — ชิปอ่าน required ที่ตั้งที่นี่
+['input', 'change'].forEach(function(ev){
+  document.getElementById('f').addEventListener(ev, function(e){
+    const name = (e.target && e.target.name) || '';
+    if (/^degree_(cover|sig|abbr)_(en|th)$/.test(name)) {
+      updateConditionalRequirements();
+      updateAbbrHints();
+    }
+  });
+});
 updateConditionalRequirements();
 document.querySelector('select[name="doc_type"]').addEventListener('change', updateDocTypeNote);
 
