@@ -9697,10 +9697,12 @@ class Update16RequirementsParagraph(unittest.TestCase):
     def test_the_wording_and_links_are_the_owners(self):
         self.assertEqual(checker_module.REQUIREMENTS_TEXT.split(NEWLINE), [
             "ศึกษาข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ และดาวน์โหลด template ตัวอย่างเพื่อใช้ประกอบการแก้ไขได้ที่",
-            "https://grad-as.my.canva.site/electronic-file-requirements-th"])
+            "https://grad-as.my.canva.site/electronic-file-requirements-th",
+            "* กรุณาจัดรูปเล่มโดยใช้ template นี้เท่านั้น *"])
         self.assertEqual(checker_module.REQUIREMENTS_TEXT_EN.split(NEWLINE), [
             "The electronic file requirements and template are available at",
-            "https://grad-as.my.canva.site/electronic-file-requirements-en"])
+            "https://grad-as.my.canva.site/electronic-file-requirements-en",
+            "* Please format your file using this template only. *"])
 
     def test_it_follows_the_closing_wording_and_never_reaches_the_sheet(self):
         report = self._report()
@@ -11043,3 +11045,375 @@ class Update182AbstractUsesTheFormAbbreviation(unittest.TestCase):
         import ethesis_rules
         self.assertEqual(self._run(), [])
         self.assertNotIn("FORM.DEGREE_ABBR_MISSING", ethesis_rules.RULE_CATALOG)
+
+
+class Update183PageLabelNoise(unittest.TestCase):
+    """สัญลักษณ์เดี่ยวจิ๋วในหัวกระดาษ (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569) — ข้อมูลสมมติ
+
+    เล่มจริงมี "`" ขนาด 9 จุดที่ซ้ายสุดของแถบหัวกระดาษ ข้อความจึงเป็น "` 11" อ่านเลขหน้าไม่ได้ ตำแหน่งขึ้น "หน้าไม่ระบุเลข"
+    เกือบทั้งเล่ม และข้อหัวกระดาษส้ม 110 หน้า
+    """
+
+    class _Page:
+        height = 842
+
+        def __init__(self, *texts):
+            self.words = [{"text": text, "top": 50} for text in texts]
+
+        def extract_words(self):
+            return self.words
+
+    def test_a_stray_mark_does_not_hide_the_page_label(self):
+        for line, label in (("` 11", "11"), ("´ 12", "12"), ("' 7", "7"), ("’ 7", "7"), ("11 `", "11"),
+                            ("`11", "11"), ("` iv", "iv"), ("` ก", "ก")):
+            with self.subTest(line=line):
+                self.assertEqual(checker_module._extract_page_label(line + NEWLINE + "Body text"), label)
+
+    def test_real_text_is_not_cut_into_a_label(self):
+        for line in ("Dr. Smith's", "`Chapter", "It's 11 o'clock", "Page ` 11"):
+            with self.subTest(line=line):
+                self.assertEqual(checker_module._extract_page_label(line + NEWLINE + "Body text."), "")
+
+    def test_a_stray_mark_is_not_other_text_in_the_header(self):
+        for texts in (("`", "11"), ("´", "11"), ("'", "11"), ("`11",)):
+            with self.subTest(texts=texts):
+                tokens = checker_module.header_tokens(self._Page(*texts))
+                self.assertEqual(tokens, ["11"])
+                self.assertEqual(checker_module.header_extra_text(None, tokens=tokens), "")
+
+    def test_real_header_text_is_still_other_text(self):
+        tokens = checker_module.header_tokens(self._Page("`", "Running", "Head's", "11"))
+        self.assertEqual(checker_module.header_extra_text(None, tokens=tokens), "Running Head's")
+
+
+class Update183SignaturePageWithoutHeading(unittest.TestCase):
+    """หน้าลงนามที่ไม่มีบรรทัดหัวข้อ "Thesis" / "เรื่อง" (อัปเดต 1.8.3) — เดิมได้ "ไม่พบหน้าลงนามในเล่ม" ทั้งที่มี · ข้อมูลสมมติ"""
+
+    EN = ("AN EXAMPLE TITLE" + NEWLINE + "was submitted to the Faculty of Graduate Studies, Mahidol University" + NEWLINE
+          + "for the degree of Doctor of Philosophy" + NEWLINE + "on 1 June 2026" + NEWLINE
+          + "Thesis Advisory Committee" + NEWLINE + "Somchai Example, Ph.D.")
+    TH = ("ชื่อเรื่องสมมติ" + NEWLINE + "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" + NEWLINE
+          + "ปริญญาปรัชญาดุษฎีบัณฑิต" + NEWLINE + "คณะกรรมการที่ปรึกษา")
+
+    def test_the_template_sentence_with_a_committee_is_a_signature_page(self):
+        self.assertEqual(checker_module.front_section_kind(self.EN)[0], "signature")
+        self.assertEqual(checker_module.front_section_kind(self.TH)[0], "signature")
+
+    def test_one_signal_alone_is_not_enough(self):
+        sentence_only = "AN EXAMPLE TITLE" + NEWLINE + "was submitted to the Faculty of Graduate Studies"
+        self.assertEqual(checker_module.front_section_kind(sentence_only)[0], "")
+        committee_only = "AN EXAMPLE TITLE" + NEWLINE + "Thesis Advisory Committee: Somchai Example, Ph.D."
+        self.assertEqual(checker_module.front_section_kind(committee_only)[0], "")
+
+    def test_other_front_pages_are_not_taken(self):
+        abstract = ("AN EXAMPLE TITLE" + NEWLINE + "THESIS ADVISORY COMMITTEE: SOMCHAI EXAMPLE, Ph.D." + NEWLINE + "ABSTRACT")
+        self.assertEqual(checker_module.front_section_kind(abstract)[0], "abstract_en")
+        ack = ("ACKNOWLEDGEMENTS" + NEWLINE + "I thank my thesis committee and the Faculty of Graduate Studies.")
+        self.assertEqual(checker_module.front_section_kind(ack)[0], "ack")
+        cover = ("ชื่อเรื่องสมมติ" + NEWLINE + "วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร" + NEWLINE + "คณะกรรมการ")
+        self.assertEqual(checker_module.front_section_kind(cover)[0], "")
+
+    def test_a_synthetic_book_is_no_longer_told_it_has_no_signature_pages(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([ScannedSignaturePages.COVER, "i" + NEWLINE + self.EN, "ii" + NEWLINE + self.EN,
+                                              ScannedSignaturePages.ACK,
+                                              "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION"]))
+            result = checker_module.run_check(str(path), None)
+        found = [i["found"] for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+        self.assertFalse([text for text in found if "ไม่พบหน้าลงนาม" in text], found)
+
+    def test_a_book_without_signature_pages_still_gets_the_red_item(self):
+        rep = Report()
+        checker_module._report_signature_page_count(rep, [], [], "roman")
+        self.assertEqual(rep.zones["RED"][0]["found"], "ไม่พบหน้าลงนามในเล่ม")
+
+
+class Update183BiographyItem(unittest.TestCase):
+    """ไม่พบ BIOGRAPHY อยู่หมวดส่วนท้าย (เจ้าหน้าที่แก้มือ — อัปเดต 1.8.3) เดิมตำแหน่ง "ทั้งเล่ม" ตกหมวดเนื้อหา"""
+
+    def _book(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([ScannedSignaturePages.COVER,
+                                              "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION"]))
+            return checker_module.run_check(str(path), None)
+
+    def test_the_item_sits_under_end_matter(self):
+        result = self._book()
+        [issue] = [i for i in result["issues_by_zone"]["RED"] if "BIOGRAPHY" in i["found"]]
+        self.assertEqual(issue["location"], "ส่วนท้ายเล่ม")
+        self.assertEqual(checker_module.summary_section(issue), "ส่วนท้ายเล่ม")
+        summary = checker_module.plain_summary(result)
+        tail = summary[summary.index("ส่วนท้ายเล่ม"):]
+        self.assertIn(". ไม่พบประวัติผู้วิจัย (BIOGRAPHY)", tail)    # ตำแหน่งเท่าชื่อหมวด ไม่พิมพ์ซ้ำ
+
+    def test_the_english_says_last_page(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        self.assertEqual(check_i18n.tr_en("ต้องมีและเป็นหน้าสุดท้ายของเล่ม", pairs),
+                         "Required and must be the last page of the document")
+        self.assertEqual(check_i18n.tr_en("ส่วนท้ายเล่ม", pairs), "End matter")
+
+
+class Update183DegreeLineQuote(unittest.TestCase):
+    """ข้อชื่อปริญญายกเฉพาะชื่อปริญญาที่พิมพ์ ไม่ยกประโยคของ template มาด้วย (อัปเดต 1.8.3) — ข้อมูลสมมติ"""
+
+    WANT = "DOCTOR OF PHILOSOPHY (IMAGINARY STUDIES)"
+
+    def _quote(self, *lines, abstract=False):
+        return checker_module.closest_degree_line(NEWLINE.join(lines), self.WANT, abstract)
+
+    def test_the_template_sentence_is_not_quoted(self):
+        self.assertEqual(self._quote("A THESIS SUBMITTED IN PARTIAL FULFILLMENT", "OF THE REQUIREMENTS FOR THE DEGREE OF",
+                                     "Imaginary Studies", "FACULTY OF GRADUATE STUDIES"), "Imaginary Studies")
+        self.assertEqual(self._quote("OF THE REQUIREMENTS FOR", "THE DEGREE OF Imaginary Studies"), "Imaginary Studies")
+        self.assertEqual(self._quote("for the degree of Degree (Imaginary Studies)"), "Degree (Imaginary Studies)")
+
+    def test_a_correct_cover_still_matches(self):
+        page = NEWLINE.join(("OF THE REQUIREMENTS FOR", "THE DEGREE OF DOCTOR OF PHILOSOPHY", "(IMAGINARY STUDIES)"))
+        self.assertEqual(compare_reference_text(page, self.WANT, "degree", degree_line=True)["status"], "exact")
+
+    def test_the_abstract_line_is_quoted_as_printed(self):
+        self.assertEqual(self._quote("SOMCHAI EXAMPLE 6700000 TEST/D", "DEGREE OF DOCTORAL OF IMAGINARY STUDIES",
+                                     abstract=True), "DEGREE OF DOCTORAL OF IMAGINARY STUDIES")
+
+
+class Update183AckAuthorSummary(unittest.TestCase):
+    """ไม่พบชื่อผู้เขียนท้ายกิตติกรรมประกาศ ไม่มีอะไรให้ "แก้เป็น" — ใช้ประโยคเต็ม (อัปเดต 1.8.3) · ข้อมูลสมมติ"""
+
+    @staticmethod
+    def _summary(found):
+        rep = Report()
+        rep.add("RED", "front_matter", "กิตติกรรมประกาศ (หน้า iii)", found,
+                'ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน "Somchai Example"', "", "FRONT.ACK_AUTHOR")
+        return checker_module.plain_summary(checker_module.check_result(rep, {"front_label_style": "roman"}))
+
+    def test_not_found_uses_the_full_sentence(self):
+        summary = self._summary("ไม่พบชื่อผู้เขียนในส่วนท้ายของกิตติกรรมประกาศ")
+        self.assertIn('ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน "Somchai Example"', summary)
+        self.assertNotIn('ต้องแก้เป็น "Somchai Example"', summary)
+
+    def test_a_misspelt_name_still_says_change_it_to(self):
+        summary = self._summary('ชื่อผู้เขียนท้ายกิตติกรรมประกาศเขียนว่า "Somchai Exampel"')
+        self.assertIn('ต้องแก้เป็น "Somchai Example"', summary)
+
+    def test_the_english(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        self.assertEqual(check_i18n.tr_en('ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน "Somchai Example"', pairs),
+                         'The acknowledgements must end with the author\'s name "Somchai Example"')
+
+
+class Update183NoThaiLeftInEnglish(unittest.TestCase):
+    """คำไทยปนในรายงานภาษาอังกฤษ (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569) — ทุกรูปของตำแหน่งที่ประกอบจาก page_ref
+
+    สาเหตุที่ด่านเดิมไม่เห็น: เล่มทดสอบพิมพ์เลขหน้าครบและมีหน้าลงนามทุกเล่ม — check_i18n --corpus จึงรันแบบอ่านเลขหน้าไม่ได้
+    และแบบไม่มีหน้าลงนามเพิ่ม เก็บ detail ที่ระบบเขียนเอง และแปลรูปตำแหน่งที่ประกอบเองโดยตรงด้วยแล้ว
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        cls.i18n = check_i18n
+        _block, cls.pairs = check_i18n.load_tr()
+
+    def test_the_composed_locations(self):
+        none = "page with no page number (sheet 4 of the file)"
+        for name, english in (("กิตติกรรมประกาศ", "Acknowledgements"), ("บทคัดย่อ (อังกฤษ)", "English abstract"),
+                              ("บทคัดย่อ (ไทย)", "Thai abstract")):
+            with self.subTest(name=name):
+                self.assertEqual(self.i18n.tr_en(checker_module.front_span_location(
+                    name, "หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)"), self.pairs), f"{english} ({none})")
+                self.assertEqual(self.i18n.translation_problems(
+                    name, self.i18n.tr_en(checker_module.front_span_location(name, "หน้า 5"), self.pairs)), [])
+        self.assertIn("5", self.i18n.tr_en(checker_module.front_span_location("กิตติกรรมประกาศ", "หน้า 5"), self.pairs))
+
+    def test_every_form_has_no_thai_left(self):
+        for thai, english in (
+            ("บทที่ 2 ในสารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) และในเนื้อหา (หน้าไม่ระบุเลข (แผ่นที่ 26 ของไฟล์))",
+             "Chapter 2 in Table of contents (page with no page number (sheet 9 of the file)) "
+             "and in the body (page with no page number (sheet 26 of the file))"),
+            ("บทที่ 2 ในสารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) และในเนื้อหา (หน้า 11)",
+             "Chapter 2 in Table of contents (page with no page number (sheet 9 of the file)) and in the body (page 11)"),
+            ("บทที่ 2 ในสารบัญ (หน้า viii) และในเนื้อหา (หน้าไม่ระบุเลข (แผ่นที่ 26 ของไฟล์))",
+             "Chapter 2 in Table of contents (page viii) and in the body (page with no page number (sheet 26 of the file))"),
+            ("หน้าลงนาม 1 ประธานหลักสูตร (หน้าไม่ระบุเลข (แผ่นที่ 2 ของไฟล์))",
+             "Signature page 1 programme chair box (page with no page number (sheet 2 of the file))"),
+            ("หน้าไม่ระบุเลข (แผ่นที่ 101 ของไฟล์) ถึง หน้าไม่ระบุเลข (แผ่นที่ 105 ของไฟล์) (5 หน้า)",
+             "pages with no page number (sheets 101 to 105 of the file, 5 pages)"),
+            ("ระบบหาหน้าลงนามไม่เจอ", "Signature pages not found"),
+            ("ระบบหาหน้าบทคัดย่อไม่เจอ", "Abstract pages not found"),
+            ('ชื่อนักศึกษาบนหน้านี้พิมพ์ว่า "Somchai Example" ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด (UPPERCASE)',
+             'The name printed on this page is "Somchai Example"; it must be in ALL CAPS (UPPERCASE)'),
+            ('ชื่อนักศึกษาบนหน้านี้พิมพ์ว่า "Mr. Somchai Example" มีคำนำหน้านาม "Mr." ซึ่งหน้านี้ต้องไม่มี',
+             'The name printed on this page is "Mr. Somchai Example"; it has the title "Mr.", which this page must not have'),
+            ('ชื่อนักศึกษาบนหน้านี้พิมพ์ว่า "Mr. SOMCHAI EXAMPLE" ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด (UPPERCASE) และ '
+             'มีคำนำหน้านาม "Mr." ซึ่งหน้านี้ต้องไม่มี',
+             'The name printed on this page is "Mr. SOMCHAI EXAMPLE"; it must be in ALL CAPS (UPPERCASE) and '
+             'has the title "Mr.", which this page must not have'),
+        ):
+            with self.subTest(thai=thai):
+                en = self.i18n.tr_en(thai, self.pairs)
+                self.assertEqual(en, english)
+                self.assertEqual(self.i18n.translation_problems(thai, en), [])
+
+    def test_every_composed_location_shape_translates(self):
+        """ทุกรูปตำแหน่งที่ประกอบจาก page_ref ทั้งมีเลขหน้าและไม่มีเลขหน้า — รันได้โดยไม่ต้องมีเล่มจริง"""
+        shapes = [checker_module.front_span_location(name, "{ref}")
+                  for name in ("กิตติกรรมประกาศ", "บทคัดย่อ (อังกฤษ)", "บทคัดย่อ (ไทย)")]
+        for shape in shapes + list(self.i18n.COMPOSED_LOCATIONS):
+            for ref in ("หน้า 5", "หน้า iv", "หน้า ก", "หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)"):
+                thai = shape.replace("{ref}", ref)
+                with self.subTest(thai=thai):
+                    self.assertEqual(self.i18n.translation_problems(thai, self.i18n.tr_en(thai, self.pairs)), [])
+
+    def test_the_gate_runs_the_forms_the_test_books_do_not_have(self):
+        source = inspect.getsource(self.i18n.collect_corpus)
+        for marker in ('{"_extract_page_label":', '{"front_section_kind": without_signature_pages}',
+                       '("skipped", "notice")', "checker.front_span_location("):
+            self.assertIn(marker, source)
+
+
+class Update183SignatureTableReader(unittest.TestCase):
+    """ตัวอ่านรายชื่อกรรมการบนหน้าลงนาม (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569) — ชื่อสมมติทั้งหมด
+
+    เล่มจริงที่เส้นประยาวจนตัดบรรทัด: แถวเลื่อนไปหนึ่งแถว ชื่อนักศึกษาถูกนับเป็นกรรมการ ได้แดง "รายชื่อเกิน 4 ชื่อ อนุมัติ 3"
+    ทั้งที่รายชื่อครบ และหน้าที่ชื่อยาวตัดบรรทัดได้เศษชื่อ ชื่อฝั่งตรงข้ามหาย
+    """
+
+    class _Page:
+        height, width = 842, 595
+        chars = []
+
+        def __init__(self, words):
+            self.words = words
+
+        def extract_words(self, **_kwargs):
+            return self.words
+
+    LEFT, RIGHT = 60, 320
+
+    def _line(self, top, left="", right=""):
+        words = [{"text": tok, "top": top, "x0": self.LEFT + k * 40} for k, tok in enumerate(left.split())]
+        return words + [{"text": tok, "top": top, "x0": self.RIGHT + k * 40} for k, tok in enumerate(right.split())]
+
+    def _dots(self, top, wrapped=True):
+        """เส้นประสองช่อง — wrapped = ยาวจนตัดเป็นสองบรรทัด"""
+        lines = self._line(top, "………………", "………………")
+        return lines + (self._line(top + 13, "……", "……") if wrapped else [])
+
+    def _read(self, *blocks):
+        return signature_committee_slots(self._Page([w for block in blocks for w in block]))
+
+    def _candidate_rows(self, wrapped):
+        return [
+            self._dots(100, wrapped), self._line(130, "Somchai Example", "Assoc. Prof. Anan One,"),
+            self._line(143, "Candidate", "Ph.D. (Example Studies)"),
+            self._dots(180, wrapped), self._line(210, "Assoc. Prof. Boon Two,", "Assoc. Prof. Chai Three,"),
+            self._line(223, "Ph.D. (Example One)", "Ph.D. (Example Two)"),
+            self._dots(260, wrapped), self._line(290, "Prof. Dean Four,", "Prof. Head Five,"),
+            self._line(303, "Dean", "Program Director"),
+        ]
+
+    def test_a_wrapped_dotted_line_is_one_line(self):
+        for wrapped in (False, True):
+            with self.subTest(wrapped=wrapped):
+                members, quals, _bottom, _raw = self._read(*self._candidate_rows(wrapped))
+                self.assertEqual({k: v for k, v in members.items() if v},
+                                 {1: "Anan One", 2: "Chai Three", 9: "Boon Two"})
+                self.assertEqual(quals[1], "Ph.D. (Example Studies)")
+
+    def test_dotted_lines_of_empty_slots_stay_separate_rows(self):
+        """เส้นประติดกันที่ห่างกันเกินหนึ่งบรรทัด = ช่องว่างของ template — ไม่ใช่เส้นตัดบรรทัด (ห้ามยุบ ไม่งั้นกรรมการหาย)"""
+        members, *_rest = self._read(
+            self._dots(100, False), self._line(130, "Somchai Example", "Assoc. Prof. Anan One,"),
+            self._line(143, "Candidate", "Ph.D. (Example Studies)"),
+            self._dots(180, False), self._dots(230, False), self._dots(280, False),
+            self._dots(330, False), self._line(360, "Prof. Dean Four,", "Prof. Head Five,"),
+        )
+        self.assertEqual({k: v for k, v in members.items() if v}, {1: "Anan One"})
+
+    def test_the_student_is_not_counted_as_a_committee_member(self):
+        members, *_rest = self._read(*self._candidate_rows(True))
+        names = [name for name in members.values() if name]
+        self.assertNotIn("Somchai Example", names)
+        self.assertEqual(len(names), 3)
+
+    def test_a_candidate_slot_is_skipped_on_any_row_by_its_label(self):
+        """ดูจากป้ายใต้ชื่อ ไม่เทียบชื่อคน — กรรมการชื่อคล้ายนักศึกษาไม่ถูกตัด"""
+        members, *_rest = self._read(
+            self._dots(100, False), self._line(130, "", "Assoc. Prof. Somchai Example,"),
+            self._line(143, "", "Ph.D. (Example Studies)"),
+            self._dots(180, False), self._line(210, "Somchai Example", "Assoc. Prof. Boon Two,"),
+            self._line(223, "Candidate", "Ph.D. (Example Two)"),
+            self._dots(260, False), self._line(290, "Prof. Dean Four,", "Prof. Head Five,"),
+        )
+        self.assertEqual({k: v for k, v in members.items() if v}, {1: "Somchai Example", 2: "Boon Two"})
+        thai, *_rest = self._read(
+            self._dots(100, False), self._line(130, "", "ก ไก่,"), self._line(143, "", "ปร.ด. (สมมติ)"),
+            self._dots(180, False), self._line(210, "สมชาย ตัวอย่าง", "ข ไข่,"),
+            self._line(223, "ผู้วิจัย", "ปร.ด. (สมมติ)"),
+            self._dots(260, False), self._line(290, "ค ควาย,", "ง งู,"),
+        )
+        self.assertNotIn("สมชาย ตัวอย่าง", [name for name in thai.values() if name])
+
+    def test_a_name_that_wraps_is_read_whole_and_the_other_side_is_kept(self):
+        members, quals, _bottom, _raw = self._read(
+            self._dots(100), self._line(130, "Somchai Example", "Lecturer Anan One,"),
+            self._line(143, "Candidate", "Ph.D. (Example Studies)"),
+            self._dots(180), self._line(210, "Assistant professor Boon"),
+            self._line(223, "Twoname ,", "Assoc. Prof. Chai Three,"),
+            self._line(236, "Ph.D. (Example One)", "Ph.D. (Example Two)"),
+            self._dots(260), self._line(290, "Prof. Dean Four,", "Prof. Head Five,"),
+        )
+        self.assertEqual({k: v for k, v in members.items() if v},
+                         {1: "Anan One", 2: "Chai Three", 9: "Boon Twoname"})
+        self.assertEqual(quals[2], "Ph.D. (Example Two)")
+        self.assertEqual(quals[9], "Ph.D. (Example One)")
+
+    def test_a_qualification_or_role_below_an_empty_slot_is_not_a_name(self):
+        members, quals, _bottom, _raw = self._read(
+            self._dots(100, False), self._line(130, "", "Assoc. Prof. Anan One,"),
+            self._line(143, "", "Ph.D. (Example Studies)"),
+            self._dots(180, False), self._line(210, "", "Assoc. Prof. Boon Two,"),
+            self._line(223, "Ph.D. (Left Over)", "Ph.D. (Example Two)"),
+            self._dots(260, False), self._line(290, "", "Assoc. Prof. Chai Three,"),
+            self._line(303, "Member", "Ph.D. (Example Three)"),
+            self._dots(340, False), self._line(370, "Prof. Dean Four,", "Prof. Head Five,"),
+        )
+        self.assertEqual({k: v for k, v in members.items() if v}, {1: "Anan One", 2: "Boon Two", 3: "Chai Three"})
+        self.assertEqual(quals[2], "Ph.D. (Example Two)")
+
+    def test_a_correct_page_no_longer_gets_the_too_many_names_item(self):
+        rep = Report()
+        members, *_rest = self._read(*self._candidate_rows(True))
+        names = checker_module.committee_name_list(members)
+        self.assertTrue(checker_module.committee_read_is_trustworthy(names))
+        checker_module._report_committee_count(rep, [{"name": "ก"}, {"name": "ข"}, {"name": "ค"}], names,
+                                               "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_a_fragment_is_never_counted(self):
+        """อ่านไม่ครบ/ได้เศษชื่อ = นับจำนวนไม่ได้ ห้ามฟ้องแดงจากการอ่านที่ไม่ครบ"""
+        self.assertFalse(checker_module.committee_read_is_trustworthy(["Anan One", "Boon"]))
+
+
+class Update183ReferencesItem(unittest.TestCase):
+    """ไม่พบหน้ารายการอ้างอิง อยู่หมวดส่วนท้ายเหมือน BIOGRAPHY (อัปเดต 1.8.3) — เดิมตำแหน่ง "ทั้งเล่ม" ตกหมวดเนื้อหา"""
+
+    def test_the_item_sits_under_end_matter(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages([ScannedSignaturePages.COVER,
+                                              "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION"]))
+            result = checker_module.run_check(str(path), None)
+        [issue] = [i for i in result["issues_by_zone"]["RED"] if i["found"] == "ไม่พบหน้ารายการอ้างอิง"]
+        self.assertEqual(issue["location"], "ส่วนท้ายเล่ม")
+        self.assertEqual(checker_module.summary_section(issue), "ส่วนท้ายเล่ม")

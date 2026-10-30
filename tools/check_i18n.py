@@ -21,7 +21,9 @@ regex ที่ python ไม่รองรับจะถูกข้าม (�
 import os
 import re
 import sys
+from contextlib import nullcontext
 from pathlib import Path
+from unittest import mock
 
 CODE = Path(__file__).resolve().parents[1]              # ...\code (git root)
 PROJECT = CODE.parent                                   # ...\e-thesis checker
@@ -337,6 +339,26 @@ def report_coverage(messages, pairs):
           f"· ยังพึ่งเศษคำ: {len(thai) - len(whole)}")
 
 
+# รูปตำแหน่งที่ checker.py ประกอบจาก page_ref — {ref} = "หน้า 5" หรือ "หน้าไม่ระบุเลข (แผ่นที่ N ของไฟล์)"
+COMPOSED_LOCATIONS = (
+    "{ref} ถึง {ref} (5 หน้า)",
+    "หน้าลงนาม 1 ({ref})", "หน้าลงนาม 2 ({ref})",
+    "หน้าลงนาม 1 ประธานหลักสูตร ({ref})", "หน้าลงนาม 2 คณบดีคณะ ({ref})",
+    "กิตติกรรมประกาศ ({ref})",
+    "บทคัดย่ออังกฤษ ({ref})", "บทคัดย่อไทย ({ref})",
+    "บทคัดย่ออังกฤษ ({ref}) และ บทคัดย่อไทย ({ref})",
+    "สารบัญ ({ref}) และสารบัญตาราง ({ref})", "สารบัญ ({ref}) และสารบัญรูปภาพ ({ref})",
+    "บทคัดย่ออังกฤษ ({ref}) รายชื่อคณะกรรมการที่ปรึกษา", "บทคัดย่อไทย ({ref}) รายชื่อคณะกรรมการที่ปรึกษา",
+    "ชื่อย่อในบทคัดย่ออังกฤษ ({ref})", "ชื่อย่อในบทคัดย่อไทย ({ref})",
+    "สารบัญ ({ref})", "สารบัญ ({ref}) บทที่ 2", "สารบัญ ({ref}) กับบทที่ 2 ({ref})",
+    "สารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) กับบทที่ 2 ({ref})", "สารบัญ ({ref}) กับบทที่ 2 (หน้า 11)",
+    "บทที่ 2 ({ref})", "บทที่ 2 ในสารบัญ ({ref}) และในเนื้อหา ({ref})",
+    "บทที่ 2 ในสารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) และในเนื้อหา ({ref})",
+    "บทที่ 2 ในสารบัญ ({ref}) และในเนื้อหา (หน้า 11)",
+    "ประวัติผู้วิจัย ({ref})",
+)
+
+
 def collect_corpus(folder):
     """รันตรวจ PDF ทุกไฟล์ในโฟลเดอร์ แล้วคืนข้อความรายงานทุกบรรทัดที่ไม่ซ้ำ
 
@@ -367,17 +389,34 @@ def collect_corpus(folder):
     # แบบที่ 3: รู้ว่าเป็นหลักสูตรอะไร แต่ช่องข้อมูลอ้างอิงว่าง — หน้าเว็บส่งแบบนี้มาไม่ได้
     # (บังคับกรอกทั้งสองฝั่ง) แต่เครื่องตรวจต้องไม่พังและข้ามเฉพาะข้อที่ไม่มีข้อมูลให้เทียบ
     PARTIAL = {"doc_type": "THESIS", "format": "1", "program_language": "thai"}
-    approvals = [{"doc_type": "THESIS", "format": "1"}, PARTIAL, REFERENCE]
+    # (ข้อมูลอนุมัติ, ผล Turnitin, ฟังก์ชันที่สลับเพื่อจำลองเล่มแบบที่เล่มทดสอบไม่มี)
+    # เล่มทดสอบพิมพ์เลขหน้าครบและมีหน้าลงนามทุกเล่ม ข้อความที่ประกอบจาก "หน้าไม่ระบุเลข (แผ่นที่ N ของไฟล์)" และข้อความตอน
+    # หาหน้าลงนามไม่เจอจึงไม่เคยเข้าด่าน — เล่มจริงได้ "(เริ่มpage with no page number …)" ในรายงานอังกฤษ ทั้งที่ด่าน
+    # รายงาน UNTRANSLATED 0 (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569) จึงรันเพิ่มแบบอ่านเลขหน้าไม่ได้ทั้งเล่ม และแบบไม่มีหน้าลงนาม
+    real_section_kind = checker.front_section_kind
+
+    def without_signature_pages(page_text):
+        kind = real_section_kind(page_text)
+        return ("", "") if kind[0] == "signature" else kind
+
+    runs = [
+        # ผลตรวจ Turnitin (อัปเดต 1.4) เกินเกณฑ์ / อ่านไม่ได้ / ไม่ได้ส่ง ให้ข้อความครบทุกแบบเข้าด่านคำแปล
+        ({"doc_type": "THESIS", "format": "1"}, {"similarity": 31}, {}),
+        (PARTIAL, {"similarity": None}, {}),
+        (REFERENCE, None, {}),
+        (REFERENCE, None, {"_extract_page_label": lambda page_text: ""}),
+        (REFERENCE, None, {"front_section_kind": without_signature_pages}),
+    ]
 
     messages, seen, cats = [], set(), set()
     for path in sorted(Path(folder).glob("*.pdf")):
-        # ผลตรวจ Turnitin (อัปเดต 1.4) เกินเกณฑ์ / อ่านไม่ได้ / ไม่ได้ส่ง ให้ข้อความครบทุกแบบเข้าด่านคำแปล
-        for approved, turnitin in zip(approvals, ({"similarity": 31}, {"similarity": None}, None)):
+        for approved, turnitin, swapped in runs:
             try:
                 # ปิดด่านภาษาของเล่ม เพราะเครื่องมือนี้จับคู่ข้อมูลสมมติกับเล่มไหนก็ได้
                 # ถ้าไม่ปิด เล่มที่ภาษาไม่ตรงข้อมูลสมมติจะหยุดตรวจ ข้อความอีกครึ่งไม่ถูกตรวจคำแปล
-                report = checker.run_check(str(path), dict(approved),
-                                           skip_identity_check=True, turnitin=turnitin)
+                with mock.patch.multiple(checker, **swapped) if swapped else nullcontext():
+                    report = checker.run_check(str(path), dict(approved),
+                                               skip_identity_check=True, turnitin=turnitin)
             except Exception as exc:                   # เล่มที่อ่านไม่ได้ ข้ามไป
                 print(f"  ({path.name}: ตรวจไม่ได้ {type(exc).__name__})")
                 continue
@@ -397,11 +436,14 @@ def collect_corpus(folder):
                     cats.add(issue.get("category") or "")
                     cats.add(issue.get("section") or "")
             # ตาราง "ผลเทียบข้อมูลอนุมัติรายตำแหน่ง" ก็แสดงผ่าน trEN (class tr-dyn)
-            # เก็บเฉพาะ topic/location ซึ่งเป็นข้อความของระบบ — ไม่เก็บ detail
-            # เพราะ detail คือ "ค่าที่พบในเล่ม" (ชื่อเรื่อง ชื่อปริญญา วันที่) ต้องคงเป็นไทย
+            # เก็บ topic/location ซึ่งเป็นข้อความของระบบ — detail ส่วนใหญ่คือ "ค่าที่พบในเล่ม" (ชื่อเรื่อง ชื่อปริญญา วันที่)
+            # ต้องคงเป็นไทย ยกเว้นสถานะ "ไม่ได้ตรวจ" และ "ข้อสังเกต" ที่ระบบเขียนเอง (อัปเดต 1.8.3 — เคยหลุด
+            # "ระบบหาSignature pagesไม่เจอ")
             for group in report.get("verification") or []:
                 texts.append(group.get("topic") or "")
                 texts += [c.get("location") or "" for c in group.get("checks") or []]
+                texts += [c.get("detail") or "" for c in group.get("checks") or []
+                          if c.get("status") in ("skipped", "notice")]
             # กล่อง "ข้อมูลประกอบ" ก็แสดงผ่าน trEN (class tr-dyn) เหมือนกัน
             # เก็บเฉพาะ topic — detail คือค่าที่อ่านได้จากเล่ม (เช่นรายชื่อกรรมการ)
             # ต้องคงเป็นไทย เคยหลุดมาแล้ว: "รายชื่อที่ระบบอ่านได้จาก..." ไม่เคยถูกตรวจ
@@ -426,6 +468,16 @@ def collect_corpus(folder):
                 if text and text not in seen:
                     seen.add(text)
                     messages.append(text)
+    # ตำแหน่งที่ประกอบจาก page_ref แต่เล่มทดสอบไม่เข้าเงื่อนไข (กิตติกรรมประกาศ/บทคัดย่อยาวเกิน ช่องคณบดีผิด ฯลฯ) — แปลรูปที่
+    # ประกอบจริงทุกแบบ ทั้งมีเลขหน้าและไม่มีเลขหน้า (อัปเดต 1.8.3) เพิ่มตำแหน่งใหม่ใน checker ต้องเพิ่มที่ COMPOSED_LOCATIONS ด้วย
+    composed = [checker.front_span_location(name, "{ref}")
+                for name in ("กิตติกรรมประกาศ", "บทคัดย่อ (อังกฤษ)", "บทคัดย่อ (ไทย)")] + list(COMPOSED_LOCATIONS)
+    for shape in composed:
+        for ref in ("หน้า 5", "หน้า iv", "หน้า ก", "หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)"):
+            text = shape.replace("{ref}", ref)
+            if text not in seen:
+                seen.add(text)
+                messages.append(text)
     return messages, sorted(c for c in cats if c)
 
 

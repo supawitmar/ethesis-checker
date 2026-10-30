@@ -460,9 +460,9 @@
 
   <div class="verdict-bar">
     <div class="verdict-label" data-th="แจ้งผลการพิจารณา" data-en="Result of consideration">แจ้งผลการพิจารณา</div>
-    <div class="verdict-pill {{ 'pass' if report.verdict=='ผ่าน' else ('fail' if report.verdict=='ไม่ผ่าน' else 'pending') }}" id="verdict-pill">
-      {{ 'ผ่าน (Passed)' if report.verdict=='ผ่าน' else ('ไม่ผ่าน (Not passed)' if report.verdict=='ไม่ผ่าน' else 'รอยืนยัน (Pending confirmation)') }}
-    </div>
+    {% set verdict_th = 'ผ่าน (Passed)' if report.verdict=='ผ่าน' else ('ไม่ผ่าน (Not passed)' if report.verdict=='ไม่ผ่าน' else 'รอยืนยัน (Pending confirmation)') %}
+    {% set verdict_en = 'Passed' if report.verdict=='ผ่าน' else ('Not passed' if report.verdict=='ไม่ผ่าน' else 'Pending confirmation') %}
+    <div class="verdict-pill {{ 'pass' if report.verdict=='ผ่าน' else ('fail' if report.verdict=='ไม่ผ่าน' else 'pending') }}" id="verdict-pill" data-th="{{ verdict_th }}" data-en="{{ verdict_en }}">{{ verdict_th }}</div>
     <div class="stats">
       <div class="stat r"><b id="stat-red">{{ report.issues_by_zone.RED | length }}</b><span data-th="ต้องแก้" data-en="Must fix">ต้องแก้</span></div>
       <div class="stat o"><b id="stat-orange">{{ report.issues_by_zone.ORANGE | length }}</b><span data-th="รอยืนยัน" data-en="Pending">รอยืนยัน</span></div>
@@ -959,7 +959,7 @@ var TR = [
   [/ตามประกาศ (\d+) ควรเป็น ("[^"]*")/g, 'Per the $1 regulation it should be $2'],
   [/พบวันที่สอบผ่านไม่ตรงกันกับในระบบ: ("[^"]*")/g, 'The examination pass date does not match the approved data: $1'],
   [/ที่ถูกต้องตามระบบคือ ("[^"]*")/g, 'The approved data says $1'],
-  [/ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน ("[^"]*")/g, 'The acknowledgements must end with the author name $1'],
+  [/ท้ายกิตติกรรมประกาศต้องเป็นชื่อผู้เขียน ("[^"]*")/g, 'The acknowledgements must end with the author\'s name $1'],
   // ชื่อท้ายกิตติกรรมประกาศครบทุกตัวอักษรแต่วรรณยุกต์/สระ/ำ ไม่ตรง (เจ้าหน้าที่สั่ง 6 ต.ค. 2569 ให้นับเป็นสะกดผิด)
   [/ชื่อผู้เขียนท้ายกิตติกรรมประกาศเขียนว่า ("[^"]*")/g, 'The author name at the end of the acknowledgements reads $1'],
   [/เพิ่มหรือแก้ชื่อผู้เขียนท้ายกิตติกรรมประกาศเป็น ("[^"]*")/g, 'Add or correct the author name at the end of the acknowledgements to $1'],
@@ -1583,6 +1583,42 @@ var TR = [
    'Please attach the original unsigned signature pages (pages $1) in place of the scanned ones'],
   [/^แทนหน้าที่สแกนด้วยหน้าลงนามแบบต้นฉบับที่ยังไม่ลงนาม$/g,
    'Replace the scanned pages with the original unsigned signature pages'],
+  // อัปเดต 1.8.3 (เจ้าของสั่ง 30 ต.ค. 2569): ตำแหน่งที่ประกอบจาก page_ref แบบไม่มีเลขหน้า ที่ด่านคำแปลไม่เคยเห็น
+  // ("(เริ่มpage with no page number …)" "Chapter 2 ในTable of contents") — check_i18n --corpus รันแบบอ่านเลขหน้าไม่ได้ด้วยแล้ว
+  [/^บทคัดย่อ \(อังกฤษ\)$/g, 'English abstract'],
+  [/^บทคัดย่อ \(ไทย\)$/g, 'Thai abstract'],
+  [/^(กิตติกรรมประกาศ|บทคัดย่อ \(อังกฤษ\)|บทคัดย่อ \(ไทย\)) \(เริ่มหน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
+   '$1 (page with no page number (sheet $2 of the file))'],
+  [/^(กิตติกรรมประกาศ|บทคัดย่อ \(อังกฤษ\)|บทคัดย่อ \(ไทย\)) \(เริ่มหน้า ([^\s()]+)\)$/g, '$1 (starting page $2)'],
+  [/^บทที่ (\d+) ในสารบัญ \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\) และในเนื้อหา \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
+   'Chapter $1 in Table of contents (page with no page number (sheet $2 of the file)) and in the body (page with no page number (sheet $3 of the file))'],
+  [/^บทที่ (\d+) ในสารบัญ \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\) และในเนื้อหา \(หน้า ([^\s()]+)\)$/g,
+   'Chapter $1 in Table of contents (page with no page number (sheet $2 of the file)) and in the body (page $3)'],
+  [/^บทที่ (\d+) ในสารบัญ \(หน้า ([^\s()]+)\) และในเนื้อหา \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
+   'Chapter $1 in Table of contents (page $2) and in the body (page with no page number (sheet $3 of the file))'],
+  [/^หน้าลงนาม (\d+) ประธานหลักสูตร \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g, 'Signature page $1 programme chair box (page with no page number (sheet $2 of the file))'],
+  [/^หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\) ถึง หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\) \((\d+) หน้า\)$/g,
+   'pages with no page number (sheets $1 to $2 of the file, $3 pages)'],
+  [/^(หน้า.+) ถึง (หน้า.+) \((\d+) หน้า\)$/g, '$1 to $2 ($3 pages)'],
+  [/^หน้าลงนาม (\d+) คณบดีคณะ \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g, 'Signature page $1 faculty dean box (page with no page number (sheet $2 of the file))'],
+  [/^สารบัญ \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\) กับบทที่ (\d+) \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
+   'Table of contents (page with no page number (sheet $1 of the file)) vs chapter $2 (page with no page number (sheet $3 of the file))'],
+  [/^สารบัญ \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\) กับบทที่ (\d+) \(หน้า ([^\s()]+)\)$/g,
+   'Table of contents (page with no page number (sheet $1 of the file)) vs chapter $2 (page $3)'],
+  [/^สารบัญ \(หน้า ([^\s()]+)\) กับบทที่ (\d+) \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
+   'Table of contents (page $1) vs chapter $2 (page with no page number (sheet $3 of the file))'],
+  [/^(สารบัญ.*?\)) และ(สารบัญ.+)$/g, '$1 and $2'],
+  [/^ระบบหาหน้าลงนามไม่เจอ$/g, 'Signature pages not found'],
+  [/^ระบบหาหน้าบทคัดย่อไม่เจอ$/g, 'Abstract pages not found'],
+  [/^เล่มไม่มีหน้าบทคัดย่อภาษาไทย$/g, 'The document has no Thai abstract page'],
+  [/^เล่มไม่มีหน้าบทคัดย่อภาษาอังกฤษ$/g, 'The document has no English abstract page'],
+  [/^เล่มไม่มีหน้าบทคัดย่อไทย$/g, 'The document has no Thai abstract page'],
+  [/^เล่มไม่มีหน้าบทคัดย่ออังกฤษ$/g, 'The document has no English abstract page'],
+  // ชื่อที่พิมพ์บนหน้านี้ + สิ่งที่ผิด เป็นสองประโยค — เดิมต่อกันเป็น 'is "…" must be in ALL CAPS' ซึ่งผิดไวยากรณ์ (อัปเดต 1.8.3)
+  [/^(?:ชื่อนักศึกษา|ชื่อภาษาไทย|ชื่อภาษาอังกฤษ)บนหน้านี้พิมพ์ว่า ("[^"]*") (.+)$/g, 'The name printed on this page is $1; it $2'],
+  [/^ต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด \(UPPERCASE\)$/g, 'must be in ALL CAPS (UPPERCASE)'],
+  [/^ต้องเป็นตัวพิมพ์ใหญ่เฉพาะอักษรแรกของชื่อและนามสกุล \(Sentence Case\)$/g, 'must be in Sentence Case (only the first letter of the given name and of the surname capitalised)'],
+  [/^(ต้องเป็นตัวพิมพ์ใหญ่[^"]*) และ (มีคำนำหน้านาม "[^"]*" ซึ่งหน้านี้ต้องไม่มี)$/g, '$1 and $2'],
   [/สารบัญมี (\d+) บท เนื้อหามี (\d+) บท/g, 'TOC lists $1 chapters but content has $2'],
   [/จำนวนบทต้องเท่ากัน/g, 'Chapter counts must match'],
   [/อัปเดตสารบัญหรือเนื้อหา/g, 'Update the TOC or the content'],
@@ -1695,7 +1731,7 @@ var TR = [
   [/ต้องมีหัวข้อ REFERENCES หรือ BIBLIOGRAPHY เสมอ/g, 'A REFERENCES or BIBLIOGRAPHY section is required'],
   [/ต้องมีหัวข้อ รายการอ้างอิง หรือ บรรณานุกรม เสมอ/g, 'A "รายการอ้างอิง" or "บรรณานุกรม" section is required'],
   [/ไม่พบประวัติผู้วิจัย \(BIOGRAPHY\)/g, 'BIOGRAPHY section not found'],
-  [/ต้องมีและเป็นหน้าสุดท้ายของเล่ม/g, 'Required and must be the last section of the document'],
+  [/ต้องมีและเป็นหน้าสุดท้ายของเล่ม/g, 'Required and must be the last page of the document'],
   [/หลัง BIOGRAPHY ยังมีส่วนอื่น/g, 'Content appears after BIOGRAPHY'],
   [/ประวัติผู้วิจัยต้องเป็นหน้าสุดท้าย/g, 'BIOGRAPHY must be the final section'],
   [/ย้ายไปท้ายสุด/g, 'Move it to the end'],
@@ -2205,16 +2241,19 @@ function clearStaffAnswer(card){
 // เจ้าหน้าที่กด "โครงสร้างหน้าลงนามผิด" กับเล่มที่ระบบว่าผ่าน แล้วข้อความสรุปเขียนว่า
 // "ไม่ผ่าน" แต่ป้ายบนหัวยังเขียน "ผ่าน (Passed)" — สองอย่างขัดกันต่อหน้าเจ้าหน้าที่
 var VERDICT_PILL = {
-  'ผ่าน':      ['pass',    'ผ่าน (Passed)'],
-  'ไม่ผ่าน':    ['fail',    'ไม่ผ่าน (Not passed)'],
-  'รอยืนยัน':   ['pending', 'รอยืนยัน (Pending confirmation)'],
+  'ผ่าน':      ['pass',    'ผ่าน (Passed)', 'Passed'],
+  'ไม่ผ่าน':    ['fail',    'ไม่ผ่าน (Not passed)', 'Not passed'],
+  'รอยืนยัน':   ['pending', 'รอยืนยัน (Pending confirmation)', 'Pending confirmation'],
 };
 function renderVerdictPill(verdict){
   var pill = document.getElementById('verdict-pill');
   var shown = VERDICT_PILL[verdict];
   if (!pill || !shown) return;              // ผลตรวจที่ไม่รู้จัก ปล่อยของเดิมไว้
   pill.className = 'verdict-pill ' + shown[0];
-  pill.textContent = shown[1];
+  // โหมดอังกฤษแสดงอังกฤษอย่างเดียว (อัปเดต 1.8.3) — applyLang อ่าน data-th/data-en ตอนสลับภาษา
+  pill.dataset.th = shown[1];
+  pill.dataset.en = shown[2];
+  pill.textContent = pill.dataset[LANG];
 }
 // ตัวเลขสามกล่องข้าง ๆ ก็ต้องตามคำตัดสิน — เจ้าหน้าที่แจ้ง (ก.ย. 2569) ว่ากด "ไม่ผ่าน"
 // ที่ข้อส้ม/เหลือง คือตัดสินว่าเป็นจุดที่นักศึกษาต้องแก้ ข้อนั้นจึงต้องย้ายไปนับกับสีแดง

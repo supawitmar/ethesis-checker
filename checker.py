@@ -472,7 +472,12 @@ def _is_blank_page_text(page_text):
 # เศษที่ติดมากับบรรทัดเลขหน้า — เส้นคั่น/จุดไข่ปลา/หัวกระดาษที่เป็นสัญลักษณ์ล้วน
 # เล่มจริงพบบรรทัดเลขหน้าเป็น ". 1" ทุกหน้าคี่ (จุดของเส้นตกแต่งติดมาด้วย)
 # ถ้าไม่ปัดออก ระบบจะอ่านเลขหน้าไม่ได้ 119 จาก 177 หน้า แล้วฟ้อง "เลขหน้ากระโดด" 45 ข้อ
-_PAGE_LABEL_NOISE = re.compile(r'^[\s.\-—–_•·|:]+|[\s.\-—–_•·|:]+$')
+# สัญลักษณ์เดี่ยวจิ๋วในแถบหัวกระดาษ (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569) — เล่มจริงมี "`" ขนาด 9 จุดที่ซ้ายสุดของแถบตั้งแต่
+# แผ่น 25 ข้อความจึงเป็น "` 11" อ่านเลขหน้าไม่ได้ทั้งเล่ม ตำแหน่งขึ้น "หน้าไม่ระบุเลข" และข้อหัวกระดาษส้ม 110 หน้า
+# ตัดเฉพาะที่หัว/ท้ายของบรรทัดหรือคำ ตัวอักษรและข้อความจริงไม่ถูกแตะ
+_PAGE_STRAY_MARKS = "`´'’‘^~¨ˋˊ"
+_PAGE_LABEL_NOISE = re.compile(rf'^[\s.\-—–_•·|:{_PAGE_STRAY_MARKS}]+|[\s.\-—–_•·|:{_PAGE_STRAY_MARKS}]+$')
+_HEADER_STRAY_MARKS = re.compile(rf'^[{_PAGE_STRAY_MARKS}]+|[{_PAGE_STRAY_MARKS}]+$')
 
 
 def _extract_page_label(page_text):
@@ -546,6 +551,8 @@ def header_tokens(pdf_page, words=None):
             continue
         # รหัส PUA ของฟอนต์ไทยที่ดึงมาเป็นกล่อง แปลงกลับเป็นอักษรจริงก่อน (thai_text.fix_thai_pua)
         token = fix_thai_pua(word.get('text', '') or '').strip()
+        # สัญลักษณ์เดี่ยวไม่ใช่ "ข้อความอื่น" ในหัวกระดาษ และเลขหน้าที่ติดสัญลักษณ์ก็ยังเป็นเลขหน้า (อัปเดต 1.8.3)
+        token = _HEADER_STRAY_MARKS.sub('', token)
         if token:
             tokens.append(token)
     return tokens
@@ -673,6 +680,12 @@ _SIG_ROLE_LABELS = frozenset(norm(label) for label in (
     'อาจารย์ที่ปรึกษาหลัก', 'อาจารย์ที่ปรึกษาร่วม'))
 
 
+# เส้นประที่ตัดบรรทัดห่างกันหนึ่งบรรทัด (เล่มจริง 14 pt) ส่วนช่องว่างของ template ห่างอย่างน้อยสองบรรทัดข้อความ (ชื่อ + คุณวุฒิ)
+_SIG_DOTS_WRAP_GAP = 25
+# ป้ายใต้ชื่อของช่องนักศึกษาบนหน้าลงนาม — ไม่ใช่กรรมการ (อัปเดต 1.8.3)
+_SIG_CANDIDATE_LABELS = frozenset(norm(label) for label in ('Candidate', 'ผู้วิจัย'))
+
+
 def _sig_qual_text(text):
     """ข้อความคุณวุฒิใต้ชื่อกรรมการ — คืน '' ถ้าว่างหรือเป็น placeholder (ยังไม่กรอกจริง)"""
     n = norm(text)
@@ -783,9 +796,14 @@ def signature_committee_slots(pdf_page):
         mid = min(dot_starts) - 2.0     # เผื่อคำที่เริ่มชิดขอบซ้ายของช่องพอดี
     # แถวชื่อ = บรรทัดถัดจากเส้นประ; แถวใต้ชื่อ = ทุกบรรทัดจนถึงเส้นประถัดไป (ช่องของคนนั้น)
     # คุณวุฒิหาจากข้อความในช่อง ไม่ใช่ "บรรทัดถัดจากชื่อ" เป๊ะ — ดู qual_cell ข้างล่าง
+    # เส้นประที่ยาวจนตัดบรรทัดคือเส้นเดียว (ใช้บรรทัดสุดท้ายของชุด) — เล่มจริง (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569)
+    # ทุกเส้นตัดเป็นสองบรรทัด แถวจึงเลื่อนไปหนึ่งแถว แถวแรกที่ตั้งใจข้ามช่องซ้าย (ช่อง Candidate) กลายเป็นแถวของเส้นประ
+    # ชื่อนักศึกษาถูกนับเป็นกรรมการคนที่ 9 แล้วฟ้องแดง "รายชื่อเกิน" ทั้งที่รายชื่อครบ
+    # เส้นประติดกันที่ห่างเกินหนึ่งบรรทัดคือ "ช่องว่าง" ของ template ไม่ใช่เส้นตัดบรรทัด ต้องนับเป็นคนละแถวเหมือนเดิม
     name_rows, qual_rows = [], []
     for i in range(len(lines) - 1):
-        if not line_dotted[i]:
+        wrapped = line_dotted[i + 1] and lines[i + 1]['top'] - lines[i]['top'] <= _SIG_DOTS_WRAP_GAP
+        if not line_dotted[i] or wrapped:
             continue
         name_rows.append(lines[i + 1])
         below = []
@@ -830,21 +848,52 @@ def signature_committee_slots(pdf_page):
                 return text
         return ''
 
+    def name_cell(nrow, rows, left):
+        """ชื่อในช่องหนึ่งของแถว — คืน (ชื่อ, บรรทัดที่เหลือใต้ชื่อ) ชื่อยาวตัดบรรทัดได้ (อัปเดต 1.8.3)
+
+        เล่มจริง (ชื่อสมมติ): ซ้าย "Assistant professor Somchai" / "Jaidee ," ส่วนชื่อฝั่งขวาตกไปอยู่บรรทัดที่สองของซ้าย
+        เดิมได้เศษ "Somchai" และชื่อฝั่งขวาหาย จำนวนที่นับได้จึงผิด
+        - ช่องนี้ว่างในแถวชื่อ แต่บรรทัดถัดไปมีข้อความ (ไม่ใช่ป้ายบทบาท) = ชื่ออยู่บรรทัดนั้น
+        - บรรทัดชื่อไม่จบด้วยจุลภาค และบรรทัดถัดไปของช่องจบด้วยจุลภาคโดยไม่ใช่คุณวุฒิ = ชื่อต่อบรรทัด
+        ช่องที่ถมขาวไว้ไม่มีข้อความใต้ชื่อ จึงยังเป็นช่องว่าง
+        """
+        rows = list(rows or ())
+        text = cell(nrow, left)
+        if _sig_is_dotted(text):        # แถวของช่องว่าง (เส้นประ) ไม่มีชื่อ บรรทัดถัดไปเป็นของแถวอื่น
+            return text, rows
+        below = rows
+        while not text and below:
+            text = cell(below[0], left)
+            # ป้ายบทบาทหรือคุณวุฒิ ไม่ใช่ชื่อ — ช่องนี้ไม่มีชื่อจริง
+            if norm(text) in _SIG_ROLE_LABELS or '(' in text or _DEGREE_ABBR_TOKEN.search(text):
+                return '', rows
+            below = below[1:]
+        rows = below
+        if text and not text.rstrip().endswith(',') and rows:
+            more = cell(rows[0], left)
+            if more.rstrip().endswith(',') and '(' not in more and not _DEGREE_ABBR_TOKEN.search(more):
+                return f'{text} {more}', rows[1:]
+        return text, rows
+
+    def is_candidate_slot(rows, left):
+        """ช่องของนักศึกษา — ใต้ชื่อพิมพ์ป้าย Candidate / ผู้วิจัย (ดูจากโครงสร้างช่อง ไม่เทียบชื่อคน)"""
+        return any(norm(cell(row, left)) in _SIG_CANDIDATE_LABELS for row in rows or ())
+
     members, member_quals, member_raw = {}, {}, {}
     # แถวเส้นประสุดท้ายคือช่องสถาบัน (คณบดี / ประธานหลักสูตร) ไม่ใช่กรรมการ — ตัดทิ้งเสมอ
     # (เดิมตัดด้วย [:5] ซึ่งพึ่งว่าต้องอ่านเส้นประเจอครบ 6 แถวพอดี ถ้าเจอไม่ครบ
     #  แถวคณบดีจะเลื่อนเข้ามาเป็นกรรมการ แล้วฟ้องว่ามีชื่อนอกรายชื่ออนุมัติ)
     member_rows = list(zip(name_rows, qual_rows))[:-1][:5]
     for idx, (nrow, qrow) in enumerate(member_rows):     # 0..4 = ระดับกรรมการ
-        right = cell(nrow, left=False)
+        right, right_below = name_cell(nrow, qrow, left=False)
         members[idx + 1] = _sig_clean_name(right)                    # ขวา → 1..5
         member_raw[idx + 1] = right
-        member_quals[idx + 1] = _sig_qual_text(qual_cell(qrow, left=False))
-        if idx >= 1:
-            left = cell(nrow, left=True)
+        member_quals[idx + 1] = _sig_qual_text(qual_cell(right_below, left=False))
+        if idx >= 1 and not is_candidate_slot(qrow, left=True):
+            left, left_below = name_cell(nrow, qrow, left=True)
             members[10 - idx] = _sig_clean_name(left)                # ซ้าย → 9,8,7,6
             member_raw[10 - idx] = left
-            member_quals[10 - idx] = _sig_qual_text(qual_cell(qrow, left=True))
+            member_quals[10 - idx] = _sig_qual_text(qual_cell(left_below, left=True))
     # ช่องล่างสุด (สถาบัน) = ทุกคำใต้แถวกรรมการสุดท้าย
     #
     # ไม่มีวิธีเรียงคำวิธีเดียวที่ถูกกับทุกเล่ม เพราะสองช่องนี้กว้างไม่เท่ากันและข้อความยาว
@@ -1582,6 +1631,11 @@ def _report_empty_pages(rep, empty_pages, page_labels):
     rep.add(EMPTY_PAGE_ZONE, "-", "หน้าว่าง", found,
             "ไฟล์รูปเล่มต้องไม่มีหน้าว่างที่ไม่มีข้อความ รูป หรือเลขหน้า", remove, "PAGE.EMPTY",
             fail_text=remove)
+
+
+def front_span_location(name, ref):
+    """ตำแหน่งของข้อ "กินพื้นที่เกิน" ของส่วนนำ — check_i18n ตรวจคำแปลของรูปนี้โดยตรง (เล่มทดสอบไม่เข้าเงื่อนไข)"""
+    return f"{name} (เริ่ม{ref})"
 
 
 def _report_signature_page_count(rep, sig_pages, scanned, label_style=None):
@@ -4914,6 +4968,9 @@ def _corrected_value(issue):
     # สรุปจะบอกแค่ให้แก้ปก แล้วหน้าลงนามกับบทคัดย่อที่เขียนผิดอยู่ด้วยหายไปจากข้อความ
     if issue.get("rule_id") in ("FORM.BOOK_LANGUAGE", "PAGE.SIGNATURE_LABEL", "FORM.DOC_TYPE"):
         return ""
+    # ไม่พบชื่อผู้เขียนท้ายกิตติกรรมประกาศ ไม่มีอะไรให้ "แก้เป็น" — ใช้ประโยคเต็มของข้อ (อัปเดต 1.8.3)
+    if issue.get("rule_id") == "FRONT.ACK_AUTHOR" and (issue.get("found") or "").startswith("ไม่พบชื่อผู้เขียน"):
+        return ""
     # บรรทัดที่เขียนถึงเจ้าหน้าที่ไม่ใช่ค่าที่ต้องแก้ ข้ามไปใช้ช่องถัดไป (ดู is_staff_only_line)
     raw = next((text for text in (summary_tidy(issue.get("expected")),
                                   summary_tidy(issue.get("fix")))
@@ -5212,9 +5269,12 @@ def _summary_block(lines, items, number):
 # ไม่ใช่จุดที่ต้องแก้ จึงไม่นับ ไม่เปลี่ยนผลตรวจ และไม่ลงช่องรายละเอียดในชีท (ไปพร้อมถ้อยคำปิดท้าย)
 # หน้าผลตรวจแปลอังกฤษทั้งก้อน (ลิงก์ฉบับอังกฤษคนละลิงก์) จึงต้องมีคู่ภาษาอังกฤษที่นี่ด้วย
 REQUIREMENTS_TEXT = ("ศึกษาข้อกำหนดรูปเล่มอิเล็กทรอนิกส์ และดาวน์โหลด template ตัวอย่างเพื่อใช้ประกอบการแก้ไขได้ที่\n"
-                     "https://grad-as.my.canva.site/electronic-file-requirements-th")
+                     "https://grad-as.my.canva.site/electronic-file-requirements-th\n"
+                     # บรรทัดท้าย: เจ้าหน้าที่เติมมือในเล่มจริง เจ้าของสั่งให้เติมให้เลย (อัปเดต 1.8.3 30 ต.ค. 2569)
+                     "* กรุณาจัดรูปเล่มโดยใช้ template นี้เท่านั้น *")
 REQUIREMENTS_TEXT_EN = ("The electronic file requirements and template are available at\n"
-                        "https://grad-as.my.canva.site/electronic-file-requirements-en")
+                        "https://grad-as.my.canva.site/electronic-file-requirements-en\n"
+                        "* Please format your file using this template only. *")
 
 
 def plain_summary(report, failed=None, passed=None, staff=None,
@@ -5761,7 +5821,7 @@ def closest_degree_line(page_text, expected, abstract=False):
     target = norm(expected)
     best = max(candidates,
                key=lambda line: difflib.SequenceMatcher(None, target, norm(line)).ratio())
-    return _strip_degree_lead_in(best)
+    return _strip_degree_lead_in(best, abstract)
 
 
 # คำนำหน้าชื่อปริญญาในประโยค template ของหน้าลงนาม — ไม่ใช่ส่วนหนึ่งของชื่อปริญญา
@@ -5769,10 +5829,18 @@ def closest_degree_line(page_text, expected, abstract=False):
 # แล้วเจ้าหน้าที่ต้องไล่เทียบเองว่าต่างจากข้อมูลอนุมัติตรงไหน
 _DEGREE_LEAD_IN = re.compile(
     r'^\s*(?:for\s+the\s+degree\s+of|เพื่อรับปริญญา|ปริญญา)\s*', re.I)
+# หน้าปกตัดบรรทัดประโยคของ template ตรงไหนก็ได้ จึงตัดได้ทุกหางของประโยค (อัปเดต 1.8.3 — เล่มจริงได้ข้อ
+# 'เขียนว่า "OF THE REQUIREMENTS FOR THE DEGREE OF Health Social Sciences"' ทั้งที่ชื่อปริญญาจริงคือ "Health Social Sciences")
+# บทคัดย่อไม่มีประโยคนี้ใน template — "DEGREE OF DOCTORAL OF …" บนบทคัดย่อคือสิ่งที่นักศึกษาพิมพ์ ต้องยกมาครบ
+_DEGREE_SENTENCE_LEAD_IN = re.compile(
+    r'^\s*(?:(?:' + '|'.join(_DEGREE_SENTENCE_OPENERS).replace(' ', r'\s+') + r')\s+)?(?:'
+    + '|'.join(tail.replace(' ', r'\s+') for tail in _sentence_tails(_DEGREE_SENTENCE_EN))
+    + r')\s*', re.I)
 
 
-def _strip_degree_lead_in(line):
-    return _DEGREE_LEAD_IN.sub('', soft(line)).strip()
+def _strip_degree_lead_in(line, abstract=False):
+    text = _DEGREE_LEAD_IN.sub('', soft(line)).strip()
+    return text if abstract else _DEGREE_SENTENCE_LEAD_IN.sub('', text).strip()
 
 
 def compare_values(actual, expected, rule_name):
@@ -7365,6 +7433,10 @@ N_LISTS = [norm('สารบัญตาราง'), norm('สารบัญ�
            norm('คำย่อ'), norm('คำอธิบายสัญลักษณ์/คำย่อ'),
            'LISTOFTABLES', 'LISTOFFIGURES', 'LISTOFABBREVIATIONS', 'LISTOFILLUSTRATIONS']
 N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
+# ข้อความที่ template หน้าลงนามพิมพ์ไว้เอง — ทางจับสำรองของหน้าลงนามที่ไม่มีบรรทัดหัวข้อ (อัปเดต 1.8.3 เจ้าของสั่ง 30 ต.ค. 2569)
+# สำรวจเล่มจริง 10 เล่ม: ประโยคนี้ร่วมกับคำว่า committee/คณะกรรมการ อยู่เฉพาะบนหน้าลงนาม ไม่พบบนปก บทคัดย่อ หรือสารบัญ
+N_SIG_TEMPLATE_SENTENCES = (norm("was submitted to the Faculty of Graduate Studies"), norm(SIGNATURE_TEMPLATE_TH_TAIL))
+N_SIG_COMMITTEE_WORDS = ("COMMITTEE", norm("คณะกรรมการ"))
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
 # หัวข้อ "ประวัติ" เฉย ๆ — เล่มจริง 6538041 SHPP/D ตั้งหัวข้อหน้าสุดท้ายแบบนี้ ระบบเลยฟ้องผิดว่า
@@ -7883,6 +7955,11 @@ def front_section_kind(page_text):
     bare = [norm(_strip_toc_page_number(l)) for l in tls]
     alt = nls if looks_like_contents_page(page_text) else bare
     if any(x in N_ENTITLED for x in nls) or any(x in N_ENTITLED for x in alt):
+        return "signature", soft(tls[0]) if tls else ""
+    # หน้าลงนามที่ไม่มีบรรทัด "Thesis" / "เรื่อง" เดิมได้ "ไม่พบหน้าลงนามในเล่ม" ทั้งที่มี (อัปเดต 1.8.3)
+    whole_page = norm(page_text)
+    if (any(sentence in whole_page for sentence in N_SIG_TEMPLATE_SENTENCES)
+            and any(word in whole_page for word in N_SIG_COMMITTEE_WORDS)):
         return "signature", soft(tls[0]) if tls else ""
     # สแกนหัวเรื่องให้ลึกพอ — เล่มที่ชื่อเรื่องยาว 3-4 บรรทัด คำว่า ABSTRACT
     # จะไปอยู่บรรทัดที่ 9-10 ของหน้า ถ้าสแกนตื้นจะหาหน้าบทคัดย่อไม่เจอ
@@ -8713,11 +8790,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f"เลือกคำเดียว: {one} หรือ {other}", "ลบคำที่ไม่ใช้")
     else:
         one, other = reference_term_choice(book_wording_language)
-        rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบหน้ารายการอ้างอิง",
+        rep.add("RED", "end_matter", "ส่วนท้ายเล่ม", "ไม่พบหน้ารายการอ้างอิง",
                 f"ต้องมีหัวข้อ {one} หรือ {other} เสมอ", "")
     bio_want = expected_biography_heading(book_wording_language, bio_heading)
     if bio_page is None:
-        rep.add("RED", "end_matter", "ทั้งเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
+        # ตำแหน่งเดียวกับชื่อหมวด ข้อความสรุปจึงไม่พิมพ์ซ้ำ · เดิม "ทั้งเล่ม" ตกหมวดเนื้อหา (เจ้าหน้าที่แก้มือ — อัปเดต 1.8.3)
+        rep.add("RED", "end_matter", "ส่วนท้ายเล่ม", "ไม่พบประวัติผู้วิจัย (BIOGRAPHY)",
                 "ต้องมีและเป็นหน้าสุดท้ายของเล่ม", "")
     else:
         _report_biography_heading(rep, bio_heading, bio_want,
@@ -8789,7 +8867,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             sp = span_of(grp_pages[0])
             if sp > gmax:
                 source_rule = "FRONT.ACKNOWLEDGEMENTS" if gname == "กิตติกรรมประกาศ" else "FRONT.ABSTRACT"
-                rep.add("RED", "front_matter", f"{gname} (เริ่ม{page_ref(grp_pages[0])})",
+                rep.add("RED", "front_matter", front_span_location(gname, page_ref(grp_pages[0])),
                         f"กินพื้นที่ {sp} หน้า", f"{gname}ต้องไม่เกิน {gmax} หน้า",
                         "ตัดเนื้อหาให้สั้นลง", source_rule)
 

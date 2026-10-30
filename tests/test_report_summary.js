@@ -72,7 +72,7 @@ function makeCard(applies, pressed) {
 
 function load(cards, summaryText) {
   const counter = { textContent: String(cards.length) };
-  const pill = { className: 'verdict-pill pass', textContent: 'ผ่าน (Passed)' };
+  const pill = { className: 'verdict-pill pass', textContent: 'ผ่าน (Passed)', dataset: {} };
   const data = {
     'staff-findings-data': { textContent: JSON.stringify(REGISTRY) },
     'plain-summary-data': { textContent: JSON.stringify(summaryText || '') },
@@ -161,6 +161,19 @@ function load(cards, summaryText) {
   sandbox.renderVerdictPill('ผ่าน');
   check('ป้ายกลับเป็นผ่านได้', pill.textContent, 'ผ่าน (Passed)');
   check('สีป้ายกลับเป็นผ่าน', pill.className, 'verdict-pill pass');
+
+  // โหมดอังกฤษแสดงอังกฤษอย่างเดียว (อัปเดต 1.8.3) — เดิม "Result of consideration ไม่ผ่าน (Not passed)"
+  sandbox.LANG = 'en';
+  sandbox.renderVerdictPill('ไม่ผ่าน');
+  check('อังกฤษ: ไม่ผ่าน', pill.textContent, 'Not passed');
+  check('อังกฤษ: ตอนสลับกลับไทยได้ข้อความไทย', pill.dataset.th, 'ไม่ผ่าน (Not passed)');
+  sandbox.renderVerdictPill('รอยืนยัน');
+  check('อังกฤษ: รอยืนยัน', pill.textContent, 'Pending confirmation');
+  sandbox.renderVerdictPill('ผ่าน');
+  check('อังกฤษ: ผ่าน', pill.textContent, 'Passed');
+  check('อังกฤษ: ตอนสลับภาษาอ่านจาก data-en', pill.dataset.en, 'Passed');
+  sandbox.LANG = 'th';
+  sandbox.renderVerdictPill('ผ่าน');
 
   // ผลตรวจที่อ่านไม่ได้ ต้องไม่ไปล้างป้ายเป็นค่าว่าง
   sandbox.renderVerdictPill('');

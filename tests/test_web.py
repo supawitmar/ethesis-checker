@@ -2401,7 +2401,9 @@ class Update16RequirementsButton(unittest.TestCase):
         # คู่แปลทั้งก้อน — ฉบับอังกฤษใช้ลิงก์ -en
         data = html.split('<script id="requirements-data" type="application/json">', 1)[1].split("</script>", 1)[0]
         pair = json.loads(data)
-        self.assertTrue(pair["en"].endswith("electronic-file-requirements-en"))
+        self.assertIn("electronic-file-requirements-en", pair["en"])
+        self.assertTrue(pair["en"].endswith("* Please format your file using this template only. *"))
+        self.assertTrue(pair["th"].endswith("* กรุณาจัดรูปเล่มโดยใช้ template นี้เท่านั้น *"))
         self.assertIn("requirements: REQUIREMENTS_ON", html)
 
     def test_the_button_takes_the_push_and_stays_readable(self):
@@ -2803,3 +2805,21 @@ class Update182AbbreviationIsRequiredWithItsDegreeName(unittest.TestCase):
         self.assertIn("&& !parsed[`degree_abbr_${lang}`]", script)
         # ตั้ง required ก่อนตัวอัปเดตชิปความพร้อม — ชิปจึงไม่ครบจนกว่าจะกรอก
         self.assertLess(script.index("updateAbbrHints();\n    }"), script.index("addEventListener(ev, updateProgress)"))
+
+
+class Update183VerdictPillIsOneLanguage(unittest.TestCase):
+    """ป้ายผลหัวรายงาน: โหมดอังกฤษแสดงอังกฤษอย่างเดียว (อัปเดต 1.8.3) — เดิม "Result of consideration ไม่ผ่าน (Not passed)" """
+
+    HTML = (Path(__file__).resolve().parents[1] / "templates" / "report.html").read_text(encoding="utf-8")
+
+    def test_the_pill_has_both_languages_for_the_toggle(self):
+        block = self.HTML.split('id="verdict-pill"', 1)[1].split(">", 1)[0]
+        self.assertIn('data-th="{{ verdict_th }}"', block)
+        self.assertIn('data-en="{{ verdict_en }}"', block)
+        for english in ("'Passed'", "'Not passed'", "'Pending confirmation'"):
+            self.assertIn(english, self.HTML.split("{% set verdict_en", 1)[1].split("%}", 1)[0])
+
+    def test_the_english_label_has_no_thai(self):
+        table = self.HTML.split("var VERDICT_PILL = {", 1)[1].split("};", 1)[0]
+        for row in table.strip().splitlines():
+            self.assertRegex(row, r"'(Passed|Not passed|Pending confirmation)'\],$")
