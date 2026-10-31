@@ -7706,7 +7706,7 @@ class TitleLanguageFindingsAreNotFiledAsTitleMismatch(unittest.TestCase):
     """
 
     ISSUE = {"rule_id": "FRONT.TITLE_ONE_LANGUAGE", "location": "หน้าปก",
-             "found": 'หน้านี้มีชื่อเรื่องภาษาอังกฤษอยู่ด้วย: "PUBLIC PARTICIPATION"',
+             "found": "หน้านี้มีชื่อเรื่องภาษาอังกฤษอยู่ด้วย",
              "expected": "เล่มภาษาไทยต้องมีเฉพาะชื่อเรื่องภาษาไทย ทั้งบนหน้าปกและหน้าลงนาม"}
 
     def test_the_finding_lands_in_its_own_category(self):
@@ -11531,13 +11531,13 @@ class NotFoundInsteadOfQuotingAnotherLine(unittest.TestCase):
     def test_unrelated_text_is_reported_as_not_found(self):
         compared = {"status": "mismatch", "actual": "Fac. of Grad. Studies, Test Univ.", "score": 0.1}
         detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, "A STUDY OF SOMETHING")
-        self.assertEqual(str(detail), "ไม่พบชื่อเรื่องบนหน้านี้")
+        self.assertEqual(str(detail), "ไม่พบชื่อเรื่องที่ตรงกับข้อมูลในระบบบนหน้านี้")
         self.assertTrue(detail.title_lead)
 
     def test_other_language_label_drops_the_book_wording(self):
         compared = {"status": "mismatch", "actual": "unrelated", "score": 0.1}
         self.assertEqual(str(checker_module.title_mismatch_detail("ชื่อเรื่องภาษาอังกฤษในรูปเล่ม ", compared)),
-                         "ไม่พบชื่อเรื่องภาษาอังกฤษบนหน้านี้")
+                         "ไม่พบชื่อเรื่องภาษาอังกฤษที่ตรงกับข้อมูลในระบบบนหน้านี้")
 
     def test_a_close_but_wrong_title_is_still_quoted(self):
         compared = {"status": "mismatch", "actual": "A STUDY OF ANOTHER THING", "score": 0.7}
@@ -11600,3 +11600,249 @@ class MonthFirstEnglishExamDate(unittest.TestCase):
         """ชื่อบทไม่ครบ (เจ้าของ 31 ต.ค. 2569) ข้อเทียบชื่อบทจับอยู่แล้ว ข้อเลขบทเปล่าต้องไม่กลืนกรณีนี้"""
         self.assertEqual(checker_module.canonical_title_status("LITERATURE", 2, 1)[0], "wrong")
         self.assertIsNone(checker_module.toc_bare_chapter("CHAPTER 2 LITERATURE .... 15"))
+
+
+class TheExamDateIsComparedByDayNotByFormat(unittest.TestCase):
+    """กฎเจ้าของ 31 ต.ค. 2569: "แค่ format ต่างกันแต่เป็นวันเดียวกัน ซึ่งตรงกับข้อมูล ถือว่าโอเค" """
+
+    SAME_DAY = ("on 14 October 2026", "on 14 October, 2026", "on 14 Oct 2026", "on 14 Oct. 2026", "on 14th October 2026",
+                "on the 14th of October 2026", "14-Oct-2026", "14October2026",
+                "on October 14, 2026", "on October 14 2026", "on Oct 14, 2026", "on Oct. 14, 2026",
+                "on October 14th, 2026", "on OCTOBER 14, 2026", "on October\n14, 2026",
+                "วันที่ 14 ตุลาคม 2569", "วันที่ 14 ตุลาคม พ.ศ. 2569", "วันที่ 14 ตุลาคมพ.ศ.2569", "วันที่ ๑๔ ตุลาคม ๒๕๖๙",
+                "14 ต.ค. 2569", "14 ต.ค. พ.ศ. 2569", "14 เดือนตุลาคม พ.ศ. 2569", "14 ตุลาคม พุทธศักราช 2569",
+                "on 14/10/2026", "on 14-10-2026", "on 14.10.2026", "on 14/10/2569", "on 2026-10-14", "on 10/14/2026",
+                "on 14 October 2569", "วันที่ 14 ตุลาคม 2026")
+
+    def test_every_format_of_the_same_day_matches(self):
+        for approved in ("14 October 2026", "14 ตุลาคม 2569", "October 14, 2026"):
+            for printed in self.SAME_DAY:
+                self.assertTrue(checker_module.exam_date_on_page(approved, printed), (approved, printed))
+
+    def test_a_different_day_never_matches(self):
+        for printed in ("on October 15, 2026", "on Oct 4, 2026", "on 4 Oct 2026", "on November 14, 2026",
+                        "on October 14, 2025", "on 14 October 2568", "on 14 ต.ค. 2568", "on 14 พ.ย. 2569",
+                        "on 04/10/2026", "on 14/11/2026", "on 14/10/2025", "on 2026-10-15"):
+            self.assertFalse(checker_module.exam_date_on_page("14 October 2026", printed), printed)
+
+    def test_a_date_missing_its_day_or_year_is_not_a_date(self):
+        for printed in ("on October 2026", "on 14 October", "on October 14", "on 14/10/26", "2026", "14"):
+            self.assertFalse(checker_module.exam_date_on_page("14 October 2026", printed), printed)
+            self.assertEqual(checker_module.dates_on_page(printed), [], printed)
+
+    def test_numeric_dates_read_day_first_unless_impossible(self):
+        import datetime
+        self.assertEqual(checker_module.dates_on_page("04/10/2026")[0][0], datetime.date(2026, 10, 4))
+        self.assertEqual(checker_module.dates_on_page("10/14/2026")[0][0], datetime.date(2026, 10, 14))
+        self.assertEqual(checker_module.dates_on_page("31/02/2026"), [])
+        self.assertEqual(checker_module.dates_on_page("31 February 2026"), [])
+
+    def test_words_that_only_look_like_months_are_not_dates(self):
+        for printed in ("Chapter 14, 2026", "Table 14 2026", "Marine 14, 2026", "หน้า 14 2569", "1 Committee 2026"):
+            self.assertEqual(checker_module.dates_on_page(printed), [], printed)
+
+    def test_the_same_day_raises_nothing_and_verifies_as_passed(self):
+        rep = Report()
+        checker_module._check_exam_date(rep, "14 October 2026", [0, 1],
+                                        ["on Oct 14, 2026", "on 14/10/2026"], lambda i: f"หน้า {i + 1}")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_a_wrong_day_stays_red_and_quotes_what_was_printed(self):
+        for printed, quoted in (("on Oct 15, 2026\nDean", "Oct 15, 2026"), ("on 15/10/2026\nDean", "15/10/2026"),
+                                ("on October 15, 2026\nDean", "October 15, 2026")):
+            rep = Report()
+            checker_module._check_exam_date(rep, "14 October 2026", [0], [printed], lambda i: f"หน้า {i + 1}")
+            self.assertEqual(len(rep.zones["RED"]), 1)
+            self.assertIn(f'"{quoted}"', rep.zones["RED"][0]["found"])
+
+    def test_the_late_fee_reads_thai_short_months_too(self):
+        import datetime
+        self.assertEqual(checker_module.parse_exam_date("14 ต.ค. 2569"), datetime.date(2026, 10, 14))
+
+    def test_a_word_split_by_the_pdf_still_matches_by_text(self):
+        """ควบคุมเชิงลบ — ไฟล์ตัดคำกลางชื่อเดือน แปลงเป็นวันไม่ได้ แต่เดิมผ่าน ต้องยังผ่าน"""
+        self.assertTrue(checker_module.exam_date_on_page("14 October 2026", "on 14 Octo ber 2026"))
+
+
+class MaiEkStoredAsAnApostrophe(unittest.TestCase):
+    """ฟอนต์เก็บไม้เอกเป็น ’ (เล่มจริง 31 ต.ค. 2569) — แปลงเฉพาะตัวกว้างศูนย์ที่ตามหลังอักษรไทยบนบรรทัดเดียวกัน"""
+
+    @staticmethod
+    def _char(text, x0, x1, top=88.0):
+        return {"text": text, "x0": x0, "x1": x1, "top": top, "bottom": top + 14, "fontname": "F", "size": 16}
+
+    def _line(self, *chars):
+        return checker_module._compose_thai_line(checker_module._thai_chars(list(chars)))
+
+    def test_a_zero_width_apostrophe_after_thai_is_mai_ek(self):
+        self.assertEqual(self._line(self._char("ท", 96.5, 103.9), self._char("ี", 104.4, 104.4),
+                                    self._char("’", 104.2, 104.2), self._char("ม", 103.9, 110.9),
+                                    self._char("ี", 111.4, 111.4)), "ที่มี")
+
+    def test_the_mark_stays_with_its_own_letter_when_it_sits_near_the_next(self):
+        self.assertEqual(self._line(self._char("ท", 310.9, 318.3), self._char("ั", 318.9, 318.9),
+                                    self._char("’", 322.0, 322.0), self._char("ว", 318.3, 324.2)), "ทั่ว")
+
+    def test_a_real_quote_after_thai_is_left_alone(self):
+        self.assertEqual(self._line(self._char("ก", 10.0, 16.0), self._char("’", 16.0, 19.0)), "ก’")
+
+    def test_a_zero_width_apostrophe_after_english_is_not_a_tone(self):
+        line = self._line(self._char("d", 10.0, 16.0), self._char("’", 16.0, 16.0), self._char("t", 16.0, 20.0))
+        self.assertNotIn("่", line)
+
+    def test_a_zero_width_apostrophe_on_another_line_is_not_a_tone(self):
+        chars = checker_module._thai_chars([self._char("ก", 10.0, 16.0, top=88.0),
+                                            self._char("’", 10.0, 10.0, top=120.0)])
+        self.assertEqual([c["text"] for c in chars], ["ก"])
+
+    def test_other_zero_width_characters_are_still_dropped(self):
+        for stray in ("9", ")"):
+            self.assertEqual(self._line(self._char("ท", 10.0, 17.0), self._char("ี", 17.5, 17.5),
+                                        self._char(stray, 17.2, 17.2)), "ที")
+
+
+class TheTitleBlockStopsAtTheOtherLanguage(unittest.TestCase):
+    """หน้าบทคัดย่อพิมพ์ชื่อเรื่องสองภาษาต่อกัน — ยกมาเฉพาะภาษาที่กำลังเทียบ ฟอนต์เพี้ยนเป็นส้ม ไม่ใช่แดง"""
+
+    THAI = "การศึกษาปัจจัยที่มีผลต่อการดูแลสุขภาพทั่วไป"
+    ENGLISH = "A STUDY OF FACTORS AFFECTING GENERAL HEALTH CARE"
+    PAGE = "vi\nการศึกษาปัจจัยที่มีผลต่อ\nการดูแลสุขภาพทั่วไป\nA STUDY OF FACTORS AFFECTING\nGENERAL HEALTH CARE\nสมมติ นามสมมติ 6401234 ABCD/M"
+
+    def test_stops_before_the_other_language(self):
+        self.assertEqual(checker_module.norm(printed_title(self.PAGE, "", self.THAI)), checker_module.norm(self.THAI))
+
+    def test_the_other_way_round(self):
+        page = "iv\nA STUDY OF FACTORS AFFECTING\nGENERAL HEALTH CARE\nการศึกษาปัจจัยที่มีผลต่อ\nการดูแลสุขภาพทั่วไป\nJANE DOE 6401234 ABCD/M"
+        self.assertEqual(checker_module.norm(printed_title(page, "", self.ENGLISH)), checker_module.norm(self.ENGLISH))
+
+    def test_english_words_wrapped_inside_a_thai_title_are_kept(self):
+        title = "การศึกษาผลกระทบของ COVID-19 INFECTION ต่อผู้ป่วย"
+        page = "vi\nการศึกษาผลกระทบของ\nCOVID-19 INFECTION\nต่อผู้ป่วย\nTHE IMPACT OF INFECTION\nสมมติ นามสมมติ 6401234 ABCD/M"
+        self.assertEqual(checker_module.norm(printed_title(page, "", title)), checker_module.norm(title))
+
+    def test_without_a_title_every_line_is_still_collected(self):
+        """ควบคุมเชิงลบ — ไม่รู้ชื่อเรื่อง ตัดสินไม่ได้ว่าบรรทัดไหนเป็นอีกภาษา"""
+        self.assertIn("A STUDY", printed_title(self.PAGE))
+
+    def test_a_tone_read_wrongly_stays_a_font_problem(self):
+        broken = self.PAGE.replace("ที่", "ที").replace("ทั่ว", "ทัว")
+        compared = checker_module.compare_reference_text(broken, self.THAI, "title")
+        self.assertTrue(compared.get("marks_only"))
+        kept = checker_module._title_as_printed(compared, broken, self.THAI)
+        self.assertTrue(kept.get("marks_only"))
+        rep = Report()
+        rep.marks_unreliable = True
+        rep.add("RED", "front_matter", "บทคัดย่อภาษาไทย (หน้า vi)",
+                checker_module.title_mismatch_detail("ชื่อเรื่องภาษาไทยในรูปเล่ม ", kept, self.THAI),
+                "x", "y", "FORM.APPROVED_MATCH")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+
+    def test_a_real_mismatch_stays_red(self):
+        """ควบคุมเชิงลบ — ตัวอักษรต่างจริง ต้องเป็นแดง"""
+        wrong = self.PAGE.replace("สุขภาพ", "การเงิน")
+        compared = checker_module.compare_reference_text(wrong, self.THAI, "title")
+        kept = checker_module._title_as_printed(compared, wrong, self.THAI)
+        self.assertFalse(kept.get("marks_only"))
+        rep = Report()
+        rep.marks_unreliable = True
+        rep.add("RED", "front_matter", "บทคัดย่อภาษาไทย (หน้า vi)",
+                checker_module.title_mismatch_detail("ชื่อเรื่องภาษาไทยในรูปเล่ม ", kept, self.THAI),
+                "x", "y", "FORM.APPROVED_MATCH")
+        self.assertEqual(len(rep.zones["RED"]), 1)
+
+
+class ACandidateInTheRightColumnIsNotACommittee(unittest.TestCase):
+    """นักศึกษาอยู่ช่องขวาบน (เล่มจริง 31 ต.ค. 2569) — ป้าย Candidate / ผู้วิจัย ไม่นับเป็นกรรมการ ทั้งซ้ายและขวา"""
+
+    class _Page:
+        height, width = 842, 595
+        chars = []
+
+        def __init__(self, words):
+            self.words = words
+
+        def extract_words(self, **_kwargs):
+            return self.words
+
+    LEFT, RIGHT = 60, 320
+
+    def _line(self, top, left="", right=""):
+        words = [{"text": tok, "top": top, "x0": self.LEFT + k * 40} for k, tok in enumerate(left.split())]
+        return words + [{"text": tok, "top": top, "x0": self.RIGHT + k * 40} for k, tok in enumerate(right.split())]
+
+    def _read(self, label):
+        rows = []
+        cells = (("Academic rank First Name Last name,", "Somchai Example", "", label),
+                 ("", "Assoc. Prof. Anan One,", "", "Ph.D. (Example Studies)"),
+                 ("", "Assoc. Prof. Boon Two,", "", "Ph.D. (Example Two)"))
+        top = 100
+        for left_name, right_name, left_below, right_below in cells:
+            rows += self._line(top, "………………", "………………")
+            rows += self._line(top + 30, left_name, right_name)
+            rows += self._line(top + 43, left_below, right_below)
+            top += 80
+        rows += self._line(top, "………………", "………………")
+        rows += self._line(top + 30, "Prof. Dean Four,", "Prof. Head Five,")
+        rows += self._line(top + 43, "Dean", "Program Director")
+        return signature_committee_slots(self._Page(rows))
+
+    def test_the_student_is_not_counted_on_either_label(self):
+        for label in ("Candidate", "ผู้วิจัย"):
+            with self.subTest(label=label):
+                members, quals, _bottom, _raw = self._read(label)
+                names = checker_module.committee_name_list(members)
+                self.assertEqual(names, ["Anan One", "Boon Two"])
+                self.assertEqual(quals[1], "")
+
+    def test_a_right_column_member_with_no_label_is_still_counted(self):
+        """ควบคุมเชิงลบ — ช่องขวาบนที่ไม่มีป้ายคือกรรมการตามปกติ"""
+        members, _quals, _bottom, _raw = self._read("Ph.D. (Example One)")
+        self.assertIn("Somchai Example", checker_module.committee_name_list(members))
+
+
+class TheCoverDegreeStopsBeforeTheTemplateLines(unittest.TestCase):
+    """ชื่อปริญญาบนปกยกบรรทัดบัณฑิตวิทยาลัยและมหาวิทยาลัยมาด้วย (เล่มจริง 31 ต.ค. 2569)"""
+
+    def test_english_placeholder(self):
+        page = "A THESIS TITLE\nJANE DOE\nDEGREE NAME (FIELD OF STUDY)\nFACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\n2026"
+        self.assertEqual(closest_degree_line(page, "MASTER OF SCIENCE (BIOSTATISTICS)"), "DEGREE NAME (FIELD OF STUDY)")
+
+    def test_english_wrong_degree(self):
+        page = "A THESIS TITLE\nJANE DOE\nMASTER OF ARTS (HISTORY)\nFACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY\n2026"
+        self.assertEqual(closest_degree_line(page, "MASTER OF SCIENCE (BIOSTATISTICS)"), "MASTER OF ARTS (HISTORY)")
+
+    def test_thai_template_lines(self):
+        page = "ชื่อเรื่องสมมติ\nสมมติ นามสมมติ\nศิลปศาสตรมหาบัณฑิต (ประวัติศาสตร์)\nบัณฑิตวิทยาลัย\nมหาวิทยาลัยมหิดล\n2569"
+        self.assertEqual(closest_degree_line(page, "วิทยาศาสตรมหาบัณฑิต (ชีวสถิติ)"), "ศิลปศาสตรมหาบัณฑิต (ประวัติศาสตร์)")
+
+    def test_a_degree_wrapped_on_two_lines_is_still_joined(self):
+        """ควบคุมเชิงลบ — ชื่อปริญญาที่ตัดขึ้นบรรทัดยังต่อกันเหมือนเดิม"""
+        page = "A THESIS TITLE\nMASTER OF SCIENCE\n(INFORMATION TECHNOLOGY MANAGEMENT)\nFACULTY OF GRADUATE STUDIES\nMAHIDOL UNIVERSITY"
+        self.assertEqual(closest_degree_line(page, "MASTER OF SCIENCE (INFORMATION TECHNOLOGY MANAGEMENT)"),
+                         "MASTER OF SCIENCE (INFORMATION TECHNOLOGY MANAGEMENT)")
+
+
+class TheOtherLanguageTitleIsNotQuoted(unittest.TestCase):
+    """ข้อมีชื่อเรื่องอีกภาษา ใช้ถ้อยคำเจ้าของ ไม่ยกชื่อเรื่อง — เดิมตัดที่ 160 ตัวอักษร ข้อความขาดท้าย"""
+
+    def test_every_spot_of_the_rule_drops_the_quote(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertNotIn("printed_other[:160]", source)
+        self.assertNotIn("printed_wrong[:160]", source)
+        self.assertIn('f"หน้านี้มีชื่อเรื่อง{other_word}อยู่ด้วย"', source)
+        self.assertIn('f"หน้านี้มีชื่อเรื่อง{wrong_word}อยู่ด้วย"', source)
+
+    def test_the_english_is_complete(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (("หน้านี้มีชื่อเรื่องภาษาอังกฤษอยู่ด้วย", "This page also carries the English title"),
+                              ("หน้านี้มีชื่อเรื่องภาษาไทยอยู่ด้วย", "This page also carries the Thai title"),
+                              ("ไม่พบชื่อเรื่องที่ตรงกับข้อมูลในระบบบนหน้านี้",
+                               "No title matching the approved record was found on this page"),
+                              ("ไม่พบชื่อเรื่องภาษาไทยที่ตรงกับข้อมูลในระบบบนหน้านี้",
+                               "No Thai title matching the approved record was found on this page"),
+                              ("ไม่พบชื่อเรื่องภาษาอังกฤษที่ตรงกับข้อมูลในระบบบนหน้านี้",
+                               "No English title matching the approved record was found on this page")):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)

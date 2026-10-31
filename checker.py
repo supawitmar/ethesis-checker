@@ -358,6 +358,16 @@ def _fonts_missing_sara_aa(page):
     return frozenset(missing - fine)
 
 
+_MAI_EK, _MAI_EK_AS_APOSTROPHE = '่', '’'
+_THAI_TEXT_CHAR = re.compile('[ก-ฺเ-๎]')
+
+
+def _follows_thai_on_line(previous, char):
+    """อักขระก่อนหน้าในไฟล์เป็นอักษรไทยบนบรรทัดเดียวกันหรือไม่"""
+    return bool(previous and _THAI_TEXT_CHAR.match(previous[-1].get('text') or '')
+                and abs(float(previous[-1].get('top', 0)) - float(char.get('top', 0))) < _LINE_TOLERANCE)
+
+
 def _thai_chars(chars, missing_sara_aa=frozenset()):
     """แปลง "ช่องว่างกว้างศูนย์" ให้เป็นนิคหิต ก่อนประกอบข้อความ
 
@@ -378,6 +388,10 @@ def _thai_chars(chars, missing_sara_aa=frozenset()):
 
     missing_sara_aa = ชื่อฟอนต์ที่ตาราง ToUnicode ไม่มีสระ า (ดู _fonts_missing_sara_aa)
     ของฟอนต์นั้น ำ ที่อ่านได้คือสระ า ตัวจริง ส่วน ำ ของเล่มมาจากนิคหิต + า อยู่แล้ว
+
+    ไม้เอกที่ฟอนต์เก็บเป็น ’ (U+2019): เล่มจริง 31 ต.ค. 2569 ฟอนต์ BrowalliaNew ได้ "ทีมี" "ทัวไป" แทน "ที่มี" "ทั่วไป" แล้วฟ้องชื่อเรื่องผิด
+    แปลงเป็นไม้เอกเฉพาะ ’ ที่กว้างศูนย์ และตามหลังอักษรไทยในบรรทัดเดียวกัน — เครื่องหมายคำพูดจริงมีความกว้างจึงไม่โดน
+    ส่วน ’ กว้างศูนย์ที่ตามหลังอักษรอื่น และเลขหรือสัญลักษณ์กว้างศูนย์อื่น ("ที9") ยังทิ้งเหมือนเดิมตามเหตุผลข้างล่าง
     """
     out = []
     for c in chars:
@@ -390,6 +404,10 @@ def _thai_chars(chars, missing_sara_aa=frozenset()):
         zero_width = (float(c.get('x1', 0)) - float(c.get('x0', 0))) < 0.5
         if zero_width and text == ' ':
             out.append({**c, 'text': 'ํ'})     # NIKHAHIT
+            continue
+        if zero_width and text == _MAI_EK_AS_APOSTROPHE and _follows_thai_on_line(out, c):
+            # ผูกกับฐานเดียวกับตัวก่อนหน้า ตำแหน่งจริงอาจเยื้องไปใกล้ฐานถัดไป ("ทั่ว" อยู่ใกล้ ว)
+            out.append({**c, 'text': _MAI_EK, 'x0': out[-1]['x1'], 'x1': out[-1]['x1']})
             continue
         # กว้างศูนย์แต่ไม่ใช่สระ/วรรณยุกต์ = ฟอนต์ map วรรณยุกต์ผิดเป็นตัวอักษรอื่น
         # เล่มจริงเล่มหนึ่งได้ "พรีซีซั่น" ออกมาเป็น "พรีซีซั8น" และ "ที่ปรึกษา" เป็น
@@ -913,10 +931,15 @@ def signature_committee_slots(pdf_page):
     #  แถวคณบดีจะเลื่อนเข้ามาเป็นกรรมการ แล้วฟ้องว่ามีชื่อนอกรายชื่ออนุมัติ)
     member_rows = list(zip(name_rows, qual_rows))[:-1][:5]
     for idx, (nrow, qrow) in enumerate(member_rows):     # 0..4 = ระดับกรรมการ
-        right, right_below = name_cell(nrow, qrow, left=False)
-        members[idx + 1] = _sig_clean_name(right)                    # ขวา → 1..5
-        member_raw[idx + 1] = right
-        member_quals[idx + 1] = _sig_qual_text(qual_cell(right_below, left=False))
+        # นักศึกษาอาจอยู่ช่องขวาบน (เล่มจริง 31 ต.ค. 2569 ช่องซ้ายเป็นข้อความขาวของ template) เดิมตรวจป้ายเฉพาะฝั่งซ้าย
+        # จึงนับเป็นกรรมการ แล้วฟ้อง "รายชื่อเกิน" กับ "ไม่พบคุณวุฒิ" ทั้งสองหน้า
+        if is_candidate_slot(qrow, left=False):
+            members[idx + 1] = member_raw[idx + 1] = member_quals[idx + 1] = ""
+        else:
+            right, right_below = name_cell(nrow, qrow, left=False)
+            members[idx + 1] = _sig_clean_name(right)                # ขวา → 1..5
+            member_raw[idx + 1] = right
+            member_quals[idx + 1] = _sig_qual_text(qual_cell(right_below, left=False))
         if idx >= 1 and not is_candidate_slot(qrow, left=True):
             left, left_below = name_cell(nrow, qrow, left=True)
             members[10 - idx] = _sig_clean_name(left)                # ซ้าย → 9,8,7,6
@@ -3003,8 +3026,6 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
-_ENGLISH_MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
-_MONTH_FIRST_DATE = re.compile(rf'\b({_ENGLISH_MONTHS})\s*(\d{{1,2}})\s*,?\s*(\d{{4}})\b', re.I)
 
 
 def _exam_date_key(text):
@@ -3012,11 +3033,8 @@ def _exam_date_key(text):
 
     หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุศักราชคั่นระหว่าง
     เดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569" ถ้าไม่ตัดออกจะฟ้องผิด
-
-    "October 14, 2026" คือวันเดียวกับ "14 October 2026" (เจ้าของสั่ง 31 ต.ค. 2569) จึงเรียงเป็นวัน-เดือน-ปีก่อนเทียบ
     """
-    text = _MONTH_FIRST_DATE.sub(r'\2 \1 \3', text or "")
-    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text))
+    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or ""))
     # norm() ตัดช่องว่างทิ้งหมด ตัวเลขสองชุดที่คั่นด้วยช่องว่างหรือขึ้นบรรทัดใหม่จึงต่อกัน
     # เป็นเลขเดียว ("หน้า 2" บรรทัดบน + "7 July" บรรทัดล่าง = "27JULY") ต้องคั่นไว้ก่อน
     return " ".join(norm(part) for part in re.split(r'(?<=\d)\s+(?=\d)', text))
@@ -3025,11 +3043,18 @@ def _exam_date_key(text):
 def exam_date_on_page(exam_date, page_text):
     """วันที่สอบตามข้อมูลอนุมัติพิมพ์อยู่บนหน้านี้หรือไม่
 
+    กฎ (เจ้าของสั่ง 31 ต.ค. 2569): เทียบที่ "วัน" ไม่ใช่รูปแบบที่พิมพ์ — ถ้าเป็นวันเดียวกับข้อมูลอนุมัติถือว่าถูก
+    "October 14, 2026" "14 Oct 2026" "14 ต.ค. 2569" "14/10/2026" จึงตรงกับ "14 October 2026" ทั้งหมด (dates_on_page)
+    เทียบข้อความต่อไว้สำหรับวันที่ที่ไฟล์ตัดคำกลางชื่อเดือน ("14 Octo ber 2026") ซึ่งแปลงเป็นวันไม่ได้
+
     ห้ามค้นแบบ "มีข้อความนี้อยู่ข้างใน" เฉย ๆ — วันที่อนุมัติ "7 July 2026" จะไปเจอ
     อยู่ในหน้าที่พิมพ์ "17 July 2026" หรือ "27 July 2026" แล้วผ่านทั้งที่วันผิด
     ไฟล์ eThesis เขียนวันที่ 1-9 เป็นเลขหลักเดียวเสมอ วันต้นเดือนจึงโดนทุกเล่ม
     ต้องไม่มีตัวเลขติดอยู่หน้าหรือหลังวันที่ที่ค้นเจอ
     """
+    wanted = {day for day, _printed in dates_on_page(exam_date)}
+    if wanted & {day for day, _printed in dates_on_page(page_text)}:
+        return True
     want = _exam_date_key(exam_date)
     if not want:
         return False
@@ -4764,6 +4789,8 @@ LATE_FEE_GRACE_DAYS = 20
 _MONTHS_EN = {name.lower(): i for i, name in enumerate(
     ("January", "February", "March", "April", "May", "June", "July", "August",
      "September", "October", "November", "December"), start=1)}
+_MONTHS_TH_SHORT = {name: i for i, name in enumerate(
+    ("มค", "กพ", "มีค", "เมย", "พค", "มิย", "กค", "สค", "กย", "ตค", "พย", "ธค"), start=1)}
 _MONTHS_TH = {name: i for i, name in enumerate(
     ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม",
      "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"), start=1)}
@@ -4776,6 +4803,8 @@ def _month_number(word):
     word = (word or "").strip().rstrip(".,")
     if word in _MONTHS_TH:
         return _MONTHS_TH[word]
+    if word.replace(".", "") in _MONTHS_TH_SHORT:
+        return _MONTHS_TH_SHORT[word.replace(".", "")]
     word = word.lower()
     if word in _MONTHS_EN:
         return _MONTHS_EN[word]
@@ -4799,12 +4828,56 @@ def parse_exam_date(text):
         day, month, year = int(month_first.group(2)), _month_number(month_first.group(1)), int(month_first.group(3))
     else:
         return None
+    return _calendar_date(day, month, year)
+
+
+def _calendar_date(day, month, year):
+    """datetime.date จากตัวเลข (ปี พ.ศ. แปลงเป็น ค.ศ.) — None ถ้าไม่ใช่วันที่มีจริง"""
     if year > 2400:
         year -= 543
     try:
         return datetime.date(year, month, day) if month else None
     except ValueError:
         return None
+
+
+_THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+_DATE_YEAR = r'((?:19|20|25)\d{2})(?!\d)'
+_DATE_ERA = r'(?:(?:พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|พุทธศักราช|คริสต์ศักราช|B\.?\s*E\.?|A\.?\s*D\.?|ปี)\s*)?'
+_DATE_ORDINAL = r'(?:st|nd|rd|th)?'
+_DATE_MONTH = r'([A-Za-z]{3,9}\.?|[ก-๙][ก-๙.]*?)'
+_DATE_FORMS = (
+    # 14 October 2026 · 14th of October, 2026 · 14-Oct-2026 · 14 ต.ค. พ.ศ. 2569 → วัน เดือน ปี
+    (re.compile(rf'(?<![\d/.-])(\d{{1,2}}){_DATE_ORDINAL}[\s-]*(?:of\s+|เดือน\s*)?{_DATE_MONTH}[\s,-]*{_DATE_ERA}{_DATE_YEAR}', re.I),
+     (1, 2, 3)),
+    # October 14, 2026 · Oct. 14th 2026 — ต้องมีตัวคั่นก่อนปี ไม่งั้น "October 2026" อ่านเป็นวันที่ 20
+    (re.compile(rf'(?<![A-Za-zก-๙]){_DATE_MONTH}\s*(\d{{1,2}}){_DATE_ORDINAL}(?:\s*,\s*|\s+){_DATE_ERA}{_DATE_YEAR}', re.I),
+     (2, 1, 3)),
+    # 14/10/2026 · 14-10-2569 · 14.10.2026 — ปีต้องครบ 4 หลัก
+    (re.compile(rf'(?<![\d/.-])(\d{{1,2}})([/.-])(\d{{1,2}})\2{_DATE_YEAR}'), (1, 3, 4)),
+    # 2026-10-14
+    (re.compile(r'(?<![\d/.-])((?:19|20|25)\d{2})-(\d{1,2})-(\d{1,2})(?![\d-])'), (3, 2, 1)),
+)
+
+
+def dates_on_page(text):
+    """วันที่ทุกตัวในข้อความ ไม่ว่าจะพิมพ์รูปแบบไหน เรียงตามที่พิมพ์ → [(datetime.date, ข้อความที่พิมพ์)]
+
+    เลขล้วนอ่านเป็น วัน/เดือน/ปี ตามธรรมเนียมไทย อ่านเป็น เดือน/วัน/ปี เฉพาะตอนเลขตัวกลางเกิน 12 ("10/14/2026")
+    """
+    source = text or ""
+    digits = source.translate(_THAI_DIGITS)
+    found = []
+    for pattern, (day_at, month_at, year_at) in _DATE_FORMS:
+        for match in pattern.finditer(digits):
+            day, month = int(match.group(day_at)), match.group(month_at)
+            month = int(month) if month.isdigit() else _month_number(month)
+            if month and month > 12 and day <= 12:
+                day, month = month, day
+            value = _calendar_date(day, month, int(match.group(year_at)))
+            if value:
+                found.append((match.start(), value, re.sub(r'\s+', ' ', source[match.start():match.end()]).strip()))
+    return [(value, printed) for _start, value, printed in sorted(found, key=lambda item: item[0])]
 
 
 def late_fee(exam_date_text, submitted_iso):
@@ -5818,6 +5891,11 @@ def _degree_search_text(page_text, abstract=False):
 _EXAM_DATE_LINE = re.compile(r'^(?:on\b|(?:เมื่อ|ณ)?\s*วันที่)', re.I)
 
 
+# บรรทัด template ที่ตามหลังชื่อปริญญาบนหน้าปก ไม่ใช่ส่วนของชื่อปริญญา (เล่มจริง 31 ต.ค. 2569 ยกทั้งสามบรรทัดมาอ้างว่าเป็นชื่อปริญญา)
+_DEGREE_LINE_TAIL = tuple(norm(words) for words in ("FACULTY OF GRADUATE STUDIES", "MAHIDOL UNIVERSITY",
+                                                    "บัณฑิตวิทยาลัย", "มหาวิทยาลัยมหิดล"))
+
+
 def closest_degree_line(page_text, expected, abstract=False):
     """หาข้อความชื่อปริญญาบนหน้านั้น รองรับกรณีถูกตัดขึ้นหลายบรรทัด
 
@@ -5842,7 +5920,8 @@ def closest_degree_line(page_text, expected, abstract=False):
             # ไม่ใช่ส่วนของชื่อปริญญา — เล่มจริง ต.ค. 2569 ได้ชื่อปริญญา "Doctor of ...
             # on 30 <เดือน>, <ปี>" (ต่อบรรทัดวันที่เข้ามา) แล้วเจ้าหน้าที่อ่านไม่ออกว่าผิดเรื่องปริญญา
             # หรือวันที่ (เจ้าหน้าที่ทัก 19 ต.ค. 2569)
-            if span > 1 and _EXAM_DATE_LINE.match(lines[k + span - 1]):
+            if span > 1 and (_EXAM_DATE_LINE.match(lines[k + span - 1])
+                             or norm(lines[k + span - 1]).startswith(_DEGREE_LINE_TAIL)):
                 break
             candidates.append(' '.join(lines[k:k + span]))
     if not candidates:
@@ -6807,6 +6886,16 @@ _TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา',
                              'บทคัดย่อ', 'บัณฑิตวิทยาลัย')
 
 
+def _other_language_title_line(line, title):
+    """บรรทัดนี้เป็นชื่อเรื่องอีกภาษา ไม่ใช่ส่วนของชื่อเรื่องที่กำลังหา — ไม่รู้ชื่อเรื่อง = ตอบไม่ได้ ถือว่าไม่ใช่
+
+    ชื่อเรื่องไทยที่มีคำอังกฤษตกบรรทัดเป็นของชื่อเรื่องเอง จึงต้องดูด้วยว่าบรรทัดนั้นไม่อยู่ในชื่อเรื่อง
+    """
+    if not title or bool(_THAI_LETTER.search(line)) == bool(_THAI_LETTER.search(title)):
+        return False
+    return norm(line) not in norm(title)
+
+
 def printed_title(page_text, student_name="", title=""):
     """ชื่อเรื่อง "ตามที่พิมพ์จริง" บนหน้านั้น รวมบรรทัดที่ห่อคำมาให้ครบ
 
@@ -6848,6 +6937,11 @@ def printed_title(page_text, student_name="", title=""):
             break
         if i == name_slot and not (title and norm(line) and norm(line) in norm(title)):
             break
+        # หน้าบทคัดย่อพิมพ์ชื่อเรื่องสองภาษาต่อกัน (เล่มจริง 31 ต.ค. 2569) — เดิมยกอีกภาษามารวม วรรณยุกต์เพี้ยนจึงกลายเป็นชื่อเรื่องผิด
+        if _other_language_title_line(line, title):
+            if out:
+                break
+            continue
         out.append(line)
     return _join_wrapped(out).strip()
 
@@ -6929,7 +7023,11 @@ def _title_as_printed(compared, page_text, expected, student_name=""):
     printed = printed_title(page_text, student_name, expected)
     if not printed:
         return compared
-    return compare_values(printed, expected, 'title')
+    recheck = compare_values(printed, expected, 'title')
+    # เทียบทั้งหน้าแล้วต่างแค่วรรณยุกต์/สระ ต้องไม่กลายเป็น "ผิด" เพราะยกบล็อกชื่อเรื่องมาไม่ตรง — ฟอนต์เพี้ยนเป็นส้ม ไม่ใช่แดง
+    if compared.get('marks_only') and not recheck.get('marks_only') and recheck['status'] != 'exact':
+        return compared
+    return recheck
 
 
 _TITLE_NOT_FOUND_SCORE = 0.4
@@ -6948,7 +7046,7 @@ def title_mismatch_detail(label, compared, expected=''):
     detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
     # ไม่ใกล้เคียงเลย = หน้านี้ไม่มีชื่อเรื่อง ไม่ใช่ชื่อเรื่องผิด — เดิมยกหัวกระดาษหรือประโยคในบทคัดย่อมาอ้าง (เล่มจริง 31 ต.ค. 2569)
     if compared['status'] == 'mismatch' and compared.get('score', 1.0) < _TITLE_NOT_FOUND_SCORE:
-        detail = f'ไม่พบ{label.replace("ในรูปเล่ม", "").strip()}บนหน้านี้'
+        detail = f'ไม่พบ{label.replace("ในรูปเล่ม", "").strip()}ที่ตรงกับข้อมูลในระบบบนหน้านี้'
     if expected and compared['status'] in ('typo', 'case'):
         analysis = analyze_diff(compared['actual'], expected, spaces=True)
         # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ analyze_diff คืนว่าง (มันเทียบแบบตัวใหญ่หมด)
@@ -6969,12 +7067,11 @@ def title_mismatch_detail(label, compared, expected=''):
 def find_signature_date(text):
     """ดึงวันที่สอบผ่านที่พิมพ์บนหน้าลงนามออกมา (ถ้ามี) เพื่อบอกว่าที่พบต่างจากระบบอย่างไร
 
-    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / "on June 26, 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569"
+    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569" / รูปแบบอื่นตาม dates_on_page
     คืน '' ถ้าหาไม่เจอ (ถือว่าไม่มีวันที่บนหน้าลงนาม ไม่ใช่แค่ไม่ตรง)
     """
     patterns = (
         r'\bon\s+(\d{1,2}\s+[A-Za-z]+\.?\s+\d{4})',
-        rf'\bon\s+((?:{_ENGLISH_MONTHS})\s+\d{{1,2}}\s*,?\s*\d{{4}})',
         r'วันท\S*\s*(\d{1,2}\s+\S+\s+(?:พ\.?\s*ศ\.?\s*)?\d{3,4})',
         r'(\d{1,2}\s+[A-Za-zก-๙]+\.?\s+(?:พ\.?\s*ศ\.?\s*)?\d{4})',
     )
@@ -6982,7 +7079,8 @@ def find_signature_date(text):
         match = re.search(pattern, text)
         if match:
             return re.sub(r'\s+', ' ', match.group(1)).strip()
-    return ""
+    other_forms = dates_on_page(text)
+    return other_forms[0][1] if other_forms else ""
 
 
 def _is_bold_font(fontname):
@@ -9246,7 +9344,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if not printed_other:
                     continue
                 rep.add("RED", "front_matter", spot_name,
-                        f'หน้านี้มีชื่อเรื่อง{other_word}อยู่ด้วย: "{printed_other[:160]}"',
+                        f"หน้านี้มีชื่อเรื่อง{other_word}อยู่ด้วย",
                         f"เล่ม{book_word}ต้องมีเฉพาะชื่อเรื่อง{book_word}"
                         " ทั้งบนหน้าปกและหน้าลงนาม",
                         f"ลบชื่อเรื่อง{other_word}ออกจากหน้านี้",
@@ -9271,7 +9369,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if not printed_wrong:
                 continue
             rep.add("RED", "front_matter", f"{spot_label} ({page_ref(spot_idx)})",
-                    f'หน้านี้มีชื่อเรื่อง{wrong_word}อยู่ด้วย: "{printed_wrong[:160]}"',
+                    f"หน้านี้มีชื่อเรื่อง{wrong_word}อยู่ด้วย",
                     f"หน้าบทคัดย่อ{page_word}ต้องมีเฉพาะชื่อเรื่อง{page_word}",
                     f"ลบชื่อเรื่อง{wrong_word}ออกจากหน้านี้",
                     "FRONT.TITLE_ONE_LANGUAGE")
