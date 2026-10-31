@@ -11500,14 +11500,32 @@ class TocBareChapter(unittest.TestCase):
         self.assertIsNone(checker_module.toc_bare_chapter("CHAPTER 1", "INTRODUCTION .... 1"))
         self.assertIsNone(checker_module.toc_bare_chapter("REFERENCES .... 100"))
 
-    def test_english_wording_follows_the_owners_list(self):
+    def test_the_wording_says_there_is_a_number_but_no_title(self):
+        """เจ้าของเกลาความ 31 ต.ค. 2569: "มีแค่เลขบท ไม่มีชื่อบท" ไม่ใช่ชื่อบทไม่เต็ม"""
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
-        self.assertEqual(i18n.tr_en("ชื่อบทในสารบัญต้องมีชื่อเต็มของแต่ละบท", pairs),
-                         "Chapter name must include the full name of each chapter")
-        self.assertEqual(i18n.tr_en('ชื่อบทในสารบัญมีแค่เลขบท ไม่มีชื่อบท: "CHAPTER II" และ "CHAPTER III"', pairs),
-                         'The table of contents lists only the chapter number, without the chapter name: '
-                         '"CHAPTER II" and "CHAPTER III"')
+        for thai, english in (
+                ('ชื่อบทในสารบัญมีเพียงเลขบท เช่น "CHAPTER I" ไม่มีชื่อบท',
+                 'The table of contents shows only the chapter number, e.g. "CHAPTER I", with no chapter title'),
+                ('ชื่อบทในสารบัญมีเพียงเลขบท ไม่มีชื่อบท: "CHAPTER II" และ "CHAPTER III"',
+                 'The table of contents shows only the chapter number, with no chapter title: '
+                 '"CHAPTER II" and "CHAPTER III"'),
+                ("ทุกบทในสารบัญต้องมีทั้งเลขบทและชื่อบท",
+                 "Every chapter in the table of contents must show both the chapter number and the chapter title"),
+                ("เพิ่มชื่อบทต่อจากเลขบทในสารบัญให้ครบทุกบท",
+                 "Add the chapter title after the chapter number for every chapter in the table of contents")):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+
+    def test_the_example_comes_from_what_the_book_printed(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('f\'ชื่อบทในสารบัญมีเพียงเลขบท เช่น "{toc_bare[0][1]}" ไม่มีชื่อบท\'', source)
+
+    def test_the_printed_chapter_number_has_no_dot_leader_or_page_number(self):
+        """เดิมยกทั้งจุดไข่ปลาและเลขหน้ามาด้วย เพราะ "CHAPTER I .... 1" เข้าเงื่อนไขข้อความที่ลงท้ายด้วยตัวเลข"""
+        for raw, printed in (("CHAPTER I .... 1", "CHAPTER I"), ("CHAPTER II 15", "CHAPTER II"),
+                             ("CHAPTER 2 ... 15", "CHAPTER 2"), ("CHAPTER 12", "CHAPTER 12"),
+                             ("บทที่ 3 ...... 35", "บทที่ 3"), ("  CHAPTER IV", "CHAPTER IV")):
+            self.assertEqual(checker_module.soft(raw[:checker_module._TOC_BARE_CHAPTER.match(raw).end(1)]), printed, raw)
 
 
 class ChapterNumberByPosition(unittest.TestCase):

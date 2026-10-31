@@ -8571,8 +8571,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             continue
         _bare = toc_bare_chapter(raw, next_toc_line)
         if _bare is not None:
-            toc_bare.append((_bare, soft(re.sub(r'[\s.…·_-]*\d*$', '', raw)
-                                         if not re.fullmatch(r'\D*\d{1,2}', raw) else raw)))
+            toc_bare.append((_bare, soft(raw[:_TOC_BARE_CHAPTER.match(raw).end(1)])))
             continue
         # "บทที่ 3 ... (ต่อ)" คือบทเดิมที่ยกมาต่อ ไม่ใช่บทใหม่ (ดู is_continuation_heading)
         if is_continuation_heading(raw):
@@ -8647,12 +8646,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # มีแค่เลขบท = ข้อเดียว (เจ้าของ 31 ต.ค. 2569) · บางบทมีชื่อบางบทไม่มี บอกว่าบทไหน · บทพวกนี้อยู่ในสารบัญแล้ว ไม่นับว่าขาด
     _toc_bare_numbers = {number for number, _printed in toc_bare}
     if toc_bare:
-        _bare_found = "ชื่อบทในสารบัญมีแค่เลขบท ไม่มีชื่อบท"
-        if toc_ch:
-            _bare_found += ": " + _join_and([f'"{printed}"' for _number, printed in toc_bare])
-        rep.add("RED", "front_matter", "สารบัญ", _bare_found,
-                "ชื่อบทในสารบัญต้องมีชื่อเต็มของแต่ละบท",
-                "เพิ่มชื่อเต็มของแต่ละบทในสารบัญ", "FRONT.TOC_CONTENT")
+        # เจ้าของเกลาความ 31 ต.ค. 2569: เคสนี้คือมีแค่เลขบท ไม่ใช่ชื่อบทไม่เต็ม จึงยกตัวอย่างเลขบทตามที่เล่มพิมพ์
+        _bare_list = _join_and([f'"{printed}"' for _number, printed in toc_bare])
+        rep.add("RED", "front_matter", "สารบัญ",
+                f"ชื่อบทในสารบัญมีเพียงเลขบท ไม่มีชื่อบท: {_bare_list}"
+                if toc_ch else f'ชื่อบทในสารบัญมีเพียงเลขบท เช่น "{toc_bare[0][1]}" ไม่มีชื่อบท',
+                "ทุกบทในสารบัญต้องมีทั้งเลขบทและชื่อบท",
+                "เพิ่มชื่อบทต่อจากเลขบทในสารบัญให้ครบทุกบท", "FRONT.TOC_CONTENT")
     if toc_ch:
         # สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน — ของเดิมบอกแค่ว่า
         # "สารบัญมี 8 บท เนื้อหามี 6 บท" เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น
