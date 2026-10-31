@@ -3979,7 +3979,7 @@ class ADuplicatedChapterInTheTocSaysWhichOne(unittest.TestCase):
         block = source.split("_toc_numbers = [c[0] for c in toc_ch]", 1)[1][:1400]
         # ต้องบอกทั้งจำนวนบทและชี้บทที่ซ้ำ ในข้อเดียว
         self.assertIn("เพราะสารบัญพิมพ์ซ้ำ", block)
-        self.assertIn("สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท", block)
+        self.assertIn("สารบัญมี {len(toc_ch) + len(toc_bare)} บท เนื้อหามี {len(body_ch)} บท", block)
         self.assertIn("_toc_chapter_label(n, toc_ch)", block)
         # ต้องชี้หน้าที่ซ้ำ ไม่ใช่ตำแหน่งลอย ๆ ว่า "สารบัญ vs เนื้อหา"
         self.assertIn("page_ref(_at[-1])", block)
@@ -11417,3 +11417,186 @@ class Update183ReferencesItem(unittest.TestCase):
         [issue] = [i for i in result["issues_by_zone"]["RED"] if i["found"] == "ไม่พบหน้ารายการอ้างอิง"]
         self.assertEqual(issue["location"], "ส่วนท้ายเล่ม")
         self.assertEqual(checker_module.summary_section(issue), "ส่วนท้ายเล่ม")
+
+
+class NotCheckedTurnitinAndLateFeeWording(unittest.TestCase):
+    """รายการ "สิ่งที่ระบบไม่ตรวจ" ต้องบอกตรงกับที่ระบบทำจริง (เจ้าของยืนยันถ้อยคำ 30 ต.ค. 2569)
+
+    ตั้งแต่อัปเดต 1.4 ระบบอ่านค่า Overall Similarity และคำนวณค่าปรับแล้ว ถ้อยคำเดิมบอกว่าไม่ตรวจเปอร์เซ็นต์ความซ้ำซ้อนและกำหนดเวลา
+    """
+
+    WORDING = (
+        ("การตรวจ Plagiarism ในเนื้อหาเล่ม (ระบบอ่านเฉพาะค่า Overall Similarity จากไฟล์ Turnitin ที่แนบ)",
+         "Plagiarism in the document content (the system only reads the Overall Similarity value from the attached Turnitin file)"),
+        ("ขั้นตอนส่งเล่มและสิทธิ์การเผยแพร่ (ค่าปรับระบบคำนวณจากวันที่ในแบบฟอร์ม เจ้าหน้าที่แก้ได้)",
+         "Submission steps and publication rights (the late fee is calculated from the dates in the form, and staff can change it)"),
+    )
+
+    def test_the_owners_wording_replaces_the_old_lines(self):
+        for thai, _english in self.WORDING:
+            self.assertIn(thai, NOT_CHECKED)
+        for old in ("Plagiarism หรือเปอร์เซ็นต์ความซ้ำซ้อน", "ขั้นตอนส่งเล่ม กำหนดเวลา และสิทธิ์การเผยแพร่"):
+            self.assertNotIn(old, NOT_CHECKED)
+
+    def test_the_english_has_no_thai_left(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import check_i18n
+        _block, pairs = check_i18n.load_tr()
+        for thai, english in self.WORDING:
+            with self.subTest(thai=thai):
+                self.assertEqual(check_i18n.tr_en(thai, pairs), english)
+                self.assertIsNotNone(check_i18n.whole_rule(thai, pairs))
+
+
+class RunningHeadPageLabel(unittest.TestCase):
+    """หัวกระดาษแบบ "ข้อความ / เลข" และบรรทัดจุดไข่ปลา (เล่มจริงที่เจ้าของตรวจเอง 31 ต.ค. 2569)"""
+
+    def test_label_after_slash_in_a_running_head_is_read(self):
+        head = "Fac. of Grad. Studies, Test Univ. M.Sc. / "
+        self.assertEqual(checker_module._extract_page_label(head + "12\nBody text"), "12")
+        self.assertEqual(checker_module._extract_page_label(head + "iv\nBody text"), "iv")
+        self.assertEqual(checker_module._extract_page_label("Test Univ. Ph.D. (Nursing) / 7\nBody"), "7")
+
+    def test_body_text_ending_in_a_slash_expression_is_not_a_label(self):
+        for line in ("Fasting glucose was 5 mg/dL", "Data were stored on CD/DVD", "The ratio was 3 / 10",
+                     "Glucose unit mg / dL"):
+            self.assertEqual(checker_module._extract_page_label(f"{line}\nMore text\n45"), "45", line)
+
+    def test_wrapped_dot_leader_is_not_a_page_label(self):
+        self.assertEqual(checker_module._extract_page_label("Table 4.2 Long caption\nthat wraps\n.... 61"), "")
+        self.assertEqual(checker_module._extract_page_label("Table 4.2 Long caption\nthat wraps\n…… 61"), "")
+
+    def test_plain_decorated_page_numbers_still_read(self):
+        self.assertEqual(checker_module._extract_page_label("Body text\n. 7"), "7")
+        self.assertEqual(checker_module._extract_page_label("- 7 -\nBody text"), "7")
+        self.assertEqual(checker_module._extract_page_label("12\nBody text"), "12")
+
+    def test_running_head_is_not_quoted_as_page_content(self):
+        head = "Fac. of Grad. Studies, Test Univ. M.Sc. / ii"
+        self.assertEqual(checker_module._without_running_head(f"{head}\nABSTRACT\nBody"), "ABSTRACT\nBody")
+        self.assertEqual(checker_module._without_running_head("ABSTRACT\nBody / ii"), "ABSTRACT\nBody / ii")
+        compared = checker_module.compare_reference_text(f"{head}\nABSTRACT\nPlain body sentence about something.",
+                                                  "M.Sc.", "degree", degree_line=True, abstract=True)
+        self.assertNotIn("Fac. of Grad.", compared["actual"])
+
+
+class TocBareChapter(unittest.TestCase):
+    """สารบัญมีแค่เลขบท ไม่มีชื่อบท — เจ้าของ 31 ต.ค. 2569 "เขามีแค่ CHAPTER ไม่ใช่ชื่อบท" """
+
+    def test_chapter_lines_without_a_name(self):
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER I .... 1"), 1)
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER IV ....... 49", "CHAPTER V ....... 80"), 4)
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER 2 15"), 2)
+        self.assertEqual(checker_module.toc_bare_chapter("บทที่ 3 ...... 35"), 3)
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER 1", "1.1 Background 2"), 1)
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER 6", "REFERENCES 100"), 6)
+
+    def test_line_with_a_page_number_is_a_finished_entry_even_before_a_heading(self):
+        self.assertEqual(checker_module.toc_bare_chapter("CHAPTER I .... 1", "Background of the study .... 1"), 1)
+
+    def test_chapter_with_a_name_is_not_bare(self):
+        self.assertIsNone(checker_module.toc_bare_chapter("CHAPTER 1 INTRODUCTION .... 1"))
+        self.assertIsNone(checker_module.toc_bare_chapter("บทที่ 1 บทนำ .... 1"))
+        self.assertIsNone(checker_module.toc_bare_chapter("CHAPTER 1", "INTRODUCTION .... 1"))
+        self.assertIsNone(checker_module.toc_bare_chapter("REFERENCES .... 100"))
+
+    def test_english_wording_follows_the_owners_list(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("ชื่อบทในสารบัญต้องมีชื่อเต็มของแต่ละบท", pairs),
+                         "Chapter name must include the full name of each chapter")
+        self.assertEqual(i18n.tr_en('ชื่อบทในสารบัญมีแค่เลขบท ไม่มีชื่อบท: "CHAPTER II" และ "CHAPTER III"', pairs),
+                         'The table of contents lists only the chapter number, without the chapter name: '
+                         '"CHAPTER II" and "CHAPTER III"')
+
+
+class ChapterNumberByPosition(unittest.TestCase):
+    """เลขบทผิดตำแหน่งเดียว บอกเลขตามลำดับจริง — เดิมสั่งให้แก้ CHAPTER VI เป็น "CHAPTER 6" ทั้งที่เป็นบทที่ 4"""
+
+    def test_one_repeated_number_out_of_sequence(self):
+        self.assertEqual(checker_module.chapter_number_by_position([1, 2, 3, 6, 5, 6]), {3: 4})
+
+    def test_a_number_that_does_not_repeat_may_be_a_missing_chapter(self):
+        self.assertEqual(checker_module.chapter_number_by_position([1, 2, 4, 5]), {})
+        self.assertEqual(checker_module.chapter_number_by_position([1, 2, 3, 5, 6]), {})
+
+    def test_several_wrong_numbers_are_left_alone(self):
+        self.assertEqual(checker_module.chapter_number_by_position([1, 3, 3, 3, 6, 6]), {})
+        self.assertEqual(checker_module.chapter_number_by_position([1, 2, 3]), {})
+
+
+class NotFoundInsteadOfQuotingAnotherLine(unittest.TestCase):
+    """หน้าไม่มีชื่อเรื่อง = "ไม่พบ" ไม่ยกประโยคอื่นมาอ้างว่าเป็นชื่อเรื่องที่ผิด"""
+
+    def test_unrelated_text_is_reported_as_not_found(self):
+        compared = {"status": "mismatch", "actual": "Fac. of Grad. Studies, Test Univ.", "score": 0.1}
+        detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, "A STUDY OF SOMETHING")
+        self.assertEqual(str(detail), "ไม่พบชื่อเรื่องบนหน้านี้")
+        self.assertTrue(detail.title_lead)
+
+    def test_other_language_label_drops_the_book_wording(self):
+        compared = {"status": "mismatch", "actual": "unrelated", "score": 0.1}
+        self.assertEqual(str(checker_module.title_mismatch_detail("ชื่อเรื่องภาษาอังกฤษในรูปเล่ม ", compared)),
+                         "ไม่พบชื่อเรื่องภาษาอังกฤษบนหน้านี้")
+
+    def test_a_close_but_wrong_title_is_still_quoted(self):
+        compared = {"status": "mismatch", "actual": "A STUDY OF ANOTHER THING", "score": 0.7}
+        self.assertIn("A STUDY OF ANOTHER THING",
+                      str(checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, "A STUDY OF SOMETHING")))
+
+
+class EverySentenceInTheCodeHasEnglish(unittest.TestCase):
+    """ด่านสแกนประโยคจากโค้ด — ไม่ต้องรอเล่มที่เข้าเงื่อนไข คำไทยจึงไม่หลุดไปถึงรายงานอังกฤษของนักศึกษา"""
+
+    def test_no_report_sentence_leaks_thai(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.literal_problems(pairs), [])
+
+    def test_sentences_found_on_the_real_book_translate_fully(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (
+                ("พบรหัสนักศึกษา 6401234 ABCD/M ต่อท้าย/อยู่ใกล้ชื่อนักศึกษา",
+                 "Student ID 6401234 ABCD/M was found next to the student name"),
+                ("หน้าปกต้องแสดงเฉพาะชื่อ-นามสกุล โดยไม่มีรหัสนักศึกษา",
+                 "The cover page must show only the first and last name, without the student ID"),
+                ("สารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)) กับLIST OF TABLES (หน้าไม่ระบุเลข (แผ่นที่ 7 ของไฟล์))",
+                 "Table of contents (page with no page number (sheet 4 of the file)) vs LIST OF TABLES "
+                 "(page with no page number (sheet 7 of the file))"),
+                ("สารบัญ (หน้า iv) กับกิตติกรรมประกาศ (หน้าไม่ระบุเลข (แผ่นที่ 2 ของไฟล์))",
+                 "Table of contents (page iv) vs Acknowledgements (page with no page number (sheet 2 of the file))"),
+                ('ชื่อนักศึกษาของนักศึกษาในหน้าบทคัดย่อต้องสะกดตรงข้อมูลอนุมัติ: "JANE DOE"',
+                 'The student name on the abstract page must be spelled as in the approved data: "JANE DOE"'),
+                ("ไม่พบชื่อนักศึกษาบนหน้านี้", "No student name was found on this page")):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+
+
+class MonthFirstEnglishExamDate(unittest.TestCase):
+    """"on October 14, 2026" คือวันเดียวกับ "14 October 2026" — เจ้าของสั่ง 31 ต.ค. 2569"""
+
+    def test_the_same_day_is_accepted(self):
+        for approved, printed in (("14 October 2026", "on October 14, 2026"),
+                                  ("14 October 2026", "on October 14 2026"),
+                                  ("4 October 2026", "on October 04, 2026"),
+                                  ("1 September 2026", "on September 1, 2026"),
+                                  ("1 May 2026", "on May 1, 2026"),
+                                  ("14 October 2026", "on 14 October 2026")):
+            self.assertTrue(checker_module.exam_date_on_page(approved, printed), printed)
+
+    def test_a_different_day_is_still_refused(self):
+        for approved, printed in (("14 October 2026", "on October 15, 2026"),
+                                  ("14 October 2026", "on October 4, 2026"),
+                                  ("4 October 2026", "on October 14, 2026"),
+                                  ("14 October 2026", "on October 14, 2025"),
+                                  ("14 October 2026", "on November 14, 2026")):
+            self.assertFalse(checker_module.exam_date_on_page(approved, printed), printed)
+
+    def test_a_wrong_date_is_quoted_as_printed(self):
+        self.assertEqual(checker_module.find_signature_date("approved on October 15, 2026\nDean"), "October 15, 2026")
+        self.assertEqual(checker_module.find_signature_date("on 15 October 2026"), "15 October 2026")
+
+    def test_a_cut_off_chapter_name_is_still_wrong(self):
+        """ชื่อบทไม่ครบ (เจ้าของ 31 ต.ค. 2569) ข้อเทียบชื่อบทจับอยู่แล้ว ข้อเลขบทเปล่าต้องไม่กลืนกรณีนี้"""
+        self.assertEqual(checker_module.canonical_title_status("LITERATURE", 2, 1)[0], "wrong")
+        self.assertIsNone(checker_module.toc_bare_chapter("CHAPTER 2 LITERATURE .... 15"))

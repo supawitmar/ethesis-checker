@@ -18,6 +18,8 @@
 หมายเหตุ: ตัวแทนที่จริงคือ JavaScript สคริปต์นี้ใช้ re ของ python จำลอง
 regex ที่ python ไม่รองรับจะถูกข้าม (แจ้งเตือนด้วย --lint)
 """
+import ast
+import itertools
 import os
 import re
 import sys
@@ -351,6 +353,8 @@ COMPOSED_LOCATIONS = (
     "บทคัดย่ออังกฤษ ({ref}) รายชื่อคณะกรรมการที่ปรึกษา", "บทคัดย่อไทย ({ref}) รายชื่อคณะกรรมการที่ปรึกษา",
     "ชื่อย่อในบทคัดย่ออังกฤษ ({ref})", "ชื่อย่อในบทคัดย่อไทย ({ref})",
     "สารบัญ ({ref})", "สารบัญ ({ref}) บทที่ 2", "สารบัญ ({ref}) กับบทที่ 2 ({ref})",
+    "สารบัญ ({ref}) กับLIST OF TABLES ({ref})", "สารบัญ ({ref}) กับLIST OF TABLES (หน้า 5)",
+    "สารบัญ (หน้า 5) กับกิตติกรรมประกาศ ({ref})",
     "สารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) กับบทที่ 2 ({ref})", "สารบัญ ({ref}) กับบทที่ 2 (หน้า 11)",
     "บทที่ 2 ({ref})", "บทที่ 2 ในสารบัญ ({ref}) และในเนื้อหา ({ref})",
     "บทที่ 2 ในสารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 9 ของไฟล์)) และในเนื้อหา ({ref})",
@@ -481,9 +485,131 @@ def collect_corpus(folder):
     return messages, sorted(c for c in cats if c)
 
 
+# ---- ด่านสแกนประโยคจากโค้ด: --corpus เห็นเฉพาะประโยคที่เล่มทดสอบทำให้เกิด ประโยคของเล่มแบบอื่นจึงหลุดไปถึงผู้ใช้
+# (เล่มจริง 31 ต.ค. 2569: ข้อรหัสนักศึกษาบนหน้าปกมีคำไทยปนในรายงานอังกฤษ) ด่านนี้อ่านประโยคจาก checker.py โดยตรง ไม่ต้องมีเล่ม
+LITERAL_CALLS = ("add", "add_info", "add_human", "add_verification")
+LITERAL_FILLS = ("5", "X", '"X"', "หน้า 5", "หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)", "ชื่อนักศึกษา", "บทคัดย่ออังกฤษ", "สารบัญ", "",
+                 "ภาษาไทย", "ภาษาอังกฤษ", "บฑ.1", "ชื่อปริญญา", "หน้าลงนาม 1", "บทคัดย่อ (อังกฤษ)", "REFERENCES",
+                 "รายการอ้างอิง", "หน้าปก")
+# ประโยคที่ค่าในช่องเดาจาก LITERAL_FILLS ไม่ได้ — ใส่ตัวอย่างค่าจริงไว้ ทุกตัวอย่างต้องแปลได้ครบ ด่านไม่ได้ข้ามประโยคพวกนี้
+_MAIN_CONTENT = "เนื้อหาหลัก (บทคัดย่อ และบทที่ 1 ถึงบทสุดท้าย)"
+LITERAL_SAMPLES = {
+    "\0 รายชื่อตาม \0 คือ \0": (
+        "ระบบนับจำนวนอาจารย์เทียบกับ บฑ.1 ให้แล้ว แต่ไม่ได้เทียบชื่อ โปรดทานรายชื่อเอง รายชื่อตาม บฑ.1 คือ 1. Jane Doe",
+        "ระบบอ่านรายชื่อบนหน้านี้ได้ไม่ชัด จึงนับจำนวนเทียบกับ บฑ.2 ไม่ได้ โปรดทานรายชื่อเอง "
+        "และดูรายชื่อที่ระบบอ่านได้ในข้อมูลประกอบ รายชื่อตาม บฑ.2 คือ 1. Jane Doe"),
+    "\0: หน้านี้มี \0 ชื่อ แต่อนุมัติไว้ \0 ชื่อ": (
+        "รายชื่อไม่ครบตามที่ได้รับอนุมัติใน บฑ.1: หน้านี้มี 2 ชื่อ แต่อนุมัติไว้ 3 ชื่อ",
+        "รายชื่อเกินจากที่ได้รับอนุมัติใน บฑ.2: หน้านี้มี 5 ชื่อ แต่อนุมัติไว้ 3 ชื่อ"),
+    "เพิ่มบทคัดย่อ": ("เพิ่มบทคัดย่อภาษาไทย", "เพิ่มบทคัดย่อภาษาอังกฤษ", "เพิ่มบทคัดย่อภาษาไทยและภาษาอังกฤษ"),
+    "\0 หน้า\0 คือแผ่นที่ \0 ของไฟล์\0": (
+        "3 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 2, 3, 4 ของไฟล์",
+        "2 หน้าระบบอ่านเลขหน้าไม่ได้ (อาจเป็นหน้าภาพ/สแกน) คือแผ่นที่ 2, 3 ของไฟล์"),
+    "(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity\n"
+    "(2) ตรวจ\0 โดยค่า Overall Similarity ต้องไม่เกิน \0%": (
+        "(1) ไฟล์ผลตรวจ Turnitin ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity\n"
+        f"(2) ตรวจ{_MAIN_CONTENT} โดยค่า Overall Similarity ต้องไม่เกิน 25%",),
+    "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity "
+    "และค่า Overall Similarity ของ\0 ต้องไม่เกิน \0%": (
+        "ไฟล์ผลตรวจ Turnitin ที่ส่งต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity "
+        f"และค่า Overall Similarity ของ{_MAIN_CONTENT} ต้องไม่เกิน 25%",),
+    "(1) ปรับแก้เนื้อหาส่วนที่ซ้ำ แล้วตรวจ Turnitin ใหม่ ให้ค่า Overall Similarity ของ\0 ไม่เกิน \0%\n"
+    "(2) แนบไฟล์ผลตรวจ Turnitin ฉบับใหม่ โดยไฟล์ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity\n"
+    "กรณีที่ไม่สามารถปรับแก้ไขร้อยละการคัดลอกได้ กรุณาติดต่อหอสมุดฯ เพื่อขอยกเว้น (Exclude) คำที่เป็นคำศัพท์เฉพาะได้": (
+        f"(1) ปรับแก้เนื้อหาส่วนที่ซ้ำ แล้วตรวจ Turnitin ใหม่ ให้ค่า Overall Similarity ของ{_MAIN_CONTENT} ไม่เกิน 25%\n"
+        "(2) แนบไฟล์ผลตรวจ Turnitin ฉบับใหม่ โดยไฟล์ต้องมีทั้งหน้าปก (Cover page) และหน้า Overall Similarity\n"
+        "กรณีที่ไม่สามารถปรับแก้ไขร้อยละการคัดลอกได้ กรุณาติดต่อหอสมุดฯ เพื่อขอยกเว้น (Exclude) คำที่เป็นคำศัพท์เฉพาะได้",),
+    "สารบัญ (\0) กับบทที่ \0 (\0)": ("สารบัญ (หน้า iv) กับบทที่ 3 (หน้า 35)",
+                                        "สารบัญ (หน้าไม่ระบุเลข (แผ่นที่ 4 ของไฟล์)) กับบทที่ 3 (หน้า 35)"),
+    "\0 \0 หน้า": ("พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ 10 หน้า",
+                   "พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนเนื้อหา และส่วนท้าย 146 หน้า"),
+    "เลือกคำเดียว: \0 หรือ \0": ("เลือกคำเดียว: REFERENCES หรือ BIBLIOGRAPHY", "เลือกคำเดียว: รายการอ้างอิง หรือ บรรณานุกรม"),
+    "ต้องมีหัวข้อ \0 หรือ \0 เสมอ": ("ต้องมีหัวข้อ REFERENCES หรือ BIBLIOGRAPHY เสมอ",
+                                     "ต้องมีหัวข้อ รายการอ้างอิง หรือ บรรณานุกรม เสมอ"),
+    "ต้องเลือกใช้คำเดียว: \0 หรือ \0 อย่างใดอย่างหนึ่ง": (
+        "ต้องเลือกใช้คำเดียว: REFERENCES หรือ BIBLIOGRAPHY อย่างใดอย่างหนึ่ง",
+        "ต้องเลือกใช้คำเดียว: รายการอ้างอิง หรือ บรรณานุกรม อย่างใดอย่างหนึ่ง"),
+    "ลำดับที่พบ: ": ("ลำดับที่พบ: ประวัติผู้วิจัย (หน้า 90) → รายการอ้างอิง/บรรณานุกรม (หน้า 95) → ภาคผนวก (หน้า 99)",),
+    "ลำดับที่ต้องเป็น: ": ("ลำดับที่ต้องเป็น: รายการอ้างอิง/บรรณานุกรม → ภาคผนวก → ประวัติผู้วิจัย",),
+    '\0ของนักศึกษาในหน้า\0ต้องสะกดตรงข้อมูลอนุมัติ: "\0"': (
+        'ชื่อนักศึกษาของนักศึกษาในหน้าบทคัดย่อต้องสะกดตรงข้อมูลอนุมัติ: "JANE DOE"',
+        'ชื่อภาษาไทยของนักศึกษาในหน้าบทคัดย่อภาษาไทยต้องสะกดตรงข้อมูลอนุมัติ: "X"',
+        'ชื่อภาษาอังกฤษของนักศึกษาในหน้าบทคัดย่อภาษาอังกฤษต้องสะกดตรงข้อมูลอนุมัติ: "JANE DOE"'),
+}
+
+
+def _literal_shapes(node):
+    """รูปประโยคของ argument — ช่องค่าเป็น \0 · None ถ้าไม่ใช่ข้อความในโค้ด"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.JoinedStr):
+        return ["".join(part.value if isinstance(part, ast.Constant) else "\0" for part in node.values)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _literal_shapes(node.left), _literal_shapes(node.right)
+        if left and right:
+            return [a + b for a in left for b in right]
+        return left or right
+    if isinstance(node, ast.IfExp):
+        return (_literal_shapes(node.body) or []) + (_literal_shapes(node.orelse) or [])
+    return None
+
+
+def literal_problems(pairs):
+    """ประโยคไทยใน rep.add(...) ที่แปลแล้วยังมีคำไทยปน — คืน [(บรรทัด, รูปประโยค, คำแปล)]"""
+    tree = ast.parse((CODE / "checker.py").read_text(encoding="utf-8"))
+    seen, problems = set(), []
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr in LITERAL_CALLS):
+            continue
+        for arg in call.args + [k.value for k in call.keywords]:
+            for shape in _literal_shapes(arg) or []:
+                if shape in seen or not re.search(r"[ก-๙]", shape):
+                    continue
+                seen.add(shape)
+                samples = LITERAL_SAMPLES.get(shape)
+                if samples:
+                    leaks = [leak for leak in (_literal_leak(sample, pairs) for sample in samples) if leak]
+                    problems.extend((call.lineno, shape.replace("\0", "{…}"), leak) for leak in leaks)
+                    continue
+                holes = shape.count("\0")
+                fills = (itertools.product(LITERAL_FILLS, repeat=holes) if holes <= 2
+                         else ((fill,) * holes for fill in LITERAL_FILLS))
+                last = ""
+                for fill in fills:
+                    last = _literal_leak(_fill_holes(shape, fill), pairs)
+                    if not last:
+                        break
+                if last:
+                    problems.append((call.lineno, shape.replace("\0", "{…}"), last))
+    return sorted(problems)
+
+
+def _fill_holes(shape, fill):
+    for value in fill:
+        shape = shape.replace("\0", value, 1)
+    return shape
+
+
+def _literal_leak(text, pairs):
+    """คำแปลที่ยังมีคำไทยปน ('' ถ้าแปลครบ) — ข้อความหลายบรรทัดแปลทีละบรรทัดเหมือนในรายงาน"""
+    for line in text.split("\n"):
+        english = tr_en(line, pairs)
+        if line.strip() and translation_problems(line, english):
+            return english
+    return ""
+
+
 def main():
     args = sys.argv[1:]
     block, pairs = load_tr()
+
+    if "--literals" in args:
+        problems = literal_problems(pairs)
+        for line, shape, sample in problems:
+            print(f"checker.py:{line}: {shape[:100]}\n    -> {sample[:110]}")
+        print(f"ประโยคในโค้ดที่ยังมีคำไทยปนเมื่อแปล: {len(problems)}")
+        return 1 if problems else 0
 
     if "--lint" in args:
         problems = lint(block, pairs)

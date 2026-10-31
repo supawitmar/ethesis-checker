@@ -480,11 +480,39 @@ _PAGE_LABEL_NOISE = re.compile(rf'^[\s.\-—–_•·|:{_PAGE_STRAY_MARKS}]+|[\s
 _HEADER_STRAY_MARKS = re.compile(rf'^[{_PAGE_STRAY_MARKS}]+|[{_PAGE_STRAY_MARKS}]+$')
 
 
+# หัวกระดาษแบบเก่า "Fac. of Grad. Studies, Mahidol Univ. M.P.H / 1" — เลขหน้าอยู่หลัง "/" (เจ้าของตรวจเล่มจริง 31 ต.ค. 2569)
+# เดิมอ่านไม่ได้ ตำแหน่งทั้งเล่มขึ้น "หน้าไม่ระบุเลข" และได้แดงผิด "9 หน้าไม่ได้พิมพ์เลขหน้า"
+# ต้องมีช่องว่างหน้า "/" ต่อจากตัวอักษร และเลขโรมันใช้แค่ i v x l — ไม่ให้เนื้อหาบรรทัดแรก "5 mg/dL" "CD/DVD" "อัตรา 3 / 10" กลายเป็นเลขหน้า
+_RUNNING_HEAD_LABEL = re.compile(r'^.*(?:[^\W\d_]|[.)])\s+/\s*(\d{1,4}|[ivxl]{1,8}|[ก-ฮ])$', re.I)
+# จุดไข่ปลาของรายการสารบัญที่ตกบรรทัด ".... 61" ไม่ใช่เลขหน้า — เดิมอ่านเป็นเลขหน้า 61 ได้แดงผิด 2 ข้อและข้อสังเกตผิด 1 ข้อ
+_DOT_LEADER_RUN = re.compile(r'\.{2,}|…')
+
+
+def _running_head_label(line):
+    """เลขหน้าจากหัวกระดาษแบบ "ข้อความ / เลข" — '' ถ้าไม่ใช่บรรทัดแบบนี้"""
+    found = _RUNNING_HEAD_LABEL.match((line or '').strip())
+    return found.group(1) if found else ''
+
+
+def _without_running_head(page_text):
+    """ตัดหัวกระดาษแบบ "ข้อความ / เลข" ออก — ไม่ใช่เนื้อหาของหน้า ห้ามยกไปอ้างว่าเป็นชื่อเรื่องหรือบรรทัดปริญญา"""
+    lines = (page_text or '').splitlines()
+    for k, line in enumerate(lines):
+        if line.strip():
+            return '\n'.join(lines[:k] + lines[k + 1:]) if _running_head_label(line) else (page_text or '')
+    return page_text or ''
+
+
 def _extract_page_label(page_text):
     """Read the page label printed at the top or bottom of a document page."""
     lines = [line.strip() for line in (page_text or '').splitlines() if line.strip()]
     candidates = (lines[:1] + lines[-1:]) if lines else []
+    running = _running_head_label(lines[0]) if lines else ''
+    if running:
+        return str(int(running)) if running.isdigit() else running.lower()
     for raw in candidates:
+        if _DOT_LEADER_RUN.search(raw):
+            continue
         candidate = _PAGE_LABEL_NOISE.sub('', raw)
         if re.fullmatch(r'\d{1,4}', candidate):
             return str(int(candidate))
@@ -2975,6 +3003,8 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
 
 
 _ERA_PREFIX = re.compile(r'พ\.?\s*ศ\.?|ค\.?\s*ศ\.?|B\.?\s*E\.?|A\.?\s*D\.?', re.I)
+_ENGLISH_MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
+_MONTH_FIRST_DATE = re.compile(rf'\b({_ENGLISH_MONTHS})\s*(\d{{1,2}})\s*,?\s*(\d{{4}})\b', re.I)
 
 
 def _exam_date_key(text):
@@ -2982,8 +3012,11 @@ def _exam_date_key(text):
 
     หน้าลงนามเล่มไทยมักเขียน "วันที่ 11 พฤษภาคม พ.ศ. 2569" (มีคำระบุศักราชคั่นระหว่าง
     เดือนกับปี) แต่ข้อมูลอนุมัติเป็น "11 พฤษภาคม 2569" ถ้าไม่ตัดออกจะฟ้องผิด
+
+    "October 14, 2026" คือวันเดียวกับ "14 October 2026" (เจ้าของสั่ง 31 ต.ค. 2569) จึงเรียงเป็นวัน-เดือน-ปีก่อนเทียบ
     """
-    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text or ""))
+    text = _MONTH_FIRST_DATE.sub(r'\2 \1 \3', text or "")
+    text = re.sub(r'\b0([1-9])', r'\1', _ERA_PREFIX.sub(' ', text))
     # norm() ตัดช่องว่างทิ้งหมด ตัวเลขสองชุดที่คั่นด้วยช่องว่างหรือขึ้นบรรทัดใหม่จึงต่อกัน
     # เป็นเลขเดียว ("หน้า 2" บรรทัดบน + "7 July" บรรทัดล่าง = "27JULY") ต้องคั่นไว้ก่อน
     return " ".join(norm(part) for part in re.split(r'(?<=\d)\s+(?=\d)', text))
@@ -5883,6 +5916,7 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False, ab
     "M.Sc." (เจอตอนเพิ่ม M.C.T.M. ก.ย. 2569)
     """
     rule = MATCH_RULES[rule_name]
+    page_text = _without_running_head(page_text)
     if degree_line:
         page_text = degree_line_search_text(page_text, abstract)
     if not rule['case_sensitive'] and spelled_in(expected, page_text):
@@ -6898,6 +6932,9 @@ def _title_as_printed(compared, page_text, expected, student_name=""):
     return compare_values(printed, expected, 'title')
 
 
+_TITLE_NOT_FOUND_SCORE = 0.4
+
+
 def title_mismatch_detail(label, compared, expected=''):
     """ข้อความชื่อเรื่องที่ไม่ตรงข้อมูลในระบบ — บอกกลาง ๆ ว่า "ไม่ตรงกับข้อมูลในระบบ"
 
@@ -6909,6 +6946,9 @@ def title_mismatch_detail(label, compared, expected=''):
     จึงเปิด spaces=True ให้บอกช่องว่างเกินด้วย (รอยตัดบรรทัดไม่ถูกต่อด้วยช่องว่าง ดู _join_wrapped)
     """
     detail = f'{label}ไม่ตรงกับข้อมูลในระบบ: "{compared["actual"]}"'
+    # ไม่ใกล้เคียงเลย = หน้านี้ไม่มีชื่อเรื่อง ไม่ใช่ชื่อเรื่องผิด — เดิมยกหัวกระดาษหรือประโยคในบทคัดย่อมาอ้าง (เล่มจริง 31 ต.ค. 2569)
+    if compared['status'] == 'mismatch' and compared.get('score', 1.0) < _TITLE_NOT_FOUND_SCORE:
+        detail = f'ไม่พบ{label.replace("ในรูปเล่ม", "").strip()}บนหน้านี้'
     if expected and compared['status'] in ('typo', 'case'):
         analysis = analyze_diff(compared['actual'], expected, spaces=True)
         # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ analyze_diff คืนว่าง (มันเทียบแบบตัวใหญ่หมด)
@@ -6929,11 +6969,12 @@ def title_mismatch_detail(label, compared, expected=''):
 def find_signature_date(text):
     """ดึงวันที่สอบผ่านที่พิมพ์บนหน้าลงนามออกมา (ถ้ามี) เพื่อบอกว่าที่พบต่างจากระบบอย่างไร
 
-    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569"
+    รูปแบบที่พบ: อังกฤษ "on 26 June 2026" / "on June 26, 2026" / ไทย "วันที่ 11 พฤษภาคม พ.ศ. 2569"
     คืน '' ถ้าหาไม่เจอ (ถือว่าไม่มีวันที่บนหน้าลงนาม ไม่ใช่แค่ไม่ตรง)
     """
     patterns = (
         r'\bon\s+(\d{1,2}\s+[A-Za-z]+\.?\s+\d{4})',
+        rf'\bon\s+((?:{_ENGLISH_MONTHS})\s+\d{{1,2}}\s*,?\s*\d{{4}})',
         r'วันท\S*\s*(\d{1,2}\s+\S+\s+(?:พ\.?\s*ศ\.?\s*)?\d{3,4})',
         r'(\d{1,2}\s+[A-Za-zก-๙]+\.?\s+(?:พ\.?\s*ศ\.?\s*)?\d{4})',
     )
@@ -7384,6 +7425,33 @@ def _toc_chapter_title(text):
 # บรรทัดสารบัญที่มีแต่ "CHAPTER 2" ไม่มีชื่อบท — _strip_toc_page_number อ่านเลขบท
 # เป็นเลขหน้าแล้วตัดทิ้ง เหลือคำว่า CHAPTER ลอย ๆ ซึ่งไม่ใช่ชื่อบท ห้ามเอาไปแสดง
 _TOC_CHAPTER_WORD_ONLY = re.compile(r'^(?:CHAPTER|บทท)\d*$', re.I)
+_TOC_BARE_CHAPTER = re.compile(r'^\s*(?:CHAPTER|บทท[ั-๎\s]*)\s*(\d{1,2}|[IVXL]+)[\s.…·_-]*(\d{1,3})?\s*$', re.I)
+
+
+def toc_bare_chapter(line, next_line=""):
+    """เลขบทของบรรทัดสารบัญที่มีแต่ "CHAPTER I" ไม่มีชื่อบท — None ถ้ามีชื่อบท หรือไม่ใช่บรรทัดบท
+
+    เจ้าของตรวจเล่มจริง 31 ต.ค. 2569: "ชื่อบทในหน้าสารบัญ เขามีแค่ CHAPTER ไม่ใช่ชื่อบท" เดิมขึ้นว่า "ไม่พบรายการบทในสารบัญ"
+    บรรทัดที่พิมพ์เลขหน้าแล้วคือรายการจบในตัว ส่วนบรรทัดที่ยังไม่มีเลขหน้า ชื่อบทอาจอยู่บรรทัดถัดไป
+    (บรรทัดถัดไปที่เป็นหัวข้อย่อย "1.1 ..." บทอื่น หรือส่วนอื่นของเล่ม ไม่ใช่ชื่อบท)
+    """
+    found = _TOC_BARE_CHAPTER.match(line or "")
+    if not found:
+        return None
+    following = (next_line or "").strip()
+    if (not found.group(2) and following and not re.match(r'\d', following)
+            and not _TOC_BARE_CHAPTER.match(following) and not _toc_section_kind(following)):
+        return None
+    token = found.group(1)
+    return int(token) if token.isdigit() else _roman_to_int(token)
+
+
+def chapter_number_by_position(numbers):
+    """{ตำแหน่ง: เลขบทที่ถูก} เมื่อเลขบทผิดตำแหน่งเดียวและเลขนั้นซ้ำกับบทอื่น — {} ถ้าไม่ชัด (ผิดหลายตำแหน่ง/บทอาจหายไปจริง)"""
+    wrong = [k for k, number in enumerate(numbers) if number != k + 1]
+    if len(wrong) == 1 and numbers.count(numbers[wrong[0]]) > 1:
+        return {wrong[0]: wrong[0] + 1}
+    return {}
 
 
 def _toc_chapter_label(number, entries):
@@ -8397,10 +8465,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # บรรทัดถัดไปเก็บไว้ด้วย เพราะชื่อบทยาวถูกตัดขึ้นบรรทัดใหม่ได้ ต้องดูของจริง
     # ไม่ใช่ยอมรับทุกชื่อที่ "เป็นต้นของชื่อมาตรฐาน" (ดู _title_status)
     toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx, next_line)
+    toc_bare = []  # เลขบทของบรรทัดสารบัญที่มีแต่เลขบท ไม่มีชื่อบท (toc_bare_chapter)
     for _k, (source_page_idx, line) in enumerate(toc_lines):
         next_toc_line = toc_lines[_k + 1][1].strip() if _k + 1 < len(toc_lines) else ""
         raw = line.strip()
         if not raw:
+            continue
+        _bare = toc_bare_chapter(raw, next_toc_line)
+        if _bare is not None:
+            toc_bare.append((_bare, soft(re.sub(r'[\s.…·_-]*\d*$', '', raw)
+                                         if not re.fullmatch(r'\D*\d{1,2}', raw) else raw)))
             continue
         # "บทที่ 3 ... (ต่อ)" คือบทเดิมที่ยกมาต่อ ไม่ใช่บทใหม่ (ดู is_continuation_heading)
         if is_continuation_heading(raw):
@@ -8449,7 +8523,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 break
     # ฟ้อง "รายบท" ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ไม่รวมเป็นข้อเดียว — แต่ละบท
     # ต้องไปแก้คนละหน้า และเล่มจริงปนกันเองได้ (I, II, III, IV, 5, VI)
+    # พิมพ์เลขบทผิดตัวเดียว (1, 2, 3, VI, 5, 6) บอกเลขตามลำดับจริง ไม่ใช่เลขที่พิมพ์ผิด (เล่มจริง 31 ต.ค. 2569 — เดิมสั่งให้แก้เป็น
+    # "CHAPTER 6" นักศึกษาจะได้บทที่ 6 สองบท ไม่มีบทที่ 4)
+    _position_fix = chapter_number_by_position([c[0] for c in body_ch])
+    _position_of = {c[2]: k for k, c in enumerate(body_ch)}
     for _cn, _head, _idx in non_arabic_heads:
+        _cn = _position_fix.get(_position_of.get(_idx), _cn)
         _want = f"CHAPTER {_cn}" if norm(_head).startswith("CHAPTER") else f"บทที่ {_cn}"
         rep.add("RED", "body", f"บทที่ {_cn} ({page_ref(_idx)})",
                 f'หัวบทเขียนว่า "{_head}"',
@@ -8467,6 +8546,15 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     option = resolve_option(body_ch, approved if same_student else None, chapters_mode)
     enforced_chapters = CANONICAL_ENFORCED_COUNT.get(option, 0)
 
+    # มีแค่เลขบท = ข้อเดียว (เจ้าของ 31 ต.ค. 2569) · บางบทมีชื่อบางบทไม่มี บอกว่าบทไหน · บทพวกนี้อยู่ในสารบัญแล้ว ไม่นับว่าขาด
+    _toc_bare_numbers = {number for number, _printed in toc_bare}
+    if toc_bare:
+        _bare_found = "ชื่อบทในสารบัญมีแค่เลขบท ไม่มีชื่อบท"
+        if toc_ch:
+            _bare_found += ": " + _join_and([f'"{printed}"' for _number, printed in toc_bare])
+        rep.add("RED", "front_matter", "สารบัญ", _bare_found,
+                "ชื่อบทในสารบัญต้องมีชื่อเต็มของแต่ละบท",
+                "เพิ่มชื่อเต็มของแต่ละบทในสารบัญ", "FRONT.TOC_CONTENT")
     if toc_ch:
         # สารบัญที่พิมพ์บทซ้ำ ต้องบอกว่าซ้ำบทไหนและอยู่หน้าไหน — ของเดิมบอกแค่ว่า
         # "สารบัญมี 8 บท เนื้อหามี 6 บท" เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น
@@ -8475,12 +8563,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         _toc_numbers = [c[0] for c in toc_ch]
         _dup = [n for n in sorted(set(_toc_numbers)) if _toc_numbers.count(n) > 1]
         if BODY_RULES['check_toc_chapter_presence'] and (
-                _dup or len(toc_ch) != len(body_ch)):
+                _dup or len(toc_ch) + len(toc_bare) != len(body_ch)):
             # บอกทั้งจำนวนและชี้บทที่ซ้ำ "ในข้อเดียว" (เจ้าหน้าที่สั่ง ก.ย. 2569)
             # ของเดิมบอกแค่จำนวน เจ้าหน้าที่เปิดเล่มเห็น 6 บทตามที่ควรเป็น เลยนึกว่า
             # ระบบนับผิด ทั้งที่สารบัญพิมพ์ CHAPTER 2 กับ 3 ซ้ำจริง (เรนเดอร์หน้า ix
             # ออกมาดูแล้วยืนยัน) — แยกเป็นสองการ์ดไม่ได้ จะกลายเป็นฟ้องซ้ำเรื่องเดียว
-            _counts = f"สารบัญมี {len(toc_ch)} บท เนื้อหามี {len(body_ch)} บท"
+            _counts = f"สารบัญมี {len(toc_ch) + len(toc_bare)} บท เนื้อหามี {len(body_ch)} บท"
             if _dup:
                 _at = sorted({c[4] for c in toc_ch if _toc_numbers.count(c[0]) > 1})
                 _where = f"สารบัญ ({page_ref(_at[-1])})"
@@ -8542,10 +8630,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             f"สารบัญระบุหน้า {t_pno} แต่บทอยู่จริงหน้า {pno}",
                             "เป็นข้อสังเกต ไม่ได้ตรวจเลขหน้าที่สารบัญอ้างถึงแล้ว",
                             "ไม่ต้องแก้ เว้นแต่เจ้าหน้าที่เห็นว่าควรแก้", "FRONT.TOC_PAGE_REF")
-            elif BODY_RULES['check_toc_chapter_presence']:
+            elif BODY_RULES['check_toc_chapter_presence'] and cn not in _toc_bare_numbers:
                 rep.add("RED", "body", f"บทที่ {cn} ({page_ref(ppage)})", "ไม่อยู่ในสารบัญ",
                         "ทุกบทต้องปรากฏในสารบัญ", "", "FRONT.TOC")
-    else:
+    elif not toc_bare:
         toc_problem = "ไม่พบรายการบทในสารบัญ" if toc_pages else "ไม่พบหน้าสารบัญ"
         rep.add("RED", "front_matter",
                 f"สารบัญ ({page_ref(toc_pages[0])})" if toc_pages else "ส่วนนำ",
@@ -8746,14 +8834,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                           and not header_reported_elsewhere(i, front)]
             if not header_bad:
                 continue
-            # ส่วนนำมีไม่กี่หน้า บอกเลขหน้าในวงเล็บได้ ส่วนเนื้อหา/ส่วนท้ายบางเล่มเป็นร้อยหน้า
-            # บอกแค่จำนวนหน้าที่ระบบนับได้ในบรรทัดถัดไปพอ (เจ้าหน้าที่สั่ง 15 ต.ค. 2569)
-            if front:
-                shown = ", ".join(page_ref(i) for i in header_bad[:5])
-                more = f" และอีก {len(header_bad) - 5} หน้า" if len(header_bad) > 5 else ""
-                location = f"{label} ({shown}{more})"
-            else:
-                location = label
+            # ส่วนนำผิดหน้าเดียวบอกหน้านั้น ผิดหลายหน้าบอกจำนวนทีเดียว (เจ้าของ 31 ต.ค. 2569 "แจ้งว่าผิดกี่หน้าและบอกทีเดียว"
+            # — เดิมไล่เลขหน้า 5 หน้าแรก) ส่วนเนื้อหา/ส่วนท้ายบางเล่มเป็นร้อยหน้า บอกแค่จำนวนเสมอ (เจ้าหน้าที่สั่ง 15 ต.ค. 2569)
+            location = f"{label} ({page_ref(header_bad[0])})" if front and len(header_bad) == 1 else label
             # ไม่ยกตัวอย่างข้อความที่พบ (เจ้าหน้าที่สั่ง 15 ต.ค. 2569) — ระบบอาจอ่านหัวกระดาษ
             # ได้ไม่ครบ/เพี้ยน ข้อความที่ยกมาจะอ่านไม่รู้เรื่อง บอกแค่หน้าและจำนวนหน้าพอ
             rep.add("ORANGE", part, location,
@@ -9372,12 +9455,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 printed_name = abstract_printed_name(pages[aidx])
                 if printed_name:
                     compared = compare_values(printed_name, core3, 'student_name')
+                elif compared['status'] == 'mismatch':
+                    # ไม่มีบรรทัดชื่อ-รหัส และไม่มีบรรทัดไหนคล้ายชื่อ = ไม่พบชื่อ ไม่ใช่ชื่อผิด — เดิมยกประโยคในบทคัดย่อ
+                    # มาอ้างว่าเป็นชื่อนักศึกษา (เล่มจริง 31 ต.ค. 2569)
+                    compared['not_found'] = True
             if compared['status'] != 'exact':
                 rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(aidx)})",
                                      rep.mismatch_status(compared.get('marks_only'), compared['actual']),
-                                     compared['actual'])
+                                     f"ไม่พบ{nlbl}บนหน้านี้" if compared.get('not_found') else compared['actual'])
                 rep.add("RED", "front_matter", f"{albl} ({page_ref(aidx)})",
-                        mismatch_detail(f"{nlbl}", compared, core3),
+                        mismatch_detail(f"{nlbl}", compared, core3) if not compared.get('not_found')
+                        else f"ไม่พบ{nlbl}บนหน้านี้",
                         f"{nlbl}ของนักศึกษาในหน้า{albl}ต้องสะกดตรงข้อมูลอนุมัติ: \"{core3}\"",
                         "ตรวจการสะกด", "FORM.APPROVED_MATCH")
             else:
@@ -9528,7 +9616,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         def _check_degree_abbr(abbr, abstract_idx, lang):
             if not abbr or abstract_idx is None:
                 return
-            abstract_text = pages[abstract_idx]
+            abstract_text = _without_running_head(pages[abstract_idx])
             compared = compare_reference_text(abstract_text, abbr, 'degree', degree_line=True, abstract=True)
             vloc = f"ชื่อย่อใน{lang} ({page_ref(abstract_idx)})"
             box = f"{lang} ({page_ref(abstract_idx)})"

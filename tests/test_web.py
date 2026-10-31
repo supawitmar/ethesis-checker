@@ -690,6 +690,17 @@ class Update14PrecheckFlow(unittest.TestCase):
             self.assertIn(text, page.text)
         self.assertEqual(self.client.get(f"/precheck/{job_id}/page/0.png").status_code, 404)
 
+    def test_the_layout_checklist_has_a_pass_all_button(self):
+        """ปุ่มผ่านทั้งหมดของโครงสร้างหน้าลงนาม (เจ้าของสั่ง 31 ต.ค. 2569) — อยู่หัวเช็กลิสต์ และไม่ลบผล "รายชื่อไม่ถูกต้อง" ทิ้ง"""
+        job_id = self._post().json()["job_id"]
+        page = self.client.get(f"/precheck/{job_id}").text
+        button = page.index('id="layout-pass-all"')
+        self.assertLess(page.index('id="layout-title"'), button)
+        self.assertLess(button, page.index('data-item="1"'))
+        self.assertIn("✓ ผ่านทั้งหมด", page)
+        self.assertIn("ยกเลิกผ่านทั้งหมด", page)
+        self.assertIn("keepItemOne && row.dataset.item === '1'", page)
+
     def test_scanned_signature_pages_are_shown_and_named_as_scans(self):
         """หน้าลงนามที่สแกนมา (เจ้าของทัก 21 ต.ค. 2569) — ขั้นที่ 1 แสดงภาพพร้อมบอกว่าเป็นไฟล์สแกน ไม่ใช่ "ไม่พบ" """
         scanned = [{"index": 1, "label": "", "scanned": True}, {"index": 2, "label": "", "scanned": True}]

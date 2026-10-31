@@ -149,6 +149,14 @@
   .pf button[aria-pressed="true"].p { color:#fff; background:var(--ok); border-color:var(--ok); }
   .pf button[aria-pressed="true"].f { color:#fff; background:var(--bad); border-color:var(--bad); }
   .outcome { margin:10px 0 0; font-size:.86rem; color:var(--ink-2); }
+  /* ปุ่ม "ผ่านทั้งหมด" ของเช็กลิสต์โครงสร้างหน้าลงนาม — หน้าตาเดียวกับปุ่มในหน้าผลตรวจ คลาสแยกจาก .pf เพราะไม่ใช่คำตอบของข้อใดข้อหนึ่ง */
+  .panel-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+  .panel-head h2 { margin:0; }
+  .pass-all { margin-left:auto; border:1.5px solid var(--ok); background:#fff; color:var(--ok); font-size:.78rem; font-weight:600;
+       padding:5px 14px; border-radius:99px; cursor:pointer; white-space:nowrap; }
+  .pass-all:hover { background:var(--ok-bg); }
+  .pass-all:focus-visible { outline:none; box-shadow:var(--ring); }
+  .pass-all[aria-pressed="true"] { background:var(--ok-bg); }
 
   .bar { position:fixed; left:0; right:0; bottom:0; z-index:30; background:rgba(255,255,255,.95);
        border-top:1px solid var(--line); box-shadow:0 -6px 20px -14px rgba(16,24,40,.3); }
@@ -350,7 +358,10 @@
       </section>
 
       <section class="panel" aria-labelledby="layout-title">
-        <h2 id="layout-title">โครงสร้างหน้าลงนาม</h2>
+        <div class="panel-head">
+          <h2 id="layout-title">โครงสร้างหน้าลงนาม</h2>
+          <button type="button" class="pass-all" id="layout-pass-all" aria-pressed="false">✓ ผ่านทั้งหมด</button>
+        </div>
         <p class="hint">ตอบทุกข้อ — ข้อที่ "ไม่ผ่าน" เท่านั้นที่เข้าข้อความแจ้งนักศึกษา (เรียงเลขใหม่ให้เอง)</p>
         {% for number, text in items %}
         <div class="item" data-item="{{ number }}">
@@ -527,7 +538,32 @@
       b.setAttribute('aria-pressed', String(b.dataset.answer === value));
     });
   }
+  // ปุ่ม "ผ่านทั้งหมด" (เจ้าของสั่ง 31 ต.ค. 2569) — กด = ทุกข้อผ่าน เหมือนกดทีละข้อ กดไม่ผ่านข้อไหนต่อได้ตามปกติ และปุ่มกลับเป็น
+  // "ผ่านทั้งหมด" · ทุกข้อผ่านอยู่แล้ว = ปุ่มเป็น "ยกเลิกผ่านทั้งหมด" ล้างคำตอบกลับเป็นยังไม่ตอบ (เหมือนปุ่มในหน้าผลตรวจ)
+  // ติ้ก "รายชื่อไม่ถูกต้อง" อยู่ = ข้อ (1) คงไม่ผ่าน เพราะเจ้าหน้าที่ยืนยันแล้วว่ารายชื่อผิด ปุ่มนี้ห้ามลบผลนั้นทิ้งเงียบ ๆ
+  var layoutPassAll = document.getElementById('layout-pass-all');
+  function allLayoutPassed(){
+    return items.length > 0 && items.every(function(r){ return answers[r.dataset.item] === 'pass'; });
+  }
+  function namesMarkedWrong(){
+    return nameBoxes.some(function(b){ return b.checked && b.dataset.nameProblem === 'wrong'; });
+  }
+  function renderLayoutPassAll(){
+    var undo = allLayoutPassed();
+    layoutPassAll.textContent = undo ? 'ยกเลิกผ่านทั้งหมด' : '✓ ผ่านทั้งหมด';
+    layoutPassAll.setAttribute('aria-pressed', String(undo));
+  }
+  layoutPassAll.addEventListener('click', function(){
+    var undo = allLayoutPassed();
+    var keepItemOne = namesMarkedWrong();
+    items.forEach(function(row){
+      if (undo) setAnswer(row, undefined);
+      else if (!(keepItemOne && row.dataset.item === '1')) setAnswer(row, 'pass');
+    });
+    refresh();
+  });
   function refresh(){
+    renderLayoutPassAll();
     ticks.forEach(function(t){ t.closest('.section').classList.toggle('checked', t.checked); });
     document.querySelectorAll('.section').forEach(function(s){
       s.classList.toggle('has-problem', !!s.querySelector('[data-name-item]:checked'));
