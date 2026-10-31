@@ -112,6 +112,10 @@ python tools/check_i18n.py --corpus
 ```
 
 ```bash
+python tools/check_i18n.py --literals
+```
+
+```bash
 python tools/smoke_web.py
 ```
 
@@ -121,6 +125,7 @@ python tools/smoke_web.py
 | `tools/regress_books.py` | ผลตรวจเล่มจริงต้องไม่เพี้ยนจาก `tools/baseline.json` | **ต้องมี** |
 | `tools/check_i18n.py --lint` | โครงสร้างตารางคำแปล `TR` ในหน้ารายงาน | ไม่ต้อง |
 | `tools/check_i18n.py --corpus` | ข้อความที่เล่มจริงทำให้เกิด ต้องมีคำแปลอังกฤษครบ | **ต้องมี** |
+| `tools/check_i18n.py --literals` | ประโยคไทยในโค้ด `checker.py` ต้องแปลได้ครบ แม้เล่มทดสอบไม่ได้ทำให้เกิด | ไม่ต้อง |
 | `tools/smoke_web.py` | ไล่ใช้งานจริงผ่าน HTTP ทั้งเส้นทาง แล้วกดปุ่มบนหน้ารายงาน | **ต้องมี** |
 
 **CI บน GitHub** (`.github/workflows/ci.yml`) รันสองด่านที่ไม่ต้องใช้ข้อมูลทดสอบ คือ `unittest` กับ

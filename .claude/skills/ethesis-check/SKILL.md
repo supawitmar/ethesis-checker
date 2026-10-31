@@ -103,6 +103,10 @@ python tools/check_i18n.py --corpus
 ```
 
 ```bash
+python tools/check_i18n.py --literals
+```
+
+```bash
 python tools/smoke_web.py
 ```
 
