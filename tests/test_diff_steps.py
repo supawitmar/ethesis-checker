@@ -639,7 +639,9 @@ class TheSummaryLayout(unittest.TestCase):
             "1. บทคัดย่อภาษาไทย (หน้า vi)",
             '   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก',
             f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"'])
-        self.assertTrue(at + 3 == len(lines) or not lines[at + 3].startswith("   "), lines[at + 3:])
+        # ข้อชื่อเรื่องข้อแรกมีบรรทัด "หากประสงค์ ... edit topic" ต่อท้าย (เจ้าของ 3 พ.ย. 2569)
+        self.assertEqual(lines[at + 3], checker_module.SUMMARY_INDENT + checker_module.TITLE_EDIT_TOPIC_LINE)
+        self.assertTrue(at + 4 == len(lines) or not lines[at + 4].startswith("   "), lines[at + 4:])
 
     def test_a_title_does_not_quote_the_wrong_title_back(self):
         issue = self._title_issue()
@@ -827,3 +829,58 @@ class TheEnglishSummaryHasNoThaiLeftOver(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CaseStepsWhenWordsAlsoDiffer(unittest.TestCase):
+    """ชื่อเรื่องมีทั้งคำผิดและตัวพิมพ์ผิด — บอกตัวพิมพ์ด้วย (เจ้าของ 3 พ.ย. 2569 "ตัวพิมพ์ไม่ตรงแบบนี้ถือว่าผิดนะ")"""
+
+    FOUND = "NEW TOOLS FOR PLASMODIUM AND ANOPHELES: A FIELD STUDY"
+    WANT = "NEW TOOLS OF Plasmodium AND Anopheles: A FIELD STUDY"
+
+    def _steps(self, found, want):
+        return list(checker_module.analyze_diff(found, want, spaces=True, case=True).steps)
+
+    def test_case_words_are_listed_in_reading_order(self):
+        self.assertEqual(self._steps(self.FOUND, self.WANT),
+                         ['ให้แก้ "FOR" เป็น "OF"', 'ให้แก้ "PLASMODIUM" เป็น "Plasmodium"',
+                          'ให้แก้ "ANOPHELES" เป็น "Anopheles"'])
+
+    def test_every_step_can_be_followed_in_either_order(self):
+        steps = self._steps(self.FOUND, self.WANT)
+        for reverse in (False, True):
+            self.assertEqual(apply_all(self.FOUND, steps, reverse=reverse), self.WANT, reverse)
+
+    def test_a_repeated_word_gets_an_anchor(self):
+        found = "GENE FLOW AND drift AND SELECTION IN WILD POPULATIONS"
+        want = "GENE FLOW and DRIFT AND SELECTION OF WILD POPULATIONS"
+        steps = self._steps(found, want)
+        self.assertEqual(len(steps), 3, steps)
+        for reverse in (False, True):
+            self.assertEqual(apply_all(found, steps, reverse=reverse), want, (reverse, steps))
+
+    def test_only_case_differs_keeps_the_old_wording(self):
+        """ควบคุมเชิงลบ — ต่างแค่ตัวพิมพ์อย่างเดียว analyze_diff ไม่ตอบ ให้ analyze_case_diff บอกแบบเดิม"""
+        self.assertEqual(self._steps("NEW TOOLS OF PLASMODIUM", "NEW TOOLS OF Plasmodium"), [])
+        compared = {"status": "case", "actual": "NEW TOOLS OF PLASMODIUM", "score": 1.0}
+        detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, "NEW TOOLS OF Plasmodium")
+        self.assertIn("ต่างที่ตัวพิมพ์เล็ก-ใหญ่", detail)
+        self.assertEqual(detail.fix_steps, ('ให้แก้ตัวพิมพ์เล็ก-ใหญ่ "PLASMODIUM" เป็น "Plasmodium"',))
+
+    def test_other_checks_still_ignore_case(self):
+        """ควบคุมเชิงลบ — กฎอื่นที่เรียก analyze_diff โดยไม่ส่ง case ได้ผลเท่าเดิม"""
+        self.assertEqual(list(checker_module.analyze_diff(self.FOUND, self.WANT).steps), ['ให้แก้ "FOR" เป็น "OF"'])
+
+    def test_more_than_three_case_words_are_not_listed(self):
+        found = "a study for the effect of light on growth"
+        want = "A STUDY OF THE EFFECT OF LIGHT ON GROWTH"
+        self.assertEqual(self._steps(found, want), ['ให้แก้ "for" เป็น "OF"'])
+
+    def test_thai_titles_are_unchanged(self):
+        found, want = "การศึกษาผลของแสงต่อการเจริญ", "การศึกษาผลของแสงต่อการเติบโต"
+        self.assertEqual(self._steps(found, want), list(checker_module.analyze_diff(found, want, spaces=True).steps))
+
+    def test_the_title_card_says_it_too(self):
+        compared = {"status": "typo", "actual": self.FOUND, "score": 0.9}
+        detail = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.WANT)
+        self.assertIn('ต่างที่ "FOR" ต้องเป็น "OF" และ ต่างที่ "PLASMODIUM" ต้องเป็น "Plasmodium"', detail)
+        self.assertTrue(detail.title_differs)

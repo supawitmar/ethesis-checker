@@ -1825,6 +1825,44 @@ def _closest_run(text, want, min_ratio=0.6):
     return best
 
 
+def _zone_lines(page_text, zone):
+    """บรรทัดของหน้าที่อยู่ในช่วง zone (soft ของหน้าที่ตัดท้ายแล้ว) — บรรทัดสุดท้ายตัดตามความยาวของ zone"""
+    out, used = [], 0
+    for line in (page_text or '').splitlines():
+        line = soft(line)
+        if not line:
+            continue
+        if used >= len(zone):
+            break
+        out.append(line[:len(zone) - used].strip())
+        used += len(line) + 1
+    return [line for line in out if line]
+
+
+def signature_template_run(page_text, zone, want):
+    """ข้อความในช่วง zone ที่ใกล้ประโยค template ที่สุด
+
+    ตัวหาช่วงอิสระ (_closest_run) ต้องได้ช่วงยาวใกล้เคียงประโยคเต็ม เมื่อเล่มตกคำ ช่วงจึงเอื้อมไปกินท้ายบรรทัดก่อนหน้า
+    (เล่มจริง 3 พ.ย. 2569 ตก "degree of" แล้วยกท้ายชื่อเรื่องมาเป็น "ILLANCE was submitted ...") — template ขึ้นประโยคนี้
+    ที่ต้นบรรทัดต่อจากชื่อเรื่อง จึงลองช่วงที่เริ่มต้นบรรทัดด้วย ถ้าใกล้เท่ากันหรือดีกว่าใช้ช่วงนั้น
+    เล่มที่พิมพ์ประโยคต่อท้ายบรรทัดอื่น ช่วงต้นบรรทัดจะได้คะแนนต่ำกว่า จึงยังได้ช่วงอิสระเหมือนเดิม
+    """
+    free = _closest_run(zone, want, min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+    target = norm(want)
+    free_ratio = difflib.SequenceMatcher(None, norm(free), target).ratio() if free else -1.0
+    lines = _zone_lines(page_text, zone)
+    best, best_ratio = '', -1.0
+    for start in range(len(lines)):
+        for end in range(start + 1, min(len(lines), start + 4) + 1):
+            run = ' '.join(lines[start:end])
+            ratio = difflib.SequenceMatcher(None, norm(run), target).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = run, ratio
+    if best and best_ratio >= SIGNATURE_TEMPLATE_MIN_RATIO and best_ratio >= free_ratio:
+        return best
+    return free
+
+
 def signature_template_zone(page_text, degree):
     """ส่วนของหน้าลงนามที่ต้องเป็น "ข้อความ template" ล้วน — ตัดชื่อปริญญาออกแล้ว
 
@@ -1930,23 +1968,19 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
         if norm(sig_template) in norm(template_zone):
             # ประโยคครบทุกคำ แต่สะกดวรรณยุกต์/สระ/ำ ไม่ตรง — ยกทั้งประโยคมาชี้จุดต่าง ไม่ใช่ท่อนท้าย
             # (ถ้าเข้ากิ่งท่อนท้ายข้างล่าง จะได้ 'ขาด "ได้รับการพิจารณาให้"' ทั้งที่เล่มพิมพ์ครบ)
-            near = _closest_run(template_zone, sig_template,
-                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+            near = signature_template_run(page_text, template_zone, sig_template)
         elif thai_book and norm(SIGNATURE_TEMPLATE_TH_TAIL) in norm(template_zone):
             # พิมพ์ประโยคมาแต่ตกคำนำ "ได้รับการพิจารณาให้" (แบบสั้น) — ยกท่อนที่พิมพ์จริงมาบอกว่าขาดอะไร
             # ต้องเทียบด้วยท่อนท้ายก่อนเทียบทั้งประโยค เพราะหน้าต่างยาวเท่าประโยคเต็มจะคร่อมท้ายชื่อเรื่อง
             # เข้ามาด้วย (เล่มทดสอบ 3: "การพัฒนาปิโตรเลียม นับเป็นส่วนหนึ่ง..." ได้ข้อความขาด/เกินปนกัน
             # จนอ่านไม่ออก)
-            near = _closest_run(template_zone, SIGNATURE_TEMPLATE_TH_TAIL,
-                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+            near = signature_template_run(page_text, template_zone, SIGNATURE_TEMPLATE_TH_TAIL)
         else:
-            near = _closest_run(template_zone, sig_template,
-                                min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+            near = signature_template_run(page_text, template_zone, sig_template)
             if not near and thai_book:
                 # ทั้งคำนำและท่อนท้ายพิมพ์ผิด: ลองหาท่อนที่ใกล้ท่อนท้ายที่สุด ไม่ให้บอกว่า "ไม่พบ" ทั้งที่
                 # มีข้อความอยู่บนหน้า
-                near = _closest_run(template_zone, SIGNATURE_TEMPLATE_TH_TAIL,
-                                    min_ratio=SIGNATURE_TEMPLATE_MIN_RATIO)
+                near = signature_template_run(page_text, template_zone, SIGNATURE_TEMPLATE_TH_TAIL)
         # ข้อความต้องขึ้นต้นด้วย "ส่วนไหนของหน้าที่ผิด" ไม่ใช่พูดคำว่า
         # "หน้าลงนาม" ซ้ำอีกรอบ — ตำแหน่งข้างบนบอกไปแล้วว่าหน้าไหน
         # (เดิมคำว่า "หน้าลงนาม" โผล่ 4 รอบในข้อเดียว: หัวกลุ่ม ตำแหน่ง
@@ -5177,6 +5211,12 @@ def _joined_fix(steps):
     return "ต้อง" + "".join(text for text, _clause in clauses)
 
 
+# ถ้อยคำเจ้าของตรงตัว (3 พ.ย. 2569) — ครั้งเดียวทั้งข้อความสรุป ต่อจาก "ชื่อเรื่องที่ถูกต้อง" ของข้อชื่อเรื่องข้อแรกที่ชื่อในเล่มมีอยู่แต่ไม่ตรง
+# (ไม่ใช่ข้อ "ไม่พบชื่อเรื่อง...") นักศึกษาอาจตั้งใจใช้ชื่อตามเล่ม ซึ่งแก้ได้ที่ระบบ e-Thesis แทนการแก้เล่ม
+TITLE_EDIT_TOPIC_LINE = ('หากประสงค์ใช้ชื่อหัวข้อตามในรูปเล่ม ให้ดำเนินการอัปเดตชื่อหัวข้อปัจจุบันในระบบให้ถูกต้อง '
+                         'โดยการกด "edit topic" ในระบบ e-Thesis submission')
+
+
 def _title_summary_lines(issue, steps, value):
     """ข้อชื่อเรื่องในข้อความสรุป = สองบรรทัด (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
 
@@ -5190,7 +5230,7 @@ def _title_summary_lines(issue, steps, value):
             f'ชื่อเรื่องที่ถูกต้อง: "{value}"']
 
 
-def _summary_sentence(issue, skip_location=False):
+def _summary_sentence(issue, skip_location=False, edit_topic=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
         3. สารบัญ (หน้า ฉ) บทที่ 3
@@ -5226,6 +5266,8 @@ def _summary_sentence(issue, skip_location=False):
     value = _corrected_value(issue)
     if issue.get("title_lead") and value:
         lines += _title_summary_lines(issue, steps, value)
+        if edit_topic:
+            lines.append(TITLE_EDIT_TOPIC_LINE)
     elif value:
         # มีค่าที่ถูกต้องเต็ม ๆ แล้ว คำสั่งแก้ทีละจุดเป็นบรรทัดที่สาม ไม่ต้องมี (อัปเดต 1.7)
         lines += [found, f'ต้องแก้เป็น "{value}"']
@@ -5351,8 +5393,10 @@ def summary_verdict(report, failed=None, passed=None, staff=None):
     return verdict
 
 
-def _summary_block(lines, items, number):
-    """เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
+def _summary_block(lines, items, number, edit_topic=None):
+    """edit_topic = [True] ส่งมาเฉพาะกลุ่ม "กรุณาแก้ไข" — ใช้ครั้งเดียวที่ข้อชื่อเรื่องข้อแรกที่ชื่อในเล่มไม่ตรง (TITLE_EDIT_TOPIC_LINE)
+
+    เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
     grouped = {}
     for issue in items:
         grouped.setdefault(summary_section(issue), []).append(issue)
@@ -5366,7 +5410,11 @@ def _summary_block(lines, items, number):
             # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
             # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
             skip_loc = _prose_location(issue.get("location")) == section
-            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
+            hint = bool(edit_topic and edit_topic[0] and issue.get("title_differs")
+                        and issue.get("title_lead") and _corrected_value(issue))
+            if hint:
+                edit_topic[0] = False
+            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc, edit_topic=hint)}")
     return number
 
 
@@ -5430,7 +5478,8 @@ def plain_summary(report, failed=None, passed=None, staff=None,
     number = 0
     if items:
         lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
-        number = _summary_block(lines, items, number)
+        # ข้อรอยืนยันยังไม่ใช่ชื่อเรื่องผิดแน่ จึงไม่ได้บรรทัด "หากประสงค์" — เจ้าหน้าที่กดไม่ผ่านเมื่อไรก็ย้ายมากลุ่มนี้
+        number = _summary_block(lines, items, number, edit_topic=[True])
     if pending:
         lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
         number = _summary_block(lines, pending, number)
@@ -6555,14 +6604,41 @@ def _word_steps(words, tag, i1, i2, got, want):
     return f'ให้แก้ "{got}" เป็น "{want}"'
 
 
-def _legacy_diff(a, b, keyfn, join, words):
+def _case_word_entry(words, k, got, want):
+    """คำที่ต่างแค่ตัวพิมพ์ (case=True ของ _legacy_diff) → (ประโยค, วิธีแก้)
+
+    ตัดเครื่องหมายที่ติดคำซึ่งเหมือนกันทั้งสองฝั่งออก ("ANOPHELES:" → "ANOPHELES") ถ้อยคำเจ้าของไม่มีเครื่องหมายพวกนี้
+    คำที่ตัดแล้วไปซ้ำกับส่วนอื่นของชื่อเรื่อง ใช้คำเต็มแทน คำสั่งแก้จึงยังชี้ได้ที่เดียว
+    """
+    head = len(got) - len(got.lstrip(_WORD_EDGE_MARKS))
+    tail = len(got) - len(got.rstrip(_WORD_EDGE_MARKS))
+    core_got, core_want = got[head:len(got) - tail], want[head:len(want) - tail]
+    shared = got[:head] == want[:head] and got[len(got) - tail:] == want[len(want) - tail:]
+    if not (shared and core_got and ' '.join(words).count(core_got) == 1):
+        core_got, core_want = got, want
+    return (f'ต่างที่ "{core_got}" ต้องเป็น "{core_want}"',
+            _word_steps(words, 'replace', k, k + 1, core_got, core_want))
+
+
+_WORD_EDGE_MARKS = ".,:;!?()[]{}\"'“”‘’"
+_CASE_WORDS_MAX = 3
+
+
+def _legacy_diff(a, b, keyfn, join, words, case=False):
     """จุดต่างของข้อความที่ไม่มีอักษรไทย: ระดับคำ (อังกฤษหลายคำ) หรือระดับตัวอักษร (คำเดียว/รหัส)"""
     matcher = difflib.SequenceMatcher(None, keyfn(a), keyfn(b))
     if matcher.ratio() < 0.5:
         return _NO_DIFF
     parts, steps = [], []
+    # case=True (ข้อชื่อเรื่อง): คำที่ keyfn เทียบแล้วตรงแต่ตัวพิมพ์ต่าง ต้องบอกด้วย เมื่อมีคำผิดอื่นอยู่แล้ว (เจ้าของ 3 พ.ย. 2569
+    # "ตัวพิมพ์ไม่ตรงแบบนี้ถือว่าผิดนะ" — เดิมบอกแค่ "FOR" เป็น "OF" นักศึกษาแก้ตามแล้วชื่อสามัญทางวิทยาศาสตร์ยังผิด)
+    # ต่างแค่ตัวพิมพ์อย่างเดียวคงตามเดิม (analyze_case_diff) · เกินสามคำ = ทั้งประโยคเขียนคนละแบบ ไม่ไล่ทีละคำ (กติกาเดียวกับ _case_pairs)
+    case_entries = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
+            if case and words:
+                case_entries += [(len(parts), _case_word_entry(a, i1 + k, a[i1 + k], b[j1 + k]))
+                                 for k in range(i2 - i1) if a[i1 + k] != b[j1 + k]]
             continue
         got, want = join(a[i1:i2]), join(b[j1:j2])
         # ช่องว่างล้วนไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
@@ -6581,6 +6657,11 @@ def _legacy_diff(a, b, keyfn, join, words):
             steps.append(_word_steps(a, kind, i1, i2, got, want))
     if not parts:
         return _NO_DIFF
+    if case_entries and len(case_entries) <= _CASE_WORDS_MAX:
+        # แทรกตามตำแหน่งในชื่อเรื่อง คำสั่งแก้จึงเรียงตามที่อ่าน
+        for offset, (at, (part, step)) in enumerate(case_entries):
+            parts.insert(at + offset, part)
+            steps.insert(at + offset, step)
     if not words:
         # คำเดียวหรือรหัส: ไล่ทีละตัวอักษรอ่านยาก บอกให้แก้ทั้งคำเลย
         whole_a, whole_b = join(a), join(b)
@@ -6590,19 +6671,19 @@ def _legacy_diff(a, b, keyfn, join, words):
     return DiffAnalysis(' และ '.join(parts), tuple(steps))
 
 
-def _analyze_latin(found_s, expected_s):
+def _analyze_latin(found_s, expected_s, case=False):
     # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
     # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
     if re.search(r'[A-Za-z]', expected_s) and ' ' in expected_s.strip():
         by_word = _legacy_diff(found_s.split(), expected_s.split(),
-                               lambda xs: [x.upper() for x in xs], ' '.join, True)
+                               lambda xs: [x.upper() for x in xs], ' '.join, True, case)
         if by_word.text:
             return by_word
     return _legacy_diff(_graphemes(found_s), _graphemes(expected_s),
                         lambda xs: xs, ''.join, False)
 
 
-def analyze_diff(found, expected, spaces=False):
+def analyze_diff(found, expected, spaces=False, case=False):
     """ชี้ว่า 'ข้อความที่พบ' ต่างจาก 'ข้อความที่ถูกต้อง' ตรงไหน และต้องแก้ยังไง
 
     คืน DiffAnalysis(text, steps) — text = จุดต่างเป็นประโยคบอกเล่า steps = วิธีแก้ทีละคำสั่ง
@@ -6619,7 +6700,7 @@ def analyze_diff(found, expected, spaces=False):
     if _THAI_LETTER.search(expected_s):
         analysis = _analyze_thai(found_s, expected_s, spaces)
     else:
-        analysis = _analyze_latin(found_s, expected_s)
+        analysis = _analyze_latin(found_s, expected_s, case)
     if analysis.text and marks_only_difference(found_s, expected_s):
         return analysis._replace(marks_only=True)
     return analysis
@@ -6717,6 +6798,7 @@ class DetailText(str):
     fix_steps = ()
     # ต่างเฉพาะวรรณยุกต์/สระบน-ล่าง/การันต์/ำ — Report.add ใช้ตัดสินสีเมื่อฟอนต์ของเล่มเพี้ยน
     marks_only = False
+    title_differs = False
     # ข้อชื่อเรื่อง: ประโยคนำของข้อความสรุป (title_mismatch_detail) — ข้ออื่นว่าง
     title_lead = ""
 
@@ -7048,7 +7130,7 @@ def title_mismatch_detail(label, compared, expected=''):
     if compared['status'] == 'mismatch' and compared.get('score', 1.0) < _TITLE_NOT_FOUND_SCORE:
         detail = f'ไม่พบ{label.replace("ในรูปเล่ม", "").strip()}ที่ตรงกับข้อมูลในระบบบนหน้านี้'
     if expected and compared['status'] in ('typo', 'case'):
-        analysis = analyze_diff(compared['actual'], expected, spaces=True)
+        analysis = analyze_diff(compared['actual'], expected, spaces=True, case=True)
         # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ analyze_diff คืนว่าง (มันเทียบแบบตัวใหญ่หมด)
         # ถ้าปล่อยไว้ รายงานจะขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะโดยไม่บอกว่าต่างตรงไหน
         if not analysis.text and compared['status'] == 'case':
@@ -7061,6 +7143,8 @@ def title_mismatch_detail(label, compared, expected=''):
     # ข้อความสรุปไม่ยกชื่อเรื่องเต็มที่ผิด (นักศึกษามีอยู่ในเล่มแล้ว) — ขึ้นด้วยประโยคนี้ต่อด้วยจุดที่ต้องแก้
     # แล้วตามด้วยชื่อเรื่องที่ถูกต้อง (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569 ดู _title_summary_lines)
     found.title_lead = f'{label}ไม่ตรงกับข้อมูลในระบบ'
+    # หน้ามีชื่อเรื่องแต่ไม่ตรง (ไม่ใช่ "ไม่พบ") — ข้อความสรุปเติมบรรทัด TITLE_EDIT_TOPIC_LINE ให้ข้อแรกแบบนี้
+    found.title_differs = not detail.startswith('ไม่พบ')
     return found
 
 
@@ -8078,6 +8162,7 @@ class Report:
             "fix_steps": list(getattr(found, "fix_steps", ())),
             # ข้อชื่อเรื่อง: ข้อความสรุปใช้ประโยคนี้ + จุดที่ต้องแก้ แทนบรรทัดที่พบ (อัปเดต 1.7)
             "title_lead": getattr(found, "title_lead", ""),
+            "title_differs": getattr(found, "title_differs", False),
             "fix": fix,
             # ข้อความที่ต้องส่งถึง "นักศึกษา" ต่อท้ายข้อนั้น (คนละอย่างกับ fix ซึ่งเป็น
             # คำแนะนำสั้น ๆ บนการ์ด) — เช่นขั้นตอนขออนุมัติที่ต้องทำนอกเล่ม

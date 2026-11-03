@@ -1615,6 +1615,8 @@ var TR = [
    'Table of contents (page $1) vs chapter $2 (page with no page number (sheet $3 of the file))'],
   // ---- ประโยคที่ยังไม่มีคำแปล เจอจากเล่มจริง 31 ต.ค. 2569 และจากด่านสแกนประโยคในโค้ด (check_i18n.py --literals) ----
   [/^หัวกระดาษส่วนนำ$/g, 'Front-matter header'],
+  [/^หากประสงค์ใช้ชื่อหัวข้อตามในรูปเล่ม ให้ดำเนินการอัปเดตชื่อหัวข้อปัจจุบันในระบบให้ถูกต้อง โดยการกด "edit topic" ในระบบ e-Thesis submission$/g,
+   'If you wish to use the title as printed in your document, please update the current title in the system by clicking "edit topic" in the e-Thesis submission system.'],
   [/^พบรหัสนักศึกษา (.+) ต่อท้าย\/อยู่ใกล้ชื่อนักศึกษา$/g, 'Student ID $1 was found next to the student name'],
   [/^หน้าปกต้องแสดงเฉพาะชื่อ-นามสกุล โดยไม่มีรหัสนักศึกษา$/g, 'The cover page must show only the first and last name, without the student ID'],
   [/^ลบรหัสนักศึกษาออกจากหน้าปก$/g, 'Remove the student ID from the cover page'],

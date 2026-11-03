@@ -11864,3 +11864,119 @@ class TheOtherLanguageTitleIsNotQuoted(unittest.TestCase):
                               ("ไม่พบชื่อเรื่องภาษาอังกฤษที่ตรงกับข้อมูลในระบบบนหน้านี้",
                                "No English title matching the approved record was found on this page")):
             self.assertEqual(i18n.tr_en(thai, pairs), english)
+
+
+class TheEditTopicLineGoesOnceOnTheFirstRealTitleMismatch(unittest.TestCase):
+    """บรรทัด "หากประสงค์ ... edit topic" ครั้งเดียว ต่อจากชื่อเรื่องที่ถูกต้องของข้อชื่อเรื่องข้อแรกที่ชื่อในเล่มไม่ตรง (3 พ.ย. 2569)"""
+
+    TITLE = "NEW TOOLS OF Plasmodium AND Anopheles: A FIELD STUDY"
+    LINE = checker_module.TITLE_EDIT_TOPIC_LINE
+
+    def _add(self, rep, zone, where, compared):
+        rep.add(zone, "front_matter", where,
+                checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.TITLE),
+                f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.TITLE}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ",
+                "FORM.APPROVED_MATCH")
+
+    WRONG = {"status": "typo", "actual": "NEW TOOLS FOR PLASMODIUM AND ANOPHELES: A FIELD STUDY", "score": 0.9}
+    MISSING = {"status": "mismatch", "actual": "Fac. of Grad. Studies", "score": 0.1}
+
+    def test_the_wording_is_the_owners(self):
+        self.assertEqual(self.LINE, 'หากประสงค์ใช้ชื่อหัวข้อตามในรูปเล่ม ให้ดำเนินการอัปเดตชื่อหัวข้อปัจจุบันในระบบให้ถูกต้อง '
+                                    'โดยการกด "edit topic" ในระบบ e-Thesis submission')
+
+    def test_once_after_the_first_title_item(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.WRONG)
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        lines = checker_module.plain_summary(checker_module.check_result(rep)).splitlines()
+        self.assertEqual(sum(self.LINE in line for line in lines), 1)
+        at = next(k for k, line in enumerate(lines) if self.LINE in line)
+        self.assertIn(f'ชื่อเรื่องที่ถูกต้อง: "{self.TITLE}"', lines[at - 1])
+        self.assertTrue(lines[at].startswith(checker_module.SUMMARY_INDENT))
+        self.assertTrue(any(line.startswith("1. ") for line in lines[:at]))
+
+    def test_a_not_found_item_is_skipped(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.MISSING)
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        lines = checker_module.plain_summary(checker_module.check_result(rep)).splitlines()
+        at = next(k for k, line in enumerate(lines) if self.LINE in line)
+        self.assertTrue(any(line.startswith("2. ") for line in lines[:at]))
+        self.assertFalse(any(line.startswith("2. ") for line in lines[at:]))
+
+    def test_only_not_found_items_have_no_line(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.MISSING)
+        self.assertNotIn(self.LINE, checker_module.plain_summary(checker_module.check_result(rep)))
+
+    def test_an_item_awaiting_confirmation_has_no_line_until_failed(self):
+        rep = Report()
+        rep.marks_unreliable = True
+        marks = {"status": "typo", "actual": "การศึกษาผลของแสงทีมีต่อพืช", "score": 0.97, "marks_only": True}
+        rep.add("RED", "front_matter", "หน้าปก",
+                checker_module.title_mismatch_detail("ชื่อเรื่อง", marks, "การศึกษาผลของแสงที่มีต่อพืช"),
+                'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "การศึกษาผลของแสงที่มีต่อพืช"', "x", "FORM.APPROVED_MATCH")
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        result = checker_module.check_result(rep)
+        self.assertNotIn(self.LINE, checker_module.plain_summary(result))
+        self.assertIn(self.LINE, checker_module.plain_summary(result, failed=["ORANGE:0"]))
+
+    def test_the_sheet_gets_it_too(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.WRONG)
+        self.assertIn(self.LINE, checker_module.sheet_row(checker_module.check_result(rep))["details"])
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(self.LINE, pairs),
+                         'If you wish to use the title as printed in your document, please update the current title '
+                         'in the system by clicking "edit topic" in the e-Thesis submission system.')
+        self.assertEqual(i18n.tr_en('ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ ต้องแก้ "FOR" เป็น "OF" และ "PLASMODIUM" '
+                                    'เป็น "Plasmodium"', pairs),
+                         'Title does not match the approved record: change "FOR" to "OF" and "PLASMODIUM" to "Plasmodium"')
+
+
+class TheTemplateQuoteStartsAtItsOwnLine(unittest.TestCase):
+    """ข้อความ template ใต้ชื่อหัวข้อ ต้องไม่มีท้ายชื่อเรื่องปน — เล่มจริง 3 พ.ย. 2569 ได้ "ILLANCE was submitted ..." """
+
+    DEGREE = "Master of Science (Tropical Medicine)"
+
+    def _page(self, sentence):
+        return "\n".join(("i", "Thesis", "entitled", "A NEW STUDY OF MOSQUITO VECTOR", "SURVEILLANCE IN THE FIELD",
+                          sentence, f"for the {self.DEGREE}" if sentence.endswith("University") else self.DEGREE,
+                          "on 14 October 2026", "Thesis Advisory Committee"))
+
+    def _found(self, page):
+        rep = Report()
+        checker_module._report_signature_template(rep, "หน้าลงนาม 1 (หน้า i)", page, SIGNATURE_TEMPLATE_EN,
+                                                  self.DEGREE, False)
+        return [issue["found"] for issue in rep.zones["RED"]]
+
+    def test_a_missing_degree_of_is_quoted_without_the_title(self):
+        page = self._page("was submitted to the Faculty of Graduate Studies, Mahidol University")
+        self.assertEqual(self._found(page), [
+            'ข้อความ template ใต้ชื่อหัวข้อพิมพ์ว่า "was submitted to the Faculty of Graduate Studies, '
+            'Mahidol University for the" ขาด "degree of"'])
+
+    def test_a_correct_sentence_is_quiet(self):
+        """ควบคุมเชิงลบ"""
+        page = self._page("was submitted to the Faculty of Graduate Studies, Mahidol University").replace(
+            "for the Master", "for the degree of Master")
+        self.assertEqual(self._found(page), [])
+
+    def test_a_misspelt_word_is_still_red(self):
+        page = self._page("was submited to the Faculty of Graduate Studies, Mahidol University").replace(
+            "for the Master", "for the degree of Master")
+        found = self._found(page)
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("FIELD", found[0])
+        self.assertIn('"submited" ต้องเป็น "submitted"', found[0])
+
+    def test_the_line_start_run_comes_from_the_page_lines(self):
+        zone = checker_module.signature_template_zone(
+            self._page("was submitted to the Faculty of Graduate Studies, Mahidol University"), self.DEGREE)
+        self.assertEqual(checker_module.signature_template_run(
+            self._page("was submitted to the Faculty of Graduate Studies, Mahidol University"), zone, SIGNATURE_TEMPLATE_EN),
+            "was submitted to the Faculty of Graduate Studies, Mahidol University for the")
