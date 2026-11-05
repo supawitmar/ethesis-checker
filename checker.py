@@ -54,6 +54,8 @@ KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
 # งั้นควรใส่สีส้ม") เดิมปล่อยผ่านเป็นข้อมูลประกอบ ซึ่งไม่มีปุ่มให้กดเมื่อเปิดหน้าจริงแล้วพบว่าผิด
 FONT_UNREADABLE_ZONE = rule_zone("FORM.FONT_UNREADABLE", "ORANGE")
 # วิธีแก้บนการ์ดสีส้มเมื่อเล่มสะกดต่างเฉพาะวรรณยุกต์/สระ/ำ แต่ระบบยืนยันไม่ได้ว่าอ่านถูก (ดู Report.add)
+GLYPH_UNREADABLE_FIX = ("ระบบอ่านตัวอักษรบางตัวจากไฟล์นี้ไม่ได้ (แสดงเป็น \ufffd) "
+                        "เปิดหน้านี้ดูด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน")
 MARKS_UNRELIABLE_FIX = ("ระบบอ่านวรรณยุกต์และสระจากไฟล์นี้ได้ไม่แน่นอน "
                         "เปิดหน้านี้ดูด้วยตา ถ้าพิมพ์ถูกต้องให้กดผ่าน")
 # เลขหน้าที่เรียงไม่ต่อเนื่อง = ส้ม ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ทั้งส่วนนำและเนื้อหา
@@ -222,6 +224,25 @@ _SUBSCRIPT_TOLERANCE = 7.0
 _SUBSCRIPT_SIZE_RATIO = 0.85
 
 
+def _char_line_y(c):
+    """ตำแหน่งแนวตั้งที่ใช้จัดบรรทัด = เส้นฐาน (baseline) ของตัวอักษร ถ้าไฟล์บอกได้ ไม่งั้นใช้ขอบบน (top)
+
+    ขอบบนของแต่ละตัวมาจากความสูงของฟอนต์ ฟอนต์ย่อยคนละชุดบนบรรทัดเดียวกันจึงได้ขอบบนต่างกัน — เล่มจริง (5 พ.ย. 2569)
+    ตัวเลขและจุลภาคใช้ฟอนต์ย่อยอีกชุด ขอบบนสูงกว่าอักษรไทย 4-6 pt ทั้งที่เส้นฐานเท่ากันทุกตัว:
+
+        "บทที่"  top 78.0  baseline 87.7
+        "1"      top 72.5  baseline 87.7      <- เดิมแยกเป็นอีกบรรทัด หาบทที่ 1 ไม่เจอ
+
+    ระบบจึงแยก "บทที่" กับ "1" "205" กับ "หน้า" จุลภาคกับชื่อกรรมการ ออกเป็นคนละบรรทัด แล้วแจ้งผิด 10 จาก 14 ข้อ
+    เส้นฐาน = page height - matrix[5] (pdfplumber เก็บ matrix ของทุกตัว) ใช้เฉพาะตัวที่ตั้งตรง ตัวหมุน (ป้ายเลขหน้าแนวตั้ง)
+    เส้นฐานไม่ได้บอกตำแหน่งแนวตั้งของบรรทัด จึงใช้ขอบบนเหมือนเดิม
+    """
+    matrix = c.get('matrix')
+    if matrix and c.get('upright', True) and 'y0' in c and 'bottom' in c:
+        return float(c['bottom']) + float(c['y0']) - float(matrix[5])
+    return float(c['top'])
+
+
 def _group_into_lines(chars):
     """จัดอักขระเป็นบรรทัดด้วย "ระยะห่างจริง" ไม่ใช่ช่องตายตัว
 
@@ -238,11 +259,11 @@ def _group_into_lines(chars):
     ที่ยังไม่ได้กรอก ("First Name Last name")
 
     เทียบระยะกับ "ตัวแรกของบรรทัด" ไม่ใช่ตัวก่อนหน้า เพื่อไม่ให้บรรทัดยาวไหลไปเรื่อย ๆ
-    ทีละ 3 pt จนกลืนบรรทัดถัดไป
+    ทีละ 3 pt จนกลืนบรรทัดถัดไป · ระยะวัดที่เส้นฐาน ไม่ใช่ขอบบน (ดู _char_line_y)
     """
     lines, start, start_size = [], None, 0.0
-    for c in sorted(chars, key=lambda c: (float(c['top']), float(c['x0']))):
-        top = float(c['top'])
+    for c in sorted(chars, key=lambda c: (_char_line_y(c), float(c['x0']))):
+        top = _char_line_y(c)
         size = float(c.get('size') or 0)
         # ตัวห้อย/ตัวยกของสูตรเคมี: ฟอนต์เล็กกว่าบรรทัดชัดเจน และเยื้องไม่เกินหนึ่งช่วงสั้น ๆ
         subscript = (start is not None and start_size
@@ -279,7 +300,7 @@ def font_damage_score(page, text=None):
     - รหัส PUA ของฟอนต์ไทย (วรรณยุกต์ตัวต่ำ/เยื้องซ้าย) — แปลงกลับได้ตรงตัว (thai_text.fix_thai_pua)
     - อักขระจากฟอนต์สูตรคณิตศาสตร์ (x̄ ในตารางสถิติ ดู _MATH_FONT)
     """
-    bad = formula_cids = 0
+    bad = formula_cids = page_cids = 0
     for c in (getattr(page, 'chars', None) or []):
         t = fix_thai_pua(c.get('text'))
         wide = float(c.get('x1', 0)) - float(c.get('x0', 0)) >= 0.5
@@ -290,7 +311,11 @@ def font_damage_score(page, text=None):
             continue
         if not wide:
             bad += 1
-    return bad + max(0, len(_CID_GLYPH.findall(text or '')) - formula_cids)
+        elif _CID_GLYPH.fullmatch(t):
+            page_cids += 1
+    # ข้อความทั้งหน้า (_page_text) ไม่มีรหัส (cid:N) แล้วตั้งแต่ 5 พ.ย. 2569 (ดู _readable_cid_glyphs) จึงนับจากตัวอักษรของหน้า
+    # ข้อความที่ส่งมายังนับได้เหมือนเดิม ใช้ค่าที่มากกว่า ไม่บวกกัน เพราะเป็นรหัสชุดเดียวกัน
+    return bad + max(page_cids, len(_CID_GLYPH.findall(text or '')) - formula_cids)
 
 
 # ฟอนต์ไทยในเล่มที่ตาราง ToUnicode เหลื่อมช่อง ทำให้สระ า กลายเป็น ำ ทั้งเล่ม
@@ -358,6 +383,41 @@ def _fonts_missing_sara_aa(page):
     return frozenset(missing - fine)
 
 
+# glyph ที่ไฟล์ไม่บอกว่าเป็นอักษรอะไร (ฟอนต์ไม่มีตาราง ToUnicode) pdfplumber ส่งออกมาเป็นรหัส "(cid:N)" — ไม่ใช่ข้อความในเล่ม
+# เล่มจริง 5 พ.ย. 2569 ได้แดงผิด 2 ข้อจากรหัสตัวเดียว "COMMITTEE:(cid:3)WANG ..." (ระบบเห็นวงเล็บในรหัสเป็นสาขาวิชา
+# และ "cid" ตัวเล็กเป็นส่วนของชื่อ) และเส้นประหน้าลงนามเป็นรหัสเดียวกันเรียงยาว ระบบหาแถวเส้นประไม่เจอ จึงนับกรรมการไม่ได้
+_UNREADABLE_GLYPH = '\ufffd'
+_LEADER_GLYPH = '…'
+_LEADER_RUN_MIN = 4
+# รหัสอ่านไม่ได้ที่ไม่ได้อยู่ระหว่างตัวอักษร (ติดช่องว่าง เครื่องหมาย หรือขอบบรรทัด) = ช่องว่างระหว่างคำ
+_GLYPH_BETWEEN_WORDS = re.compile('(?<!\\w)\ufffd+|\ufffd+(?!\\w)')
+
+
+def _readable_cid_glyphs(chars):
+    """แทนรหัส (cid:N) ก่อนประกอบข้อความ — ห้ามนับรหัสเป็นอักษร วงเล็บ หรือตัวพิมพ์ของข้อความในเล่ม
+
+    รหัสเดียวกันเรียงติดกันตั้งแต่ _LEADER_RUN_MIN ตัวบนบรรทัดเดียวกัน = เส้นประ (glyph เดียวซ้ำยาวคือจุดนำ ไม่ใช่คำ
+    เพราะคำมีอักษรต่างกัน) นอกนั้นเป็น _UNREADABLE_GLYPH ซึ่ง _compose_thai_line เปลี่ยนเป็นช่องว่างเมื่ออยู่ระหว่างคำ
+    และคงไว้เมื่ออยู่กลางคำ (อักษรที่อ่านไม่ได้) Report.add ใช้ตัวนี้ตัดสินว่าข้อความยืนยันไม่ได้ (ส้ม)
+    ไม่ผูกกับเลข cid หรือชื่อฟอนต์ — เลข cid ของ glyph เดียวกันต่างกันไปตามฟอนต์ย่อยของแต่ละไฟล์
+    """
+    out = list(chars)
+    k = 0
+    while k < len(out):
+        if not _CID_GLYPH.fullmatch(out[k].get('text') or ''):
+            k += 1
+            continue
+        end = k
+        while (end + 1 < len(out) and _CID_GLYPH.fullmatch(out[end + 1].get('text') or '')
+               and abs(float(out[end + 1].get('top', 0)) - float(out[k].get('top', 0))) < _LINE_TOLERANCE):
+            end += 1
+        run = out[k:end + 1]
+        leader = len(run) >= _LEADER_RUN_MIN and len({c.get('text') for c in run}) == 1
+        out[k:end + 1] = [{**c, 'text': _LEADER_GLYPH if leader else _UNREADABLE_GLYPH} for c in run]
+        k = end + 1
+    return out
+
+
 _MAI_EK, _MAI_EK_AS_APOSTROPHE = '่', '’'
 _THAI_TEXT_CHAR = re.compile('[ก-ฺเ-๎]')
 
@@ -394,7 +454,7 @@ def _thai_chars(chars, missing_sara_aa=frozenset()):
     ส่วน ’ กว้างศูนย์ที่ตามหลังอักษรอื่น และเลขหรือสัญลักษณ์กว้างศูนย์อื่น ("ที9") ยังทิ้งเหมือนเดิมตามเหตุผลข้างล่าง
     """
     out = []
-    for c in chars:
+    for c in _readable_cid_glyphs(chars):
         text = c.get('text') or ''
         real = fix_thai_pua(text)
         if real == _SARA_AM and c.get('fontname') in missing_sara_aa:
@@ -471,6 +531,8 @@ def _compose_thai_line(chars):
     # นิคหิต + า = ำ  ส่วน นิคหิต + ำ เกิดจากไฟล์ที่มี ำ อยู่แล้วและยังใส่นิคหิตซ้ำมาให้
     # (ถ้าไม่ยุบจะได้ "คํำสํำคัญ" แทน "คำสำคัญ") และ นิคหิต + วรรณยุกต์ + า คือ "น้ำ" ที่ระบบอ่านจาก
     # PDF ได้ลำดับ "นํ้า" — รวมทุกแบบเป็น ำ (ดู thai_text.fold_sara_am)
+    # รหัสอ่านไม่ได้ระหว่างคำ = ช่องว่าง (ดู _readable_cid_glyphs)
+    line = re.sub(r' +', ' ', _GLYPH_BETWEEN_WORDS.sub(' ', line))
     return fold_sara_am(line).strip()
 
 
@@ -523,7 +585,10 @@ def _without_running_head(page_text):
 
 def _extract_page_label(page_text):
     """Read the page label printed at the top or bottom of a document page."""
-    lines = [line.strip() for line in (page_text or '').splitlines() if line.strip()]
+    # บรรทัดที่มีแต่สัญลักษณ์จิ๋วหรือเส้นคั่น (_PAGE_LABEL_NOISE) ไม่ใช่บรรทัดของหน้า — เล่มจริงมี "`" 9 pt เหนือเลขหน้า
+    # เส้นฐานสูงกว่าเลขหน้า 7 pt พอจัดบรรทัดตามเส้นฐาน (5 พ.ย. 2569) จึงแยกเป็นบรรทัดของตัวเอง แล้วอ่านเลขหน้าไม่ได้ทั้งเล่ม
+    lines = [line.strip() for line in (page_text or '').splitlines()
+             if _PAGE_LABEL_NOISE.sub('', line.strip())]
     candidates = (lines[:1] + lines[-1:]) if lines else []
     running = _running_head_label(lines[0]) if lines else ''
     if running:
@@ -697,8 +762,11 @@ _SIG_LEFTOVER_PLACEHOLDERS = (
 )
 
 
+_SAME_CID_RUN = re.compile(r'(\(cid:\d+\))\1{%d,}' % (_LEADER_RUN_MIN - 1))
+
+
 def _sig_is_dotted(text):
-    t = (text or '').strip()
+    t = _SAME_CID_RUN.sub(lambda m: _LEADER_GLYPH * (len(m.group(0)) // len(m.group(1))), (text or '').strip())
     return len(t) >= 4 and sum(c in '….' for c in t) >= len(t) * 0.6
 
 
@@ -8148,6 +8216,9 @@ class Report:
             # ให้เจ้าหน้าที่เปิดหน้าดู (แนวเดียวกับข้อชื่อนักศึกษาบนหน้าที่อ่านตัวเลขไม่ออก ซึ่งเจ้าหน้าที่สั่งให้ฟอนต์เพี้ยน
             # เป็นสีส้ม ก.ย. 2569)
             zone, fix, rule_id = FONT_UNREADABLE_ZONE, MARKS_UNRELIABLE_FIX, "FORM.FONT_UNREADABLE"
+        elif zone == "RED" and _UNREADABLE_GLYPH in str(found):
+            # ข้อความที่ยกมามีอักษรที่ไฟล์ไม่บอกว่าเป็นตัวอะไร (_readable_cid_glyphs) — ห้ามฟันธงสิ่งที่ยืนยันไม่ได้
+            zone, fix, rule_id = FONT_UNREADABLE_ZONE, GLYPH_UNREADABLE_FIX, "FORM.FONT_UNREADABLE"
         # ไม่เติม "แก้ไขให้เป็นไปตามข้อกำหนด: <expected>" อัตโนมัติอีกแล้ว — มันคือการ
         # พูดซ้ำบรรทัด "ควรเป็น" ที่อยู่เหนือมันคำต่อคำ ทำให้การ์ดยาวขึ้นโดยไม่ได้ข้อมูล
         # เพิ่ม ข้อที่มีวิธีแก้จริงจะส่ง fix มาเอง ข้อที่ไม่ส่งก็ไม่ต้องมีบรรทัดนี้

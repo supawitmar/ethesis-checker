@@ -11980,3 +11980,152 @@ class TheTemplateQuoteStartsAtItsOwnLine(unittest.TestCase):
         self.assertEqual(checker_module.signature_template_run(
             self._page("was submitted to the Faculty of Graduate Studies, Mahidol University"), zone, SIGNATURE_TEMPLATE_EN),
             "was submitted to the Faculty of Graduate Studies, Mahidol University for the")
+
+
+class LinesAreGroupedByBaseline(unittest.TestCase):
+    """จัดบรรทัดด้วยเส้นฐาน ไม่ใช่ขอบบน (เล่มจริง 5 พ.ย. 2569) — ตัวเลขฟอนต์ย่อยอีกชุดขอบบนสูงกว่า 4-6 pt แต่เส้นฐานเท่ากัน"""
+
+    H = 842.0
+
+    def _char(self, text, x0, baseline, top, size=18.0, width=7.0, upright=True, matrix=True):
+        char = {"text": text, "x0": x0, "x1": x0 + width, "top": top, "bottom": top + size,
+                "size": size, "fontname": "F", "upright": upright, "y0": self.H - (top + size)}
+        if matrix:
+            char["matrix"] = (size, 0.0, 0.0, size, x0, self.H - baseline)
+        return char
+
+    def _texts(self, chars):
+        return ["".join(c["text"] for c in sorted(line, key=lambda c: c["x0"]))
+                for line in checker_module._group_into_lines(chars)]
+
+    def test_a_digit_with_a_higher_top_stays_on_its_line(self):
+        chars = [self._char("A", 280.0, 87.7, 78.0), self._char("B", 288.0, 87.7, 78.0),
+                 self._char("1", 308.0, 87.7, 72.5)]
+        self.assertEqual(self._texts(chars), ["AB1"])
+
+    def test_a_comma_with_a_lower_top_stays_on_its_line(self):
+        chars = [self._char("N", 70.0, 238.6, 229.3, 16), self._char(",", 88.0, 238.6, 225.3, 16),
+                 self._char("M", 94.0, 238.6, 229.3, 16)]
+        self.assertEqual(self._texts(chars), ["N,M"])
+
+    def test_two_real_lines_close_together_are_not_merged(self):
+        """ระยะบรรทัดจริง 16 pt ราว 20 pt · ฟอนต์ 12 pt ราว 13 pt — ต้องยังเป็นสองบรรทัด"""
+        for gap, size in ((20.1, 16), (13.0, 12), (12.0, 11)):
+            with self.subTest(gap=gap):
+                chars = [self._char("A", 70.0, 218.5, 209.3, size), self._char("B", 70.0, 218.5 + gap, 209.3 + gap, size)]
+                self.assertEqual(self._texts(chars), ["A", "B"])
+
+    def test_lines_whose_tops_overlap_are_still_split_by_their_baselines(self):
+        """ขอบบนของบรรทัดล่างสูงกว่าบรรทัดบนได้ เมื่อฟอนต์ต่างกัน — ตัดสินด้วยเส้นฐาน"""
+        chars = [self._char("A", 70.0, 218.5, 209.3, 16), self._char("2", 70.0, 238.6, 207.0, 16)]
+        self.assertEqual(self._texts(chars), ["A", "2"])
+
+    def test_without_a_matrix_the_top_is_used(self):
+        """ควบคุมเชิงลบ — ข้อมูลที่ไม่มี matrix ใช้ขอบบนเหมือนเดิม"""
+        chars = [self._char("A", 280.0, 87.7, 78.0, matrix=False), self._char("1", 308.0, 87.7, 72.5, matrix=False)]
+        self.assertEqual(self._texts(chars), ["1", "A"])
+
+    def test_a_rotated_character_uses_its_top(self):
+        char = self._char("1", 308.0, 87.7, 72.5, upright=False)
+        self.assertEqual(checker_module._char_line_y(char), 72.5)
+        self.assertAlmostEqual(checker_module._char_line_y(self._char("1", 308.0, 87.7, 72.5)), 87.7)
+
+    def test_a_subscript_still_joins_its_line(self):
+        chars = [self._char("C", 10.0, 100.0, 86.0, 14), self._char("O", 18.0, 100.0, 86.0, 14),
+                 self._char("2", 26.0, 103.0, 94.0, 9)]
+        self.assertEqual(self._texts(chars), ["CO2"])
+
+    def test_the_page_text_keeps_the_chapter_number_with_its_heading(self):
+        class Page:
+            chars = [self._char("บ", 280.4, 87.7, 78.0, width=8), self._char("ท", 288.4, 87.7, 78.0, width=8),
+                     self._char("ท", 296.3, 87.7, 78.0, width=8), self._char("ี", 304.2, 87.7, 78.0, width=0),
+                     self._char("่", 304.2, 87.7, 78.0, width=0), self._char("1", 308.4, 87.7, 72.5, width=4)]
+        self.assertEqual(checker_module._page_text(Page()), "บทที่ 1")
+
+
+class APageNumberUnderAStrayMarkIsStillRead(unittest.TestCase):
+    """สัญลักษณ์จิ๋วที่แยกเป็นบรรทัดของตัวเองต้องไม่บังเลขหน้า (เล่มจริง 5 พ.ย. 2569 หลังจัดบรรทัดตามเส้นฐาน)"""
+
+    def test_a_mark_line_above_the_number(self):
+        for mark in ("`", "´", "'", ".", "—"):
+            self.assertEqual(checker_module._extract_page_label(f"{mark}\n11\nCHAPTER II\nBody text"), "11", mark)
+
+    def test_a_mark_line_below_the_number(self):
+        self.assertEqual(checker_module._extract_page_label("Body text\nMore text\n45\n`"), "45")
+
+    def test_a_real_first_line_still_wins(self):
+        """ควบคุมเชิงลบ — บรรทัดแรกที่เป็นข้อความจริงไม่ถูกข้าม"""
+        self.assertEqual(checker_module._extract_page_label("Introduction\nBody text\n7"), "7")
+        self.assertEqual(checker_module._extract_page_label("Introduction\nBody text"), "")
+
+
+class UnmappedGlyphsAreNotBookText(unittest.TestCase):
+    """รหัส (cid:N) ไม่ใช่ข้อความในเล่ม (เล่มจริง 5 พ.ย. 2569 ได้แดงผิด 2 ข้อจาก "COMMITTEE:(cid:3)WANG ...")"""
+
+    @staticmethod
+    def _chars(*specs, top=100.0):
+        out, x = [], 10.0
+        for text, width in specs:
+            out.append({"text": text, "x0": x, "x1": x + width, "top": top, "bottom": top + 12, "size": 12, "fontname": "F"})
+            x += width
+        return out
+
+    def _line(self, *specs):
+        return checker_module._compose_thai_line(checker_module._thai_chars(self._chars(*specs)))
+
+    def test_a_code_between_words_is_a_space(self):
+        self.assertEqual(self._line(("E", 7), (":", 3), ("(cid:3)", 3), ("W", 11), ("A", 8)), "E: WA")
+
+    def test_a_code_inside_a_word_stays_unreadable(self):
+        self.assertEqual(self._line(("e", 5), ("(cid:177)", 6), ("v", 6)), "e�v")
+
+    def test_a_long_run_of_the_same_code_is_a_dotted_line(self):
+        line = self._line(*[("(cid:171)", 4)] * 30)
+        self.assertEqual(line, "…" * 30)
+        self.assertTrue(checker_module._sig_is_dotted(line))
+
+    def test_a_run_of_different_codes_is_not_a_dotted_line(self):
+        line = self._line(("(cid:68)", 6), ("(cid:81)", 6), ("(cid:72)", 6), ("(cid:79)", 6))
+        self.assertNotIn("…", line)
+        self.assertFalse(checker_module._sig_is_dotted("(cid:68)(cid:81)(cid:72)(cid:79)"))
+
+    def test_raw_word_text_of_a_dotted_line_is_dotted(self):
+        self.assertTrue(checker_module._sig_is_dotted("(cid:171)" * 12))
+        self.assertFalse(checker_module._sig_is_dotted("(cid:171)" * 3))
+
+    def test_no_code_text_ever_reaches_the_page(self):
+        line = self._line(("C", 7), ("(cid:3)", 3), ("(", 3), ("x", 5), (")", 3))
+        self.assertNotIn("cid", line)
+
+    def test_a_short_run_split_across_lines_is_not_joined(self):
+        chars = self._chars(*[("(cid:171)", 4)] * 2, top=100.0) + self._chars(*[("(cid:171)", 4)] * 2, top=130.0)
+        self.assertNotIn("…", "".join(c["text"] for c in checker_module._readable_cid_glyphs(chars)))
+
+    def test_the_font_is_still_counted_as_damaged(self):
+        """ข้อความทั้งหน้าไม่มีรหัสแล้ว ต้องนับจากตัวอักษรของหน้าแทน"""
+        class Page:
+            chars = self._chars(("ก", 7), ("(cid:3)", 3), ("(cid:171)", 4))
+        self.assertEqual(checker_module.font_damage_score(Page(), ""), 2)
+        self.assertEqual(checker_module.font_damage_score(Page(), "(cid:3)(cid:171)"), 2)
+
+    def test_an_unreadable_quote_is_orange(self):
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าปก", 'ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ: "A STUDY OF ��"', "x", "y",
+                "FORM.APPROVED_MATCH")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["ORANGE"][0]["rule_id"], "FORM.FONT_UNREADABLE")
+        self.assertEqual(rep.zones["ORANGE"][0]["fix"], checker_module.GLYPH_UNREADABLE_FIX)
+
+    def test_a_readable_quote_stays_red(self):
+        """ควบคุมเชิงลบ"""
+        rep = Report()
+        rep.add("RED", "front_matter", "หน้าปก", 'ชื่อเรื่องไม่ตรงกับข้อมูลในระบบ: "A STUDY OF X"', "x", "y",
+                "FORM.APPROVED_MATCH")
+        self.assertEqual(len(rep.zones["RED"]), 1)
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(checker_module.GLYPH_UNREADABLE_FIX, pairs),
+                         "Some characters in this file cannot be read (shown as �). Open this page and check it by eye; "
+                         "if it is printed correctly, mark it as passed")
