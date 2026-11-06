@@ -4999,7 +4999,7 @@ class ASignaturePageWithoutANumberIsReportedOnce(unittest.TestCase):
         """ควบคุมเชิงลบ — ถ้ากฎหน้าลงนามไม่ได้ฟ้อง ข้อส่วนนำต้องยังฟ้องเหมือนเดิม"""
         reds = self._front(["", "", "", "ค", "ง"])
         self.assertEqual(len(reds), 1)
-        self.assertIn("แผ่นที่ 2 และ 3 ของไฟล์", reds[0])
+        self.assertIn("แผ่นที่ 2–3 ของไฟล์", reds[0])          # แผ่นติดกันเป็นช่วง (6 พ.ย. 2569)
 
     def test_another_front_page_without_a_number_is_still_reported(self):
         reds = self._front(["", "", "", "", "ง"], reported=[1, 2])
@@ -10530,14 +10530,14 @@ class Update18UnnumberedBodyPages(unittest.TestCase):
         pages = ["cover", "x"] + ["text"] * 7
         [issue] = self._items(pages=pages, labels={})
         self.assertEqual(issue["found"],
-                         "7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3, 4, 5, 6 และ 7 ของไฟล์ และอีก 2 หน้า")
+                         "7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3–9 ของไฟล์")   # แผ่นติดกันเป็นช่วง (6 พ.ย. 2569)
 
     def test_the_front_matter_wording_is_unchanged(self):
         rep = Report()
         checker_module._check_front_page_numbers(rep, {1: "i"}, lambda i: f"แผ่นที่ {i + 1}", 1, 4, "roman",
                                                  page_texts=["c", "i", "text", "text"])
         [issue] = rep.zones["RED"]
-        self.assertEqual(issue["found"], "2 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3 และ 4 ของไฟล์")
+        self.assertEqual(issue["found"], "2 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3–4 ของไฟล์")
 
 
 class Update18EdgePageNumberHint(unittest.TestCase):
@@ -10599,9 +10599,9 @@ class Update18BodyPageNumberWordingIsTranslated(unittest.TestCase):
         for thai, english in (
             ("ส่วนเนื้อหา และส่วนท้าย", "Content and end matter"),
             ("ทุกหน้าต้องมีเลขหน้าอารบิก", "Every page must carry an Arabic page number"),
-            ("1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์", "1 page(s) carry no page number: sheet 4 of the file"),
-            ("7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3, 4, 5, 6 และ 7 ของไฟล์ และอีก 2 หน้า",
-             "7 page(s) carry no page number: sheet 3, 4, 5, 6 and 7 of the file and 2 more"),
+            ("1 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 4 ของไฟล์", "1 page(s) carry no page number: sheet(s) 4 of the file"),
+            ("7 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 3–9 ของไฟล์",
+             "7 page(s) carry no page number: sheet(s) 3–9 of the file"),
             # ข้อเลขหน้าไม่ต่อเนื่องของส่วนเนื้อหา/ส่วนท้าย (รวมข้อ อัปเดต 1.8)
             ('เลขหน้าไม่ต่อเนื่อง: กระโดดจาก "2" ไป "4" และ เลขหน้า "5" ถูกใช้ซ้ำ 2 หน้า',
              'The page numbers are not continuous: jumps from "2" to "4" and page label "5" is used on 2 pages'),
@@ -10738,10 +10738,18 @@ class Update182SequenceWording(unittest.TestCase):
         self.assertEqual(self._problems(["152", "156"], gaps={1}), ['ข้ามเลขหน้า 154–155 (จาก "152" ไป "156")'])
 
     def test_less_than_expected_but_not_counting_back(self):
-        # 11, (อ่านไม่ออก), 12 → หน้านี้ควรเป็น 13
-        self.assertEqual(self._problems(["11", "12"], gaps={1}), ['เลขหน้า "12" ควรเป็น "13"'])
-        self.assertEqual(self._problems(["ก", "ข"], "thai", gaps={1}), ['เลขหน้า "ข" ควรเป็น "ค"'])
-        self.assertEqual(self._problems(["i", "ii"], "roman", gaps={1}), ['เลขหน้า "ii" ควรเป็น "iii"'])
+        # 6 พ.ย. 2569: หน้าที่คั่นไม่มีเลข (แจ้งแดงแยกอยู่แล้ว) อธิบายได้ว่าเล่มไม่นับหน้านั้น — ไม่แจ้งซ้ำเป็นข้อต่อเนื่อง
+        self.assertEqual(self._problems(["11", "12"], gaps={1}), [])
+        self.assertEqual(self._problems(["ก", "ข"], "thai", gaps={1}), [])
+        self.assertEqual(self._problems(["i", "ii"], "roman", gaps={1}), [])
+        # ไม่มีหน้าคั่น เลขน้อยกว่าที่ควรยังแจ้งตามเดิม
+        self.assertEqual(self._problems(["11", "12", "12"]), ['เลขหน้า "12" ถูกใช้ซ้ำ 2 หน้า'])
+
+    def test_a_real_skip_across_unnumbered_pages_is_still_reported(self):
+        self.assertEqual(self._problems(["11", "15"], gaps={1}), ['ข้ามเลขหน้า 13–14 (จาก "11" ไป "15")'])
+        self.assertEqual(self._problems(["ค", "ฐ"], "thai", gaps={1, 2}),
+                         ['ข้ามเลขหน้า จ–ฏ (จาก "ค" ไป "ฐ")'])
+        self.assertTrue(self._problems(["12", "11"], gaps={1}))       # ย้อนกลับ
 
     def test_the_same_label_on_pages_in_a_row_is_unchanged(self):
         self.assertEqual(self._problems(["2", "3", "3", "3", "4"]), ['เลขหน้า "3" ถูกใช้ซ้ำ 3 หน้า'])
@@ -11891,10 +11899,11 @@ class TheEditTopicLineGoesOnceOnTheFirstRealTitleMismatch(unittest.TestCase):
         self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
         lines = checker_module.plain_summary(checker_module.check_result(rep)).splitlines()
         self.assertEqual(sum(self.LINE in line for line in lines), 1)
+        # 6 พ.ย. 2569: ย่อหน้าแยกท้ายรายการ ไม่ผูกกับข้อชื่อเรื่องข้อใด
         at = next(k for k, line in enumerate(lines) if self.LINE in line)
-        self.assertIn(f'ชื่อเรื่องที่ถูกต้อง: "{self.TITLE}"', lines[at - 1])
-        self.assertTrue(lines[at].startswith(checker_module.SUMMARY_INDENT))
-        self.assertTrue(any(line.startswith("1. ") for line in lines[:at]))
+        self.assertEqual(lines[at], self.LINE)
+        self.assertEqual(lines[at - 1], "")
+        self.assertTrue(any(line.startswith("2. ") for line in lines[:at]))
 
     def test_a_not_found_item_is_skipped(self):
         rep = Report()
@@ -12129,3 +12138,221 @@ class UnmappedGlyphsAreNotBookText(unittest.TestCase):
         self.assertEqual(i18n.tr_en(checker_module.GLYPH_UNREADABLE_FIX, pairs),
                          "Some characters in this file cannot be read (shown as �). Open this page and check it by eye; "
                          "if it is printed correctly, mark it as passed")
+
+
+class RunningHeadWithoutASpaceBeforeTheSlash(unittest.TestCase):
+    """"Thesis/ iv" (เล่มจริง 5 พ.ย. 2569) — มีช่องว่างข้างใดข้างหนึ่งของ "/" ก็อ่านได้"""
+
+    def test_a_space_after_the_slash_only(self):
+        self.assertEqual(checker_module._extract_page_label("Fac. of Grad. Studies, Test Univ. Thesis/ iv\nBody"), "iv")
+        self.assertEqual(checker_module._extract_page_label("Test Univ. Thesis /12\nBody"), "12")
+
+    def test_no_space_on_either_side_is_not_a_label(self):
+        for line in ("Fuel use was 12 km/l", "Diabetes Type/II", "Data on CD/DVD", "The ratio was 3/ 10"):
+            self.assertEqual(checker_module._extract_page_label(f"{line}\nMore text\n45"), "45", line)
+
+    def test_the_head_is_removed_before_comparing(self):
+        self.assertEqual(checker_module._without_running_head("Test Univ. Thesis/ iv\nA TITLE"), "A TITLE")
+
+
+class LineEndHyphensInATitle(unittest.TestCase):
+    """ชื่อเรื่องที่ตัดคำด้วยขีดท้ายบรรทัด (เล่มจริง 5 พ.ย. 2569)"""
+
+    TITLE = "A STUDY OF AN IMU-BASED INTERACTIVE SYSTEM FOR UPPER-LIMB REHABILITATION"
+
+    def test_a_split_word_is_joined(self):
+        page = "A STUDY OF AN IMU-BASED IN-\nTERACTIVE SYSTEM FOR UPPER-LIMB REHABIL-\nITATION\nJANE DOE"
+        self.assertEqual(checker_module.compare_reference_text(page, self.TITLE, "title")["status"], "exact")
+
+    def test_an_approved_hyphen_at_the_line_end_is_kept(self):
+        page = "A STUDY OF AN IMU-\nBASED INTERACTIVE SYSTEM FOR UPPER-\nLIMB REHABILITATION\nJANE DOE"
+        self.assertEqual(checker_module.compare_reference_text(page, self.TITLE, "title")["status"], "exact")
+
+    def test_a_hyphen_mid_line_is_not_dropped(self):
+        """ควบคุมเชิงลบ — ขีดกลางบรรทัดที่ไม่มีในข้อมูลอนุมัติยังผิด"""
+        page = "A STUDY OF AN IMU-BASED INTER-ACTIVE SYSTEM FOR UPPER-LIMB REHABILITATION\nJANE DOE"
+        self.assertNotEqual(checker_module.compare_reference_text(page, self.TITLE, "title")["status"], "exact")
+
+    def test_a_wrong_word_is_still_wrong(self):
+        page = "A STUDY OF AN IMU-BASED IN-\nTERACTION SYSTEM FOR UPPER-LIMB REHABILITATION\nJANE DOE"
+        self.assertNotEqual(checker_module.compare_reference_text(page, self.TITLE, "title")["status"], "exact")
+
+    def test_the_helper(self):
+        self.assertEqual(checker_module.join_line_end_hyphens("IN-\nTERACTIVE UPPER-\nLIMB", self.TITLE),
+                         "INTERACTIVE UPPER-LIMB")
+
+
+class TheHeaderBandFollowsTheTopLine(unittest.TestCase):
+    """หัวกระดาษที่อยู่ต่ำกว่า 8% ของหน้า (เล่มจริง 5 พ.ย. 2569 อยู่ราว 8.5%)"""
+
+    H = 842.0
+
+    @staticmethod
+    def _w(text, top, height=10.0):
+        return {"text": text, "top": top, "bottom": top + height, "x0": 70.0}
+
+    def _tokens(self, words):
+        class Page:
+            height = self.H
+        return checker_module.header_tokens(Page(), words=words)
+
+    def test_a_small_separated_top_line_is_the_header(self):
+        words = [self._w("Univ.", 71.9), self._w("/v", 71.9), self._w("Body", 107.6, 12), self._w("text", 127.6, 12)]
+        self.assertEqual(self._tokens(words), ["Univ.", "/v"])
+
+    def test_the_first_body_line_is_not_a_header(self):
+        """บรรทัดแรกของเนื้อความห่างบรรทัดถัดไปตามระยะบรรทัดปกติ"""
+        words = [self._w("Body", 72.0, 12), self._w("next", 92.0, 12), self._w("more", 112.0, 12)]
+        self.assertEqual(self._tokens(words), [])
+
+    def test_a_big_chapter_heading_is_not_a_header(self):
+        words = [self._w("CHAPTER", 75.0, 18), self._w("1", 75.0, 18), self._w("Body", 130.0, 12), self._w("x", 150.0, 12)]
+        self.assertEqual(self._tokens(words), [])
+
+    def test_a_line_below_the_margin_limit_is_not_a_header(self):
+        words = [self._w("Univ.", 100.0), self._w("Body", 140.0, 12), self._w("x", 160.0, 12)]
+        self.assertEqual(self._tokens(words), [])
+
+    def test_the_old_band_still_counts(self):
+        """ควบคุมเชิงลบ — คำในแถบ 8% เดิมยังเป็นหัวกระดาษ"""
+        words = [self._w("iv", 40.0), self._w("Body", 107.6, 12), self._w("x", 127.6, 12)]
+        self.assertEqual(self._tokens(words), ["iv"])
+
+    def test_a_landscape_page(self):
+        class Page:
+            height = 595.0
+        words = [self._w("Univ.", 50.0), self._w("/12", 50.0), self._w("Table", 80.0, 12), self._w("x", 100.0, 12)]
+        self.assertEqual(checker_module.header_tokens(Page(), words=words), ["Univ.", "/12"])
+
+
+class TheFrontMatterHeaderWording(unittest.TestCase):
+    """ถ้อยคำเจ้าของ (5 พ.ย. 2569) "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมันเท่านั้น" — ยังส้ม"""
+
+    def test_the_rule_uses_the_owners_wording(self):
+        source = inspect.getsource(checker_module.run_check)
+        for text in ("ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมันเท่านั้น",
+                     "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นพยัญชนะไทย (ก ข ค) เท่านั้น",
+                     "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมัน หรือพยัญชนะไทย (ก ข ค) เท่านั้น"):
+            self.assertIn(text, source)
+        self.assertIn('rep.add("ORANGE", part, location,', source)
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมันเท่านั้น", pairs),
+                         "Every page in the front matter must show only the page number in Roman numerals")
+        for thai in ("ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นพยัญชนะไทย (ก ข ค) เท่านั้น",
+                     "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมัน หรือพยัญชนะไทย (ก ข ค) เท่านั้น"):
+            self.assertFalse(i18n.translation_problems(thai, i18n.tr_en(thai, pairs)), thai)
+
+
+class AWrongPrintedStudentId(unittest.TestCase):
+    """รหัสที่พิมพ์ไว้แต่ไม่ตรง (เจ้าของ 5 พ.ย. 2569): "รหัสนักศึกษาผิด ไม่ตรงกันกับในระบบ ให้แก้เป็น..." """
+
+    def test_a_spaced_id_is_still_a_printed_id(self):
+        self.assertEqual(checker_module._closest_student_id("JANE DOE 123 45678 90 ABCD/M", "6401234 ABCD/M"),
+                         "123 45678 90 ABCD/M")
+
+    def test_a_normal_wrong_id_is_found(self):
+        self.assertEqual(checker_module._closest_student_id("JANE DOE 6401239 ABCD/M", "6401234 ABCD/M"),
+                         "6401239 ABCD/M")
+
+    def test_no_id_at_all(self):
+        self.assertEqual(checker_module._closest_student_id("JANE DOE\nM.Sc. (BIOLOGY)", "6401234 ABCD/M"), "")
+        self.assertEqual(checker_module._closest_student_id("Table 12 34 rows / 5", "6401234 ABCD/M"), "")
+
+    def test_the_wording(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn('"รหัสนักศึกษาผิด ไม่ตรงกันกับในระบบ"', source)
+        self.assertIn("f'ให้แก้เป็น \"{student_id}\"'", source)
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("รหัสนักศึกษาผิด ไม่ตรงกันกับในระบบ", pairs),
+                         "The student ID is incorrect and does not match the system record")
+        self.assertEqual(i18n.tr_en('ให้แก้เป็น "6401234 ABCD/M"', pairs), 'Change it to "6401234 ABCD/M"')
+
+
+class Book4SummaryTitleAndEditTopic(unittest.TestCase):
+    """เจ้าของ 6 พ.ย. 2569: ข้อชื่อเรื่องตัดจุดต่างออก · edit topic เป็นย่อหน้าแยกเหนือข้อความค่าปรับ"""
+
+    TITLE = "NEW TOOLS OF Plasmodium AND Anopheles: A FIELD STUDY"
+    WRONG = {"status": "typo", "actual": "NEW TOOLS FOR PLASMODIUM AND ANOPHELES: A FIELD STUDY", "score": 0.9}
+    MISSING = {"status": "mismatch", "actual": "Fac. of Grad. Studies", "score": 0.1}
+
+    def _add(self, rep, zone, where, compared):
+        rep.add(zone, "front_matter", where, checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.TITLE),
+                f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.TITLE}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+
+    def test_a_title_item_is_two_lines_without_fix_points(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        text = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn(f'   ชื่อเรื่องไม่ตรงกันกับในระบบ\n   ต้องแก้ไขเป็น: "{self.TITLE}"', text)
+        self.assertNotIn('"FOR"', text)
+        self.assertNotIn("ชื่อเรื่องที่ถูกต้อง", text)
+
+    def test_the_card_still_shows_the_fix_points(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        self.assertIn('"FOR" ต้องเป็น "OF"', rep.zones["RED"][0]["found"])
+
+    def test_a_not_found_title_keeps_the_old_lines_and_no_edit_topic(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.MISSING)
+        text = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn(f'ชื่อเรื่องที่ถูกต้อง: "{self.TITLE}"', text)
+        self.assertNotIn(checker_module.TITLE_EDIT_TOPIC_LINE, text)
+
+    def test_edit_topic_is_one_paragraph_above_the_closing_text(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.WRONG)
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        text = checker_module.plain_summary(checker_module.check_result(rep), requirements=True)
+        self.assertEqual(text.count(checker_module.TITLE_EDIT_TOPIC_LINE), 1)
+        self.assertIn("\n\n" + checker_module.TITLE_EDIT_TOPIC_LINE + "\n\n" + checker_module.REQUIREMENTS_TEXT, text)
+
+    def test_edit_topic_without_closing_text_ends_the_list(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าปก", self.WRONG)
+        text = checker_module.plain_summary(checker_module.check_result(rep), with_closing=False)
+        self.assertTrue(text.endswith("\n\n" + checker_module.TITLE_EDIT_TOPIC_LINE))
+
+    def test_a_pending_title_gets_edit_topic_only_when_failed(self):
+        rep = Report()
+        rep.marks_unreliable = True
+        marks = {"status": "typo", "actual": "การศึกษาผลของแสงทีมีต่อพืช", "score": 0.97, "marks_only": True}
+        rep.add("RED", "front_matter", "หน้าปก",
+                checker_module.title_mismatch_detail("ชื่อเรื่อง", marks, "การศึกษาผลของแสงที่มีต่อพืช"),
+                'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "การศึกษาผลของแสงที่มีต่อพืช"', "x", "FORM.APPROVED_MATCH")
+        result = checker_module.check_result(rep)
+        self.assertNotIn(checker_module.TITLE_EDIT_TOPIC_LINE, checker_module.plain_summary(result))
+        self.assertIn(checker_module.TITLE_EDIT_TOPIC_LINE, checker_module.plain_summary(result, failed=["ORANGE:0"]))
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("ชื่อเรื่องไม่ตรงกันกับในระบบ", pairs), "The title does not match the system record")
+        self.assertEqual(i18n.tr_en('ต้องแก้ไขเป็น: "ก ข"', pairs), 'Change it to: "ก ข"')
+
+
+class UnnumberedSheetsAsRanges(unittest.TestCase):
+    """แผ่นที่ไม่มีเลขหน้าบอกเป็นช่วง (เจ้าของ 6 พ.ย. 2569: เดิม "6, 7, 8, 9 และ 10 ... และอีก 3 หน้า" หาไม่เจอ)"""
+
+    def test_contiguous_sheets_are_one_range(self):
+        self.assertEqual(checker_module._sheet_list(list(range(5, 13))), ("6–13", ""))
+
+    def test_mixed_ranges_and_single_sheets(self):
+        self.assertEqual(checker_module._sheet_list([5, 6, 7, 19, 24, 25, 26]), ("6–8, 20 และ 25–27", ""))
+        self.assertEqual(checker_module._sheet_list([3]), ("4", ""))
+        self.assertEqual(checker_module._sheet_list([3, 5]), ("4 และ 6", ""))
+
+    def test_too_many_ranges_are_counted(self):
+        self.assertEqual(checker_module._sheet_list([1, 3, 5, 7, 9, 11, 13]), ("2, 4, 6, 8 และ 10", " และอีก 2 ช่วง"))
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("8 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 6–13 ของไฟล์", pairs),
+                         "8 page(s) carry no page number: sheet(s) 6–13 of the file")
+        self.assertEqual(i18n.tr_en("9 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 2, 4, 6, 8 และ 10 ของไฟล์ และอีก 2 ช่วง", pairs),
+                         "9 page(s) carry no page number: sheet(s) 2, 4, 6, 8 and 10 of the file and 2 more range(s)")

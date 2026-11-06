@@ -637,11 +637,11 @@ class TheSummaryLayout(unittest.TestCase):
         at = next(i for i, line in enumerate(lines) if line.startswith("1. "))
         self.assertEqual(lines[at:at + 3], [
             "1. บทคัดย่อภาษาไทย (หน้า vi)",
-            '   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก',
-            f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"'])
-        # ข้อชื่อเรื่องข้อแรกมีบรรทัด "หากประสงค์ ... edit topic" ต่อท้าย (เจ้าของ 3 พ.ย. 2569)
-        self.assertEqual(lines[at + 3], checker_module.SUMMARY_INDENT + checker_module.TITLE_EDIT_TOPIC_LINE)
-        self.assertTrue(at + 4 == len(lines) or not lines[at + 4].startswith("   "), lines[at + 4:])
+            '   ชื่อเรื่องไม่ตรงกันกับในระบบ',
+            f'   ต้องแก้ไขเป็น: "{APPROVED_TITLE}"'])
+        # 6 พ.ย. 2569: ตัดจุดต่างออก · บรรทัด "หากประสงค์ ... edit topic" เป็นย่อหน้าแยกท้ายรายการ
+        self.assertTrue(at + 3 == len(lines) or not lines[at + 3].startswith("   "), lines[at + 3:])
+        self.assertIn("\n\n" + checker_module.TITLE_EDIT_TOPIC_LINE, "\n".join(lines))
 
     def test_a_title_does_not_quote_the_wrong_title_back(self):
         issue = self._title_issue()
@@ -712,6 +712,10 @@ class TheSummaryLayout(unittest.TestCase):
                  f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{APPROVED_TITLE}"',
                  "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
         text = _summary_of(issue)
+        self.assertIn('   ชื่อเรื่องไม่ตรงกันกับในระบบ\n'
+                      f'   ต้องแก้ไขเป็น: "{APPROVED_TITLE}"', text)
+        self.assertNotIn('ต้องลบ "การ"', text)
+        return
         self.assertIn('   ชื่อเรื่องอีกภาษาไม่ตรงกับข้อมูลในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก '
                       'และลบช่องว่างระหว่าง "ในระบบ" กับ "บริหาร"\n'
                       f'   ชื่อเรื่องที่ถูกต้อง: "{APPROVED_TITLE}"', text)

@@ -563,7 +563,9 @@ _HEADER_STRAY_MARKS = re.compile(rf'^[{_PAGE_STRAY_MARKS}]+|[{_PAGE_STRAY_MARKS}
 # หัวกระดาษแบบเก่า "Fac. of Grad. Studies, Mahidol Univ. M.P.H / 1" — เลขหน้าอยู่หลัง "/" (เจ้าของตรวจเล่มจริง 31 ต.ค. 2569)
 # เดิมอ่านไม่ได้ ตำแหน่งทั้งเล่มขึ้น "หน้าไม่ระบุเลข" และได้แดงผิด "9 หน้าไม่ได้พิมพ์เลขหน้า"
 # ต้องมีช่องว่างหน้า "/" ต่อจากตัวอักษร และเลขโรมันใช้แค่ i v x l — ไม่ให้เนื้อหาบรรทัดแรก "5 mg/dL" "CD/DVD" "อัตรา 3 / 10" กลายเป็นเลขหน้า
-_RUNNING_HEAD_LABEL = re.compile(r'^.*(?:[^\W\d_]|[.)])\s+/\s*(\d{1,4}|[ivxl]{1,8}|[ก-ฮ])$', re.I)
+# เล่มจริง 5 พ.ย. 2569 พิมพ์ "Thesis/ iv" (ไม่มีช่องว่างหน้า "/" แต่มีหลัง) จึงรับเมื่อมีช่องว่างข้างใดข้างหนึ่ง
+# ไม่มีช่องว่างเลยทั้งสองข้าง ("km/l" "Type/II") ยังไม่ใช่เลขหน้า
+_RUNNING_HEAD_LABEL = re.compile(r'^.*(?:[^\W\d_]|[.)])(?:\s+/\s*|/\s+)(\d{1,4}|[ivxl]{1,8}|[ก-ฮ])$', re.I)
 # จุดไข่ปลาของรายการสารบัญที่ตกบรรทัด ".... 61" ไม่ใช่เลขหน้า — เดิมอ่านเป็นเลขหน้า 61 ได้แดงผิด 2 ข้อและข้อสังเกตผิด 1 ข้อ
 _DOT_LEADER_RUN = re.compile(r'\.{2,}|…')
 
@@ -646,6 +648,37 @@ def _is_header_page_label(token, front=False, front_style=None):
     return bool(re.fullmatch(r'\d{1,4}', token))
 
 
+_HEADER_BAND = 0.08
+# หัวกระดาษบางเล่มอยู่ต่ำกว่า 8% (เล่มจริง 5 พ.ย. 2569 อยู่ราว 8.5% ระบบจึงไม่ตรวจหัวกระดาษเลยทั้งเล่ม) — ดูบรรทัดบนสุดของหน้าด้วย
+# เมื่ออยู่เหนือระยะนี้ ตัวอักษรไม่ใหญ่กว่าเนื้อความ และเว้นช่องห่างจากบรรทัดถัดไปชัดเจน (หัวกระดาษแยกจากเนื้อความเสมอ)
+# หัวบท/ชื่อเรื่องตัวใหญ่ และบรรทัดแรกของเนื้อความที่ห่างบรรทัดถัดไปตามระยะบรรทัดปกติ จึงไม่ถูกนับเป็นหัวกระดาษ
+_HEADER_LINE_MAX = 0.11
+_HEADER_GAP_RATIO = 1.5
+
+
+def header_band_bottom(words, height):
+    """ขอบล่างของแถบหัวกระดาษ (พิกัด top) — อย่างน้อย _HEADER_BAND ของความสูงหน้า"""
+    cutoff = height * _HEADER_BAND
+    rows = sorted((w for w in words or () if 'top' in w and 'bottom' in w), key=lambda w: float(w['top']))
+    if not rows:
+        return cutoff
+    first_top = float(rows[0]['top'])
+    if first_top < cutoff or first_top >= height * _HEADER_LINE_MAX:
+        return cutoff
+    line = [w for w in rows if float(w['top']) - first_top <= _LINE_TOLERANCE]
+    rest = [w for w in rows if float(w['top']) - first_top > _LINE_TOLERANCE]
+    if not rest:
+        return cutoff
+    line_bottom = max(float(w['bottom']) for w in line)
+    line_height = line_bottom - first_top
+    body = sorted(float(w['bottom']) - float(w['top']) for w in rest)
+    body_height = body[len(body) // 2]
+    gap = float(rest[0]['top']) - line_bottom
+    if line_height <= body_height + 0.5 and gap >= _HEADER_GAP_RATIO * line_height:
+        return line_bottom + 0.1
+    return cutoff
+
+
 def header_tokens(pdf_page, words=None):
     """คำทั้งหมดในแถบหัวกระดาษ (บนสุดของหน้า) เรียงตามที่ pdfplumber อ่านได้
 
@@ -655,9 +688,10 @@ def header_tokens(pdf_page, words=None):
     height = float(getattr(pdf_page, 'height', 0) or 0)
     if not height:
         return []
-    cutoff = height * 0.08
+    words = (pdf_page.extract_words() if words is None else words) or []
+    cutoff = header_band_bottom(words, height)
     tokens = []
-    for word in (pdf_page.extract_words() if words is None else words) or []:
+    for word in words:
         if float(word.get('top', height)) >= cutoff:
             continue
         # รหัส PUA ของฟอนต์ไทยที่ดึงมาเป็นกล่อง แปลงกลับเป็นอักษรจริงก่อน (thai_text.fix_thai_pua)
@@ -680,8 +714,9 @@ def edge_page_number_hint(words, width, height):
     if not height:
         return False
     band = 0.08 * max(width or 0, height)
+    top_band = max(band, header_band_bottom(words, height))
     for word in words or ():
-        if not (float(word.get('top', band)) < band or float(word.get('bottom', 0)) > height - band):
+        if not (float(word.get('top', band)) < top_band or float(word.get('bottom', 0)) > height - band):
             continue
         token = fix_thai_pua(word.get('text', '') or '').strip()
         if re.search(r'\d', token) or re.fullmatch(r'[A-Za-z]{1,4}', token):
@@ -2547,6 +2582,8 @@ _ABS_COMMITTEE_HEADING = re.compile(
 # แทรก/ตัดช่องว่างรอบเครื่องหมายทับได้
 _STUDENT_ID_SHAPE = re.compile(
     r'\d{6,9}\s*[A-Z]{2,8}\s*/\s*[A-Z0-9]{1,3}', re.I)
+_SPACED_STUDENT_ID_SHAPE = re.compile(
+    r'(?<![\d])(\d[\d ]{4,14}\d)\s*[A-Z]{2,8}\s*/\s*[A-Z0-9]{1,3}', re.I)
 
 
 def student_id_line(page_text):
@@ -2717,6 +2754,10 @@ def _closest_student_id(page_text, expected):
     และทำให้รายงานบอกได้ว่าเล่มพิมพ์ว่าอะไร แทนที่จะบอกลอย ๆ ว่า "ไม่พบรหัสนักศึกษา"
     """
     found = [soft(m.group(0)) for m in _STUDENT_ID_SHAPE.finditer(page_text or "")]
+    if not found:
+        # ตัวเลขที่พิมพ์เว้นวรรคกลางรหัส ("123 45678 90 XXXX/M" เล่มจริง 5 พ.ย. 2569) ก็ยังเป็นรหัสที่พิมพ์ไว้ ไม่ใช่ "ไม่มีรหัส"
+        found = [soft(m.group(0)) for m in _SPACED_STUDENT_ID_SHAPE.finditer(page_text or "")
+                 if 5 <= len(re.sub(r'\D', '', m.group(1))) <= 12]
     if not found:
         return ""
     target = norm(expected)
@@ -3398,8 +3439,13 @@ def _sequence_problems(seq, ignore=(), style="arabic"):
                 dup_run = 1
             continue
         dup_run = 1
-        want = prev_v + between(prev_i, cur_i) + 1
+        gap = between(prev_i, cur_i)
+        want = prev_v + gap + 1
         if cur_v == want:
+            continue
+        # หน้าที่คั่นอยู่ไม่มีเลขหน้า (แจ้งแดง "ไม่ได้พิมพ์เลขหน้า" อยู่แล้ว) — เล่มนับหน้าพวกนั้นหรือไม่ก็ได้ เลขที่อยู่ในช่วงนี้จึงไม่ใช่
+        # อีกข้อ (เล่มจริง 6 พ.ย. 2569 ได้ส้ม "เลขหน้า "ช" ควรเป็น "ฐ"" ซ้ำกับแดง 8 หน้าไม่มีเลข) · ข้ามจริงหรือย้อนกลับยังแจ้งตามเดิม
+        if gap and prev_v < cur_v < want:
             continue
         first = cur_i if first is None else first
         nxt = seq[k] if k < len(seq) else None
@@ -3433,9 +3479,16 @@ def sequence_found(problems):
 
 def _sheet_list(group, limit=5):
     """แผ่นในไฟล์แบบที่ข้อเลขหน้าใช้ ("2, 3 และ 4") — คืน (รายการ, ท่อน " และอีก N หน้า" ถ้าเกิน limit)"""
-    sheets = [str(i + 1) for i in group[:limit]]
-    shown = " และ ".join([", ".join(sheets[:-1]), sheets[-1]]) if len(sheets) > 1 else sheets[0]
-    more = f" และอีก {len(group) - limit} หน้า" if len(group) > limit else ""
+    # แผ่นที่ติดกันรวมเป็นช่วง "6–13" (เจ้าของ 6 พ.ย. 2569: เดิม "6, 7, 8, 9 และ 10 ... และอีก 3 หน้า" เจ้าหน้าที่หาหน้าที่เหลือไม่เจอ)
+    runs = []
+    for i in sorted(group):
+        if runs and i == runs[-1][1] + 1:
+            runs[-1][1] = i
+        else:
+            runs.append([i, i])
+    parts = [str(lo + 1) if lo == hi else f"{lo + 1}–{hi + 1}" for lo, hi in runs[:limit]]
+    shown = " และ ".join([", ".join(parts[:-1]), parts[-1]]) if len(parts) > 1 else parts[0]
+    more = f" และอีก {len(runs) - limit} ช่วง" if len(runs) > limit else ""
     return shown, more
 
 
@@ -5285,6 +5338,9 @@ TITLE_EDIT_TOPIC_LINE = ('หากประสงค์ใช้ชื่อห
                          'โดยการกด "edit topic" ในระบบ e-Thesis submission')
 
 
+TITLE_DIFFERS_LINE = "ชื่อเรื่องไม่ตรงกันกับในระบบ"
+
+
 def _title_summary_lines(issue, steps, value):
     """ข้อชื่อเรื่องในข้อความสรุป = สองบรรทัด (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
 
@@ -5293,12 +5349,16 @@ def _title_summary_lines(issue, steps, value):
 
     ไม่ยกชื่อเรื่องเต็มที่ผิด (นักศึกษามีอยู่ในเล่มแล้ว) · ชี้จุดไม่ได้ (ต่างกันมาก) = บรรทัดแรกเหลือแค่ประโยคนำ
     """
+    # ชื่อในเล่มมีอยู่แต่ไม่ตรง (เจ้าของ 6 พ.ย. 2569 "แจ้งว่า ชื่อเรื่องไม่ตรงกันกับในระบบ / แจ้งชื่อที่ถูก / ต้องแก้ไข" และเลือก
+    # "ตัดจุดต่างออก") — การ์ดบนหน้ารายงานยังยกข้อความที่เล่มพิมพ์และจุดต่างให้เจ้าหน้าที่ดูตามเดิม · ข้อ "ไม่พบชื่อเรื่อง..." คงแบบเดิม
+    if issue.get("title_differs"):
+        return [TITLE_DIFFERS_LINE, f'ต้องแก้ไขเป็น: "{value}"']
     lead = issue["title_lead"]
     return [f"{lead} {_joined_fix(steps)}" if steps else lead,
             f'ชื่อเรื่องที่ถูกต้อง: "{value}"']
 
 
-def _summary_sentence(issue, skip_location=False, edit_topic=False):
+def _summary_sentence(issue, skip_location=False):
     """หนึ่งจุด = สามบรรทัด ตามที่เจ้าหน้าที่สั่ง: อยู่หน้าไหน / อะไรผิด / ต้องแก้เป็นอะไร
 
         3. สารบัญ (หน้า ฉ) บทที่ 3
@@ -5334,8 +5394,6 @@ def _summary_sentence(issue, skip_location=False, edit_topic=False):
     value = _corrected_value(issue)
     if issue.get("title_lead") and value:
         lines += _title_summary_lines(issue, steps, value)
-        if edit_topic:
-            lines.append(TITLE_EDIT_TOPIC_LINE)
     elif value:
         # มีค่าที่ถูกต้องเต็ม ๆ แล้ว คำสั่งแก้ทีละจุดเป็นบรรทัดที่สาม ไม่ต้องมี (อัปเดต 1.7)
         lines += [found, f'ต้องแก้เป็น "{value}"']
@@ -5461,10 +5519,8 @@ def summary_verdict(report, failed=None, passed=None, staff=None):
     return verdict
 
 
-def _summary_block(lines, items, number, edit_topic=None):
-    """edit_topic = [True] ส่งมาเฉพาะกลุ่ม "กรุณาแก้ไข" — ใช้ครั้งเดียวที่ข้อชื่อเรื่องข้อแรกที่ชื่อในเล่มไม่ตรง (TITLE_EDIT_TOPIC_LINE)
-
-    เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
+def _summary_block(lines, items, number):
+    """เติมรายการหนึ่งกลุ่มลงข้อความสรุป จัดตามส่วนของเล่ม คืนเลขข้อล่าสุด"""
     grouped = {}
     for issue in items:
         grouped.setdefault(summary_section(issue), []).append(issue)
@@ -5478,11 +5534,7 @@ def _summary_block(lines, items, number, edit_topic=None):
             # ตำแหน่งที่เป็นชื่อส่วนเปล่า ๆ (เช่น "ส่วนนำ") ซ้ำกับหัวข้อกลุ่มบรรทัดบน
             # จึงไม่ต้องพิมพ์อีก ให้ขึ้นต้นด้วยสิ่งที่พบเลย
             skip_loc = _prose_location(issue.get("location")) == section
-            hint = bool(edit_topic and edit_topic[0] and issue.get("title_differs")
-                        and issue.get("title_lead") and _corrected_value(issue))
-            if hint:
-                edit_topic[0] = False
-            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc, edit_topic=hint)}")
+            lines.append(f"{number}. {_summary_sentence(issue, skip_location=skip_loc)}")
     return number
 
 
@@ -5546,11 +5598,15 @@ def plain_summary(report, failed=None, passed=None, staff=None,
     number = 0
     if items:
         lines.append(f"\nกรุณาแก้ไขทั้งหมด {len(items)} จุด ดังต่อไปนี้")
-        # ข้อรอยืนยันยังไม่ใช่ชื่อเรื่องผิดแน่ จึงไม่ได้บรรทัด "หากประสงค์" — เจ้าหน้าที่กดไม่ผ่านเมื่อไรก็ย้ายมากลุ่มนี้
-        number = _summary_block(lines, items, number, edit_topic=[True])
+        number = _summary_block(lines, items, number)
     if pending:
         lines.append(f"\nรอยืนยัน {len(pending)} จุด ดังต่อไปนี้")
         number = _summary_block(lines, pending, number)
+    # เจ้าของ 6 พ.ย. 2569: "แจ้ง edit topic ให้แยกออกมาเป็นลักษณะเหมือนกรณีพวกค่าปรับ แต่จะอยู่ด้านบนค่าปรับเสมอ"
+    # ขึ้นเมื่อกลุ่ม "กรุณาแก้ไข" มีข้อชื่อเรื่องที่ชื่อในเล่มไม่ตรง (ไม่นับข้อไม่พบชื่อเรื่องและข้อที่ยังรอยืนยัน) · อยู่นอก
+    # with_closing จึงไปถึงชีทด้วย
+    if any(issue.get("title_differs") and issue.get("title_lead") and _corrected_value(issue) for issue in items):
+        lines.append("\n" + TITLE_EDIT_TOPIC_LINE)
     if with_closing:
         if requirements:
             lines.append("\n" + REQUIREMENTS_TEXT)
@@ -6103,6 +6159,23 @@ def compare_values(actual, expected, rule_name):
     return {'status': status, 'actual': actual, 'score': score}
 
 
+_LINE_END_HYPHEN = re.compile(r'([A-Za-z]+)-[ \t]*\n[ \t]*([A-Za-z]+)')
+
+
+def join_line_end_hyphens(page_text, expected):
+    """ต่อคำที่ตัดด้วยขีดท้ายบรรทัด ("IN-" / "TERACTIVE" → "INTERACTIVE") — เล่มจริง 5 พ.ย. 2569 จัดชื่อเรื่องแบบตัดคำอัตโนมัติ
+
+    ขีดที่ข้อมูลอนุมัติมีอยู่แล้ว ("UPPER-LIMB") คงไว้แม้อยู่ท้ายบรรทัด — ตัดสินทีละจุดจากข้อมูลอนุมัติ ไม่ใช่ทิ้งขีดท้ายบรรทัดทุกตัว
+    """
+    want = re.sub(r'\s+', '', (expected or '').upper())
+
+    def join(match):
+        left, right = match.group(1), match.group(2)
+        kept = f'{left}-{right}'
+        return kept if kept.upper() in want else left + right
+    return _LINE_END_HYPHEN.sub(join, page_text or '')
+
+
 def compare_reference_text(page_text, expected, rule_name, degree_line=False, abstract=False):
     """Find the relevant PDF line, then classify exact/case/typo/mismatch.
 
@@ -6113,6 +6186,8 @@ def compare_reference_text(page_text, expected, rule_name, degree_line=False, ab
     """
     rule = MATCH_RULES[rule_name]
     page_text = _without_running_head(page_text)
+    if rule_name == 'title':
+        page_text = join_line_end_hyphens(page_text, expected)
     if degree_line:
         page_text = degree_line_search_text(page_text, abstract)
     if not rule['case_sensitive'] and spelled_in(expected, page_text):
@@ -9063,11 +9138,16 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # เลขหน้าส่วนนำที่บอกในข้อความ ให้ตรงภาษาของเล่ม (ไม่รู้ภาษาเล่ม = บอกทั้งสองแบบ)
         front_labels = {"thai": "ก ข ค", "roman": "i ii iii"}.get(
             front_label_style, "ก ข ค หรือ i ii iii")
+        # ถ้อยคำเจ้าของ (5 พ.ย. 2569) "ทุกหน้าในส่วนบทนำ ต้องมีเพียงเลขหน้าเป็นเลขโรมันเท่านั้น" — ไม่รู้ภาษาเล่มบอกทั้งสองแบบ
+        front_header_rule = {
+            "roman": "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมันเท่านั้น",
+            "thai": "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นพยัญชนะไทย (ก ข ค) เท่านั้น",
+        }.get(front_label_style, "ทุกหน้าในส่วนนำต้องมีเพียงเลขหน้าเป็นเลขโรมัน หรือพยัญชนะไทย (ก ข ค) เท่านั้น")
 
         header_spans = (
             ("front_matter", "หัวกระดาษส่วนนำ", range(0, end_scan_start), True,
              "พบข้อความอื่นนอกจากเลขหน้าในหัวกระดาษส่วนนำ",
-             f"หัวกระดาษส่วนนำต้องมีเพียงเลขหน้า ({front_labels}) เท่านั้น",
+             front_header_rule,
              f"ลบข้อความอื่นออกจากหัวกระดาษ ให้เหลือเฉพาะเลขหน้า ({front_labels})"),
             # ถ้อยคำของเจ้าหน้าที่ (15 ต.ค. 2569) พิมพ์ตรงตัว — สะกด "อารบิก" ตามราชบัณฑิตฯ (เจ้าหน้าที่ยืนยัน)
             ("body/end", "หัวกระดาษส่วนเนื้อหา และส่วนท้าย",
@@ -9772,6 +9852,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         rep.add_verification("รหัสนักศึกษา", loc, "fail", printed)
                         rep.add("RED", "front_matter", loc, *thai_digits,
                                 "FORM.APPROVED_MATCH")
+                        continue
+                    if printed:
+                        # ถ้อยคำเจ้าของ (5 พ.ย. 2569): "รหัสนักศึกษาผิด ไม่ตรงกันกับในระบบ ให้แก้เป็น......." แทนการยกรหัสที่พิมพ์และชี้จุดต่าง
+                        rep.add_verification("รหัสนักศึกษา", loc, "fail", printed)
+                        rep.add("RED", "front_matter", loc, "รหัสนักศึกษาผิด ไม่ตรงกันกับในระบบ",
+                                f'ให้แก้เป็น "{student_id}"', "", "FORM.APPROVED_MATCH")
                         continue
                     if printed:
                         # ชี้จุดต่างเฉพาะตอนที่ต่างกันจุดเดียว (พิมพ์ผิดหลักเดียว)
