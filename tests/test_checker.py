@@ -12356,3 +12356,124 @@ class UnnumberedSheetsAsRanges(unittest.TestCase):
                          "8 page(s) carry no page number: sheet(s) 6–13 of the file")
         self.assertEqual(i18n.tr_en("9 หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ 2, 4, 6, 8 และ 10 ของไฟล์ และอีก 2 ช่วง", pairs),
                          "9 page(s) carry no page number: sheet(s) 2, 4, 6, 8 and 10 of the file and 2 more range(s)")
+
+
+class AChapterPageWithoutItsNumberLine(unittest.TestCase):
+    """หน้าบทที่มีแค่ชื่อบท ไม่มีบรรทัด "บทที่ N" (เล่มจริง 10 พ.ย. 2569) — นับว่ามีบท แจ้งที่หน้านั้นข้อเดียว"""
+
+    TOC = [(1, checker_module.norm("บทนำ"), 1, "บทที่ 1 บทนำ 1", 5, ""),
+           (2, checker_module.norm("การทบทวนวรรณกรรม"), 11, "บทที่ 2 การทบทวนวรรณกรรม 11", 5, ""),
+           (3, checker_module.norm("วิธีการดำเนินการวิจัย"), 41, "บทที่ 3 วิธีการดำเนินการวิจัย 41", 5, ""),
+           (4, checker_module.norm("ผลการวิจัย"), 55, "บทที่ 4 ผลการวิจัย 55", 5, "")]
+    BODY = [(1, "บทนำ", 10, 1, ""), (2, "การทบทวนวรรณกรรม", 20, 11, ""), (4, "ผลการวิจัย", 64, 55, "")]
+    PRINTED = {10: 1, 20: 11, 50: 41, 64: 55}
+
+    def _pages(self, page_50):
+        pages = ["x"] * 70
+        pages[50] = page_50
+        return pages
+
+    def test_the_title_on_the_toc_page_counts_as_the_chapter(self):
+        found = checker_module.chapters_missing_number_line(
+            self.BODY, self.TOC, self._pages("41\nวิธีการดำเนินการวิจัย\nในการดำเนินการวิจัยครั้งนี้"), self.PRINTED)
+        self.assertEqual(found, [(3, "วิธีการดำเนินการวิจัย", 50, "บทที่")])
+
+    def test_a_page_without_the_title_is_a_missing_chapter(self):
+        found = checker_module.chapters_missing_number_line(
+            self.BODY, self.TOC, self._pages("41\nเนื้อความต่อจากบทก่อนหน้า\nข้อความ"), self.PRINTED)
+        self.assertEqual(found, [])
+
+    def test_a_chapter_not_in_the_toc_is_a_missing_chapter(self):
+        found = checker_module.chapters_missing_number_line(
+            self.BODY, self.TOC[:2] + self.TOC[3:], self._pages("41\nวิธีการดำเนินการวิจัย"), self.PRINTED)
+        self.assertEqual(found, [])
+
+    def test_a_missing_last_chapter_is_not_looked_for(self):
+        """ควบคุมเชิงลบ — บทท้ายที่ขาดไม่ใช่ช่องว่างระหว่างเลขบท"""
+        toc = self.TOC + [(5, checker_module.norm("การอภิปรายผล"), 60, "บทที่ 5 การอภิปรายผล 60", 5, "")]
+        pages = self._pages("x")
+        pages[66] = "60\nการอภิปรายผล"
+        found = checker_module.chapters_missing_number_line(self.BODY, toc, pages, {**self.PRINTED, 66: 60})
+        self.assertEqual(found, [])
+
+    def test_an_english_book_uses_chapter(self):
+        toc = [(1, "INTRODUCTION", 1, "CHAPTER 1 INTRODUCTION 1", 5, ""),
+               (2, "METHODS", 9, "CHAPTER 2 METHODS 9", 5, ""),
+               (3, "RESULTS", 20, "CHAPTER 3 RESULTS 20", 5, "")]
+        body = [(1, "INTRODUCTION", 10, 1, ""), (3, "RESULTS", 40, 20, "")]
+        pages = ["x"] * 45
+        pages[18] = "9\nMETHODS\nThis chapter describes"
+        found = checker_module.chapters_missing_number_line(body, toc, pages, {10: 1, 18: 9, 40: 20})
+        self.assertEqual(found, [(2, "METHODS", 18, "CHAPTER")])
+
+    def test_the_wording_does_not_end_on_a_quoted_title(self):
+        source = inspect.getsource(checker_module.run_check)
+        # ถ้อยคำเจ้าของ (10 พ.ย. 2569) ไม่ยกชื่อบท
+        self.assertIn("f'หน้าแรกของบทต้องมีบรรทัด \"{_line}\" อยู่เหนือชื่อบท ตาม template'", source)
+        self.assertIn("f'ไม่พบบรรทัด \"{_line}\" เหนือชื่อบท'", source)
+        self.assertNotIn("พบชื่อบท \"{_title}\"", source)
+
+    def test_the_english(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (
+                ('ไม่พบบรรทัด "บทที่ 3" เหนือชื่อบท', 'The line "บทที่ 3" was not found above the chapter title'),
+                ('หน้าแรกของบทต้องมีบรรทัด "CHAPTER 3" อยู่เหนือชื่อบท ตาม template',
+                 'The first page of the chapter must have the line "CHAPTER 3" above the chapter title, as in the template'),
+                ('เพิ่มบรรทัด "บทที่ 3" เหนือชื่อบท', 'Add the line "บทที่ 3" above the chapter title')):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+
+
+class TheMissingChapterComesFromTheGap(unittest.TestCase):
+    """บทที่ขาดจริงบอกเลขจากช่องว่างของเลขบท ไม่ใช่สมมติว่าเป็นบทท้าย (10 พ.ย. 2569)"""
+
+    CANON = checker_module.CANONICAL_OPT1
+
+    def test_a_middle_chapter(self):
+        text = checker_module.chapter_count_expected(5, self.CANON, True, [1, 2, 4, 5, 6])
+        self.assertTrue(text.startswith(f'เล่มนี้ยังไม่มีบทที่ 3 คือ "{self.CANON[2][0]}"'), text)
+
+    def test_the_last_chapter_as_before(self):
+        text = checker_module.chapter_count_expected(5, self.CANON, True, [1, 2, 3, 4, 5])
+        self.assertTrue(text.startswith(f'เล่มนี้ยังไม่มีบทที่ 6 คือ "{self.CANON[5][0]}"'), text)
+        self.assertEqual(text, checker_module.chapter_count_expected(5, self.CANON, True))
+
+    def test_two_gaps(self):
+        text = checker_module.chapter_count_expected(4, self.CANON, True, [1, 2, 4, 6])
+        self.assertTrue(text.startswith("เล่มนี้ยังไม่มีบทที่ 3 และ 5 "), text)
+
+    def test_unusable_numbers_keep_the_old_behaviour(self):
+        """ควบคุมเชิงลบ — เลขซ้ำหรือเกินประกาศ ดูช่องว่างไม่ได้"""
+        old = checker_module.chapter_count_expected(5, self.CANON, True)
+        self.assertEqual(checker_module.chapter_count_expected(5, self.CANON, True, [1, 2, 2, 4, 5]), old)
+        self.assertEqual(checker_module.chapter_count_expected(5, self.CANON, True, [1, 2, 3, 4, 9]), old)
+
+class ATocChapterTitleWrappedAfterThePageNumber(unittest.TestCase):
+    """ชื่อบทในสารบัญที่คำท้ายตกบรรทัดหลังเลขหน้า (เล่มจริง 10 พ.ย. 2569)"""
+
+    TITLE = "EXPERIMENTAL STUDY AND PERFORMANCE"
+    BODY = "EXPERIMENTAL STUDY AND PERFORMANCE EVALUATION"
+
+    def test_the_next_line_completes_the_title(self):
+        self.assertEqual(checker_module.toc_title_joined(self.TITLE, "EVALUATION", self.BODY), self.BODY)
+        self.assertEqual(checker_module.toc_title_joined(self.TITLE, "EVALUATION 141", self.BODY), self.BODY)
+
+    def test_a_subsection_is_not_joined(self):
+        self.assertEqual(checker_module.toc_title_joined(self.TITLE, "6.1 Materials and preparation 141", self.BODY),
+                         self.TITLE)
+        self.assertEqual(checker_module.toc_title_continuation("6.1 Materials and preparation 141"), "")
+
+    def test_a_new_entry_is_not_joined(self):
+        for line in ("CHAPTER 7 CONCLUSION 160", "บทที่ 7 สรุป 160", "BIBLIOGRAPHY 170", "APPENDIX A 180",
+                     "LIST OF TABLES x", "171"):
+            self.assertEqual(checker_module.toc_title_continuation(line), "", line)
+
+    def test_a_title_really_missing_a_word_stays_different(self):
+        """ควบคุมเชิงลบ — ไม่มีบรรทัดต่อ หรือบรรทัดต่อไม่ทำให้ตรง ยังแจ้งเหมือนเดิม"""
+        self.assertEqual(checker_module.toc_title_joined(self.TITLE, "", self.BODY), self.TITLE)
+        self.assertEqual(checker_module.toc_title_joined(self.TITLE, "Background of the study", self.BODY), self.TITLE)
+
+    def test_both_comparisons_use_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("toc_title_joined(_toc_chapter_title(t_raw), t_next, title)", source)
+        self.assertIn("toc_title = toc_title_joined(toc_title, toc_next, body_title)", source)

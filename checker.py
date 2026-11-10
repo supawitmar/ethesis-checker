@@ -7753,6 +7753,33 @@ _TOC_CHAPTER_WORD_ONLY = re.compile(r'^(?:CHAPTER|บทท)\d*$', re.I)
 _TOC_BARE_CHAPTER = re.compile(r'^\s*(?:CHAPTER|บทท[ั-๎\s]*)\s*(\d{1,2}|[IVXL]+)[\s.…·_-]*(\d{1,3})?\s*$', re.I)
 
 
+def toc_title_continuation(next_line):
+    """บรรทัดถัดจากรายการบทในสารบัญ ถ้าเป็นส่วนต่อของชื่อบท — '' ถ้าเป็นรายการใหม่
+
+    รายการใหม่ = หัวข้อย่อยที่ขึ้นต้นด้วยเลข ("6.1 ...") บทอื่น ส่วนอื่นของเล่ม (บรรณานุกรม ภาคผนวก ประวัติ ฯลฯ) หรือ LIST OF ...
+    ตัดเลขหน้าท้ายบรรทัดออกก่อน
+    """
+    text = _strip_toc_page_number(next_line or "").strip()
+    if not text or re.match(r'\d', text) or not re.search(r'[A-Za-zก-๙]', text):
+        return ""
+    head = norm(text)
+    if head.startswith(("CHAPTER", norm("บทที่"), "LISTOF")) or _toc_section_kind(text):
+        return ""
+    return text
+
+
+def toc_title_joined(toc_title, next_line, target):
+    """ชื่อบทในสารบัญรวมบรรทัดถัดไป เมื่อรวมแล้วตรง target (ชื่อบทในเนื้อหา) — ไม่งั้นคืนชื่อเดิม
+
+    เล่มจริง 10 พ.ย. 2569 พิมพ์ "CHAPTER 6 EXPERIMENTAL STUDY AND PERFORMANCE 141" แล้ว "EVALUATION" ตกบรรทัดถัดไปหลังเลขหน้า
+    ระบบอ่านแค่บรรทัดแรก จึงแจ้งแดงว่าชื่อบทในสารบัญกับในเนื้อหาไม่ตรง · รวมเฉพาะเมื่อรวมแล้วตรง ชื่อที่ขาดคำจริงจึงยังแจ้งเหมือนเดิม
+    """
+    rest = toc_title_continuation(next_line)
+    if rest and target and norm(f"{toc_title} {rest}") == norm(target):
+        return f"{toc_title} {rest}"
+    return toc_title
+
+
 def toc_bare_chapter(line, next_line=""):
     """เลขบทของบรรทัดสารบัญที่มีแต่ "CHAPTER I" ไม่มีชื่อบท — None ถ้ามีชื่อบท หรือไม่ใช่บรรทัดบท
 
@@ -7982,7 +8009,38 @@ def chapter_count_found(found, low, high):
     return f"พบ {found} บท"
 
 
-def chapter_count_expected(found, canon, thai_book):
+def chapters_missing_number_line(body_ch, toc_ch, pages, printed):
+    """บทที่เว้นเลขไปในเนื้อหา แต่หน้าตามสารบัญขึ้นต้นด้วยชื่อบทนั้น = มีบท แค่ไม่มีบรรทัด "บทที่ N" → [(เลขบท, ชื่อบท, ดัชนีหน้า, คำนำ)]
+
+    ดูเฉพาะเลขที่อยู่ "ระหว่าง" เลขบทที่พบ (1, 2, 4 → 3) และสารบัญบอกเลขหน้าไว้ · บรรทัดบนสุดของหน้า (ไม่นับเลขหน้าและหัวกระดาษ)
+    ต้องตรงชื่อบทในสารบัญ (หรือต่อกับบรรทัดถัดไปแล้วตรง) ไม่งั้นถือว่าบทนั้นขาดจริง
+    """
+    numbers = [c[0] for c in body_ch]
+    if not numbers:
+        return []
+    found = []
+    for chap_no, title_n, page_no, raw, _src, _next in toc_ch:
+        if chap_no in numbers or page_no is None or not (min(numbers) < chap_no < max(numbers)):
+            continue
+        before = [c[2] for c in body_ch if c[0] < chap_no]
+        after = [c[2] for c in body_ch if c[0] > chap_no]
+        idx = next((i for i, label in sorted(printed.items()) if label == page_no
+                    and (not before or i > max(before)) and (not after or i < min(after))), None)
+        if idx is None or idx >= len(pages):
+            continue
+        lines = [line for line in top_lines(pages[idx], 5)
+                 if line != str(page_no) and not _running_head_label(line) and _PAGE_LABEL_NOISE.sub('', line)]
+        if not lines:
+            continue
+        joined = lines[0] + (lines[1] if len(lines) > 1 else "")
+        if title_n and (norm(lines[0]) == title_n or norm(joined) == title_n):
+            title = lines[0] if norm(lines[0]) == title_n else f"{lines[0]} {lines[1]}"
+            word = "CHAPTER" if norm(raw).startswith("CHAPTER") else "บทที่"
+            found.append((chap_no, title, idx, word))
+    return found
+
+
+def chapter_count_expected(found, canon, thai_book, numbers=None):
     """บอกว่าบทที่ยังไม่มีคือบทไหน (ชื่อตามประกาศ) ไม่ใช่บอกแค่จำนวนที่ต้องมี
 
     บทที่ขาดคือบทท้าย ๆ เสมอ เพราะการเทียบชื่อบทยึด "ลำดับที่" เป็นหลัก (บทที่ 1 ของ
@@ -7996,12 +8054,19 @@ def chapter_count_expected(found, canon, thai_book):
     # ที่ส่งนักศึกษาอ้าง "ประกาศ" ลอย ๆ พอ เลขปีเป็นเรื่องของเจ้าหน้าที่กับแหล่งอ้างอิง
     tail = f"ตามประกาศ รูปแบบดั้งเดิมกำหนดให้มีครบ {len(canon)} บท"
     missing = list(range(found + 1, len(canon) + 1))
+    # เลขบทในเนื้อหาเว้นเลขไป = บทที่ขาดคือเลขนั้น ไม่ใช่บทท้าย (เล่มจริง 10 พ.ย. 2569 เลขบท 1, 2, 4, 5, 6 แต่ระบบบอกว่ายังไม่มีบทที่ 6)
+    if numbers and len(set(numbers)) == len(numbers) and all(1 <= n <= len(canon) for n in numbers):
+        gaps = [n for n in range(1, len(canon) + 1) if n not in numbers]
+        if gaps and gaps != missing:
+            missing = gaps
     if not missing:
         return tail
     if len(missing) == 1:
         title = canon[missing[0] - 1][0 if thai_book else 1]
         return f'เล่มนี้ยังไม่มีบทที่ {missing[0]} คือ "{title}" {tail}'
-    return f"เล่มนี้ยังไม่มีบทที่ {missing[0]}-{missing[-1]} {tail}"
+    if missing == list(range(missing[0], missing[-1] + 1)):
+        return f"เล่มนี้ยังไม่มีบทที่ {missing[0]}-{missing[-1]} {tail}"
+    return f"เล่มนี้ยังไม่มีบทที่ {_join_and([str(n) for n in missing])} {tail}"
 
 
 CANONICAL_OPT1 = CANONICAL_OPTION_1
@@ -8849,6 +8914,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if not chapter_number_is_arabic(l):
                         non_arabic_heads.append((cn, soft(l), i))
                 break
+    # บทที่พิมพ์แค่ชื่อบท ไม่มีบรรทัด "บทที่ N" (เล่มจริง 10 พ.ย. 2569: เลขบทในเนื้อหาเป็น 1, 2, 4, 5, 6 แล้วระบบแจ้งว่ายังไม่มีบทที่ 6)
+    # นับว่าพบบทนั้น แล้วแจ้งที่หน้านั้นข้อเดียว — ไม่ให้ข้อจำนวนบทไม่เท่ากัน ข้อน้อยกว่าประกาศ และย่อหน้ายื่นขอคงโครงบทตามมา
+    for _number, _title, _idx, _printed_word in chapters_missing_number_line(body_ch, toc_ch, pages, printed):
+        body_ch.append((_number, _title, _idx, printed.get(_idx), ""))
+        _line = f"{_printed_word} {_number}"
+        # ถ้อยคำเจ้าของ (10 พ.ย. 2569): บอกตรง ๆ ว่าไม่พบอะไร ไม่ยกชื่อบท — "พบชื่อบท ... แต่ไม่มีบรรทัด ..." อ่านแล้วเหมือนชื่อบทไม่ครบ
+        rep.add("RED", "body", f"บทที่ {_number} ({page_ref(_idx)})",
+                f'ไม่พบบรรทัด "{_line}" เหนือชื่อบท',
+                f'หน้าแรกของบทต้องมีบรรทัด "{_line}" อยู่เหนือชื่อบท ตาม template',
+                f'เพิ่มบรรทัด "{_line}" เหนือชื่อบท', "BODY.CHAPTER_NUMBER")
+    body_ch.sort(key=lambda c: c[2])
     # ฟ้อง "รายบท" ตามที่เจ้าหน้าที่สั่ง (ก.ย. 2569) ไม่รวมเป็นข้อเดียว — แต่ละบท
     # ต้องไปแก้คนละหน้า และเล่มจริงปนกันเองได้ (I, II, III, IV, 5, VI)
     # พิมพ์เลขบทผิดตัวเดียว (1, 2, 3, VI, 5, 6) บอกเลขตามลำดับจริง ไม่ใช่เลขที่พิมพ์ผิด (เล่มจริง 31 ต.ค. 2569 — เดิมสั่งให้แก้เป็น
@@ -8910,11 +8986,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 _where, _found = "สารบัญ vs เนื้อหา", _counts
                 _want, _fix = "จำนวนบทต้องเท่ากัน", "อัปเดตสารบัญหรือเนื้อหา"
             rep.add("RED", "body", _where, _found, _want, _fix, "FRONT.TOC")
-        toc_map = {c[0]: (c[1], c[2], c[3], c[4]) for c in toc_ch}
+        toc_map = {c[0]: (c[1], c[2], c[3], c[4], c[5]) for c in toc_ch}
         for cn, title, ppage, pno, _next_line in body_ch:
             if cn in toc_map:
-                t_title_n, t_pno, t_raw, toc_page_idx = toc_map[cn]
+                t_title_n, t_pno, t_raw, toc_page_idx, t_next = toc_map[cn]
                 nb = norm(title)
+                # ชื่อบทในสารบัญที่คำท้ายตกบรรทัดหลังเลขหน้า (toc_title_joined)
+                if t_title_n != nb and norm(toc_title_joined(_toc_chapter_title(t_raw), t_next, title)) == nb:
+                    t_title_n = nb
                 # บทที่ประกาศบังคับชื่อ (โหมด strict) ยึดประกาศเป็นหลัก ไม่เทียบสารบัญ↔
                 # เนื้อหา — บทที่ประกาศไม่บังคับ (รูปแบบ 2 บทที่ 3 / โหมดยกเว้นบท) ยังเทียบ
                 enforced_title = chapters_mode == "strict" and 1 <= cn <= enforced_chapters
@@ -9038,7 +9117,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         if option == 1 and len(body_ch) != 6:
             rep.add("RED", "body", where,
                     chapter_count_found(len(body_ch), 6, 6),
-                    chapter_count_expected(len(body_ch), CANONICAL_OPT1, thai_book),
+                    chapter_count_expected(len(body_ch), CANONICAL_OPT1, thai_book, [c[0] for c in body_ch]),
                     "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1",
                     notice=CHAPTER_COUNT_NOTICE)
         if option == 2 and len(body_ch) not in (2, 3):
@@ -9072,6 +9151,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 continue
             toc_title, toc_idx, toc_next = toc_by_ch.get(cn, (None, None, ""))
             body_title, body_idx, body_next = body_by_ch.get(cn, (None, None, ""))
+            if toc_title is not None and body_title:
+                toc_title = toc_title_joined(toc_title, toc_next, body_title)
             toc_bad = _title_status(toc_title, cn, toc_next) if toc_title is not None else None
             body_bad = _title_status(body_title, cn, body_next) if body_title is not None else None
             if not toc_bad and not body_bad:

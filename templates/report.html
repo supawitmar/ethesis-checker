@@ -1615,6 +1615,9 @@ var TR = [
    'Table of contents (page $1) vs chapter $2 (page with no page number (sheet $3 of the file))'],
   // ---- ประโยคที่ยังไม่มีคำแปล เจอจากเล่มจริง 31 ต.ค. 2569 และจากด่านสแกนประโยคในโค้ด (check_i18n.py --literals) ----
   [/^หัวกระดาษส่วนนำ$/g, 'Front-matter header'],
+  [/^ไม่พบบรรทัด ("[^"]*") เหนือชื่อบท$/g, 'The line $1 was not found above the chapter title'],
+  [/^หน้าแรกของบทต้องมีบรรทัด ("[^"]*") อยู่เหนือชื่อบท ตาม template$/g, 'The first page of the chapter must have the line $1 above the chapter title, as in the template'],
+  [/^เพิ่มบรรทัด ("[^"]*") เหนือชื่อบท$/g, 'Add the line $1 above the chapter title'],
   [/^ชื่อเรื่องไม่ตรงกันกับในระบบ$/g, 'The title does not match the system record'],
   [/^ต้องแก้ไขเป็น: ("[^"]*")$/g, 'Change it to: $1'],
   [/^(\d+) หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ (.+?) ของไฟล์ และอีก (\d+) ช่วง$/g,
