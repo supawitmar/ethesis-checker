@@ -2675,8 +2675,8 @@ class Update17TwoLinesInTheSummaryAndTheSheet(unittest.TestCase):
             }
         data = self.client.post("/summary/two", json={}).json()
         for text in (data["plain"], data["details"]):
-            # 6 พ.ย. 2569: ตัดจุดต่างออก เป็นสองบรรทัด และบรรทัด edit topic เป็นย่อหน้าแยก ไปถึงชีทด้วย
-            self.assertIn('ชื่อเรื่องไม่ตรงกันกับในระบบ\n'
+            # สองบรรทัด (จุดที่ต้องแก้ต่อท้ายบรรทัดแรก 11 พ.ย. 2569) และบรรทัด edit topic เป็นย่อหน้าแยก ไปถึงชีทด้วย
+            self.assertIn('ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"\n'
                           f'   ต้องแก้ไขเป็น: "{self.WANT}"', text)
             self.assertIn("\n\n" + checker.TITLE_EDIT_TOPIC_LINE, text)
             self.assertIn('สะกดชื่อคณะผิด เขียนว่า "คณะสังคมศาสตร์และมนุษย์ศาสตร์"\n'

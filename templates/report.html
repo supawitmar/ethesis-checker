@@ -1619,6 +1619,8 @@ var TR = [
   [/^หน้าแรกของบทต้องมีบรรทัด ("[^"]*") อยู่เหนือชื่อบท ตาม template$/g, 'The first page of the chapter must have the line $1 above the chapter title, as in the template'],
   [/^เพิ่มบรรทัด ("[^"]*") เหนือชื่อบท$/g, 'Add the line $1 above the chapter title'],
   [/^ชื่อเรื่องไม่ตรงกันกับในระบบ$/g, 'The title does not match the system record'],
+  // จุดที่ต้องแก้ต่อท้าย (เจ้าของ 11 พ.ย. 2569) — ท่อนหลัง "ต้อง" แปลต่อด้วยกฎรายการคำสั่งเหมือนประโยคนำแบบเดิม
+  [/^ชื่อเรื่องไม่ตรงกันกับในระบบ ต้อง(.+)$/g, 'The title does not match the system record: $1'],
   [/^ต้องแก้ไขเป็น: ("[^"]*")$/g, 'Change it to: $1'],
   [/^(\d+) หน้าไม่ได้พิมพ์เลขหน้าไว้ คือแผ่นที่ (.+?) ของไฟล์ และอีก (\d+) ช่วง$/g,
    '$1 page(s) carry no page number: sheet(s) $2 of the file and $3 more range(s)'],

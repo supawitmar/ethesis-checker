@@ -5349,10 +5349,15 @@ def _title_summary_lines(issue, steps, value):
 
     ไม่ยกชื่อเรื่องเต็มที่ผิด (นักศึกษามีอยู่ในเล่มแล้ว) · ชี้จุดไม่ได้ (ต่างกันมาก) = บรรทัดแรกเหลือแค่ประโยคนำ
     """
-    # ชื่อในเล่มมีอยู่แต่ไม่ตรง (เจ้าของ 6 พ.ย. 2569 "แจ้งว่า ชื่อเรื่องไม่ตรงกันกับในระบบ / แจ้งชื่อที่ถูก / ต้องแก้ไข" และเลือก
-    # "ตัดจุดต่างออก") — การ์ดบนหน้ารายงานยังยกข้อความที่เล่มพิมพ์และจุดต่างให้เจ้าหน้าที่ดูตามเดิม · ข้อ "ไม่พบชื่อเรื่อง..." คงแบบเดิม
+    # ชื่อในเล่มมีอยู่แต่ไม่ตรง (เจ้าของ 6 พ.ย. 2569 "แจ้งว่า ชื่อเรื่องไม่ตรงกันกับในระบบ / แจ้งชื่อที่ถูก / ต้องแก้ไข")
+    # 6 พ.ย. เลือก "ตัดจุดต่างออก" แล้วนักศึกษาไม่รู้ว่าผิดตรงไหน — เจ้าของ 11 พ.ย. 2569 ให้ใส่จุดที่ต้องแก้กลับมาต่อท้ายบรรทัดแรก
+    #   ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "ด้วย" เป็น "โดยใช้"
+    #   ต้องแก้ไขเป็น: "<ชื่อเรื่องเต็ม>"
+    # บอกเฉพาะเมื่อผิดจุดเดียว — ผิดหลายจุด (เจ้าของ 11 พ.ย. 2569 "ก็ไม่ต้องบอก ใช้แบบเดิม") หรือชี้จุดไม่ได้ (ต่างกันมาก)
+    # = บรรทัดแรกเหลือแค่ประโยคนำ · ข้อ "ไม่พบชื่อเรื่อง..." คงแบบเดิม
     if issue.get("title_differs"):
-        return [TITLE_DIFFERS_LINE, f'ต้องแก้ไขเป็น: "{value}"']
+        return [f"{TITLE_DIFFERS_LINE} {_joined_fix(steps)}" if len(steps) == 1 else TITLE_DIFFERS_LINE,
+                f'ต้องแก้ไขเป็น: "{value}"']
     lead = issue["title_lead"]
     return [f"{lead} {_joined_fix(steps)}" if steps else lead,
             f'ชื่อเรื่องที่ถูกต้อง: "{value}"']
@@ -6487,6 +6492,68 @@ _LEADING_FILLERS = ("และ", "หรือ", "ของ", "ใน", "กั�
                     "สำหรับ", "ระหว่าง")
 
 
+def _after_filler(fg, i):
+    """ข้อความก่อนตำแหน่ง i ลงท้ายด้วยคำเชื่อม (ของ ใน และ ...) — หลังคำพวกนี้คือต้นคำใหม่"""
+    before = ''.join(fg[max(0, i - 6):i])
+    return any(before.endswith(word) for word in _LEADING_FILLERS)
+
+
+def _clear_word_start(fg, i):
+    """ตำแหน่ง i เป็นต้นคำที่มั่นใจได้: ต้นข้อความ หลังช่องว่าง รอยต่อไทย-อังกฤษ หรือหลังคำเชื่อม
+
+    ต่างจาก _at_word_edge ตรงที่ไม่นับสระหน้า (สระหน้าเริ่มพยางค์ใหม่ ไม่จำเป็นต้องเป็นคำใหม่)
+    """
+    if i <= 0 or i >= len(fg) or not fg[i].strip() or not fg[i - 1].strip():
+        return True
+    return _is_latin(fg[i]) != _is_latin(fg[i - 1]) or _after_filler(fg, i)
+
+
+def _widen_to_word_start(fg, start):
+    """ถอยจุดเริ่มของตัวอ้างอิงไปถึงต้นคำที่มั่นใจได้ ถ้าอยู่ไม่เกิน _ANCHOR_WORD_REACH ตัว — ไม่เจอ = คงที่เดิม
+
+    เล่มจริง 11 พ.ย. 2569: 'ต้องเติม "การจัดทำ" หลัง "ชาชนใน"' ตัดกลางคำ "ประชาชน" (ตัวอ้างอิงที่สั้นที่สุดที่ไม่ซ้ำ)
+    ข้อความก่อนหน้าคือ "...ร่วมของ" จึงถอยไปเริ่มหลัง "ของ" ได้ "ประชาชนใน" · ยาวขึ้นแล้วยังไม่ซ้ำเหมือนเดิม
+    """
+    # ขึ้นด้วยสระหน้า ("เทคโนโลยี") ถือว่าต้นคำพอแล้ว — ถอยต่อจะลากคำหน้าที่ไม่จำเป็นมาด้วย ("การนำเทคโนโลยี")
+    if _clear_word_start(fg, start) or _at_word_edge(fg, start):
+        return start
+    for step in range(1, _ANCHOR_WORD_REACH + 1):
+        i = start - step
+        if i < 0:
+            break
+        if _clear_word_start(fg, i) and not _NOT_A_WORD_START.match(fg[i]):
+            return i
+    return start
+
+
+def _clear_word_end(fg, i, lead_vowel=True):
+    """ตำแหน่ง i เป็นท้ายคำ: ท้ายข้อความ ก่อน/หลังช่องว่าง รอยต่อไทย-อังกฤษ หลังคำเชื่อม หรือก่อนสระหน้า
+
+    lead_vowel=False ไม่นับก่อนสระหน้า — ใช้ตอน "ตัดให้สั้นลง" เพราะสระหน้ากลางคำมีมาก ("ประ|เมิน" "ตัว|เอง")
+    ส่วนตอนคงขอบเดิมหรือยืดออก ก่อนสระหน้าดีกว่ากลางพยางค์ ("กระดาน|ใน" "ความดัน|โลหิต")
+    """
+    if i <= 0 or i >= len(fg) or not fg[i].strip() or not fg[i - 1].strip():
+        return True
+    return (_is_latin(fg[i]) != _is_latin(fg[i - 1]) or _after_filler(fg, i)
+            or (lead_vowel and bool(_LEAD_VOWEL_START.match(fg[i]))))
+
+
+def _widen_to_word_end(fg, stop):
+    """ยืดจุดจบของข้อความรอบจุดแก้ไปถึงท้ายคำที่มั่นใจได้ ถ้าอยู่ไม่เกิน _ANCHOR_WORD_REACH ตัว — ไม่เจอ = คงที่เดิม
+
+    'ให้แก้ "การดูแลตัวเองขอ" เป็น ...' ตัดกลาง "ของ" (11 พ.ย. 2569) → "การดูแลตัวเองของ"
+    """
+    if _clear_word_end(fg, stop):
+        return stop
+    for step in range(1, _ANCHOR_WORD_REACH + 1):
+        i = stop + step
+        if i >= len(fg):
+            return len(fg)
+        if _clear_word_end(fg, i) and not _NOT_A_WORD_START.match(fg[i]):
+            return i
+    return stop
+
+
 def _drop_leading_filler(fg, lo, limit):
     """จุดเริ่มใหม่หลังตัดคำเชื่อมที่ขึ้นต้นข้อความรอบจุดแก้ (คืน lo เดิมถ้าไม่ได้ขึ้นต้นด้วยคำพวกนี้)
 
@@ -6568,6 +6635,10 @@ def _steps_once(fg, edits):
     # คำที่ต้องลบ "ของ" ก็ซ้ำขึ้นมาทันที) — ตั้งใหม่ทุกจุดแก้ใน states
     states = [plain]
 
+    def clear_of_others(lo, hi):
+        """ช่วง [lo, hi) ไม่คร่อมจุดแก้ใด — ใช้ก่อนยืดข้อความอ้างอิงให้ครบคำ (จุดแก้ของตัวเองอยู่ที่ขอบช่วง ไม่นับว่าคร่อม)"""
+        return not any(_crosses(lo, hi, other) for other in edits)
+
     def others_applied(skip):
         out, at = [], 0
         for k, other in enumerate(edits):
@@ -6590,7 +6661,11 @@ def _steps_once(fg, edits):
             if not anchor:
                 return '', pos
             if occurs(anchor if alone else anchor + need) == 1:
-                return anchor, start
+                # ไม่ให้เริ่มกลางคำ (_widen_to_word_start) — ยาวขึ้นแล้วยังไม่ซ้ำเสมอ ไม่ต้องนับใหม่ · ห้ามคร่อมจุดแก้อื่น
+                wide = _widen_to_word_start(fg, start)
+                if wide != start and clear_of_others(wide, pos):
+                    start = wide
+                return ''.join(fg[start:pos]).strip(), start
         return '', pos
 
     def after(end, need, alone=False):
@@ -6607,6 +6682,35 @@ def _steps_once(fg, edits):
                 return anchor, stop
         return '', end
 
+    def word_bounds(edit, lo, hi):
+        """ขอบของข้อความรอบจุดแก้ที่ไม่เริ่ม/ไม่จบกลางคำ (11 พ.ย. 2569) — ไม่มีพจนานุกรม จึงยึดรอยต่อที่มั่นใจได้
+        (_clear_word_start / _clear_word_end) แล้วทำเท่าที่ทำได้ ไม่เจอรอยต่อ = คงขอบเดิม
+
+        ขยับเข้าหาต้นคำก่อนถ้าข้อความที่สั้นลงยังไม่ซ้ำ ("ดานในผู้สุงอายุ" → "ผู้สุงอายุ") ไม่งั้นถอยออกไปหาต้นคำ
+        ("งอายุชุมชน" → "ผู้สูงอายุชุมชน") · ท้ายข้อความทำแบบเดียวกัน ("ตัวเองขอ" → "ตัวเองของ") · ยืดออกต้องไม่คร่อมจุดแก้อื่น
+        """
+        def text(a, b):
+            return (''.join(fg[a:edit.pos]) + edit.got + ''.join(fg[edit.end:b])).strip()
+
+        if lo and not (_clear_word_start(fg, lo) or _at_word_edge(fg, lo)):
+            inner = next((i for i in range(lo + 1, edit.pos + 1)
+                          if _clear_word_start(fg, i) and text(i, hi) and occurs(text(i, hi)) == 1), None)
+            if inner is not None:
+                lo = inner
+            else:
+                wide = _widen_to_word_start(fg, lo)
+                lo = wide if clear_of_others(wide, edit.pos) else lo
+        if hi < len(fg) and not _clear_word_end(fg, hi):
+            inner = next((i for i in range(hi - 1, edit.end - 1, -1)
+                          if _clear_word_end(fg, i, lead_vowel=False) and text(lo, i) and occurs(text(lo, i)) == 1),
+                         None)
+            if inner is not None:
+                hi = inner
+            else:
+                wide = _widen_to_word_end(fg, hi)
+                hi = wide if clear_of_others(edit.end, wide) else hi
+        return lo, hi
+
     def typo_step(edit):
         """ผิดทีละตัวอักษร (ตกตัว/เกินตัว/สะกดผิดตัวเดียว) หรือหลายจุดที่อยู่ติดกัน: ยกคำรอบจุดแก้มาทั้งก้อน
         แล้วบอกให้แก้เป็นอะไร
@@ -6619,6 +6723,9 @@ def _steps_once(fg, edits):
             left, right = ''.join(fg[lo:edit.pos]), ''.join(fg[edit.end:hi])
             found_part = (left + edit.got + right).strip()
             if found_part and occurs(found_part) == 1:
+                lo, hi = word_bounds(edit, lo, hi)
+                left, right = ''.join(fg[lo:edit.pos]), ''.join(fg[edit.end:hi])
+                found_part = (left + edit.got + right).strip()
                 trimmed = _drop_leading_filler(fg, lo, edit.pos)
                 shorter = (''.join(fg[trimmed:edit.pos]) + edit.got + right).strip()
                 if trimmed != lo and occurs(shorter) == 1:
@@ -7107,7 +7214,11 @@ _TITLE_STOP = re.compile(
     r'^(?:was\s+submitted\s+to'
     r'|A\s+(?:THESIS|THEMATIC\s+PAPER|DISSERTATION|MASTER|DOCTOR)'
     r'|ABSTRACT|FACULTY\s+OF)', re.I)
-_TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา', 'วิทยานิพนธ์นี้เป็นส่วนหนึ่ง', 'สารนิพนธ์นี้เป็นส่วนหนึ่ง',
+# "นับเป็นส่วนหนึ่งของการศึกษา" = ประโยค template หน้าลงนามที่ตกคำนำ "ได้รับการพิจารณาให้" (มีข้อแจ้งแยกที่ FRONT.APPROVAL)
+# เล่มจริง 11 พ.ย. 2569: ไม่มีคำนี้ในรายการ ชื่อเรื่องบนการ์ดจึงยาวต่อไปถึงประโยค template ชื่อปริญญา และวันที่
+# ใช้ท่อนยาวถึง "ของการศึกษา" ไม่ให้บรรทัดชื่อเรื่องที่บังเอิญขึ้นต้นด้วย "นับเป็น..." ถูกตัด
+_TITLE_STOP_TH = _loose_keys('ได้รับการพิจารณา', 'นับเป็นส่วนหนึ่งของการศึกษา', 'วิทยานิพนธ์นี้เป็นส่วนหนึ่ง',
+                             'สารนิพนธ์นี้เป็นส่วนหนึ่ง', 'การค้นคว้าอิสระนี้เป็นส่วนหนึ่ง',
                              'บทคัดย่อ', 'บัณฑิตวิทยาลัย')
 
 

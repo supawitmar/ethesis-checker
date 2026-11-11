@@ -251,7 +251,8 @@ class TheDifferenceExplainerCountsEveryFormAsSaraAm(unittest.TestCase):
             with self.subTest(form=form.encode("unicode_escape")):
                 analysis = analyze_diff("ค่า" + form + "ประปาใหม่", self.EXPECTED)
                 self.assertEqual(analysis.text, 'มี "ใหม่" เกินมา')
-                self.assertEqual(analysis.steps, ('ให้แก้ "ระปาใหม่" เป็น "ระปา"',))
+                # ไม่เริ่มกลางคำ "ประปา" (11 พ.ย. 2569) — เดิม "ระปาใหม่" · คำที่ยกมาพิมพ์สระอำแบบมาตรฐานทุกรูป
+                self.assertEqual(analysis.steps, ('ให้แก้ "ค่า' + WATER + 'ประปาใหม่" เป็น "ค่า' + WATER + 'ประปา"',))
 
     def test_the_expected_side_may_be_any_form_too(self):
         analysis = analyze_diff("ค่า" + WATER + "ประปาใหม่", "ค่า" + WATER_NIKHAHIT_FIRST + "ประปา")

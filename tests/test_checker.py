@@ -12273,7 +12273,10 @@ class AWrongPrintedStudentId(unittest.TestCase):
 
 
 class Book4SummaryTitleAndEditTopic(unittest.TestCase):
-    """เจ้าของ 6 พ.ย. 2569: ข้อชื่อเรื่องตัดจุดต่างออก · edit topic เป็นย่อหน้าแยกเหนือข้อความค่าปรับ"""
+    """เจ้าของ 6 พ.ย. 2569: ข้อชื่อเรื่องสองบรรทัด · edit topic เป็นย่อหน้าแยกเหนือข้อความค่าปรับ
+    11 พ.ย. 2569: ผิดจุดเดียวบอกจุดที่ต้องแก้ต่อท้ายบรรทัดแรก ("ไม่เห็นการแจ้งว่าผิดตรงไหนเลย") · ผิดหลายจุดใช้แบบเดิม"""
+
+    ONE_POINT = {"status": "typo", "actual": "NEW TOOLS FOR Plasmodium AND Anopheles: A FIELD STUDY", "score": 0.95}
 
     TITLE = "NEW TOOLS OF Plasmodium AND Anopheles: A FIELD STUDY"
     WRONG = {"status": "typo", "actual": "NEW TOOLS FOR PLASMODIUM AND ANOPHELES: A FIELD STUDY", "score": 0.9}
@@ -12283,13 +12286,33 @@ class Book4SummaryTitleAndEditTopic(unittest.TestCase):
         rep.add(zone, "front_matter", where, checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.TITLE),
                 f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.TITLE}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
 
-    def test_a_title_item_is_two_lines_without_fix_points(self):
+    def test_one_wrong_point_is_named_on_the_first_line(self):
+        rep = Report()
+        self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.ONE_POINT)
+        text = checker_module.plain_summary(checker_module.check_result(rep))
+        self.assertIn('   ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "FOR" เป็น "OF"\n'
+                      f'   ต้องแก้ไขเป็น: "{self.TITLE}"', text)
+        self.assertNotIn("ชื่อเรื่องที่ถูกต้อง", text)
+        self.assertNotIn(f'"{self.ONE_POINT["actual"]}"', text)      # ไม่ยกชื่อเรื่องเต็มที่ผิดกลับมา
+
+    def test_several_wrong_points_keep_the_plain_two_lines(self):
+        """เจ้าของ 11 พ.ย. 2569: "ถ้ามันผิดหลายจุดในชื่อเรื่องก็ไม่ต้องบอก ใช้แบบเดิม" """
         rep = Report()
         self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
+        self.assertGreater(len(rep.zones["RED"][0]["fix_steps"]), 1)
         text = checker_module.plain_summary(checker_module.check_result(rep))
         self.assertIn(f'   ชื่อเรื่องไม่ตรงกันกับในระบบ\n   ต้องแก้ไขเป็น: "{self.TITLE}"', text)
         self.assertNotIn('"FOR"', text)
-        self.assertNotIn("ชื่อเรื่องที่ถูกต้อง", text)
+
+    def test_a_title_that_cannot_be_pointed_at_is_the_lead_alone(self):
+        """ควบคุมเชิงลบ — ไม่มีจุดให้ชี้ บรรทัดแรกไม่มีท่อน "ต้อง..." ห้อยท้าย"""
+        issue = {"title_differs": True, "title_lead": "x"}
+        self.assertEqual(checker_module._title_summary_lines(issue, [], "ก ข"),
+                         ["ชื่อเรื่องไม่ตรงกันกับในระบบ", 'ต้องแก้ไขเป็น: "ก ข"'])
+        self.assertEqual(checker_module._title_summary_lines(issue, ['ให้แก้ "ก" เป็น "ข"'], "ข ค")[0],
+                         'ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "ก" เป็น "ข"')
+        self.assertEqual(checker_module._title_summary_lines(issue, ['ให้แก้ "ก" เป็น "ข"', 'ให้ลบ "ง" ออก'], "ข ค")[0],
+                         "ชื่อเรื่องไม่ตรงกันกับในระบบ")
 
     def test_the_card_still_shows_the_fix_points(self):
         rep = Report()
@@ -12333,6 +12356,8 @@ class Book4SummaryTitleAndEditTopic(unittest.TestCase):
         _block, pairs = i18n.load_tr()
         self.assertEqual(i18n.tr_en("ชื่อเรื่องไม่ตรงกันกับในระบบ", pairs), "The title does not match the system record")
         self.assertEqual(i18n.tr_en('ต้องแก้ไขเป็น: "ก ข"', pairs), 'Change it to: "ก ข"')
+        self.assertEqual(i18n.tr_en('ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "FOR" เป็น "OF" และ "A" เป็น "B"', pairs),
+                         'The title does not match the system record: change "FOR" to "OF" and "A" to "B"')
 
 
 class UnnumberedSheetsAsRanges(unittest.TestCase):
@@ -12477,3 +12502,82 @@ class ATocChapterTitleWrappedAfterThePageNumber(unittest.TestCase):
         source = inspect.getsource(checker_module.run_check)
         self.assertIn("toc_title_joined(_toc_chapter_title(t_raw), t_next, title)", source)
         self.assertIn("toc_title = toc_title_joined(toc_title, toc_next, body_title)", source)
+
+
+class ASignPageTitleStopsAtTheShortTemplateSentence(unittest.TestCase):
+    """หน้าลงนามที่ตกคำนำ "ได้รับการพิจารณาให้" — ชื่อเรื่องหยุดที่ "นับเป็นส่วนหนึ่งของการศึกษา" (เล่มจริง 11 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    TITLE = "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดานในผู้สูงอายุ"
+    TAIL = ["(สังคมศาสตร์)", "14 ตุลาคม 2569"]
+
+    def _page(self, sentence):
+        return "\n".join(["เรื่อง", "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดาน", "ในผู้สูงอายุ", sentence] + self.TAIL)
+
+    def test_the_short_sentence_ends_the_title(self):
+        page = self._page("นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญาศิลปศาสตรมหาบัณฑิต")
+        self.assertEqual(checker_module.printed_title(page, "", self.TITLE), self.TITLE)
+
+    def test_the_full_sentence_still_ends_the_title(self):
+        page = self._page("ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญาศิลปศาสตรมหาบัณฑิต")
+        self.assertEqual(checker_module.printed_title(page, "", self.TITLE), self.TITLE)
+
+    def test_the_card_quotes_only_the_title(self):
+        wrong = self.TITLE.replace("โดยใช้", "ด้วย")
+        page = self._page("นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญาศิลปศาสตรมหาบัณฑิต").replace("โดยใช้", "ด้วย")
+        compared = checker_module._title_as_printed({"status": "typo", "actual": "x", "score": 0.5}, page, self.TITLE)
+        self.assertEqual(compared["actual"], wrong)
+        found = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.TITLE)
+        self.assertNotIn("นับเป็นส่วนหนึ่ง", found)
+        self.assertEqual(len(found.fix_steps), 1)
+
+    def test_a_title_line_starting_with_nab_pen_is_kept(self):
+        """ควบคุมเชิงลบ — บรรทัดชื่อเรื่องที่ขึ้นต้นด้วย "นับเป็น..." แต่ไม่ใช่ประโยค template ไม่ถูกตัด"""
+        title = "ปัจจัยที่สัมพันธ์กับการออกกำลังกายนับเป็นกิจวัตรของผู้สูงอายุ"
+        page = "\n".join(["เรื่อง", "ปัจจัยที่สัมพันธ์กับการออกกำลังกาย", "นับเป็นกิจวัตรของผู้สูงอายุ",
+                          "ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตรปริญญา"])
+        self.assertEqual(checker_module.printed_title(page, "", title), title)
+
+
+class AnAnchorDoesNotStartInsideAWord(unittest.TestCase):
+    """คำอ้างตำแหน่งไม่เริ่มกลางคำ (เล่มจริง 11 พ.ย. 2569 ได้ "ชาชนใน" จาก "ประชาชนใน" · ข้อมูลสมมติ)"""
+
+    WANT = "กระบวนการสื่อสารเพื่อส่งเสริมการมีส่วนร่วมของประชาชนในการจัดทำรายงานโครงการตัวอย่าง"
+
+    def test_it_backs_up_to_just_after_a_joining_word(self):
+        steps = checker_module.analyze_diff(self.WANT.replace("การจัดทำ", ""), self.WANT, spaces=True, case=True).steps
+        self.assertEqual(steps, ('ให้เติม "การจัดทำ" หลัง "ประชาชนใน"',))
+
+    def test_a_lead_vowel_start_is_kept_short(self):
+        """ควบคุมเชิงลบ — "เทคโนโลยี" ขึ้นด้วยสระหน้า เป็นต้นคำอยู่แล้ว ไม่ลาก "การนำ" มาด้วย"""
+        fg = list("การนำเทคโนโลยี")
+        self.assertEqual(checker_module._widen_to_word_start(fg, 5), 5)
+
+    def test_no_word_start_nearby_keeps_the_old_anchor(self):
+        fg = list("กกกกกกกกกกชาชน")
+        self.assertEqual(checker_module._widen_to_word_start(fg, 10), 10)
+
+
+class AQuotedChunkDoesNotCutAWord(unittest.TestCase):
+    """คำที่ยกมาทั้งก้อนรอบจุดแก้ไม่เริ่ม/ไม่จบกลางคำ ถ้าหารอยต่อที่มั่นใจได้ใกล้ ๆ (11 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    A = "ปัจจัยที่มีความสัมพันธ์กับพฤติกรรมการดูแลตนเองของผู้สูงอายุในชุมชนเมือง"
+    B = "ผลของโปรแกรมฝึกสมองโดยใช้เกมกระดานในผู้สูงอายุ"
+
+    def _steps(self, want, old, new):
+        return checker_module.analyze_diff(want.replace(old, new, 1), want, spaces=True, case=True).steps
+
+    def test_backs_up_to_a_word_start(self):
+        """เดิม 'ให้แก้ "งอายุชุมชน" ...' เริ่มกลาง "ผู้สูงอายุ" """
+        self.assertEqual(self._steps(self.A, "ในชุมชน", "ชุมชน"), ('ให้แก้ "ผู้สูงอายุชุมชน" เป็น "ผู้สูงอายุในชุมชน"',))
+
+    def test_moves_in_to_a_word_start(self):
+        """เดิม 'ให้แก้ "ดานในผู้สุงอายุ" ...' — ตัดเศษ "ดานใน" ทิ้งได้เพราะ "ผู้สุงอายุ" ไม่ซ้ำอยู่แล้ว"""
+        self.assertEqual(self._steps(self.B, "ผู้สูง", "ผู้สุง"), ('ให้แก้ "ผู้สุงอายุ" เป็น "ผู้สูงอายุ"',))
+
+    def test_runs_on_to_a_word_end(self):
+        """เดิม 'ให้แก้ "การดูแลตัวเองขอ" ...' จบกลาง "ของ" """
+        self.assertEqual(self._steps(self.A, "ตนเอง", "ตัวเอง"), ('ให้แก้ "การดูแลตัวเองของ" เป็น "การดูแลตนเองของ"',))
+
+    def test_the_confirmed_wording_stays(self):
+        """ควบคุมเชิงลบ — แบบที่เจ้าของยืนยัน 26 ต.ค. 2569 ไม่เปลี่ยน"""
+        self.assertEqual(self._steps(self.B, "โดยใช้", "ด้วย"), ('ให้แก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"',))
