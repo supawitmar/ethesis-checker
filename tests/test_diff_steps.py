@@ -712,10 +712,10 @@ class TheSummaryLayout(unittest.TestCase):
                  f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{APPROVED_TITLE}"',
                  "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
         text = _summary_of(issue)
-        # ผิดหลายจุดไม่บอกจุด (เจ้าของ 11 พ.ย. 2569 "ก็ไม่ต้องบอก ใช้แบบเดิม") — การ์ดยังบอกครบ
-        self.assertIn('   ชื่อเรื่องไม่ตรงกันกับในระบบ\n'
+        # ผิด 2 จุดบอกทั้งสองในบรรทัดเดียว (เจ้าของ "ตามที่แนะนำ" 11 พ.ย. 2569 — ไม่เกิน 2 จุด)
+        self.assertIn('   ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องลบ "การ" ที่อยู่หลัง "เทคโนโลยี" ออก '
+                      'และลบช่องว่างระหว่าง "ในระบบ" กับ "บริหาร"\n'
                       f'   ต้องแก้ไขเป็น: "{APPROVED_TITLE}"', text)
-        self.assertNotIn('ต้องลบ "การ"', text)
 
     def test_the_fix_points_are_joined_without_repeating_the_verb(self):
         self.assertEqual(checker_module._joined_fix(['ให้แก้ "A" เป็น "B"', 'ให้แก้ "C" เป็น "D"']),

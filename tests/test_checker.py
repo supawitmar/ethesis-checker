@@ -12296,10 +12296,10 @@ class Book4SummaryTitleAndEditTopic(unittest.TestCase):
         self.assertNotIn(f'"{self.ONE_POINT["actual"]}"', text)      # ไม่ยกชื่อเรื่องเต็มที่ผิดกลับมา
 
     def test_several_wrong_points_keep_the_plain_two_lines(self):
-        """เจ้าของ 11 พ.ย. 2569: "ถ้ามันผิดหลายจุดในชื่อเรื่องก็ไม่ต้องบอก ใช้แบบเดิม" """
+        """เจ้าของ 11 พ.ย. 2569: "ถ้ามันผิดหลายจุดในชื่อเรื่องก็ไม่ต้องบอก ใช้แบบเดิม" — มากกว่า 2 จุด"""
         rep = Report()
         self._add(rep, "RED", "หน้าลงนาม 1 (หน้า i)", self.WRONG)
-        self.assertGreater(len(rep.zones["RED"][0]["fix_steps"]), 1)
+        self.assertGreater(len(rep.zones["RED"][0]["fix_steps"]), checker_module.TITLE_FIX_POINTS_MAX)
         text = checker_module.plain_summary(checker_module.check_result(rep))
         self.assertIn(f'   ชื่อเรื่องไม่ตรงกันกับในระบบ\n   ต้องแก้ไขเป็น: "{self.TITLE}"', text)
         self.assertNotIn('"FOR"', text)
@@ -12311,8 +12311,14 @@ class Book4SummaryTitleAndEditTopic(unittest.TestCase):
                          ["ชื่อเรื่องไม่ตรงกันกับในระบบ", 'ต้องแก้ไขเป็น: "ก ข"'])
         self.assertEqual(checker_module._title_summary_lines(issue, ['ให้แก้ "ก" เป็น "ข"'], "ข ค")[0],
                          'ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "ก" เป็น "ข"')
+        # ไม่เกิน 2 จุดบอก (เจ้าของ "ตามที่แนะนำ" 11 พ.ย. 2569) · 3 จุดไม่บอก
         self.assertEqual(checker_module._title_summary_lines(issue, ['ให้แก้ "ก" เป็น "ข"', 'ให้ลบ "ง" ออก'], "ข ค")[0],
-                         "ชื่อเรื่องไม่ตรงกันกับในระบบ")
+                         'ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "ก" เป็น "ข" และลบ "ง" ออก')
+        self.assertEqual(checker_module._title_summary_lines(issue, ['ให้แก้ "ก" เป็น "ข"', 'ให้แก้ "ค" เป็น "ง"'], "ข ง")[0],
+                         'ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "ก" เป็น "ข" และ "ค" เป็น "ง"')
+        self.assertEqual(checker_module._title_summary_lines(
+            issue, ['ให้แก้ "ก" เป็น "ข"', 'ให้แก้ "ค" เป็น "ง"', 'ให้ลบ "จ" ออก'], "ข ง")[0],
+            "ชื่อเรื่องไม่ตรงกันกับในระบบ")
 
     def test_the_card_still_shows_the_fix_points(self):
         rep = Report()
@@ -12358,6 +12364,12 @@ class Book4SummaryTitleAndEditTopic(unittest.TestCase):
         self.assertEqual(i18n.tr_en('ต้องแก้ไขเป็น: "ก ข"', pairs), 'Change it to: "ก ข"')
         self.assertEqual(i18n.tr_en('ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "FOR" เป็น "OF" และ "A" เป็น "B"', pairs),
                          'The title does not match the system record: change "FOR" to "OF" and "A" to "B"')
+        # เล่มที่ 5 (11 พ.ย. 2569): แก้ + ลบ
+        line = ('ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "PARTICIPATION" เป็น "PARTICIPATORY" '
+                'และลบ "FOR" ที่อยู่หลัง "CARING" ออก')
+        self.assertEqual(i18n.tr_en(line, pairs),
+                         'The title does not match the system record: change "PARTICIPATION" to "PARTICIPATORY" '
+                         'and delete "FOR" that follows "CARING"')
 
 
 class UnnumberedSheetsAsRanges(unittest.TestCase):
