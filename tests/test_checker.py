@@ -9736,7 +9736,7 @@ class Update161FacultyHeadNotice(unittest.TestCase):
         import tools.check_i18n as i18n
         _block, pairs = i18n.load_tr()
         self.assertEqual(i18n.tr_en(self.LINE, pairs),
-                         "Please verify the name and qualifications of the faculty member with the program again.")
+                         "Please verify the name and degree with the program staff again.")  # เจ้าของ 12 พ.ย. 2569
 
     def test_a_dean_title_has_no_line(self):
         self.assertEqual(self._issue("Prof. Somchai Jaidee,\nM.D.\nDean\nFaculty of Medicine"), [])
