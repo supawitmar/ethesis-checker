@@ -1770,17 +1770,17 @@ class SignatureInstitutionCellTests(unittest.TestCase):
         _check_signature_institution(rep, kind, bottom, self.APPROVED, english)
         return len(rep.zones["RED"]), len(rep.zones["ORANGE"])
 
-    def test_misspelt_box_is_red(self):
-        """สะกดผิด = แดง (เจ้าหน้าที่ ต.ค. 2569)"""
+    def test_misspelt_programme_box_is_orange(self):
+        """ชื่อหลักสูตรสะกดผิด = ส้ม (เจ้าของ 13 พ.ย. 2569 "ส้มทุกกรณี" · เดิมแดง เจ้าหน้าที่ ต.ค. 2569)"""
         self.assertEqual(self._zones("advisory",
                                      "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร "
-                                     "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม"), (1, 0))
+                                     "ศิลปศาสตรมหาบัณฑิต สาขาวิชาสังคมศาสตร์สิ่งแวดล้ม"), (0, 1))
 
-    def test_box_read_but_text_missing_from_the_book_is_red(self):
-        """ระบบอ่านช่องขวาได้ (เจอ "ประธานหลักสูตร") แต่ไม่มีชื่อสาขา = เล่มไม่มี = แดง
-        (เจ้าหน้าที่ ต.ค. 2569: "หาไม่เจอ ... ถ้าไม่มีในเล่ม แดง")"""
+    def test_box_read_but_text_missing_from_the_book(self):
+        """ระบบอ่านช่องขวาได้แต่ไม่มีข้อความ: ชื่อหลักสูตร (หน้าลงนาม 1) = ส้ม (เจ้าของ 13 พ.ย. 2569 "ส้มทุกกรณี")
+        · ชื่อคณะ (หน้าลงนาม 2) ยังแดง (เจ้าหน้าที่ ต.ค. 2569: "หาไม่เจอ ... ถ้าไม่มีในเล่ม แดง") — สเปกไม่แตะหน้าลงนาม 2"""
         self.assertEqual(self._zones("advisory",
-                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร"), (1, 0))
+                                     "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล ประธานหลักสูตร"), (0, 1))
         self.assertEqual(self._zones("exam", "คณบดี บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล คณบดี "
                                              "มหาวิทยาลัยมหิดล"), (1, 0))
 

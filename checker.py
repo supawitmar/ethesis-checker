@@ -2233,7 +2233,8 @@ def _check_programme_name(rep, degree, bottom_text, english, box_read, loc):
     ระหว่างชื่อปริญญากับ "สาขาวิชา…" ได้ (เล่มจริง: "พยาบาลศาสตรมหาบัณฑิต บัณฑิตวิทยาลัย … สาขาวิชา…") จึงถือว่าถูก
     เมื่อพบชื่อเต็มติดกัน หรือพบชื่อปริญญา และ "สาขาวิชา/สาขา<ชื่อสาขา>" ติดกันสะกดตรงครบทุกตัว — ชื่อสาขาเดี่ยว ๆ ไม่นับ
     เพราะชื่อคณะมักมีชื่อสาขาอยู่ด้วย ("Faculty of Tropical Medicine") การฟ้องเกินทั้งที่เล่มถูกเสียหายกว่า (หลักเดิม)
-    สะกดผิด/ไม่มี = แดง · อ่านช่องนี้ไม่ได้ (box_read=False) และหาไม่เจอ = ส้ม (ตรรกะเดิม)
+    ส้มทุกกรณี (เจ้าของ 13 พ.ย. 2569 "ขอเป็นสีส้มแทนได้ไหม" แล้วยืนยัน "ส้มทุกกรณี") — เดิมสะกดผิด/ไม่มี = แดง
+    อ่านช่องนี้ไม่ได้ = ส้ม · ถ้อยคำ วิธีแก้ ตำแหน่งเหมือนเดิม · box_read ไม่ใช้ตัดสินสีแล้ว (คงพารามิเตอร์ไว้ให้ผู้เรียก)
     """
     want = programme_name(degree, english)
     if not want:
@@ -2248,12 +2249,8 @@ def _check_programme_name(rep, degree, bottom_text, english, box_read, loc):
     tails = [f"{joint} {subject}" for joint in joints]
     if spelled_in(degree_name, bottom_text) and any(spelled_in(tail, bottom_text) for tail in tails):
         return
-    # เจอชื่อหลักสูตรแบบหยาบ (ตัดวรรณยุกต์/สระ) แต่สะกดไม่ตรง = สะกดผิด แดงเสมอ
-    rough = any(norm(text) in norm(bottom_text) for text in full) or \
-        (norm(degree_name) in norm(bottom_text) and any(norm(tail) in norm(bottom_text) for tail in tails))
-    zone = "RED" if (rough or box_read) else "ORANGE"
     shown = match_printed_case(want, bottom_text) if english else want
-    rep.add(zone, "front_matter", loc,
+    rep.add("ORANGE", "front_matter", loc,
             "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด",
             f'ต้องแก้เป็น "{shown}"',
             "แก้ชื่อหลักสูตรในช่องประธานหลักสูตรให้ตรงตามที่ได้รับอนุมัติ", "FRONT.COMMITTEE")

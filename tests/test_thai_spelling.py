@@ -206,14 +206,15 @@ class EachCheckJudgesSpellingStrictly(unittest.TestCase):
         self.assertEqual(rep.zones["ORANGE"], [])
 
     def test_a_subject_misspelt_in_a_mark_still_counts_as_the_programme_line(self):
-        """ชื่อสาขาผิดแค่วรรณยุกต์ + ชื่อปริญญาสะกดผิด = แดงข้อเดียว (อัปเดต 1.7 ข้อชื่อหลักสูตรเต็มแทนสองข้อเดิม)"""
+        """ชื่อสาขาผิดแค่วรรณยุกต์ + ชื่อปริญญาสะกดผิด = ข้อเดียว (อัปเดต 1.7 ข้อชื่อหลักสูตรเต็มแทนสองข้อเดิม)
+        สีส้ม (เจ้าของ 13 พ.ย. 2569 "ส้มทุกกรณี" · เดิมแดง) — ยังตัดสินว่าสะกดผิดเหมือนเดิม"""
         rep = Report()
         checker_module._check_signature_institution(
             rep, "advisory", "ประธานหลักสูตร วิทยาศาสตรมหาบัณฑิด สาขาวิชาโรคติดเชือ",
             {"degree_cover_th": "วิทยาศาสตรมหาบัณฑิต (โรคติดเชื้อ)"}, False, "หน้าลงนาม 1 ", " (หน้า ก)")
-        self.assertEqual([i["expected"] for i in rep.zones["RED"]],
+        self.assertEqual([i["expected"] for i in rep.zones["ORANGE"]],
                          ['ต้องแก้เป็น "วิทยาศาสตรมหาบัณฑิต สาขาวิชาโรคติดเชื้อ"'])
-        self.assertEqual(rep.zones["ORANGE"], [])
+        self.assertEqual(rep.zones["RED"], [])
 
     def test_the_abstract_committee_heading_with_a_missing_tone_mark_is_red(self):
         rep = Report()
