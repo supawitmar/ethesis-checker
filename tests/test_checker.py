@@ -4314,7 +4314,7 @@ class TheExamPageHeadMustBeDeanOrDirector(unittest.TestCase):
         source = inspect.getsource(checker_module.run_check)
         with_names = source.index("checked_committee = _check_committees(")
         without = source.index(
-            "_check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref)")
+            "_check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref,")
         self.assertLess(with_names, without)
         between = source[with_names:without]
         self.assertIn("else:", between)        # อยู่ในกิ่งที่ไม่มีรายชื่อกรรมการ ไม่ใช่ทุกกรณี
@@ -11252,7 +11252,7 @@ class Update183NoThaiLeftInEnglish(unittest.TestCase):
             ("บทที่ 2 ในสารบัญ (หน้า viii) และในเนื้อหา (หน้าไม่ระบุเลข (แผ่นที่ 26 ของไฟล์))",
              "Chapter 2 in Table of contents (page viii) and in the body (page with no page number (sheet 26 of the file))"),
             ("หน้าลงนาม 1 ประธานหลักสูตร (หน้าไม่ระบุเลข (แผ่นที่ 2 ของไฟล์))",
-             "Signature page 1 programme chair box (page with no page number (sheet 2 of the file))"),
+             "Signature page 1 program director box (page with no page number (sheet 2 of the file))"),
             ("หน้าไม่ระบุเลข (แผ่นที่ 101 ของไฟล์) ถึง หน้าไม่ระบุเลข (แผ่นที่ 105 ของไฟล์) (5 หน้า)",
              "pages with no page number (sheets 101 to 105 of the file, 5 pages)"),
             ("ระบบหาหน้าลงนามไม่เจอ", "Signature pages not found"),
@@ -12593,3 +12593,135 @@ class AQuotedChunkDoesNotCutAWord(unittest.TestCase):
     def test_the_confirmed_wording_stays(self):
         """ควบคุมเชิงลบ — แบบที่เจ้าของยืนยัน 26 ต.ค. 2569 ไม่เปลี่ยน"""
         self.assertEqual(self._steps(self.B, "โดยใช้", "ด้วย"), ('ให้แก้ "สมองด้วยเกมกระดาน" เป็น "สมองโดยใช้เกมกระดาน"',))
+
+
+class TheRightBoxTitleOnBothSignaturePages(unittest.TestCase):
+    """ตำแหน่งช่องล่างขวา (เจ้าของ 16 พ.ย. 2569 "ใช้สเปคตามนี้เลย" · ข้อมูลสมมติ)
+
+    หน้าลงนาม 1 = "Program director" · หน้าลงนาม 2 = คณะใช้ "Dean" สถาบันใช้ "Director"
+    """
+
+    LEFT = "Prof. Somchai Jaidee, Ph.D. (Biology) Dean Faculty of Graduate Studies, Mahidol University"
+
+    def _bottom(self, right):
+        return checker_module.BottomText(f"{self.LEFT} {right}", right)
+
+    def _items(self, check, right, *args):
+        rep = Report()
+        check(rep, self._bottom(right), "หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", *args)
+        return rep.zones["RED"]
+
+    # ---------- อ่านตำแหน่ง ----------
+    def test_the_title_kinds(self):
+        title = checker_module.right_box_title
+        self.assertEqual(title("Asst. Prof. A B, Ph.D. Program Director Doctor of Philosophy Program in X")[0], "programme")
+        self.assertEqual(title("A B, Ph.D. Programme director Master of Science Programme in X")[0], "programme")
+        self.assertEqual(title("A B, Ph.D. Director Doctor of Philosophy program in X Faculty of Y")[:2], ("director", "Director"))
+        self.assertEqual(title("A B, Ph.D. Dean Faculty of Y, Mahidol University")[:2], ("dean", "Dean"))
+        self.assertEqual(title("ก ข, ปร.ด. ประธานหลักสูตร ปรัชญาดุษฎีบัณฑิต สาขาวิชา ค")[0], "programme")
+        self.assertEqual(title("ก ข, ปร.ด. ผู้อำนวยการหลักสูตร ปรัชญาดุษฎีบัณฑิต สาขาวิชา ค")[0], "programme")
+        self.assertEqual(title("ก ข, ปร.ด. คณบดี คณะสังคมศาสตร์")[:2], ("dean", "คณบดี"))
+        self.assertEqual(title("ก ข, ปร.ด. ผู้อำนวยการ สถาบันโภชนาการ")[:2], ("director", "ผู้อำนวยการ"))
+
+    def test_no_title_or_both_words_is_unknown(self):
+        self.assertIsNone(checker_module.right_box_title(""))
+        self.assertIsNone(checker_module.right_box_title("A B, Ph.D. Faculty of Y"))
+        self.assertIsNone(checker_module.right_box_title("A B Dean X Director Y"))
+
+    def test_the_unit_kind(self):
+        kind = checker_module.head_unit_kind
+        self.assertEqual(kind("คณะสังคมศาสตร์และมนุษยศาสตร์"), "faculty")
+        self.assertEqual(kind("สถาบันโภชนาการ"), "institute")
+        self.assertEqual(kind("วิทยาลัยการจัดการ"), "")                 # บอกไม่ได้ = ไม่แจ้ง
+        self.assertEqual(kind("", "Director Faculty of Social Sciences, Mahidol University"), "faculty")
+        self.assertEqual(kind("", "Director Institute of Nutrition, Mahidol University"), "institute")
+        self.assertEqual(kind("", "Dean Faculty of Graduate Studies, Mahidol University"), "")
+
+    # ---------- หน้าลงนาม 1 ----------
+    def test_page_1_director_is_red(self):
+        items = self._items(checker_module._check_programme_head_title,
+                            "A B, Ph.D. (Public Health) Director Doctor of Philosophy program in X Faculty of Y")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["found"], 'ช่องประธานหลักสูตร (มุมล่างขวา) ใช้ตำแหน่ง "Director"')
+        self.assertEqual(items[0]["expected"], 'ตำแหน่งต้องเป็น "Program director" เท่านั้น')
+        self.assertEqual(items[0]["notice"], checker_module.FACULTY_HEAD_CHECK_NOTICE)
+
+    def test_page_1_programme_titles_pass(self):
+        for right in ("A B, Ph.D. Program Director Doctor of Philosophy Program in X",
+                      "A B, Ph.D. Programme Director Master of Science Programme in X",
+                      "ก ข, ปร.ด. ประธานหลักสูตร ปรัชญาดุษฎีบัณฑิต สาขาวิชา ค"):
+            self.assertEqual(self._items(checker_module._check_programme_head_title, right), [], right)
+
+    def test_page_1_thai_dean_is_red(self):
+        items = self._items(checker_module._check_programme_head_title, "ก ข, ปร.ด. คณบดี คณะสังคมศาสตร์")
+        self.assertEqual(items[0]["expected"], 'ตำแหน่งต้องเป็น "ประธานหลักสูตร" เท่านั้น')
+
+    def test_page_1_no_title_or_unread_box_is_quiet(self):
+        """ควบคุมเชิงลบ — ไม่มีตำแหน่ง / อ่านช่องขวาไม่ได้ (.right ว่าง) = ไม่แจ้ง"""
+        self.assertEqual(self._items(checker_module._check_programme_head_title, "A B, Ph.D. Faculty of Y"), [])
+        rep = Report()
+        checker_module._check_programme_head_title(rep, f"{self.LEFT} Director", "x")
+        self.assertEqual(rep.zones["RED"], [])
+
+    # ---------- หน้าลงนาม 2 ----------
+    def test_page_2_faculty_with_director_is_red(self):
+        items = self._items(checker_module._check_faculty_head_title,
+                            "A B, Ph.D. Director Faculty of Social Sciences, Mahidol University", "คณะสังคมศาสตร์")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["expected"], 'ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น')
+        self.assertEqual(items[0]["notice"].split(NEWLINE),
+                         ['คณะใช้ "Dean" และสถาบันใช้ "Director"', checker_module.FACULTY_HEAD_CHECK_NOTICE])
+
+    def test_page_2_institute_with_dean_is_red_and_thai_words(self):
+        items = self._items(checker_module._check_faculty_head_title,
+                            "ก ข, ปร.ด. คณบดี สถาบันโภชนาการ มหาวิทยาลัยมหิดล", "สถาบันโภชนาการ")
+        self.assertEqual(items[0]["notice"].split(NEWLINE)[0], 'คณะใช้ "คณบดี" และสถาบันใช้ "ผู้อำนวยการ"')
+
+    def test_page_2_right_pairs_and_unknown_units_are_quiet(self):
+        check = checker_module._check_faculty_head_title
+        self.assertEqual(self._items(check, "A B, Ph.D. Dean Faculty of Y", "คณะวิทยาศาสตร์"), [])
+        self.assertEqual(self._items(check, "A B, Ph.D. Director Institute of Nutrition", "สถาบันโภชนาการ"), [])
+        self.assertEqual(self._items(check, "A B, Ph.D. Director College of Management", "วิทยาลัยการจัดการ"), [])
+
+    def test_page_2_program_director_keeps_its_own_item_only(self):
+        items = self._items(checker_module._check_faculty_head_title,
+                            "A B, Ph.D. Program Director Doctor of Philosophy Program in X Faculty of Y", "คณะ ก")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["notice"], checker_module.FACULTY_HEAD_CHECK_NOTICE)    # ไม่มีบรรทัด "คณะใช้ ..."
+
+    def test_the_english_is_the_owners(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for th, en in (
+                ("หน้าลงนาม 1 ประธานหลักสูตร (หน้า i)", "Signature page 1 program director box (page i)"),
+                ('ช่องประธานหลักสูตร (มุมล่างขวา) ใช้ตำแหน่ง "Director"',
+                 'The program director box (bottom right) uses the title "Director"'),
+                ('ตำแหน่งต้องเป็น "Program director" เท่านั้น', 'The title must be "Program director"'),
+                ('ตำแหน่งต้องเป็น "Dean" หรือ "Director" เท่านั้น', 'The title must be "Dean" or "Director"'),
+                ('คณะใช้ "Dean" และสถาบันใช้ "Director"', 'For the faculty use "Dean" and the institution use "Director"'),
+                (checker_module.FACULTY_HEAD_CHECK_NOTICE, "Please verify the name and degree with the program staff again.")):
+            self.assertEqual(i18n.tr_en(th, pairs), en)
+
+
+class TheRightBoxSplitsAtTheGapNotTheMiddle(unittest.TestCase):
+    """บรรทัดยาวของช่องขวาที่จัดกึ่งกลางเริ่มซ้ายกว่าเส้นแบ่ง — ต้องไม่ตัดคำแรกไปฝั่งซ้าย (เล่มจริง 16 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    @staticmethod
+    def _w(text, x0, top, width=None):
+        return {"text": text, "x0": x0, "x1": x0 + (width or 6 * len(text)), "top": top}
+
+    def test_a_centred_long_right_line_stays_whole(self):
+        mid = 297.0
+        band = [self._w("Dean", 100, 700), self._w("Program", 280, 700), self._w("Director", 330, 700),
+                self._w("Faculty", 60, 712), self._w("of", 105, 712), self._w("Graduate", 120, 712),
+                self._w("Master", 250, 712), self._w("of", 290, 712), self._w("Science", 305, 712),
+                self._w("Program", 352, 712), self._w("in", 400, 712), self._w("X", 415, 712)]
+        right = [w["text"] for w in checker_module._right_box_words(band, mid)]
+        self.assertEqual(right, ["Program", "Director", "Master", "of", "Science", "Program", "in", "X"])
+        self.assertEqual(checker_module.right_box_title(" ".join(right))[0], "programme")
+
+    def test_a_line_of_one_box_goes_by_its_centre(self):
+        band = [self._w("Mahidol", 330, 724), self._w("University", 378, 724)]
+        self.assertEqual(len(checker_module._right_box_words(band, 297.0)), 2)
+        band = [self._w("Mahidol", 80, 724), self._w("University", 128, 724)]
+        self.assertEqual(checker_module._right_box_words(band, 297.0), [])

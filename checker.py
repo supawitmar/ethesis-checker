@@ -908,6 +908,20 @@ def _rejoin_thai_marks(words):
     return out
 
 
+class BottomText(str):
+    """ข้อความแถวล่างสุดของหน้าลงนาม (str เดิม) + .right = ข้อความช่องล่างขวาอย่างเดียว
+
+    ข้อตำแหน่งของช่องล่างขวา (16 พ.ย. 2569) ต้องรู้ว่าคำ "Dean"/"Director" อยู่ช่องไหน — ช่องซ้ายเป็น
+    "Dean Faculty of Graduate Studies" เสมอ ค้นทั้งแถวจึงแยกไม่ออก · เป็น str เดิมทุกอย่าง ผู้เรียกเดิมไม่ต้องแก้
+    """
+    right = ""
+
+    def __new__(cls, text, right=""):
+        obj = super().__new__(cls, text)
+        obj.right = right
+        return obj
+
+
 def signature_committee_slots(pdf_page):
     """อ่านตารางลายเซ็นตามกริดตายตัว
 
@@ -1075,7 +1089,40 @@ def signature_committee_slots(pdf_page):
     reading = band_text(band)
     by_column = band_text([w for w in band if float(w['x0']) < mid]) + ' ' + \
                 band_text([w for w in band if float(w['x0']) >= mid])
-    return members, member_quals, (reading + '\n' + by_column).strip(), member_raw
+    right = band_text(_right_box_words(band, mid))
+    return members, member_quals, BottomText((reading + '\n' + by_column).strip(), right.strip()), member_raw
+
+
+# ช่องว่างระหว่างช่องล่างซ้ายกับช่องล่างขวาในบรรทัดเดียวกัน (pt) — ช่องว่างระหว่างคำปกติไม่กี่ pt
+_BOX_GAP = 15.0
+
+
+def _right_box_words(band, mid):
+    """คำของช่องล่างขวาอย่างเดียว — แบ่งแต่ละบรรทัดที่ช่องว่างใหญ่สุด แล้วดูว่าก้อนไหนอยู่ฝั่งขวาจากจุดกึ่งกลางของก้อน
+
+    ข้อความในช่องจัดกึ่งกลาง บรรทัดยาวของช่องขวา ("Program Director" "Master of Science Program in ...") เริ่มซ้ายกว่า
+    เส้นแบ่ง แบ่งด้วย x0 ของคำ คำแรกจึงตกไปฝั่งซ้าย เหลือ "Director of Science Program in ..." (เล่มจริง 16 พ.ย. 2569)
+    แล้วข้อตำแหน่งหน้าลงนาม 1 แจ้งผิดว่าใช้ "Director" · by_column เดิมไม่แตะ (ข้ออื่นค้นแบบ substring จากทั้งแถวอยู่แล้ว)
+    """
+    def x1(w):
+        return float(w.get('x1', float(w['x0']) + 5 * len(w.get('text', ''))))
+
+    rows = []
+    for w in sorted(band, key=lambda w: (float(w['top']), float(w['x0']))):
+        if rows and abs(rows[-1][0] - float(w['top'])) <= 3:
+            rows[-1][1].append(w)
+        else:
+            rows.append([float(w['top']), [w]])
+    out = []
+    for _top, ws in rows:
+        ws.sort(key=lambda w: float(w['x0']))
+        gaps = [(float(ws[i + 1]['x0']) - x1(ws[i]), i) for i in range(len(ws) - 1)]
+        gap, at = max(gaps) if gaps else (0.0, -1)
+        parts = [ws[:at + 1], ws[at + 1:]] if gap >= _BOX_GAP else [ws]
+        for part in parts:
+            if (float(part[0]['x0']) + x1(part[-1])) / 2 >= mid:
+                out.extend(part)
+    return out
 
 
 def _committee_page_kind(page_text):
@@ -2337,8 +2384,80 @@ def faculty_head_choice(bottom_text):
 
 FACULTY_HEAD_CHECK_NOTICE = "กรุณาตรวจสอบชื่อและคุณวุฒิของอาจารย์กับทางหลักสูตรอีกครั้ง"
 
+_HEAD_WORD_EN = re.compile(r'\b(Dean|Director)\b', re.I)
 
-def _check_faculty_head_title(rep, bottom_text, loc):
+
+def right_box_title(right_text):
+    """ตำแหน่งในช่องล่างขวาของหน้าลงนาม -> (ชนิด, คำที่พิมพ์, "en"/"th") หรือ None
+
+    ชนิด: "programme" (Program/Programme director · ประธานหลักสูตร · ผู้อำนวยการหลักสูตร) · "choice" (ยังเป็น
+    "Dean/Director") · "dean" · "director" · ไม่มีตำแหน่ง อ่านไม่ได้ หรือมีทั้ง Dean และ Director (แยกไม่ออก) = None
+    รับเฉพาะข้อความช่องขวา (BottomText.right) — ทั้งแถวมี "Dean" ของช่องซ้ายเสมอ
+    """
+    text = right_text or ""
+    if not text.strip():
+        return None
+    found = programme_head_title(text)
+    if found:
+        return "programme", found[0], found[1]
+    choice = faculty_head_choice(text)
+    if choice:
+        return "choice", choice[0], choice[1]
+    words = {m.group(1).lower(): soft(m.group(1)) for m in _HEAD_WORD_EN.finditer(text)}
+    if len(words) == 1:
+        kind, printed = next(iter(words.items()))
+        return kind, printed, "en"
+    if words:
+        return None
+    squashed = norm(text)
+    dean, director = norm("คณบดี") in squashed, norm("ผู้อำนวยการ") in squashed
+    if dean != director:
+        return ("dean", "คณบดี", "th") if dean else ("director", "ผู้อำนวยการ", "th")
+    return None
+
+
+def head_unit_kind(unit, right_text=""):
+    """หน่วยงานของนักศึกษาเป็น "faculty" (คณะ) / "institute" (สถาบัน) / "" (บอกไม่ได้)
+
+    ยึดชื่อส่วนงานจาก eThesis ก่อน (ภาษาไทยเสมอ) ไม่มีแล้วค่อยดูข้อความช่องล่างขวา (ตัด "Faculty of Graduate
+    Studies" / "บัณฑิตวิทยาลัย" ของช่องซ้ายที่อาจปนมาออกก่อน) · วิทยาลัย/ศูนย์/อื่น ๆ = บอกไม่ได้ (ไม่ฟ้อง)
+    """
+    unit = soft(unit or "").strip()
+    if unit:
+        if unit.startswith("คณะ"):
+            return "faculty"
+        if unit.startswith("สถาบัน"):
+            return "institute"
+        return ""
+    text = re.sub(r'Faculty\s+of\s+Graduate\s+Studies', ' ', right_text or "", flags=re.I)
+    faculty = bool(re.search(r'\bFaculty\s+of\b', text, re.I)) or norm("คณะ") in norm(text.replace("บัณฑิตวิทยาลัย", " "))
+    institute = bool(re.search(r'\bInstitute\b', text, re.I)) or norm("สถาบัน") in norm(text)
+    if faculty != institute:
+        return "faculty" if faculty else "institute"
+    return ""
+
+
+def _check_programme_head_title(rep, bottom_text, loc):
+    """หน้าลงนาม 1 มุมล่างขวา (ช่องประธานหลักสูตร) ต้องใช้ตำแหน่ง "Program director" / "ประธานหลักสูตร"
+
+    เจ้าของ 16 พ.ย. 2569 ส่งเล่มที่ช่องนี้พิมพ์ "Director" มาว่าระบบไม่แจ้ง แล้วยืนยันสเปก "ใช้สเปคตามนี้เลย"
+    · ตำแหน่งระดับหลักสูตร (รวม "Programme director" และ "ผู้อำนวยการหลักสูตร") = ถูก · ไม่มีตำแหน่ง/อ่านช่องไม่ได้ = ไม่แจ้ง
+    · แดงเหมือนข้อตำแหน่งของช่องคณบดี (คำตำแหน่งอ่านได้แน่นอน) · แยกจากข้อชื่อหลักสูตร (ส้ม)
+    · expected ห้ามจบด้วยเครื่องหมายคำพูด (เหตุผลเดียวกับ _check_faculty_head_title) จึงลงท้าย "เท่านั้น"
+    """
+    found = right_box_title(getattr(bottom_text, "right", ""))
+    if not found or found[0] == "programme":
+        return
+    _kind, printed, lang = found
+    want = "Program director" if lang == "en" else "ประธานหลักสูตร"
+    rep.add("RED", "front_matter", loc,
+            f'ช่องประธานหลักสูตร (มุมล่างขวา) ใช้ตำแหน่ง "{printed}"',
+            f'ตำแหน่งต้องเป็น "{want}" เท่านั้น',
+            "ใช้ตำแหน่งของประธานหลักสูตร ส่วนคณบดี/ผู้อำนวยการลงนามในหน้าลงนาม 2",
+            "FRONT.COMMITTEE", notice=FACULTY_HEAD_CHECK_NOTICE)
+
+
+def _check_faculty_head_title(rep, bottom_text, loc, unit=""):
     """หน้าลงนาม 2 มุมล่างขวาต้องเป็นตำแหน่ง Dean หรือ Director ไม่ใช่ Program Director
 
     เจ้าหน้าที่สั่ง (ก.ย. 2569): "หน้า ii หรือ ข ... มุมล่างขวา ต้องเป็น Dean ก็ Director
@@ -2378,9 +2497,30 @@ def _check_faculty_head_title(rep, bottom_text, loc):
                 f'ต้องเลือกตำแหน่งเดียว: "{heads[0]}" หรือ "{heads[1]}" อย่างใดอย่างหนึ่ง',
                 "เลือกเหลือคำเดียวตามหัวหน้าส่วนงานของนักศึกษา แล้วลบอีกคำออก",
                 "FRONT.COMMITTEE")
+    # สองข้อบนแจ้งพร้อมกันได้ (เดิม) · ข้อคณะ/สถาบันข้างล่างแจ้งเฉพาะเมื่อสองข้อบนไม่แจ้ง
+    if found or choice:
+        return
+    # คณะใช้ Dean สถาบันใช้ Director (เจ้าของ 16 พ.ย. 2569 "ใช้สเปคตามนี้เลย") — เล่มที่ส่งมาเป็นคณะแต่ช่องนี้พิมพ์
+    # "Director" (คัดมาจากหน้าลงนาม 1) · บอกไม่ได้ว่าเป็นคณะหรือสถาบัน / อ่านตำแหน่งไม่ได้ = ไม่แจ้ง
+    # บรรทัด "คณะใช้ ... สถาบันใช้ ..." เฉพาะข้อนี้ ไม่ใส่ในข้อ Program director ข้างบน (เจ้าของให้มาเฉพาะกรณีนี้)
+    right = getattr(bottom_text, "right", "")
+    title = right_box_title(right)
+    if not title or title[0] not in ("dean", "director"):
+        return
+    kind, printed, lang = title
+    unit_kind = head_unit_kind(unit, right)
+    if (unit_kind, kind) not in (("faculty", "director"), ("institute", "dean")):
+        return
+    heads = ("Dean", "Director") if lang == "en" else ("คณบดี", "ผู้อำนวยการ")
+    rep.add("RED", "front_matter", loc,
+            f'ช่องคณบดีคณะ (มุมล่างขวา) ใช้ตำแหน่ง "{printed}"',
+            f'ตำแหน่งต้องเป็น "{heads[0]}" หรือ "{heads[1]}" เท่านั้น',
+            f'คณะใช้ "{heads[0]}" และสถาบันใช้ "{heads[1]}"',
+            "FRONT.COMMITTEE",
+            notice=f'คณะใช้ "{heads[0]}" และสถาบันใช้ "{heads[1]}"\n{FACULTY_HEAD_CHECK_NOTICE}')
 
 
-def _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref):
+def _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref, unit=""):
     """ตรวจตำแหน่งมุมล่างขวาของหน้าลงนาม 2 เมื่อไม่มีรายชื่อกรรมการจาก eThesis
 
     run_check เรียก _check_committees ก็ต่อเมื่อมีรายชื่อกรรมการ ไม่งั้นข้ามทั้งหน้าลงนามเงียบ ๆ รวมข้อ
@@ -2395,14 +2535,19 @@ def _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, p
             for idx in sig_pages[:2]:
                 if not 0 <= idx < min(len(_pl.pages), len(pages)):
                     continue
-                if signature_page_committee(sig_pages, idx) != "exam":
+                kind = signature_page_committee(sig_pages, idx)
+                if kind not in ("advisory", "exam"):
                     continue
-                if _committee_page_kind(pages[idx]) not in ("", "exam"):
+                if _committee_page_kind(pages[idx]) not in ("", kind):
                     continue
                 bottom_text = signature_committee_slots(_pl.pages[idx])[2]
                 page_label = signature_page_position(sig_pages, idx)
-                _check_faculty_head_title(rep, bottom_text,
-                                          f"{page_label} คณบดีคณะ ({page_ref(idx)})")
+                if kind == "advisory":
+                    _check_programme_head_title(rep, bottom_text,
+                                                f"{page_label} ประธานหลักสูตร ({page_ref(idx)})")
+                else:
+                    _check_faculty_head_title(rep, bottom_text,
+                                              f"{page_label} คณบดีคณะ ({page_ref(idx)})", unit)
     except Exception:
         return
 
@@ -2538,7 +2683,11 @@ def _check_committees(rep, committees, sig_pages, pages, pdf_path, page_ref,
         # จึงตรวจก่อนบรรทัดข้ามข้างล่าง — ถ้าหัวข้อบนหน้าบอกว่าเป็นหน้าที่ปรึกษา (สลับหน้ากัน)
         # ไม่ฟ้อง เพราะหน้าที่ปรึกษาต้องมี Program Director อยู่แล้ว มีรายการสีม่วงเตือนเรื่องสลับหน้าแทน
         if kind == "exam" and heading_kind in ("", "exam"):
-            _check_faculty_head_title(rep, bottom_text, f"{page_label} คณบดีคณะ ({page_ref(idx)})")
+            _check_faculty_head_title(rep, bottom_text, f"{page_label} คณบดีคณะ ({page_ref(idx)})",
+                                      A.get("faculty", ""))
+        # ตำแหน่งช่องล่างขวาของหน้าลงนาม 1 ก็เป็นกฎของ template เหมือนกัน (เจ้าของ 16 พ.ย. 2569)
+        if kind == "advisory" and heading_kind in ("", "advisory"):
+            _check_programme_head_title(rep, bottom_text, f"{page_label} ประธานหลักสูตร ({page_ref(idx)})")
         if not expected:
             continue
         handled_any = True
@@ -10215,7 +10364,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         else:
             # ไม่มีรายชื่อกรรมการ (ไม่ได้แนบ eThesis หรืออ่านไม่ได้) — ข้อตำแหน่ง Dean/Director
             # ของหน้าลงนาม 2 ไม่ต้องใช้รายชื่อ ต้องตรวจต่อ ไม่ใช่ข้ามไปพร้อมทั้งหน้า
-            _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref)
+            _check_signature_heads_without_committees(rep, sig_pages, pages, pdf_path, page_ref,
+                                                      A.get("faculty", ""))
         # หน้าบทคัดย่อ: รูปแบบรายชื่อกรรมการ (ตัวพิมพ์ใหญ่/วงเล็บ/ตำแหน่งวิชาการ) เป็นกฎ
         # ของ template ล้วน จึงตรวจเสมอ ส่วนการนับจำนวนทำเมื่อมีข้อมูล eThesis
         _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages,

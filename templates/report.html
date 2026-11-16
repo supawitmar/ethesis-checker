@@ -1011,6 +1011,12 @@ var TR = [
   [/ไม่พบชื่อสาขา ("[^"]+") ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The subject $1 was not found in the programme chair box (bottom right)'],
   [/ไม่พบชื่อปริญญา ("[^"]+") ในช่องประธานหลักสูตร \(มุมล่างขวา\)/g, 'The degree name $1 was not found in the programme chair box (bottom right)'],
   [/ช่องคณบดีคณะ \(มุมล่างขวา\) ใช้ตำแหน่ง/g, 'The faculty dean box (bottom right) uses the title'],
+  // ตำแหน่งช่องล่างขวาหน้าลงนาม 1 · คณะ/สถาบัน หน้าลงนาม 2 (ถ้อยคำอังกฤษตามเจ้าของ 16 พ.ย. 2569)
+  [/ช่องประธานหลักสูตร \(มุมล่างขวา\) ใช้ตำแหน่ง/g, 'The program director box (bottom right) uses the title'],
+  [/^ตำแหน่งต้องเป็น ("[^"]+") เท่านั้น$/g, 'The title must be $1'],
+  [/^คณะใช้ "คณบดี" และสถาบันใช้ "ผู้อำนวยการ"$/g, 'For the faculty use "Dean" and the institution use "Director"'],
+  [/^คณะใช้ ("[^"]+") และสถาบันใช้ ("[^"]+")$/g, 'For the faculty use $1 and the institution use $2'],
+  [/^ใช้ตำแหน่งของประธานหลักสูตร ส่วนคณบดี\/ผู้อำนวยการลงนามในหน้าลงนาม 2$/g, 'Use the program director title; the dean or director signs on signature page 2'],
   [/ตำแหน่งต้องเป็น ("[^"]+") หรือ ("[^"]+") เท่านั้น/g, 'The title must be $1 or $2'],
   [/ใช้ตำแหน่งของหัวหน้าส่วนงาน ส่วนประธานหลักสูตรลงนามในหน้าลงนาม 1/g, 'Use the title of the head of the faculty or institute; the programme director signs on signature page 1'],
   // ถ้อยคำอังกฤษตามเจ้าของทุกตัวอักษร (12 พ.ย. 2569)
@@ -1603,7 +1609,7 @@ var TR = [
    'Chapter $1 in Table of contents (page with no page number (sheet $2 of the file)) and in the body (page $3)'],
   [/^บทที่ (\d+) ในสารบัญ \(หน้า ([^\s()]+)\) และในเนื้อหา \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g,
    'Chapter $1 in Table of contents (page $2) and in the body (page with no page number (sheet $3 of the file))'],
-  [/^หน้าลงนาม (\d+) ประธานหลักสูตร \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g, 'Signature page $1 programme chair box (page with no page number (sheet $2 of the file))'],
+  [/^หน้าลงนาม (\d+) ประธานหลักสูตร \(หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\)\)$/g, 'Signature page $1 program director box (page with no page number (sheet $2 of the file))'],
   [/^หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\) ถึง หน้าไม่ระบุเลข \(แผ่นที่ (\d+) ของไฟล์\) \((\d+) หน้า\)$/g,
    'pages with no page number (sheets $1 to $2 of the file, $3 pages)'],
   [/^(หน้า.+) ถึง (หน้า.+) \((\d+) หน้า\)$/g, '$1 to $2 ($3 pages)'],
@@ -1727,7 +1733,7 @@ var TR = [
   // ---- รายชื่อกรรมการบนหน้าลงนาม ----
   [/หน้าอาจารย์ที่ปรึกษา/g, 'Advisory committee page'],
   [/หน้ากรรมการสอบ/g, 'Examination committee page'],
-  [/ ประธานหลักสูตร \(หน้า/g, ' programme chair box (page'],
+  [/ ประธานหลักสูตร \(หน้า/g, ' program director box (page'],
   [/ คณบดีคณะ \(หน้า/g, ' faculty dean box (page'],
   [/ — คณบดี/g, ' — Dean'],
   [/พบกรรมการที่มีชื่อ (\d+) คนบนหน้าลงนาม/g, 'Found $1 named committee members on the signature page'],
