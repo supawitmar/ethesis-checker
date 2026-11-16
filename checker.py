@@ -7417,7 +7417,7 @@ def printed_title(page_text, student_name="", title=""):
     for i in range(start, min(start + 6, len(lines))):
         line = lines[i]
         if (_TITLE_STOP.match(line.strip()) or _starts_loosely(line, _TITLE_STOP_TH)
-                or _ABS_STUDENT_LINE.search(line)):
+                or _ABS_STUDENT_LINE.search(line) or _ABS_COMMITTEE_HEADING.search(line)):
             break
         if want_name and want_name in norm(line):
             break
@@ -7517,6 +7517,10 @@ def _title_as_printed(compared, page_text, expected, student_name=""):
 
 
 _TITLE_NOT_FOUND_SCORE = 0.4
+# ชื่อเรื่องที่คล้ายกันตั้งแต่ระดับนี้ชี้จุดต่างได้ แม้ต่ำกว่าเกณฑ์ "พิมพ์ผิด" (typo_threshold 0.90) — เล่มจริง 16 พ.ย. 2569
+# มีคำว่า "อำเภอเมืองสุราษฎร์ธานี" เกินมาทั้งก้อน คล้าย 0.87 จึงเป็น mismatch แล้วไม่ไล่จุดต่างเลย ข้อความสรุปเหลือแค่
+# "ชื่อเรื่องไม่ตรงกันกับในระบบ" ทั้งที่ผิดจุดเดียว · ต่ำกว่านี้ (ต่างกันมาก) ยังไม่ไล่ เพราะจุดต่างจะยาวจนอ่านไม่รู้เรื่อง
+_TITLE_DIFF_SCORE = 0.8
 
 
 def title_mismatch_detail(label, compared, expected=''):
@@ -7533,7 +7537,8 @@ def title_mismatch_detail(label, compared, expected=''):
     # ไม่ใกล้เคียงเลย = หน้านี้ไม่มีชื่อเรื่อง ไม่ใช่ชื่อเรื่องผิด — เดิมยกหัวกระดาษหรือประโยคในบทคัดย่อมาอ้าง (เล่มจริง 31 ต.ค. 2569)
     if compared['status'] == 'mismatch' and compared.get('score', 1.0) < _TITLE_NOT_FOUND_SCORE:
         detail = f'ไม่พบ{label.replace("ในรูปเล่ม", "").strip()}ที่ตรงกับข้อมูลในระบบบนหน้านี้'
-    if expected and compared['status'] in ('typo', 'case'):
+    near = compared['status'] == 'mismatch' and compared.get('score', 0.0) >= _TITLE_DIFF_SCORE
+    if expected and (compared['status'] in ('typo', 'case') or near):
         analysis = analyze_diff(compared['actual'], expected, spaces=True, case=True)
         # ต่างกันแค่ตัวพิมพ์เล็ก-ใหญ่ analyze_diff คืนว่าง (มันเทียบแบบตัวใหญ่หมด)
         # ถ้าปล่อยไว้ รายงานจะขึ้นสองบรรทัดที่หน้าตาเหมือนกันเป๊ะโดยไม่บอกว่าต่างตรงไหน
@@ -9882,8 +9887,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if alt_abs is not None:
                 compared = compare_reference_text(pages[alt_abs], alt_title, 'title')
                 if compared['status'] != 'exact':
+                    # หน้าบทคัดย่ออีกภาษาพิมพ์ชื่อนักศึกษาภาษานั้น — เดิมส่งชื่อภาษาหลัก บล็อกชื่อเรื่องจึงไม่หยุดที่บรรทัดชื่อ
+                    # กินชื่อ ปริญญา และรายชื่อกรรมการมาด้วย คล้ายแค่ 0.36 แล้วแจ้ง "ไม่พบชื่อเรื่องภาษาอังกฤษ..." (เล่มจริง 16 พ.ย. 2569)
+                    alt_student_name = student_name if thai_book else student_name_th
                     compared = _title_as_printed(compared, pages[alt_abs],
-                                                 alt_title, primary_student_name)
+                                                 alt_title, alt_student_name or primary_student_name)
                 rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(alt_abs)})",
                                      "pass" if compared['status'] == 'exact'
                                      else rep.mismatch_status(compared.get('marks_only'), compared['actual']),

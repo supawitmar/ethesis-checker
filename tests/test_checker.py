@@ -12725,3 +12725,39 @@ class TheRightBoxSplitsAtTheGapNotTheMiddle(unittest.TestCase):
         self.assertEqual(len(checker_module._right_box_words(band, 297.0)), 2)
         band = [self._w("Mahidol", 80, 724), self._w("University", 128, 724)]
         self.assertEqual(checker_module._right_box_words(band, 297.0), [])
+
+
+class ATitleCloseButBelowTheTypoBarStillNamesItsPoint(unittest.TestCase):
+    """เล่มจริง 16 พ.ย. 2569 · ข้อมูลสมมติ — คำเกินทั้งก้อนทำให้คล้ายต่ำกว่า 0.90 ("mismatch") แต่ยังชี้จุดได้"""
+
+    WANT = "ปัจจัยที่มีความสัมพันธ์กับการใช้บริการสุขภาพในประชาชนอายุ 18 ปีขึ้นไปจังหวัดตัวอย่าง"
+
+    def test_an_extra_district_is_one_delete_step(self):
+        got = self.WANT.replace("จังหวัดตัวอย่าง", "อำเภอเมืองตัวอย่าง จังหวัดตัวอย่าง")
+        compared = checker_module.compare_values(got, self.WANT, "title")
+        self.assertEqual(compared["status"], "mismatch")
+        self.assertGreaterEqual(compared["score"], checker_module._TITLE_DIFF_SCORE)
+        found = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.WANT)
+        self.assertEqual(found.fix_steps, ('ให้ลบ "อำเภอเมืองตัวอย่าง" ออก',))
+        self.assertTrue(found.title_differs)
+
+    def test_a_very_different_title_still_names_nothing(self):
+        """ควบคุมเชิงลบ — คล้ายต่ำกว่า _TITLE_DIFF_SCORE ไม่ไล่จุดต่าง"""
+        compared = {"status": "mismatch", "score": 0.6, "actual": "ชื่อเรื่องอื่นที่ต่างกันมากจนไม่ควรชี้จุด"}
+        found = checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.WANT)
+        self.assertEqual(tuple(found.fix_steps), ())
+
+    def test_the_title_block_stops_at_the_committee_heading(self):
+        page = NEWLINE.join(["จ", "FACTORS ASSOCIATED WITH EXAMPLE USE AMONG PEOPLE AGED 18 YEARS",
+                          "AND OLDER IN EXAMPLE PROVINCE", "SOMSRI EXAMPLE 6400000",
+                          "Master of Science (Example)", "THESIS ADVISORY COMMITTEE: A B, Ph.D."])
+        printed = checker_module.printed_title(page, "SOMSRI EXAMPLE",
+                                               "FACTORS ASSOCIATED WITH EXAMPLE USE AMONG PEOPLE AGED 18 YEARS AND OLDER")
+        self.assertEqual(printed, "FACTORS ASSOCIATED WITH EXAMPLE USE AMONG PEOPLE AGED 18 YEARS AND OLDER IN EXAMPLE PROVINCE")
+        no_name = checker_module.printed_title(NEWLINE.join(["FACTORS OF EXAMPLE", "THESIS ADVISORY COMMITTEE: A B"]), "", "")
+        self.assertEqual(no_name, "FACTORS OF EXAMPLE")
+
+    def test_the_other_language_abstract_uses_that_languages_name(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("alt_student_name = student_name if thai_book else student_name_th", source)
+        self.assertIn("alt_title, alt_student_name or primary_student_name)", source)
