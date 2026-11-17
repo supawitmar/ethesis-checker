@@ -5572,8 +5572,12 @@ def _summary_sentence(issue, skip_location=False):
     # ที่ส่งนักศึกษา ส่วนบรรทัดนี้เขียนถึงนักศึกษาโดยตรงและสั่งให้ไปติดต่อเจ้าหน้าที่
     # หลักสูตร (ถ้อยคำของเจ้าหน้าที่เอง ก.ย. 2569) ถ้าเอาตัวกรองมาครอบ ถ้อยคำทั้งย่อหน้า
     # จะหายไปจากข้อความที่ส่งนักศึกษาโดยไม่มีอะไรฟ้อง
-    lines += [line.strip() for line in (issue.get("notice") or "").split("\n")
-              if line.strip()]
+    # ย่อหน้าขอคงโครงบทขึ้นครั้งเดียวท้ายรายการแทน (plain_summary · เจ้าของ 17 พ.ย. 2569 "แจ้งแค่ครั้งเดียวไม่ต้องซ้ำซ้อน")
+    # การ์ดบนหน้ารายงานยังแสดง notice นี้ใต้ข้อจำนวนบทเหมือนเดิม
+    notice = issue.get("notice") or ""
+    if notice == CHAPTER_COUNT_NOTICE:
+        notice = ""
+    lines += [line.strip() for line in notice.split("\n") if line.strip()]
     kept = [line for line in lines if line]
     return f"\n{SUMMARY_INDENT}".join(kept)
 
@@ -5762,6 +5766,11 @@ def plain_summary(report, failed=None, passed=None, staff=None,
     # with_closing จึงไปถึงชีทด้วย
     if any(issue.get("title_differs") and issue.get("title_lead") and _corrected_value(issue) for issue in items):
         lines.append("\n" + TITLE_EDIT_TOPIC_LINE)
+    # เจ้าของ 17 พ.ย. 2569: ย่อหน้าขอคงโครงบท "แจ้งแค่ครั้งเดียวไม่ต้องซ้ำซ้อน" และ "ให้แจ้ง ลักษณะเดียวกันกับ edit topic" —
+    # ขึ้นเมื่อกลุ่ม "กรุณาแก้ไข" มีข้อจำนวนบทหรือชื่อบทไม่ตรงประกาศ (BODY.OPTION1/2 รวมข้อส้มที่เจ้าหน้าที่กดไม่ผ่าน)
+    # ต่อจาก edit topic และเหนือข้อความปิดท้ายเสมอ · ข้อส้มที่ยังรอยืนยัน สารบัญกับเนื้อหาไม่ตรงกัน โหมดยกเว้นบท = ไม่ขึ้น
+    if any(issue.get("rule_id") in CHAPTER_NOTICE_RULES for issue in items):
+        lines.append("\n" + CHAPTER_COUNT_NOTICE)
     if with_closing:
         if requirements:
             lines.append("\n" + REQUIREMENTS_TEXT)
@@ -8253,6 +8262,9 @@ N_APPENDIX = ['APPENDIX', 'APPENDICES', norm('ภาคผนวก')]
 # ขั้นตอนที่นักศึกษาต้องทำ ถ้าอยากคงโครงบทที่ไม่เป็นไปตามประกาศไว้ (เจ้าหน้าที่กำหนด
 # ถ้อยคำเอง ก.ย. 2569) — ไม่ใช่ "วิธีแก้เล่ม" แต่เป็นเรื่องที่ต้องไปยื่นขออนุมัติต่างหาก
 # จึงเขียนเป็น notice ต่อท้ายข้อ ไม่ใช่ fix (ซึ่งเป็นคำแนะนำสั้น ๆ บนการ์ด)
+# ข้อที่ทำให้ย่อหน้าขอคงโครงบทขึ้นในข้อความสรุป (จำนวนบท + ชื่อบทเทียบประกาศ ใช้รหัสเดียวกัน)
+CHAPTER_NOTICE_RULES = ("BODY.OPTION1", "BODY.OPTION2")
+
 CHAPTER_COUNT_NOTICE = "\n".join([
     "หากประสงค์จะคงเนื้อหาที่ไม่เป็นไปตามประกาศ กรุณาติดต่อเจ้าหน้าที่หลักสูตร "
     "และกรอกแบบฟอร์มตามลิงก์ด้านล่าง แล้วส่งผ่านระบบ e-document "

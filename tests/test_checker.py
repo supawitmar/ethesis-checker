@@ -695,11 +695,21 @@ class ChapterCountMessageTests(unittest.TestCase):
         # ต้องไม่กลายเป็นคำสั่งให้เปลี่ยนชื่อบท
         self.assertNotIn("ต้องแก้เป็น", summary)
 
-    def test_the_notice_never_leaks_into_other_items(self):
-        """ควบคุมเชิงลบ — ข้อที่ไม่ได้ส่ง notice ต้องไม่มีบรรทัดพวกนี้ติดไปด้วย"""
+    def test_a_chapter_title_issue_gets_the_paragraph_too(self):
+        """เจ้าของ 17 พ.ย. 2569: ชื่อบทไม่ตรงประกาศ (บทครบ) ก็ขึ้นย่อหน้านี้ ครั้งเดียวท้ายรายการ"""
         rep = checker_module.Report()
         rep.add("RED", "body", "บทที่ 2", 'ชื่อบทในเล่มเขียนว่า "LITERATURE REVIEWS"',
                 'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"', "", "BODY.OPTION1")
+        report = checker_module.check_result(rep, {"front_label_style": "roman"})
+        summary = checker_module.plain_summary(report, with_closing=False)
+        self.assertEqual(summary.count("drive.google.com"), 1)
+        self.assertTrue(summary.endswith("\n\n" + checker_module.CHAPTER_COUNT_NOTICE))
+
+    def test_the_notice_never_leaks_into_other_items(self):
+        """ควบคุมเชิงลบ — ข้ออื่น (สารบัญกับเนื้อหาไม่ตรงกัน) ไม่ทำให้ย่อหน้านี้ขึ้น"""
+        rep = checker_module.Report()
+        rep.add("RED", "front_matter", "บทที่ 2", 'ชื่อบทในสารบัญเขียนว่า "LITERATURE REVIEWS"',
+                'ต้องตรงกับในเนื้อหา "LITERATURE REVIEW"', "", "FRONT.TOC")
         report = checker_module.check_result(rep, {"front_label_style": "roman"})
         summary = checker_module.plain_summary(report)
         self.assertNotIn("e-document", summary)
@@ -12761,3 +12771,72 @@ class ATitleCloseButBelowTheTypoBarStillNamesItsPoint(unittest.TestCase):
         source = inspect.getsource(checker_module.run_check)
         self.assertIn("alt_student_name = student_name if thai_book else student_name_th", source)
         self.assertIn("alt_title, alt_student_name or primary_student_name)", source)
+
+
+class TheKeepTheStructureParagraphGoesOnceLikeEditTopic(unittest.TestCase):
+    """ย่อหน้าขอคงโครงบท ครั้งเดียวท้ายรายการ แบบ edit topic (เจ้าของ 17 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    TITLE = "ผลของโปรแกรมตัวอย่างต่อผู้สูงอายุ"
+
+    def _count(self, rep):
+        rep.add("RED", "body", "ทั้งเล่ม (สารบัญและเนื้อหา)", checker_module.chapter_count_found(5, 6, 6),
+                checker_module.chapter_count_expected(5, checker_module.CANONICAL_OPT1, False),
+                "ปรับโครงบทตามประกาศ ทั้งในสารบัญและในเนื้อหา", "BODY.OPTION1",
+                notice=checker_module.CHAPTER_COUNT_NOTICE)
+
+    def _name(self, rep, zone="RED", chapter=2):
+        rep.add(zone, "body", f"บทที่ {chapter} ในสารบัญ (หน้า vi) และในเนื้อหา (หน้า 6)",
+                'ชื่อบทในเล่มเขียนว่า "LITERATURE REVIEWS"', 'ตามประกาศ 2569 ควรเป็น "LITERATURE REVIEW"',
+                "", "BODY.OPTION1")
+
+    def _title(self, rep):
+        compared = {"status": "typo", "actual": self.TITLE.replace("ตัวอย่าง", "ตัวอยาง"), "score": 0.95}
+        rep.add("RED", "front_matter", "หน้าปก", checker_module.title_mismatch_detail("ชื่อเรื่อง", compared, self.TITLE),
+                f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.TITLE}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+
+    def _summary(self, rep, **kw):
+        return checker_module.plain_summary(checker_module.check_result(rep, {"front_label_style": "roman"}), **kw)
+
+    def test_count_and_names_wrong_is_once(self):
+        rep = Report()
+        self._count(rep)
+        self._name(rep, chapter=2)
+        self._name(rep, chapter=3)
+        text = self._summary(rep)
+        self.assertEqual(text.count(checker_module.CHAPTER_COUNT_NOTICE), 1)
+        self.assertEqual(text.count("drive.google.com"), 1)
+
+    def test_neither_is_absent(self):
+        rep = Report()
+        self._title(rep)
+        self.assertNotIn("drive.google.com", self._summary(rep))
+
+    def test_a_pending_orange_name_alone_is_absent_until_failed(self):
+        rep = Report()
+        self._name(rep, zone="ORANGE")
+        result = checker_module.check_result(rep, {"front_label_style": "roman"})
+        self.assertNotIn("drive.google.com", checker_module.plain_summary(result))
+        self.assertIn(checker_module.CHAPTER_COUNT_NOTICE,
+                      checker_module.plain_summary(result, failed=["ORANGE:0"]))
+
+    def test_the_order_is_edit_topic_then_the_form_then_the_closing(self):
+        rep = Report()
+        self._title(rep)
+        self._count(rep)
+        text = self._summary(rep, requirements=True)
+        self.assertIn("\n\n" + checker_module.TITLE_EDIT_TOPIC_LINE + "\n\n" + checker_module.CHAPTER_COUNT_NOTICE
+                      + "\n\n" + checker_module.REQUIREMENTS_TEXT, text)
+
+    def test_without_closing_it_ends_the_list(self):
+        rep = Report()
+        self._count(rep)
+        text = self._summary(rep, with_closing=False)
+        self.assertTrue(text.endswith("\n\n" + checker_module.CHAPTER_COUNT_NOTICE))
+        # ไม่ต่อท้ายข้อจำนวนบทอีก — ย่อหน้าแยกขึ้นต้นด้วยบรรทัดว่าง ไม่ใช่ย่อหน้าใต้ข้อ
+        first = checker_module.CHAPTER_COUNT_NOTICE.split(NEWLINE)[0]
+        self.assertNotIn(checker_module.SUMMARY_INDENT + first, text)
+
+    def test_the_card_keeps_the_notice(self):
+        rep = Report()
+        self._count(rep)
+        self.assertEqual(rep.zones["RED"][0]["notice"], checker_module.CHAPTER_COUNT_NOTICE)
