@@ -1615,10 +1615,13 @@ class AbstractCommitteeTests(unittest.TestCase):
         self.assertTrue(any("ตัวพิมพ์ใหญ่" in r for r in reds))
 
     def test_subject_in_parentheses_flagged(self):
+        # สีส้ม ถ้อยคำเดิม (เจ้าของ 18 พ.ย. 2569 "อันนี้ปรับเป็นสีส้ม เป็นส่วนที่ยอมรับได้" · เดิมแดง)
         committees = {"advisory": [{"name": "ก ข", "role": ""}]}
         pages = ["THESIS ADVISORY COMMITTEE: NARISARA CHANTRATITA, Ph.D. (Microbiology)\nABSTRACT"]
-        reds = self._reds(self._run(committees, [0], [], pages))
-        self.assertTrue(any("วงเล็บ" in r for r in reds))
+        rep = self._run(committees, [0], [], pages)
+        self.assertFalse(any("วงเล็บ" in r for r in self._reds(rep)))
+        self.assertEqual([i["found"] for i in rep.zones["ORANGE"]],
+                         ['รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ: "(Microbiology)"'])
 
     def test_academic_rank_in_abstract_flagged(self):
         committees = {"advisory": [{"name": "ก ข", "role": ""}]}
@@ -1672,8 +1675,9 @@ class AbstractCommitteeTests(unittest.TestCase):
         # กฎรูปแบบเป็นกฎของ template ล้วน ต้องตรวจได้แม้เจ้าหน้าที่ไม่ได้อัปโหลด eThesis
         pages = ["THESIS ADVISORY COMMITTEE: Assoc. Prof. Narisara Chantratita, "
                  "Ph.D. (Microbiology)\nABSTRACT"]
-        reds = self._reds(self._run({}, [0], [], pages))
-        self.assertTrue(any("วงเล็บ" in r for r in reds))
+        rep = self._run({}, [0], [], pages)
+        reds = self._reds(rep)
+        self.assertTrue(any("วงเล็บ" in i["found"] for i in rep.zones["ORANGE"]))   # ส้มตั้งแต่ 18 พ.ย. 2569
         self.assertTrue(any("ตำแหน่งทางวิชาการ" in r for r in reds))
         self.assertTrue(any("ตัวพิมพ์ใหญ่" in r for r in reds))
 
@@ -12865,3 +12869,101 @@ class TheArtsAndScienceMasterAbbreviation(unittest.TestCase):
         self.assertEqual(ethesis_import._degree_abbr_th("ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์)"), "ศศ.ม. (สังคมศาสตร์)")
         self.assertEqual(ethesis_import._degree_abbr_th("วิทยาศาสตรมหาบัณฑิต (ชีววิทยา)"), "วท.ม. (ชีววิทยา)")
         self.assertEqual(ethesis_import._degree_abbr_th("ศิลปศาสตรและวิทยาศาสตรดุษฎีบัณฑิต (สาขาสมมติ)"), "")
+
+
+
+class SpacingOnlyIsNotATitlePoint(unittest.TestCase):
+    """ชื่อเรื่องต่างแค่ช่องว่างข้างขีด/คำอังกฤษ ไม่เป็นจุด (เจ้าของ 18 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    SYSTEM = "IMPROVING SAMPLE PRIORITIZATION IN ASEAN THROUGH CLIENT- EVIDENCE-BASED CRITERIA"
+    BOOK = "IMPROVING SAMPLE PRIORITIZATION IN SEA THROUGH CLIENT-EVIDENCE-BASED CRITERIA"
+
+    def test_the_hyphen_space_is_not_a_point(self):
+        analysis = checker_module.analyze_diff(self.BOOK, self.SYSTEM, spaces=True, case=True)
+        self.assertEqual(analysis.text, 'ต่างที่ "SEA" ต้องเป็น "ASEAN"')
+        self.assertEqual(analysis.steps, ('ให้แก้ "SEA" เป็น "ASEAN"',))
+
+    def _summary(self, book):
+        rep = Report()
+        compared = {"status": "mismatch", "actual": book, "score": 0.9}
+        rep.add("RED", "front_matter", "บทคัดย่อภาษาอังกฤษ (หน้า iv)",
+                checker_module.title_mismatch_detail("ชื่อเรื่องภาษาอังกฤษ", compared, self.SYSTEM),
+                f'ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: "{self.SYSTEM}"', "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ",
+                "FORM.APPROVED_MATCH")
+        card = rep.zones["RED"][0]["found"]
+        return card, checker_module.plain_summary(checker_module.check_result(rep, {"front_label_style": "roman"}))
+
+    def test_summary_and_card_name_only_the_real_point(self):
+        card, text = self._summary(self.BOOK)
+        self.assertIn('ชื่อเรื่องไม่ตรงกันกับในระบบ ต้องแก้ "SEA" เป็น "ASEAN"' + NEWLINE, text)
+        self.assertIn(f'ต้องแก้ไขเป็น: "{self.SYSTEM}"', text)        # ค่าจากระบบตามเดิม
+        self.assertNotIn("เว้นวรรค", text)
+        self.assertNotIn('ต่างที่ "CLIENT', card)
+        self.assertTrue(card.endswith('ต่างที่ "SEA" ต้องเป็น "ASEAN"'))
+
+    def test_the_space_does_not_use_up_the_two_points(self):
+        book = self.BOOK.replace("SAMPLE", "SAMPEL")
+        _card, text = self._summary(book)
+        self.assertIn('ต้องแก้ "SAMPEL" เป็น "SAMPLE" และ "SEA" เป็น "ASEAN"', text)
+    # ช่องว่างเกินระหว่างไทย-ไทยยังบอกเหมือนเดิม: test_diff_steps.ARealExtraSpaceIsNamed
+
+
+class AbstractCommitteeSubjectWithoutBrackets(unittest.TestCase):
+    """คุณวุฒิมีสาขาไม่มีวงเล็บ ไม่ใช่ชื่อคนใหม่ · แจ้งส้ม (เจ้าของ 18 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    ADVISORY = {"advisory": [{"name": "สมชาย ใจดี", "role": "อาจารย์ที่ปรึกษาหลัก"},
+                             {"name": "มานี ดีใจ", "role": "อาจารย์ที่ปรึกษาร่วม"}]}
+
+    def _run(self, line, english=True):
+        rep = Report()
+        heading = "THESIS ADVISORY COMMITTEE: " if english else "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: "
+        page = heading + line + NEWLINE + ("ABSTRACT" if english else "บทคัดย่อ") + NEWLINE + "xxx"
+        en, th = ([0], []) if english else ([], [0])
+        checker_module._check_abstract_committees(rep, self.ADVISORY, en, th, [page], lambda i: "หน้า iv")
+        return rep
+
+    def test_split_counts_two_people(self):
+        names, degrees = checker_module.split_abstract_committee(
+            "SOMCHAI JAIDEE, Ph.D. Management Science, MANEE DEEJAI, Ph.D. Management")
+        self.assertEqual(names, ["SOMCHAI JAIDEE", "MANEE DEEJAI"])
+        self.assertEqual(degrees, ["Ph.D. Management Science", "Ph.D. Management"])
+
+    def test_english_page_is_one_orange_item(self):
+        rep = self._run("SOMCHAI JAIDEE, Ph.D. Management Science," + NEWLINE + "MANEE DEEJAI, Ph.D. Management")
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["YELLOW"], [])
+        self.assertEqual(len(rep.zones["ORANGE"]), 1)
+        item = rep.zones["ORANGE"][0]
+        self.assertEqual(item["found"],
+                         'คุณวุฒิของกรรมการมีสาขาวิชาต่อท้าย: "Ph.D. Management Science", "Ph.D. Management"')
+        self.assertEqual(item["expected"], "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชา")
+        self.assertEqual(item["rule_id"], "FRONT.ABSTRACT")
+
+    def test_thai_page_is_one_orange_item(self):
+        rep = self._run("สมชาย ใจดี, Ph.D. Management Science, มานี ดีใจ," + NEWLINE + "ปร.ด. การบริหารจัดการ",
+                        english=False)
+        self.assertEqual(rep.zones["RED"], [])
+        self.assertEqual(rep.zones["YELLOW"], [])
+        self.assertEqual([i["found"] for i in rep.zones["ORANGE"]],
+                         ['คุณวุฒิของกรรมการมีสาขาวิชาต่อท้าย: "Ph.D. Management Science", "ปร.ด. การบริหารจัดการ"'])
+
+    def test_other_rules_still_see_the_right_names(self):
+        rep = self._run("Somchai Jaidee, Ph.D. Management Science, Assoc. Prof. MANEE DEEJAI, Ph.D.")
+        reds = [i["found"] for i in rep.zones["RED"]]
+        self.assertIn('ชื่อกรรมการไม่ได้เป็นตัวพิมพ์ใหญ่ทั้งหมด: "Somchai Jaidee"', reds)
+        self.assertIn('ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า: "Assoc. Prof. MANEE DEEJAI"', reds)
+        self.assertFalse(any("รายชื่อ" in r for r in reds))
+
+    def test_a_missing_comma_before_the_next_name_is_unchanged(self):
+        block = "SOMCHAI JAIDEE, Ph.D. MANEE DEEJAI, Ph.D. (Nursing)"
+        self.assertEqual(checker_module.split_abstract_committee(block)[0], ["SOMCHAI JAIDEE", "MANEE DEEJAI"])
+        self.assertEqual(checker_module.abstract_committee_missing_commas(block), ["MANEE DEEJAI"])
+        self.assertEqual(checker_module.abstract_committee_bare_subjects(block), [])
+
+    def test_plain_and_multi_part_degrees_are_not_subjects(self):
+        for block in ("SOMCHAI JAIDEE, Ph.D., MANEE DEEJAI, M.D., Ph.D.",
+                      "SOMCHAI JAIDEE, Dr. rer. nat., MANEE DEEJAI, Ph.D. (Nursing)",
+                      "สมชาย ใจดี, พ.บ., ว.ว. และ อ.ว., มานี ดีใจ, ปร.ด.",
+                      "สมชาย ใจดี, ปร.ด, มานี ดีใจ, Ph.D"):          # ขาดจุดท้าย (เล่มจริง) ไม่ใช่สาขา
+            self.assertEqual(checker_module.abstract_committee_bare_subjects(block), [], block)
+            self.assertEqual(len(checker_module.split_abstract_committee(block)[0]), 2, block)

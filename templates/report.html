@@ -1775,6 +1775,10 @@ var TR = [
   [/รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ/g, 'The advisory committee list contains a subject in parentheses'],
   [/รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชาในวงเล็บ/g, "The format must be 'First name Last name, Degree' with no subject in parentheses"],
   [/ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ/g, 'Remove the parenthesised subject from the qualification'],
+  // สาขาต่อท้ายคุณวุฒิแบบไม่มีวงเล็บ (สีส้ม · เจ้าของ 18 พ.ย. 2569)
+  [/^คุณวุฒิของกรรมการมีสาขาวิชาต่อท้าย: (.+)$/g, 'A committee qualification has a subject after it: $1'],
+  [/^รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชา$/g, "The format must be 'First name Last name, Degree' with no subject"],
+  [/^ลบสาขาวิชาต่อท้ายคุณวุฒิออก ให้เหลือเฉพาะคุณวุฒิ$/g, 'Remove the subject after the qualification, leaving the qualification only'],
   [/รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ/g, 'The format must contain only the name and qualification, with no academic rank'],
   [/ลบตำแหน่งทางวิชาการนำหน้าชื่อออก/g, 'Remove the academic rank before the name'],
   [/ชื่อกรรมการในบทคัดย่อภาษาอังกฤษต้องเป็นตัวพิมพ์ใหญ่ทั้งหมด/g, 'Committee names in the English abstract must be in all capitals'],

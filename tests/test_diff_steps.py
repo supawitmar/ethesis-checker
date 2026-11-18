@@ -102,12 +102,12 @@ class TheSummaryTellsHowToFix(unittest.TestCase):
                                       "THE DATA ON THE DATUM SET").steps,
                          ('ให้แก้ "DATA" ที่อยู่หลัง "ON THE" เป็น "DATUM"',))
 
-    def test_a_difference_that_is_only_spacing_says_so(self):
-        """ "OFTHE" กับ "OF THE": บอกว่าเป็นเรื่องเว้นวรรค ไม่ใช่สะกดผิด"""
+    def test_a_difference_that_is_only_spacing_is_not_a_point(self):
+        """ "OFTHE" กับ "OF THE": ต่างแค่ช่องว่าง ไม่เป็นจุดผิด ไม่บอก (เจ้าของ 18 พ.ย. 2569 — เดิมบอก "ให้แก้การเว้นวรรค")"""
         analysis = analyze_diff("A STUDY OFTHE RESULTS FOR RELATIONSHP",
                                 "A STUDY OF THE RESULTS FOR RELATIONSHIP")
-        self.assertEqual(analysis.steps, ('ให้แก้การเว้นวรรค "OFTHE" เป็น "OF THE"',
-                                          'ให้แก้ "RELATIONSHP" เป็น "RELATIONSHIP"'))
+        self.assertEqual(analysis.text, 'ต่างที่ "RELATIONSHP" ต้องเป็น "RELATIONSHIP"')
+        self.assertEqual(analysis.steps, ('ให้แก้ "RELATIONSHP" เป็น "RELATIONSHIP"',))
 
     def test_only_the_letter_case_differs(self):
         analysis = analyze_case_diff("UTILIZATION OF CAMELINA NAHEEL: A CULTIVAR OF CAMELINA SATIVA OILSEED",

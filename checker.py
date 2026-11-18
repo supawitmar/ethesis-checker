@@ -3095,7 +3095,8 @@ def _scan_abstract_committee(block):
     """
     expect_name = True
     seen_name = False
-    for tok in [t for t in _committee_tokens(block) if t]:
+    tokens = [t for t in _committee_tokens(block) if t]
+    for at, tok in enumerate(tokens):
         if expect_name:
             # คุณวุฒิตัวที่ 2 ของคนเดิม (เช่น "..., M.D., Ph.D., ชื่อคนถัดไป, ...")
             # ไม่ใช่ชื่อคนใหม่ ถ้านับผิดจะเลื่อนสลับ ชื่อ/คุณวุฒิ ไปทั้งชุด
@@ -3121,13 +3122,36 @@ def _scan_abstract_committee(block):
             continue
         m = _ABS_DEGREE_HEAD.match(tok)
         rest = tok[m.end():].strip() if m else ""
-        if not m or not _looks_like_person_name(rest):
-            # ทั้งก้อนคือคุณวุฒิ (รวมคุณวุฒิหลายท่อนอย่าง "Dr. rer. nat.")
+        # ที่เหลือหลังคุณวุฒิเป็น "ชื่อคนถัดไปที่ลืมจุลภาค" ได้ต่อเมื่อก้อนถัดไปคือคุณวุฒิของคนนั้น
+        # ก้อนถัดไปเป็นชื่อคน (หรือหมดรายการ) แปลว่าที่เหลือคือสาขาของคุณวุฒินี้ที่พิมพ์ไม่มีวงเล็บ เช่น
+        # "ชื่อ, Ph.D. Management Science, ชื่อ, Ph.D. Management" — เดิมนับ "Management Science" เป็นชื่อ
+        # ได้ 3 ชื่อจาก 2 คน แล้วแจ้งแดงว่ารายชื่อเกิน บฑ.1 (เล่มจริง 18 พ.ย. 2569 · เจ้าของ "ระบบต้องนับชื่อให้ครบก่อน")
+        # ตำแหน่งวิชาการมีจุดเหมือนตัวย่อคุณวุฒิ ("Assoc. Prof. ชื่อ") ก้อนแบบนั้นคือชื่อคน ไม่ใช่คุณวุฒิ
+        nxt = tokens[at + 1] if at + 1 < len(tokens) else ""
+        next_is_degree = bool(_ABS_DEGREE_HEAD.match(nxt)) and _strip_committee_title(nxt) == nxt
+        if not m or not _looks_like_person_name(rest) or not next_is_degree:
+            # ทั้งก้อนคือคุณวุฒิ (รวมคุณวุฒิหลายท่อนอย่าง "Dr. rer. nat." และคุณวุฒิที่มีสาขาไม่มีวงเล็บ)
             yield "degree", tok, False
             expect_name = True
             continue
         yield "degree", tok[:m.end()].strip(), False
         yield "name", rest, True       # ขาดจุลภาคคั่น — ที่เหลือคือชื่อคนถัดไป
+
+
+def abstract_committee_bare_subjects(block):
+    """คุณวุฒิที่มีสาขาวิชาต่อท้ายโดยไม่มีวงเล็บ เช่น "Ph.D. Management Science" "ปร.ด. การบริหารจัดการ"
+
+    ที่เหลือหลังตัวย่อคุณวุฒิต้องไม่มีจุดหรือวงเล็บ — คุณวุฒิหลายท่อน ("Dr. rer. nat.") หลายใบ ("พ.บ. และ อ.ว.")
+    และสาขาในวงเล็บ (มีข้อส้มของตัวเอง) จึงไม่เข้าข้อนี้ · ต้องมีตัวอักษรอย่างน้อย 3 ตัว: ตัวย่อที่ขาดจุดท้าย ("ปร.ด"
+    เหลือ "ด") ไม่ใช่สาขา (เล่มจริง 2 เล่มเคยได้ข้อส้ม 'มีสาขาวิชาต่อท้าย: "ปร.ด"' ตอนทำข้อนี้ 18 พ.ย. 2569)
+    """
+    out = []
+    for kind, text, _ in _scan_abstract_committee(block):
+        m = _ABS_DEGREE_HEAD.match(text) if kind == "degree" else None
+        rest = text[m.end():].strip() if m else ""
+        if rest and not re.search(r'[.()]', rest) and len(re.findall(r'[A-Za-zก-ฮ]', rest)) >= 3:
+            out.append(text)
+    return out
 
 
 def abstract_committee_missing_commas(block):
@@ -3249,15 +3273,25 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                 continue
             loc = f"{abs_label} ({page_ref(ai)}) รายชื่อคณะกรรมการที่ปรึกษา"
 
-            # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ
+            # รูปแบบ 1: ห้ามมีสาขาวิชาในวงเล็บ — สีส้ม (เจ้าของ 18 พ.ย. 2569 "อันนี้ปรับเป็นสีส้ม เป็นส่วนที่ยอมรับได้" · เดิมแดง)
             if "(" in block or ")" in block:
                 inside = ", ".join(f'"({s})"' for s in re.findall(r'\(([^)]*)\)', block))
-                rep.add("RED", "front_matter", loc,
+                rep.add("ORANGE", "front_matter", loc,
                         f"รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ: {inside}"
                         if inside else "รายชื่อกรรมการที่ปรึกษามีสาขาวิชาในวงเล็บ",
                         "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชาในวงเล็บ",
                         f"ลบ {inside} ออก ให้เหลือเฉพาะชื่อและคุณวุฒิ"
                         if inside else "ลบสาขาวิชาในวงเล็บออกจากคุณวุฒิ", "FRONT.ABSTRACT")
+
+            # รูปแบบ 1.0: สาขาวิชาต่อท้ายคุณวุฒิแบบไม่มีวงเล็บ — สีส้มเหมือนข้อวงเล็บ (เจ้าของ 18 พ.ย. 2569 "ถ้าพบชื่อผิด format
+            # จึงค่อยแจ้ง แต่แจ้งเหมือนกรณีที่ format ไม่ถูก(สีส้ม)" · "เคสนี้ก็สีส้ม" · ถ้อยคำเจ้าของอนุมัติทุกตัวอักษร)
+            bare = abstract_committee_bare_subjects(block)
+            if bare:
+                shown = ", ".join(f'"{d}"' for d in bare)
+                rep.add("ORANGE", "front_matter", loc,
+                        f"คุณวุฒิของกรรมการมีสาขาวิชาต่อท้าย: {shown}",
+                        "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยไม่มีสาขาวิชา",
+                        "ลบสาขาวิชาต่อท้ายคุณวุฒิออก ให้เหลือเฉพาะคุณวุฒิ", "FRONT.ABSTRACT")
 
             # รูปแบบ 1.1: ต้องมีจุลภาคคั่นระหว่างคุณวุฒิของคนก่อนกับชื่อคนถัดไป
             # เจ้าหน้าที่สั่ง ส.ค. 2569 ว่าเรื่องจุลภาคให้แจ้งเป็นสีเหลือง — ยังบอกให้
@@ -7005,9 +7039,6 @@ def _word_steps(words, tag, i1, i2, got, want):
         return f'ให้เติม "{want}" หน้า "{words[0]}"' if words else f'ให้เติม "{want}"'
     if tag == 'delete':
         return f'ให้ลบ "{got}" ที่อยู่หลัง "{anchor}" ออก' if anchor else f'ให้ลบ "{got}" ออก'
-    # ต่างกันแค่ช่องว่าง ("OFTHE" กับ "OF THE") บอกให้ชัดว่าเป็นเรื่องเว้นวรรค
-    if got.replace(' ', '') == want.replace(' ', ''):
-        return f'ให้แก้การเว้นวรรค "{got}" เป็น "{want}"'
     if anchor:
         return f'ให้แก้ "{got}" ที่อยู่หลัง "{anchor}" เป็น "{want}"'
     return f'ให้แก้ "{got}" เป็น "{want}"'
@@ -7052,6 +7083,12 @@ def _legacy_diff(a, b, keyfn, join, words, case=False):
         got, want = join(a[i1:i2]), join(b[j1:j2])
         # ช่องว่างล้วนไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
         if not got.strip() and not want.strip():
+            continue
+        # ต่างกันแค่ช่องว่างระหว่างคำอังกฤษหรือข้างขีด ("CUSTOMER-EVIDENCE-BASED" กับ "CUSTOMER- EVIDENCE-BASED" ·
+        # "OFTHE" กับ "OF THE") ไม่เป็นจุดผิด: ไม่บอกทั้งการ์ดและข้อความสรุป และไม่นับรวมในเกณฑ์ชี้จุด
+        # (เจ้าของ 18 พ.ย. 2569 "การเว้นวรรค ... ไม่น่าจะเป็นประเด็นที่ต้องแก้" · กติกาเดิม ต่างแค่ช่องว่างล้วนไม่เป็นจุดผิด)
+        # บรรทัด "ต้องแก้ไขเป็น" ยังยกค่าจากระบบทั้งชื่อเหมือนเดิม · ช่องว่างเกินระหว่างไทย-ไทยอยู่อีกทาง (_thai_edits) คงเดิม
+        if got.replace(' ', '') == want.replace(' ', ''):
             continue
         if not want:
             parts.append(f'มี "{got}" เกินมา')
