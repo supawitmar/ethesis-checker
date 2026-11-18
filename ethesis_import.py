@@ -46,6 +46,9 @@ DEGREE_ABBR = {
     'MASTER OF PUBLIC HEALTH': 'M.P.H.',
     'MASTER OF NURSING SCIENCE': 'M.N.S.',
     'MASTER OF EDUCATION': 'M.Ed.',
+    # หลักสูตรศิลปศาสตรและวิทยาศาสตรมหาบัณฑิต สาขาวิชากลยุทธ์ทางธุรกิจ (ภาคพิเศษ) — เจ้าของยืนยัน 18 พ.ย. 2569 "M.A.S. (Business Strategy)"
+    # ชื่อเต็มในระบบตามเจ้าของ "MASTER OF ARTS AND SCIENCE(BUSINESS STRATEGY)" · เทียบทั้งชื่อ ไม่ชน 'MASTER OF ARTS'
+    'MASTER OF ARTS AND SCIENCE': 'M.A.S.',
 }
 
 MINOR_WORDS = {'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from',
@@ -76,6 +79,7 @@ DEGREE_ABBR_TH_STEM = {
 DEGREE_ABBR_TH_FULL = {
     'การแพทย์แผนไทยประยุกต์ดุษฎีบัณฑิต': 'พทป.ด.',     # เจ้าของยืนยัน 28 ต.ค. 2569 (อัปเดต 1.8.2)
     'การแพทย์แผนไทยประยุกต์มหาบัณฑิต': 'พทป.ม.',      # เจ้าของยืนยัน 29 ต.ค. 2569 (เพิ่มหลังออก 1.8.2)
+    'ศิลปศาสตรและวิทยาศาสตรมหาบัณฑิต': 'ศศ.วท.ม.',    # เจ้าของยืนยัน 18 พ.ย. 2569 (สาขาวิชากลยุทธ์ทางธุรกิจ)
 }
 
 
@@ -227,7 +231,8 @@ def _degree_abbr_th(value):
     if not m:
         return ''
     stem, level, field = m.group(1), m.group(2), m.group(3).strip()
-    base = DEGREE_ABBR_TH_FULL.get(stem + level)
+    # ชื่อเต็มเทียบแบบไม่สนการันต์ — eThesis/เล่มบางฉบับพิมพ์ "ศิลปศาสตร์และวิทยาศาสตร์..." (ชื่อปริญญาที่ถูกไม่มีการันต์)
+    base = DEGREE_ABBR_TH_FULL.get(stem + level) or DEGREE_ABBR_TH_FULL.get(stem.replace('์', '') + level)
     if not base:
         abbr = DEGREE_ABBR_TH_STEM.get(stem)
         if not abbr:

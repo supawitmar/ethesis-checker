@@ -12840,3 +12840,28 @@ class TheKeepTheStructureParagraphGoesOnceLikeEditTopic(unittest.TestCase):
         rep = Report()
         self._count(rep)
         self.assertEqual(rep.zones["RED"][0]["notice"], checker_module.CHAPTER_COUNT_NOTICE)
+
+
+class TheArtsAndScienceMasterAbbreviation(unittest.TestCase):
+    """ศศ.วท.ม. / M.A.S. — เจ้าของยืนยัน 18 พ.ย. 2569 (สาขาวิชากลยุทธ์ทางธุรกิจ)"""
+
+    def test_thai(self):
+        abbr = ethesis_import._degree_abbr_th
+        self.assertEqual(abbr("ศิลปศาสตรและวิทยาศาสตรมหาบัณฑิต (กลยุทธ์ทางธุรกิจ)"), "ศศ.วท.ม. (กลยุทธ์ทางธุรกิจ)")
+        self.assertEqual(abbr("ศิลปศาสตรและวิทยาศาสตรมหาบัณฑิต(กลยุทธ์ทางธุรกิจ)"), "ศศ.วท.ม. (กลยุทธ์ทางธุรกิจ)")
+        self.assertEqual(abbr("ศิลปศาสตร์และวิทยาศาสตร์มหาบัณฑิต (กลยุทธ์ทางธุรกิจ)"), "ศศ.วท.ม. (กลยุทธ์ทางธุรกิจ)")
+
+    def test_english(self):
+        abbr = ethesis_import._degree_abbr
+        # ค่าในระบบตามเจ้าของ (18 พ.ย. 2569) — ไม่มีช่องว่างก่อนวงเล็บ
+        self.assertEqual(abbr("MASTER OF ARTS AND SCIENCE(BUSINESS STRATEGY)"), "M.A.S. (BUSINESS STRATEGY)")
+        self.assertEqual(abbr("MASTER OF ARTS AND SCIENCE (BUSINESS STRATEGY)"), "M.A.S. (BUSINESS STRATEGY)")
+        self.assertEqual(abbr("MASTER OF ARTS AND SCIENCES(BUSINESS STRATEGY)"), "")    # ไม่ได้ยืนยันรูปนี้
+
+    def test_other_degrees_do_not_change(self):
+        """ควบคุมเชิงลบ — เทียบทั้งชื่อ ไม่ชน MASTER OF ARTS · ศิลปศาสตร/วิทยาศาสตร มหาบัณฑิตเดี่ยวยังเหมือนเดิม"""
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF ARTS (BUSINESS STRATEGY)"), "M.A. (BUSINESS STRATEGY)")
+        self.assertEqual(ethesis_import._degree_abbr("MASTER OF SCIENCE (BIOLOGY)"), "M.Sc. (BIOLOGY)")
+        self.assertEqual(ethesis_import._degree_abbr_th("ศิลปศาสตรมหาบัณฑิต (สังคมศาสตร์)"), "ศศ.ม. (สังคมศาสตร์)")
+        self.assertEqual(ethesis_import._degree_abbr_th("วิทยาศาสตรมหาบัณฑิต (ชีววิทยา)"), "วท.ม. (ชีววิทยา)")
+        self.assertEqual(ethesis_import._degree_abbr_th("ศิลปศาสตรและวิทยาศาสตรดุษฎีบัณฑิต (สาขาสมมติ)"), "")
