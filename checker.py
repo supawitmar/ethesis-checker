@@ -6104,6 +6104,18 @@ _DEGREE_LINE_TEMPLATE_PREFIXES = tuple(norm(text).upper() for text in (
 ))
 
 
+# ถ้อยคำ template ที่ตามหลังชื่อปริญญาบนหน้าปก เรียงจาก "ท้ายสุด" เข้าหาชื่อปริญญา (ตัดจากท้ายตามลำดับนี้)
+# เล่มจริง 19 พ.ย. 2569 ตัดบรรทัดเป็น "...DEGREE OF MASTER OF ENGINEERING" / "(BIOMEDICAL ENGINEERING) FACULTY OF GRADUATE
+# STUDIES" / "MAHIDOL UNIVERSITY" ทุกคำตรง template แต่ได้แดง "มีข้อความเกิน" — เจ้าของ "จริงๆแล้วมันก็ไม่ได้ผิดอะไรนะ"
+# หลักเดียวกับท่อนนำ (เจ้าหน้าที่ 28 ก.ย. 2569 "ข้อ 1 มันถูกแล้วนะ ตามโครงสร้าง")
+_DEGREE_LINE_TEMPLATE_SUFFIXES = tuple(norm(text).upper() for text in (
+    "MAHIDOL UNIVERSITY",
+    "FACULTY OF GRADUATE STUDIES",
+    "มหาวิทยาลัยมหิดล",
+    "บัณฑิตวิทยาลัย",
+))
+
+
 def cover_degree_line_expected(expected, thai_book):
     """ถ้อยคำ "บรรทัดนี้ต้องเป็น" ของชื่อปริญญาบนหน้าปก ตาม template ไม่ใช่ชื่อเปล่า ๆ
 
@@ -6125,7 +6137,7 @@ def degree_line_search_text(page_text, abstract=False):
 
 
 def _without_degree_template_words(nl):
-    """ตัดถ้อยคำของ template ที่นำหน้าชื่อปริญญาออกให้หมดทุกชั้น (รับค่าที่ norm แล้ว)
+    """ตัดถ้อยคำของ template ที่นำหน้าและตามหลังชื่อปริญญาออกให้หมดทุกชั้น (รับค่าที่ norm แล้ว)
 
     บรรทัดเดียวมีได้สองชั้น ("...ตามหลักสูตร" แล้วต่อด้วย "ปริญญา") ตัดชั้นเดียวแล้วหยุด
     ไม่พอ — เล่มที่ไม่ขึ้นบรรทัดใหม่พอดีก่อนคำว่า "ปริญญา" จะโดนฟ้องว่ามีข้อความเกิน
@@ -6139,6 +6151,11 @@ def _without_degree_template_words(nl):
                 nl = nl[len(prefix):]
                 trimmed = True
                 break
+    # ท่อนตาม: ตัดจากท้ายตามลำดับ template ทีละท่อน ตัดเฉพาะถ้อยคำเหล่านี้ ไม่ใช่ทั้งบรรทัด — คำเกินจริงที่อยู่
+    # ระหว่างชื่อปริญญากับท่อนตาม ("(ภาคพิเศษ) FACULTY OF GRADUATE STUDIES") ยังเหลืออยู่และยังแดง
+    for suffix in _DEGREE_LINE_TEMPLATE_SUFFIXES:
+        if suffix and nl.upper().endswith(suffix) and len(nl) > len(suffix):
+            nl = nl[:-len(suffix)]
     return nl
 
 

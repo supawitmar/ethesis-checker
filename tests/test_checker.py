@@ -12967,3 +12967,47 @@ class AbstractCommitteeSubjectWithoutBrackets(unittest.TestCase):
                       "สมชาย ใจดี, ปร.ด, มานี ดีใจ, Ph.D"):          # ขาดจุดท้าย (เล่มจริง) ไม่ใช่สาขา
             self.assertEqual(checker_module.abstract_committee_bare_subjects(block), [], block)
             self.assertEqual(len(checker_module.split_abstract_committee(block)[0]), 2, block)
+
+
+
+class TheTemplateWordsAfterTheCoverDegree(unittest.TestCase):
+    """ท่อนตามหลังชื่อปริญญาบนหน้าปก (FACULTY OF GRADUATE STUDIES / MAHIDOL UNIVERSITY) ไม่ใช่คำเกิน (เจ้าของ 19 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    DEGREE = "MASTER OF ENGINEERING (EXAMPLE ENGINEERING)"
+
+    def _cover(self, *lines):
+        return NEWLINE.join(("SAMPLE TITLE", "SOMCHAI JAIDEE") + lines)
+
+    def test_the_faculty_on_the_subject_line_is_not_extra(self):
+        page = self._cover("A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE",
+                           "REQUIREMENTS FOR THE DEGREE OF MASTER OF ENGINEERING",
+                           "(EXAMPLE ENGINEERING) FACULTY OF GRADUATE STUDIES",
+                           "MAHIDOL UNIVERSITY", "2026")
+        self.assertEqual(checker_module.degree_line_extras(page, self.DEGREE), "")
+
+    def test_the_university_on_the_same_line_is_not_extra(self):
+        page = self._cover("FOR THE DEGREE OF MASTER OF ENGINEERING",
+                           "(EXAMPLE ENGINEERING) FACULTY OF GRADUATE STUDIES MAHIDOL UNIVERSITY", "2026")
+        self.assertEqual(checker_module.degree_line_extras(page, self.DEGREE), "")
+
+    def test_thai_template_words_after_the_degree(self):
+        page = self._cover("วิทยานิพนธ์นี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+                           "ปริญญาวิศวกรรมศาสตรมหาบัณฑิต (วิศวกรรมตัวอย่าง) บัณฑิตวิทยาลัย",
+                           "มหาวิทยาลัยมหิดล", "พ.ศ. 2569")
+        self.assertEqual(checker_module.degree_line_extras(page, "วิศวกรรมศาสตรมหาบัณฑิต (วิศวกรรมตัวอย่าง)"), "")
+
+    def test_a_real_extra_word_is_still_red(self):
+        for tail in (" (ภาคพิเศษ) FACULTY OF GRADUATE STUDIES", " (ภาคพิเศษ)"):
+            page = self._cover("REQUIREMENTS FOR THE DEGREE OF MASTER OF ENGINEERING",
+                               "(EXAMPLE ENGINEERING)" + tail, "MAHIDOL UNIVERSITY", "2026")
+            self.assertIn("(ภาคพิเศษ)", checker_module.degree_line_extras(page, self.DEGREE), tail)
+
+    def test_another_faculty_is_still_red(self):
+        page = self._cover("FOR THE DEGREE OF MASTER OF ENGINEERING",
+                           "(EXAMPLE ENGINEERING) FACULTY OF EXAMPLE", "MAHIDOL UNIVERSITY")
+        self.assertIn("FACULTY OF EXAMPLE", checker_module.degree_line_extras(page, self.DEGREE))
+
+    def test_the_words_out_of_template_order_are_still_extra(self):
+        page = self._cover("FOR THE DEGREE OF MASTER OF ENGINEERING",
+                           "(EXAMPLE ENGINEERING) MAHIDOL UNIVERSITY FACULTY OF GRADUATE STUDIES", "2026")
+        self.assertIn("MAHIDOL UNIVERSITY", checker_module.degree_line_extras(page, self.DEGREE))
