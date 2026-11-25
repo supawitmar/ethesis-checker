@@ -13267,3 +13267,83 @@ class DotsUnderTheTitleOnSignaturePages(unittest.TestCase):
         self.assertEqual(i18n.tr_en("ใต้ชื่อเรื่องต้องไม่มีเส้นประหรือจุดไข่ปลา", pairs),
                          "There must be no dotted line or ellipsis below the thesis title")
         self.assertEqual(rule_zone("FRONT.APPROVAL_TITLE_DOTS"), "RED")
+
+
+
+class AcademicRankInTheQualificationSlot(unittest.TestCase):
+    """ช่องคุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ = ส้ม (เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    EN = "INDEPENDENT STUDY ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D, MANEE DEEJAI, Ph.D."
+    TH = "คณะกรรมการที่ปรึกษาการค้นคว้าอิสระ: สมชาย ใจดี, รศ. ดร., มานี ดีใจ, ผศ. ดร."
+
+    def _run(self, en=None, th=None):
+        pages, en_idx, th_idx = [], [], []
+        if en is not None:
+            en_idx.append(len(pages))
+            pages.append(en + NEWLINE + "ABSTRACT" + NEWLINE + "xxx")
+        if th is not None:
+            th_idx.append(len(pages))
+            pages.append(th + NEWLINE + "บทคัดย่อ" + NEWLINE + "xxx")
+        rep = Report()
+        checker_module._check_abstract_committees(rep, {}, en_idx, th_idx, pages, lambda i: "หน้า vi")
+        return [i for i in rep.zones["ORANGE"] if i["rule_id"] == "FRONT.ABSTRACT_QUALIFICATION"], rep
+
+    def test_thai_rank_slots_with_a_line_copied_from_the_english_abstract(self):
+        items, rep = self._run(self.EN, self.TH)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["location"], "บทคัดย่อไทย (หน้า vi) รายชื่อคณะกรรมการที่ปรึกษา")
+        self.assertEqual(items[0]["found"], 'คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: '
+                                            '"สมชาย ใจดี, รศ. ดร.", "มานี ดีใจ, ผศ. ดร."')
+        self.assertEqual(items[0]["expected"], "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยคุณวุฒิคือวุฒิการศึกษา "
+                                               "เช่น Ph.D. หรือ ปร.ด. ไม่ใช่ตำแหน่งทางวิชาการ")
+        # "Ph.D" ที่ขาดจุดท้ายใช้แบบมีจุด เพราะอีกคนพิมพ์ "Ph.D."
+        self.assertEqual(items[0]["fix"], 'แก้เป็น "สมชาย ใจดี, Ph.D., มานี ดีใจ, Ph.D."')
+        self.assertFalse(any("ตำแหน่งทางวิชาการนำหน้า" in i["found"] for i in rep.zones["RED"]))
+
+    def test_english_rank_slot_with_a_line_copied_from_the_thai_abstract(self):
+        items, _rep = self._run("THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Assoc. Prof. Dr., MANEE DEEJAI, Ph.D.",
+                                "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: สมชาย ใจดี, ปร.ด., มานี ดีใจ, Ph.D.")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["found"], 'คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: '
+                                            '"SOMCHAI JAIDEE, Assoc. Prof. Dr."')
+        self.assertEqual(items[0]["fix"], 'แก้เป็น "SOMCHAI JAIDEE, ปร.ด., MANEE DEEJAI, Ph.D."')
+
+    def test_general_fix_when_the_other_abstract_cannot_be_used(self):
+        general = "แทนตำแหน่งทางวิชาการด้วยวุฒิการศึกษาของกรรมการแต่ละท่าน ในรูปแบบ 'ชื่อ นามสกุล, คุณวุฒิ'"
+        for en in (None,                                                              # ไม่มีอีกภาษา
+                   "THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D.",                  # จำนวนไม่เท่ากัน
+                   "THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Ph.D., MANEE DEEJAI, Asst. Prof. Dr."):  # อีกภาษาก็ผิด
+            items, _rep = self._run(en, self.TH)
+            # อีกภาษาที่ผิดด้วยได้ข้อของตัวเองแยก (ข้อละหน้า) — ดูเฉพาะข้อของบทคัดย่อไทย
+            thai = [i for i in items if i["location"].startswith("บทคัดย่อไทย")]
+            self.assertEqual([i["fix"] for i in thai], [general], en)
+
+    def test_real_degrees_that_look_like_titles_are_fine(self):
+        for qual in ("Dr.PH", "Dr.P.H.", "DrPH", "ปร.ด.", "ศษ.ด.", "D.B.A.", "Ph.D.", "M.D., Ph.D.", "พ.บ.", "Dr. rer. nat."):
+            self.assertFalse(checker_module.is_academic_rank_only(qual), qual)
+        for qual in ("รศ. ดร.", "ผศ. ดร.", "ศ.", "ดร.", "นพ.", "Assoc. Prof. Dr.", "Asst. Prof.", "Prof.", "Dr."):
+            self.assertTrue(checker_module.is_academic_rank_only(qual), qual)
+        items, _rep = self._run("THESIS ADVISORY COMMITTEE: SOMCHAI JAIDEE, Dr.PH, MANEE DEEJAI, Dr.P.H.",
+                                "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: สมชาย ใจดี, ส.ด., มานี ดีใจ, ศษ.ด.")
+        self.assertEqual(items, [])
+
+    def test_a_rank_before_the_name_stays_the_red_item_only(self):
+        items, rep = self._run(None, "คณะกรรมการที่ปรึกษาวิทยานิพนธ์: รศ. สมชาย ใจดี, ดร., มานี ดีใจ, ปร.ด.")
+        self.assertEqual(items, [])
+        self.assertTrue(any("ตำแหน่งทางวิชาการนำหน้า" in i["found"] for i in rep.zones["RED"]))
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (
+                ('คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: "สมชาย ใจดี, รศ. ดร."',
+                 'A committee member\'s qualification is an academic rank, not a degree: "สมชาย ใจดี, รศ. ดร."'),
+                ("รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยคุณวุฒิคือวุฒิการศึกษา เช่น Ph.D. หรือ ปร.ด. ไม่ใช่ตำแหน่งทางวิชาการ",
+                 "The format must be 'First name Last name, Qualification', where the qualification is a degree "
+                 'such as "Ph.D." or "ปร.ด.", not an academic rank'),
+                ('แก้เป็น "สมชาย ใจดี, Ph.D."', 'Change it to "สมชาย ใจดี, Ph.D."'),
+                ("แทนตำแหน่งทางวิชาการด้วยวุฒิการศึกษาของกรรมการแต่ละท่าน ในรูปแบบ 'ชื่อ นามสกุล, คุณวุฒิ'",
+                 "Replace each academic rank with that committee member's degree, in the format "
+                 "'First name Last name, Qualification'")):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+        self.assertEqual(rule_zone("FRONT.ABSTRACT_QUALIFICATION"), "ORANGE")

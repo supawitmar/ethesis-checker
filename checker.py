@@ -54,6 +54,8 @@ LIST_HEADER_ONLY_ZONE = rule_zone("FRONT.LIST_HEADER_ONLY", "RED")
 FOOTER_TEXT_ZONE = rule_zone("PAGE.FOOTER_TEXT", "ORANGE")
 # อัปเดต 1.11.1: เส้นประใต้ชื่อเรื่องบนหน้าลงนาม — แดง (เจ้าของยืนยัน 25 พ.ย. 2569 "แดง") เหมือนข้อบทคัดย่อ
 SIG_TITLE_DOTS_ZONE = rule_zone("FRONT.APPROVAL_TITLE_DOTS", "RED")
+# อัปเดต 1.12 (เจ้าของ 25 พ.ย. 2569): คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ = ส้ม
+ABSTRACT_QUALIFICATION_ZONE = rule_zone("FRONT.ABSTRACT_QUALIFICATION", "ORANGE")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -3358,6 +3360,62 @@ def abstract_committee_bare_subjects(block):
     return out
 
 
+def abstract_committee_people(block):
+    """[(ชื่อ, [คุณวุฒิ ...])] ตามลำดับ — คุณวุฒิทุกช่องที่ตามหลังชื่อคนนั้นจนถึงชื่อถัดไป"""
+    people = []
+    for kind, text, _ in _scan_abstract_committee(block):
+        if kind == "name":
+            people.append((text.strip(), []))
+        elif people:
+            people[-1][1].append(text.strip())
+    return people
+
+
+def is_academic_rank_only(qualification):
+    """ช่องคุณวุฒินี้เป็นตำแหน่งทางวิชาการ/คำนำหน้าล้วน ("รศ. ดร." "Assoc. Prof. Dr." "อาจารย์") ไม่ใช่วุฒิการศึกษา
+
+    ใช้ตัวตัดตำแหน่งชุดเดียวกับชื่อกรรมการ ตัดแล้วไม่เหลืออะไร = ตำแหน่งล้วน · วุฒิที่ขึ้นต้นคล้ายตำแหน่งยังเหลือส่วนของ
+    ตัวเองหลังตัด ("Dr.PH" เหลือ "PH" · "Dr.P.H." เหลือ "P.H.") จึงไม่โดน · ปร.ด. ศษ.ด. D.B.A. ไม่ตรงคำนำหน้าใดเลย
+    """
+    text = (qualification or "").strip(" ,")
+    return bool(text) and _strip_committee_title(text) == ""
+
+
+def _qualifications_from(people, dotted):
+    """คุณวุฒิของแต่ละคนในบทคัดย่ออีกภาษา เขียนเป็นข้อความเดียว · ตัวย่อที่ขาดจุดท้ายใช้แบบมีจุดเมื่อในรายการมีแบบนั้นอยู่
+    ("Ph.D" กับ "Ph.D." ในเล่มเดียวกัน — เล่มจริง 25 พ.ย. 2569) ไม่เดาจุดให้เอง ("Dr.PH" ไม่มีจุดท้ายโดยชอบ)"""
+    out = []
+    for _name, quals in people:
+        out.append(", ".join(q + "." if q + "." in dotted else q for q in quals))
+    return out
+
+
+def _report_rank_qualifications(rep, people, other_people, loc):
+    """คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ — ส้ม ข้อเดียวต่อหน้า (อัปเดต 1.12 เจ้าของ 25 พ.ย. 2569)
+
+    เจ้าของ: "เล่มนี้บทคัดย่อไทย format ผิดนะ" → "บอกให้เขาทำ format ที่ถูกสิ สีส้ม" — เล่มจริงพิมพ์ "ชื่อ, รศ. ดร., ชื่อ, ผศ. ดร."
+    ข้อแดง "ตำแหน่งทางวิชาการนำหน้า" ดูเฉพาะช่องชื่อ จึงหลุด · คนที่ช่องชื่อมีตำแหน่งนำหน้า (ข้อแดงอยู่แล้ว) ไม่นับซ้ำ
+    วิธีแก้: บทคัดย่ออีกภาษามีกรรมการเท่ากันและคุณวุฒิเป็นวุฒิการศึกษาจริงครบทุกคน = ยกคุณวุฒิตามลำดับมาเขียนบรรทัดที่ถูกให้
+    (ชื่อตามหน้านี้) · ยกไม่ได้ = บอกรูปแบบทั่วไป
+    """
+    wrong = [(name, quals) for name, quals in people
+             if _strip_committee_title(name) == name and any(is_academic_rank_only(q) for q in quals)]
+    if not wrong:
+        return
+    shown = ", ".join('"' + ", ".join([name] + quals) + '"' for name, quals in wrong)
+    fix = ("แทนตำแหน่งทางวิชาการด้วยวุฒิการศึกษาของกรรมการแต่ละท่าน ในรูปแบบ 'ชื่อ นามสกุล, คุณวุฒิ'")
+    if other_people and len(other_people) == len(people) and all(
+            quals and not any(is_academic_rank_only(q) for q in quals) for _n, quals in other_people):
+        dotted = {q for _n, quals in other_people for q in quals}
+        corrected = ", ".join(f"{name}, {quals}"
+                              for (name, _q), quals in zip(people, _qualifications_from(other_people, dotted)))
+        fix = f'แก้เป็น "{corrected}"'
+    rep.add(ABSTRACT_QUALIFICATION_ZONE, "front_matter", loc,
+            f"คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: {shown}",
+            "รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยคุณวุฒิคือวุฒิการศึกษา เช่น Ph.D. หรือ ปร.ด. ไม่ใช่ตำแหน่งทางวิชาการ",
+            fix, "FRONT.ABSTRACT_QUALIFICATION")
+
+
 def abstract_committee_missing_commas(block):
     """คืนรายชื่อกรรมการที่ไม่มีจุลภาคคั่นจากคุณวุฒิของคนก่อนหน้า"""
     return [text for kind, text, missing in _scan_abstract_committee(block)
@@ -3458,6 +3516,14 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
     กฎ "รูปแบบ" เป็นกฎของ template ล้วน จึงตรวจได้แม้ไม่มีข้อมูลกรรมการจาก eThesis
     """
     advisory = (committees or {}).get("advisory", [])
+    # รายชื่อกรรมการของบทคัดย่อแต่ละภาษา (หน้าแรกที่อ่านรายชื่อได้) — ไว้ยกคุณวุฒิมาเขียนบรรทัดที่ถูกให้อีกภาษา (อัปเดต 1.12)
+    people_by_language = {}
+    for page_list, heading_en in ((abs_en_pages, True), (abs_th_pages, False)):
+        for ai in page_list:
+            parsed = abstract_committee_block(pages[ai]) if ai < len(pages) else None
+            if parsed and abstract_committee_people(parsed[1]):
+                people_by_language[heading_en] = abstract_committee_people(parsed[1])
+                break
     for page_list, heading_en in ((abs_en_pages, True), (abs_th_pages, False)):
         for ai in page_list:
             if ai >= len(pages):
@@ -3524,6 +3590,9 @@ def _check_abstract_committees(rep, committees, abs_en_pages, abs_th_pages, page
                         f'ชื่อกรรมการมีตำแหน่งทางวิชาการนำหน้า: {shown}',
                         "รูปแบบต้องเป็นชื่อ-สกุลและคุณวุฒิเท่านั้น ไม่มีตำแหน่งทางวิชาการ",
                         "ลบตำแหน่งทางวิชาการนำหน้าชื่อออก", "FRONT.ABSTRACT")
+            # คุณวุฒิเป็นตำแหน่งทางวิชาการ (อัปเดต 1.12 ส้ม) — คนที่ช่องชื่อมีตำแหน่งนำหน้าแจ้งข้อแดงข้างบนแล้ว ไม่นับซ้ำ
+            _report_rank_qualifications(rep, abstract_committee_people(block),
+                                        people_by_language.get(not heading_en), loc)
             # ตรวจตัวพิมพ์จาก "ชื่อล้วน" หลังตัดตำแหน่งวิชาการออกแล้ว เพราะตำแหน่ง
             # วิชาการมีตัวพิมพ์เล็กเป็นปกติ ("Asst. Prof.") และถูกฟ้องเป็นข้อของตัวเอง
             # ไปแล้วข้างบน ถ้าไม่ตัดออกจะได้สองข้อจากความผิดเดียว แถมข้อหลังยังบอกผิด

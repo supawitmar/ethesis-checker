@@ -803,6 +803,14 @@ var TR = [
   [/ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย/g, 'The thesis title on the abstract page has a dotted line or ellipsis (.....) after it'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา/g, 'The thesis title on the abstract page must contain only the title, with no dotted line or ellipsis'],
   [/ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก/g, 'Remove the dotted line or ellipsis below the thesis title'],
+  // อัปเดต 1.12: คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ (FRONT.ABSTRACT_QUALIFICATION)
+  [/^คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: ((?:"[^"]*"(?:, )?)+)$/g,
+   'A committee member\'s qualification is an academic rank, not a degree: $1'],
+  [/^รูปแบบต้องเป็น 'ชื่อ นามสกุล, คุณวุฒิ' โดยคุณวุฒิคือวุฒิการศึกษา เช่น Ph\.D\. หรือ ปร\.ด\. ไม่ใช่ตำแหน่งทางวิชาการ$/g,
+   "The format must be 'First name Last name, Qualification', where the qualification is a degree such as \"Ph.D.\" or \"ปร.ด.\", not an academic rank"],
+  [/^แก้เป็น ("[^"]*")$/g, 'Change it to $1'],
+  [/^แทนตำแหน่งทางวิชาการด้วยวุฒิการศึกษาของกรรมการแต่ละท่าน ในรูปแบบ 'ชื่อ นามสกุล, คุณวุฒิ'$/g,
+   "Replace each academic rank with that committee member's degree, in the format 'First name Last name, Qualification'"],
   // อัปเดต 1.11.1: เส้นประใต้ชื่อเรื่องบนหน้าลงนาม (FRONT.APPROVAL_TITLE_DOTS)
   [/^ชื่อเรื่องบนหน้าลงนามมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย$/g,
    'The thesis title on the signature page has a dotted line or ellipsis (.....) after it'],
