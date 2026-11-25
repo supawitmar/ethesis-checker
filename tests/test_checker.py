@@ -13603,3 +13603,92 @@ class Update1122ChapterTitlesWrappedOnBothSides(unittest.TestCase):
         source = inspect.getsource(checker_module.run_check)
         self.assertIn("chapter_title_wrapped_join(_toc_chapter_title(t_raw), t_next, title, _next_line)", source)
         self.assertIn("chapter_title_wrapped_join(toc_title, toc_next, body_title, body_next)", source)
+
+
+
+def _pdf_with_placed_lines(pages):
+    """PDF เล็ก ๆ ที่วางข้อความแต่ละบรรทัดตามพิกัด — แต่ละหน้าเป็นรายการ (x, y, ข้อความ) (อัปเดต 1.12.3)"""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None,
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for lines in pages:
+        stream = " ".join(f"BT /F1 12 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET" for x, y, text in lines).encode("ascii")
+        objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+                       + stream + b"\nendstream")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
+                       f"<< /Font << /F1 3 0 R >> >> /Contents {len(objects)} 0 R >>".encode("ascii"))
+        kids.append(f"{len(objects)} 0 R")
+    objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode("ascii")
+    pdf, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    pdf.extend("".join(f"{offset:010d} 00000 n \n" for offset in offsets).encode("ascii"))
+    pdf.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+               .encode("ascii"))
+    return bytes(pdf)
+
+
+class Update1123ChapterNumberInATableCell(unittest.TestCase):
+    """"บทที่ N" ในเซลล์หัวตารางที่ขึ้นซ้ำบนหน้าต่อไม่ใช่หัวบท (อัปเดต 1.12.3 เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    @staticmethod
+    def _words(*rows):
+        out = []
+        for x0, top, text in rows:
+            for k, word in enumerate(text.split()):
+                out.append({"text": word, "x0": x0 + 40 * k, "x1": x0 + 40 * k + 35, "top": top, "bottom": top + 14})
+        return out
+
+    def test_a_cell_in_the_right_column_is_not_a_heading(self):
+        words = self._words((300, 60, "116"), (71, 90, "Factor"), (200, 90, "Detail"), (370, 90, "Items in"),
+                            (370, 112, "บทที่ 5"), (71, 150, "row text"), (480, 150, "end"))
+        self.assertEqual(checker_module.chapter_lines_far_right(words), {5})
+
+    def test_real_headings_are_kept(self):
+        """ควบคุมเชิงลบ — หัวบทกึ่งกลาง ชิดซ้าย หัวบทกับชื่อบทบรรทัดเดียวกัน และหน้าที่กึ่งกลางเลื่อนซ้าย"""
+        full = [(71, 200, "body"), (489, 200, "end")]                       # พื้นที่พิมพ์ 71-524 กึ่งกลาง 297.5
+        for heading in ((280, 91, "บทที่ 5"), (71, 91, "CHAPTER 5"), (230, 91, "บทที่ 5 สรุปผล"),
+                        (305, 91, "CHAPTER 5")):                           # เริ่มเลยกึ่งกลาง 7.5 จุด (ไม่ถึงครึ่งนิ้ว)
+            self.assertEqual(checker_module.chapter_lines_far_right(self._words(heading, *full)), set(), heading)
+        # เครื่องหมายขอบหน้าที่ x = 20 ดึงกึ่งกลางไปทางซ้าย (เล่มจริง) — หัวบทกึ่งกลางยังนับ
+        self.assertEqual(checker_module.chapter_lines_far_right(
+            self._words((20, 400, "|"), (280, 87, "บทที่ 1"), *full)), set())
+        # บทเดียวกันมีทั้งเซลล์และหัวบทจริงบนหน้าเดียว — หัวบทจริงยังนับ
+        self.assertEqual(checker_module.chapter_lines_far_right(
+            self._words((280, 91, "บทที่ 5"), (370, 300, "บทที่ 5"), *full)), set())
+        self.assertEqual(checker_module.chapter_lines_far_right([]), set())
+
+    def _run(self, cell_x):
+        import tempfile
+        toc = [(300, 800, "iii"), (230, 770, "TABLE OF CONTENTS"), (72, 740, "CHAPTER 1 INTRODUCTION 1"),
+               (72, 724, "CHAPTER 2 METHODS 3")]
+        chapter1 = [(300, 800, "1"), (270, 770, "CHAPTER 1"), (255, 754, "INTRODUCTION"), (72, 730, self.BODY)]
+        table = [(300, 800, "2"), (72, 770, "Factor"), (200, 770, "Detail"), (cell_x, 770, "Items to do in"),
+                 (cell_x, 754, "CHAPTER 2"), (72, 730, self.BODY)]
+        chapter2 = [(300, 800, "3"), (270, 770, "CHAPTER 2"), (270, 754, "METHODS"), (72, 730, self.BODY)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_placed_lines([toc, chapter1, table, chapter2]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]
+                if i["rule_id"] == "FRONT.TOC"]
+
+    def test_the_book_has_two_chapters(self):
+        issues = self._run(370)
+        self.assertFalse([i for i in issues if "เนื้อหามี" in i["found"]], issues)
+        self.assertFalse([i for i in issues if "ชื่อบทในสารบัญกับในเนื้อหาไม่ตรงกัน" in i["found"]], issues)
+
+    def test_a_left_aligned_chapter_line_on_that_page_still_counts(self):
+        """ควบคุมเชิงลบ — บรรทัดเดียวกันชิดซ้ายนับเป็นหัวบทตามเดิม (เนื้อหา 3 บท สารบัญ 2 บท)"""
+        issues = self._run(72)
+        self.assertTrue([i for i in issues if "เนื้อหามี 3 บท" in i["found"]], issues)
+
+    def test_the_body_scan_uses_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("table_chapter_cells[_i] = _cells", source)
+        self.assertIn("cn in table_chapter_cells.get(i, ())", source)

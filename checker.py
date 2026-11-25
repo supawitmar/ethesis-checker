@@ -8983,6 +8983,43 @@ def _chapter_match(line):
     return int(num) if num.isdigit() else _roman_to_int(num)
 
 
+# บรรทัด "บทที่ N" ที่เริ่มเลยกึ่งกลางพื้นที่พิมพ์ไปทางขวาเกินครึ่งนิ้ว = เซลล์ตาราง ไม่ใช่หัวบท (อัปเดต 1.12.3)
+_HEADING_RIGHT_SLACK = 36
+
+
+def _word_rows(words):
+    """คำบนหน้าจัดเป็นแถวตามแนวบรรทัด (ขอบบนห่างกันไม่เกิน 3 จุด) เรียงซ้ายไปขวา"""
+    rows = []
+    for word in sorted(words, key=lambda w: (round(float(w["top"])), float(w["x0"]))):
+        if rows and abs(float(rows[-1][0]["top"]) - float(word["top"])) <= 3:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    return [sorted(row, key=lambda w: float(w["x0"])) for row in rows]
+
+
+def chapter_lines_far_right(words):
+    """เลขบทที่บรรทัด "บทที่ N / CHAPTER N" บนหน้านี้ทุกบรรทัดเริ่มเลยกึ่งกลางพื้นที่พิมพ์ไปทางขวาเกินครึ่งนิ้ว
+
+    เจ้าของ 25 พ.ย. 2569 *"เล่มนี้มี 5 บท เท่านั้นนะ เช็คอีกที"* — ตารางที่ขึ้นหัวตารางซ้ำบนหน้าต่อมีหัวคอลัมน์
+    "องค์ประกอบที่ต้องดำเนินการใน" / "บทที่ 5" บรรทัดเซลล์ "บทที่ 5" (x0 = 370 กึ่งกลางพื้นที่พิมพ์ 298) ติดอยู่ในบรรทัดต้น ๆ
+    ของหน้า ระบบจับเป็นหัวบท 5 จึงแดง "สารบัญมี 5 บท เนื้อหามี 6 บท" และ "ชื่อบทไม่ตรงกัน" ยกแถวข้อมูลตารางเป็นชื่อบท
+    หัวบทจริงอยู่กึ่งกลาง (เริ่มก่อนกึ่งกลางเสมอ) หรือชิดซ้าย — เล่มจริงทั้งชุดหัวบทเริ่มเลยกึ่งกลางมากสุด 8 จุด
+    """
+    if not words:
+        return set()
+    left = min(float(w["x0"]) for w in words)
+    right = max(float(w["x1"]) for w in words)
+    middle = (left + right) / 2
+    starts = {}
+    for row in _word_rows(words):
+        number = _chapter_match(" ".join(w["text"] for w in row))
+        if number is not None:
+            starts.setdefault(number, []).append(float(row[0]["x0"]))
+    return {number for number, xs in starts.items()
+            if all(x > middle + _HEADING_RIGHT_SLACK for x in xs)}
+
+
 def resolve_option(body_ch, approved, chapters_mode):
     """Resolve document option without forcing canonical titles in free mode.
 
@@ -9368,6 +9405,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     rotated_labels = {}        # เลขหน้าที่พิมพ์เป็นอักษรหมุน (rotated_page_label อัปเดต 1.8)
     footers = []               # ข้อความในแถบท้ายกระดาษต่อหน้า — ข้อ PAGE.FOOTER_TEXT (อัปเดต 1.11)
     drawn_pages = set()        # หน้าส่วนนำที่ข้อความเป็นเส้นวาด ไม่ใช่ตัวอักษร (drawn_text_page อัปเดต 1.12.2)
+    table_chapter_cells = {}   # ดัชนีหน้า → เลขบทที่ "บทที่ N" เป็นเซลล์ตาราง ไม่ใช่หัวบท (chapter_lines_far_right อัปเดต 1.12.3)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -9411,6 +9449,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 _rotated = rotated_page_label(_words, float(_pg.width or 0), float(_pg.height or 0))
                 if _rotated:
                     rotated_labels[_i] = _rotated
+                _cells = chapter_lines_far_right(_words)
+                if _cells:
+                    table_chapter_cells[_i] = _cells
             except Exception:
                 header_words.append([])
                 del footers[_i:]
@@ -9693,6 +9734,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         tls = top_lines(t, BODY_RULES['heading_scan_lines'])
         for j, l in enumerate(tls):
             cn = _chapter_match(l)
+            # "บทที่ N" ในเซลล์ตาราง (หัวตารางซ้ำบนหน้าต่อ) ไม่ใช่หัวบท — อัปเดต 1.12.3
+            if cn is not None and cn in table_chapter_cells.get(i, ()):
+                continue
             if cn is not None and j + 1 < len(tls):
                 title = tls[j+1]
                 # หัวบทที่เขียน "(ต่อ)" เป็นหน้าถัดไปของบทเดิม ไม่ใช่บทใหม่
