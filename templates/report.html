@@ -803,6 +803,10 @@ var TR = [
   [/ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย/g, 'The thesis title on the abstract page has a dotted line or ellipsis (.....) after it'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา/g, 'The thesis title on the abstract page must contain only the title, with no dotted line or ellipsis'],
   [/ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก/g, 'Remove the dotted line or ellipsis below the thesis title'],
+  // อัปเดต 1.12.2: บทคัดย่อไทยที่ข้อความเป็นเส้นวาด
+  [/^ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะข้อความเป็นภาพหรือเส้น ไม่ใช่ตัวอักษร$/g,
+   'The system cannot read the text on this page because it is an image or drawn lines, not characters'],
+  [/^เจ้าหน้าที่ตรวจข้อมูลบทคัดย่อภาษาไทยด้วยตา$/g, 'Staff to check the Thai abstract by eye'],
   // อัปเดต 1.12.1: หน้าที่สารบัญอ้างถึงอ่านไม่ออก (ฟอนต์เข้ารหัสผิดปกติ)
   [/^ระบบอ่านข้อความหน้านี้ไม่ออก \(ฟอนต์เข้ารหัสผิดปกติ\) จึงยืนยันไม่ได้ว่ามี ("[^"]*") ตามที่สารบัญระบุ$/g,
    'The system cannot read the text on this page (abnormal font encoding), so it cannot confirm the $1 heading listed in the table of contents'],
@@ -1700,6 +1704,7 @@ var TR = [
   [/^ระบบหาหน้าลงนามไม่เจอ$/g, 'Signature pages not found'],
   [/^ระบบหาหน้าบทคัดย่อไม่เจอ$/g, 'Abstract pages not found'],
   [/^เล่มไม่มีหน้าบทคัดย่อภาษาไทย$/g, 'The document has no Thai abstract page'],
+  [/^ไม่ได้ตรวจ — ข้อความเป็นภาพ$/g, 'Not checked — the text is an image'],
   [/^เล่มไม่มีหน้าบทคัดย่อภาษาอังกฤษ$/g, 'The document has no English abstract page'],
   [/^เล่มไม่มีหน้าบทคัดย่อไทย$/g, 'The document has no Thai abstract page'],
   [/^เล่มไม่มีหน้าบทคัดย่ออังกฤษ$/g, 'The document has no English abstract page'],

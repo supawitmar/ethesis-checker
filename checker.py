@@ -108,11 +108,16 @@ def soft(s):
 # (ขีดยาว) ส่วนข้อมูลอนุมัติเป็น "Co-PRODUCTION" แล้วถูกฟ้องว่าชื่อเรื่องไม่ตรง
 # ใช้ตอน "ตัดสินว่าตรงหรือไม่" เท่านั้น ข้อความที่ยกมาจากเล่มยังแสดงตามที่พิมพ์จริง
 _DASH_VARIANTS = re.compile('[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]')
+# อัญประกาศ/อะพอสทรอฟีทุกแบบนับเป็นตัวเดียวกันแบบเดียวกับขีด (อัปเดต 1.12.2 เจ้าของ 25 พ.ย. 2569: *"เครื่องหมาย ' ไม่ควรผิด
+# ถึงแม้จะเป็นคนละฟ้อนก็ตาม จะเป็นลักษณะเดียวกันกับ เครื่องหมาย -"*) — เล่มจริงพิมพ์ "BONCHON'S" (ตรง) ข้อมูลอนุมัติเป็น "BONCHON’S" (โค้ง)
+_SINGLE_QUOTE_VARIANTS = re.compile('[\u2018\u2019\u201A\u201B\u02BC\u0060\u00B4\u2032]')
+_DOUBLE_QUOTE_VARIANTS = re.compile('[\u201C\u201D\u201E\u201F\u2033]')
 
 
 def fold_dashes(s):
-    """แทนขีดทุกแบบด้วยขีดสั้น "-" (U+002D)"""
-    return _DASH_VARIANTS.sub('-', s or '')
+    """แทนขีดทุกแบบด้วยขีดสั้น "-" (U+002D) และอัญประกาศทุกแบบด้วยตัวตรง ' " (อัปเดต 1.12.2)"""
+    s = _DASH_VARIANTS.sub('-', s or '')
+    return _DOUBLE_QUOTE_VARIANTS.sub('"', _SINGLE_QUOTE_VARIANTS.sub("'", s))
 
 
 # ---------- ตัวสะกดไทยครบทุกตัว (ใช้ "ตัดสิน" ว่าเล่มสะกดตรงหรือไม่) ----------
@@ -2107,6 +2112,48 @@ def page_text_unreadable(text):
     letters = re.sub(r'\s', '', text or '')
     return (len(letters) >= _UNREADABLE_PAGE_MIN
             and letters.count(_UNREADABLE_GLYPH) >= _UNREADABLE_PAGE_SHARE * len(letters))
+
+
+# หน้าที่ข้อความถูกแปลงเป็นเส้นวาด (outline) ไม่ใช่ตัวอักษร — อัปเดต 1.12.2
+_DRAWN_TEXT_MIN_CURVES = 300
+_DRAWN_TEXT_CURVES_PER_CHAR = 10
+
+
+def drawn_text_page(n_chars, n_curves):
+    """หน้าที่ข้อความเป็นเส้นวาด: เส้นโค้งตั้งแต่ 300 เส้น และมากกว่าตัวอักษรบนหน้าเกิน 10 เท่า
+
+    เล่มจริง (IS อังกฤษ 25 พ.ย. 2569) บทคัดย่อไทยหน้า vi มีเส้นโค้ง 3,499 เส้นกับตัวอักษรจริง 32 ตัว (เลขหน้า "Ph.D.")
+    หน้าแผนภาพ/ตารางทั่วไปมีตัวอักษรกำกับมากกว่า เส้นโค้งไม่ถึงสิบเท่าของตัวอักษร
+    """
+    return n_curves >= _DRAWN_TEXT_MIN_CURVES and n_chars * _DRAWN_TEXT_CURVES_PER_CHAR < n_curves
+
+
+def drawn_abstract_page(toc_entries, page_labels, drawn_pages, abs_en_idx, front_marks, kind="abstract_th"):
+    """แผ่นบทคัดย่อที่ข้อความเป็นเส้นวาด — None ถ้าไม่มี
+
+    1) สารบัญมีรายการบทคัดย่อ (kind) ชี้ไปที่แผ่นเส้นวาด (หรือแผ่นถัดไปหนึ่งแผ่น)
+    2) ไม่งั้น แผ่นเส้นวาดแผ่นแรกต่อจากบทคัดย่ออังกฤษ ก่อนถึงส่วนถัดไปของส่วนนำ
+    """
+    if not drawn_pages:
+        return None
+    by_label = {}
+    for idx, label in sorted(page_labels.items()):
+        by_label.setdefault(str(label).lower(), idx)
+    for entry in toc_entries:
+        if entry.get("kind") != kind or not entry.get("page_label"):
+            continue
+        idx = by_label.get(str(entry["page_label"]).lower())
+        if idx is not None:
+            for cand in (idx, idx + 1):
+                if cand in drawn_pages:
+                    return cand
+    if abs_en_idx is not None:
+        later = [b for b in front_marks if b > abs_en_idx]
+        stop = min(later) if later else abs_en_idx + 4
+        for cand in range(abs_en_idx + 1, min(stop, abs_en_idx + 4)):
+            if cand in drawn_pages:
+                return cand
+    return None
 
 
 def _toc_target_page(toc_lines, toc_idx, terms, printed, pages):
@@ -7466,8 +7513,9 @@ def _legacy_diff(a, b, keyfn, join, words, case=False):
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             if case and words:
+                # ต่างแค่ชนิดขีด/อัญประกาศ (fold_dashes) ไม่ใช่ตัวพิมพ์ต่าง — อัปเดต 1.12.2
                 case_entries += [(len(parts), _case_word_entry(a, i1 + k, a[i1 + k], b[j1 + k]))
-                                 for k in range(i2 - i1) if a[i1 + k] != b[j1 + k]]
+                                 for k in range(i2 - i1) if fold_dashes(a[i1 + k]) != fold_dashes(b[j1 + k])]
             continue
         got, want = join(a[i1:i2]), join(b[j1:j2])
         # ช่องว่างล้วนไม่ต้องพูดถึง — ข้อความที่ถูกต้องมีให้อยู่แล้วในบรรทัดถัดมา
@@ -7510,12 +7558,13 @@ def _analyze_latin(found_s, expected_s, case=False):
     # อังกฤษหลายคำ: ลองเทียบระดับคำก่อน (อ่านง่าย เห็นเป็นคำ) ถ้าทุกคำต่างกัน
     # จนเทียบไม่ได้ ค่อยตกไปเทียบระดับตัวอักษร (เช่น "LITTERATURE" ต่าง T กับ S)
     if re.search(r'[A-Za-z]', expected_s) and ' ' in expected_s.strip():
+        # ขีด/อัญประกาศต่างแบบไม่เป็นจุดต่าง (fold_dashes อัปเดต 1.12.2) — เดิมชี้ 'ต่างที่ "BONCHON'S" ต้องเป็น "BONCHON’S"'
         by_word = _legacy_diff(found_s.split(), expected_s.split(),
-                               lambda xs: [x.upper() for x in xs], ' '.join, True, case)
+                               lambda xs: [fold_dashes(x).upper() for x in xs], ' '.join, True, case)
         if by_word.text:
             return by_word
     return _legacy_diff(_graphemes(found_s), _graphemes(expected_s),
-                        lambda xs: xs, ''.join, False)
+                        lambda xs: [fold_dashes(x) for x in xs], ''.join, False)
 
 
 def analyze_diff(found, expected, spaces=False, case=False):
@@ -8481,6 +8530,23 @@ def toc_title_joined(toc_title, next_line, target):
     return toc_title
 
 
+def chapter_title_wrapped_join(toc_title, toc_next, body_title, body_next):
+    """ชื่อบทที่สารบัญกับเนื้อหาตรงกันเมื่อรวมบรรทัดต่อของแต่ละฝั่ง (ข้อความฝั่งเนื้อหา) — '' ถ้ารวมแล้วก็ไม่ตรง (อัปเดต 1.12.2)
+
+    ไม่สนว่าแต่ละฝั่งตัดบรรทัดตรงคำไหน
+
+    เล่มจริง (25 พ.ย. 2569) สารบัญ "CHAPTER 4 STRATEGIC RECOMMENDATIONS AND 44" / "IMPROVEMENT ALTERNATIVES"
+    เนื้อหา "STRATEGIC RECOMMENDATIONS AND IMPROVEMENT" / "ALTERNATIVES" — รวมแล้วตรงกัน แต่ระบบเทียบบรรทัดแรกจึงแดง
+    บรรทัดต่อต้องไม่ใช่หัวข้อย่อย บทอื่น หรือส่วนอื่นของเล่ม (toc_title_continuation) และต้องรวมแล้วตรงทุกตัว
+    """
+    if not toc_title or not body_title:
+        return ""
+    toc_rest, body_rest = toc_title_continuation(toc_next), toc_title_continuation(body_next)
+    tocs = {norm(toc_title)} | ({norm(f"{toc_title} {toc_rest}")} if toc_rest else set())
+    bodies = [body_title] + ([f"{body_title} {body_rest}"] if body_rest else [])
+    return next((soft(b) for b in reversed(bodies) if norm(b) in tocs), "")
+
+
 def toc_bare_chapter(line, next_line=""):
     """เลขบทของบรรทัดสารบัญที่มีแต่ "CHAPTER I" ไม่มีชื่อบท — None ถ้ามีชื่อบท หรือไม่ใช่บรรทัดบท
 
@@ -9301,6 +9367,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     edge_numbered = set()      # หน้าที่แถบหัว/ท้ายกระดาษมีสิ่งที่อาจเป็นเลขหน้า (edge_page_number_hint อัปเดต 1.8)
     rotated_labels = {}        # เลขหน้าที่พิมพ์เป็นอักษรหมุน (rotated_page_label อัปเดต 1.8)
     footers = []               # ข้อความในแถบท้ายกระดาษต่อหน้า — ข้อ PAGE.FOOTER_TEXT (อัปเดต 1.11)
+    drawn_pages = set()        # หน้าส่วนนำที่ข้อความเป็นเส้นวาด ไม่ใช่ตัวอักษร (drawn_text_page อัปเดต 1.12.2)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -9328,6 +9395,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 if not (pages[-1] or "").strip() and not (
                         _pg.chars or _pg.images or _pg.lines or _pg.rects or _pg.curves):
                     empty_pages.add(_i)
+            except Exception:
+                pass
+            try:
+                if _i < 20 and drawn_text_page(len(_pg.chars), len(_pg.curves)):
+                    drawn_pages.add(_i)
             except Exception:
                 pass
             try:
@@ -9517,8 +9589,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # แผ่นสแกนตรงหน้าลงนามแจ้งไว้แล้วในข้อ "อ่านหน้าลงนามไม่ได้" — ไม่แจ้งซ้ำว่าดึงข้อความไม่ได้
     # หน้าว่างจริงแจ้งเป็นข้อ PAGE.EMPTY ข้อเดียวทั้งเล่ม ไม่ซ้อนกับ PAGE.BLANK บนแผ่นเดียวกัน (อัปเดต 1.7)
+    # หน้าเส้นวาดมีข้อความ (เป็นเส้น) ไม่ใช่หน้าว่าง — แจ้งเป็นข้อบทคัดย่ออ่านไม่ได้แทน (อัปเดต 1.12.2)
     _report_blank_runs(rep, pages, printed, image_pages, arabic_sequence_ok, page_ref,
-                       skip=list(scanned_sig) + sorted(empty_pages),
+                       skip=list(scanned_sig) + sorted(empty_pages | drawn_pages),
                        sequence_reported=BODY_RULES['check_page_sequence'])
     _report_empty_pages(rep, empty_pages, page_labels)
     # อัปเดต 1.11 (เจ้าของ 25 พ.ย. 2569): หน้าสารบัญตาราง/รูปภาพที่มีแต่หัวคอลัมน์ · ข้อความท้ายกระดาษซ้ำ
@@ -9569,6 +9642,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "raw": line.strip(),
                 "page_label": _toc_page_label(line),
             })
+    # บทคัดย่อไทยที่ข้อความเป็นเส้นวาด (อัปเดต 1.12.2) — มีหน้าอยู่จริงแต่อ่านไม่ได้ ไม่ใช่ "ขาดบทคัดย่อ"
+    abs_th_drawn = None if abs_th_pages else drawn_abstract_page(
+        toc_entries, page_labels, drawn_pages, abs_en_idx,
+        sorted(set(sig_pages + abs_en_pages + ack_pages + toc_pages + list_pages)))
     # บรรทัดถัดไปเก็บไว้ด้วย เพราะชื่อบทยาวถูกตัดขึ้นบรรทัดใหม่ได้ ต้องดูของจริง
     # ไม่ใช่ยอมรับทุกชื่อที่ "เป็นต้นของชื่อมาตรฐาน" (ดู _title_status)
     toc_ch = []   # (chap_no, title_norm, page_no, raw_line, source_page_idx, next_line)
@@ -9706,6 +9783,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 nb = norm(title)
                 # ชื่อบทในสารบัญที่คำท้ายตกบรรทัดหลังเลขหน้า (toc_title_joined)
                 if t_title_n != nb and norm(toc_title_joined(_toc_chapter_title(t_raw), t_next, title)) == nb:
+                    t_title_n = nb
+                # ตัดบรรทัดทั้งสองฝั่งคนละตำแหน่ง (chapter_title_wrapped_join อัปเดต 1.12.2)
+                if t_title_n != nb and chapter_title_wrapped_join(_toc_chapter_title(t_raw), t_next, title, _next_line):
                     t_title_n = nb
                 # บทที่ประกาศบังคับชื่อ (โหมด strict) ยึดประกาศเป็นหลัก ไม่เทียบสารบัญ↔
                 # เนื้อหา — บทที่ประกาศไม่บังคับ (รูปแบบ 2 บทที่ 3 / โหมดยกเว้นบท) ยังเทียบ
@@ -9866,6 +9946,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             body_title, body_idx, body_next = body_by_ch.get(cn, (None, None, ""))
             if toc_title is not None and body_title:
                 toc_title = toc_title_joined(toc_title, toc_next, body_title)
+                # ตัดบรรทัดทั้งสองฝั่งคนละตำแหน่ง = ชื่อเดียวกัน เทียบประกาศด้วยชื่อเต็ม (อัปเดต 1.12.2)
+                # เดิมแจ้ง 'สารบัญพิมพ์ "... AND" ส่วนเนื้อหาพิมพ์ "... AND IMPROVEMENT"' ทั้งที่สองฝั่งพิมพ์เหมือนกัน
+                if not same_spelling(toc_title, body_title):
+                    full = chapter_title_wrapped_join(toc_title, toc_next, body_title, body_next)
+                    if full:
+                        toc_title = body_title = full
+                        toc_next = body_next = ""
             toc_bad = _title_status(toc_title, cn, toc_next) if toc_title is not None else None
             body_bad = _title_status(body_title, cn, body_next) if body_title is not None else None
             if not toc_bad and not body_bad:
@@ -10059,7 +10146,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
 
     # ---------- ขนาด section ส่วนนำ ----------
     _p("ตรวจบทคัดย่อและกิตติกรรมประกาศ")
-    boundaries = sorted(set(sig_pages + abs_th_pages + abs_en_pages + ack_pages + toc_pages + list_pages))
+    # หน้าเส้นวาดเป็นขอบเขตของส่วนด้วย ไม่นับเป็นหน้าต่อของส่วนก่อนหน้า (อัปเดต 1.12.2 — เดิมบทคัดย่ออังกฤษ "กินพื้นที่ 4 หน้า")
+    boundaries = sorted(set(sig_pages + abs_th_pages + abs_en_pages + ack_pages + toc_pages + list_pages)
+                        | drawn_pages)
     first_chapter = body_ch[0][2] if body_ch else front_limit
 
     # เลขหน้าส่วนนำทุกหน้า (ไม่ใช่แค่ 2 หน้าลงนาม) — ตรวจได้เมื่อรู้ว่าเนื้อหาเริ่มหน้าไหน
@@ -10088,6 +10177,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add("RED", "front_matter", front_span_location(gname, page_ref(grp_pages[0])),
                         f"กินพื้นที่ {sp} หน้า", f"{gname}ต้องไม่เกิน {gmax} หน้า",
                         "ตัดเนื้อหาให้สั้นลง", source_rule)
+    if abs_th_drawn is not None:
+        # ส้มให้เจ้าหน้าที่ดูเอง ไม่มีข้อให้นักศึกษาแก้ (เจ้าของตัดสิน 25 พ.ย. 2569 "ขึ้นว่าไม่สามารถอ่านได้ ให้ staff ตรวจ สีส้ม")
+        rep.add(UNCERTAIN_ZONE, "front_matter", f"บทคัดย่อภาษาไทย ({page_ref(abs_th_drawn)})",
+                "ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะข้อความเป็นภาพหรือเส้น ไม่ใช่ตัวอักษร",
+                "เจ้าหน้าที่ตรวจข้อมูลบทคัดย่อภาษาไทยด้วยตา", "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
 
     # ---------- กฎหน้าบทคัดย่อ (ตรวจทั้งช่วงของบทคัดย่อ ไม่ใช่แค่หน้าแรก) ----------
     abstract_idxs = sorted(set(abs_en_pages + abs_th_pages))
@@ -10360,6 +10454,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             title_mismatch_detail(alt_word, compared, alt_title),
                             f"ต้องตรงข้อมูลอนุมัติทุกตัวอักษร: \"{alt_title}\"",
                             "แก้ชื่อเรื่องให้ตรงข้อมูลในระบบ", "FORM.APPROVED_MATCH")
+            elif not thai_book and abs_th_drawn is not None:
+                # หน้ามีอยู่แต่ข้อความเป็นเส้นวาด (อัปเดต 1.12.2)
+                rep.add_verification("ชื่อเรื่อง (ตาม บฑ.1)", f"{alt_lbl} ({page_ref(abs_th_drawn)})",
+                                     "skipped", "ไม่ได้ตรวจ — ข้อความเป็นภาพ")
             else:
                 # ไม่มีหน้าบทคัดย่อภาษานั้นในเล่ม = ถูกฟ้องเป็นสีแดงในกฎ "ภาษาครบตามหลักสูตร"
                 # อยู่แล้ว จึงไม่ฟ้องซ้ำด้วยข้อความที่ฟังเหมือนระบบอ่านไม่ได้
@@ -10565,6 +10663,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             # เจ้าหน้าที่ยืนยันให้เอาออก (ก.ย. 2569) เหมือนการ์ด "ไม่ได้กรอกข้อมูลอนุมัติ"
             if not nm3:
                 continue
+            if aidx is None and albl == "บทคัดย่อภาษาไทย" and abs_th_drawn is not None:
+                rep.add_verification("ชื่อนักศึกษา", f"{albl} ({page_ref(abs_th_drawn)})", "skipped",
+                                     "ไม่ได้ตรวจ — ข้อความเป็นภาพ")
+                continue
             if aidx is None:
                 # เล่มไม่มีหน้าบทคัดย่อภาษานี้ — กฎ "ภาษาครบตามหลักสูตร" ฟ้องแดงไปแล้ว
                 rep.add_verification("ชื่อนักศึกษา", albl, "skipped",
@@ -10637,6 +10739,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 rep.add_verification("รหัสนักศึกษา", "บทคัดย่อ", "skipped",
                                      "ระบบหาหน้าบทคัดย่อไม่เจอ")
             for abs_idx, abs_label in abstract_spots:
+                if abs_idx is None and abs_label == "บทคัดย่อไทย" and abs_th_drawn is not None:
+                    rep.add_verification("รหัสนักศึกษา", f"{abs_label} ({page_ref(abs_th_drawn)})", "skipped",
+                                         "ไม่ได้ตรวจ — ข้อความเป็นภาพ")
+                    continue
                 if abs_idx is None:
                     continue
                 loc = f"{abs_label} ({page_ref(abs_idx)})"
@@ -10758,6 +10864,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         # ตัวย่อ = ค่าที่เจ้าหน้าที่กรอกในฟอร์มเสมอ — ช่องว่างไม่ถึงตรงนี้ เพราะฟอร์มและ /check บังคับกรอกช่องตัวย่อของ
         # บทคัดย่อทุกภาษาที่หลักสูตรมี และทุกภาษาที่มีชื่อปริญญา (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569)
         def _check_degree_abbr(abbr, abstract_idx, lang):
+            if abbr and abstract_idx is None and lang == "บทคัดย่อไทย" and abs_th_drawn is not None:
+                rep.add_verification("ชื่อปริญญา", f"ชื่อย่อใน{lang} ({page_ref(abs_th_drawn)})", "skipped",
+                                     "ไม่ได้ตรวจ — ข้อความเป็นภาพ")
+                return
             if not abbr or abstract_idx is None:
                 return
             abstract_text = _without_running_head(pages[abstract_idx])
@@ -10856,10 +10966,12 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                         "ต้องมีเพียงบทคัดย่อภาษาอังกฤษเท่านั้น ให้ลบบทคัดย่อไทยออก",
                         "ลบบทคัดย่อไทยออก", "FRONT.ABSTRACT")
         if prog in ("thai", "thai_english"):
+            # บทคัดย่อไทยที่เป็นเส้นวาดมีอยู่จริง — ส้มอ่านไม่ได้แทนแดง "ขาด" (อัปเดต 1.12.2)
+            th_at = abs_th_idx if abs_th_idx is not None else abs_th_drawn
             _report_missing_abstract_language(
-                rep, has_en_abs, has_th_abs,
+                rep, has_en_abs, th_at is not None,
                 page_ref(abs_en_idx) if abs_en_idx is not None else "",
-                page_ref(abs_th_idx) if abs_th_idx is not None else "")
+                page_ref(th_at) if th_at is not None else "")
 
         if toc_pages:
             actual_toc_sections = {}

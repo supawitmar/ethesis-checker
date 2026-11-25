@@ -13418,3 +13418,188 @@ class SarabunNewGlyphCodesAreDecoded(unittest.TestCase):
             '"ภาคผนวก" heading listed in the table of contents')
         self.assertEqual(i18n.tr_en("เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ", pairs),
                          "Staff to check by eye that this page is the heading listed in the table of contents")
+
+
+
+def _pdf_with_drawn_pages(pages):
+    """PDF เล็ก ๆ ที่บางหน้าวาดเส้นโค้งแทนตัวอักษร — แต่ละหน้าเป็น (ข้อความ, จำนวนเส้นโค้ง) (อัปเดต 1.12.2)"""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None,
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for text, curves in pages:
+        lines = " ".join(f"({line}) Tj 0 -16 Td" for line in text.split(NEWLINE))
+        stream = f"BT /F1 12 Tf 72 760 Td {lines} ET".encode("ascii")
+        shapes = " ".join(f"{72 + (k % 40) * 11} {700 - (k // 40) * 14} m {74 + (k % 40) * 11} {706 - (k // 40) * 14} "
+                          f"{78 + (k % 40) * 11} {706 - (k // 40) * 14} {80 + (k % 40) * 11} {700 - (k // 40) * 14} c S"
+                          for k in range(curves))
+        if shapes:
+            stream += (" q " + shapes + " Q").encode("ascii")
+        objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+                       + stream + b"\nendstream")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
+                       f"<< /Font << /F1 3 0 R >> >> /Contents {len(objects)} 0 R >>".encode("ascii"))
+        kids.append(f"{len(objects)} 0 R")
+    objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode("ascii")
+    pdf, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    pdf.extend("".join(f"{offset:010d} 00000 n \n" for offset in offsets).encode("ascii"))
+    pdf.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+               .encode("ascii"))
+    return bytes(pdf)
+
+
+class Update1122QuotesAreOneMark(unittest.TestCase):
+    """อัญประกาศตรง/โค้งนับเป็นตัวเดียวกันแบบขีด (อัปเดต 1.12.2 เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    BOOK = "IMPROVING SERVICE QUALITY: AN APPLICATION OF THE GAP MODEL TO EXAMPLE'S CAFES"
+    SYSTEM = "IMPROVING CUSTOMER LOYALTY AND SERVICE QUALITY: AN APPLICATION OF THE GAP MODEL TO EXAMPLE\u2019S CAFES"
+
+    def test_every_quote_folds_to_a_straight_one(self):
+        for mark in ("\u2018", "\u2019", "\u201a", "\u201b", "\u02bc", "`", "\u00b4", "\u2032"):
+            self.assertEqual(checker_module.fold_dashes(f"EXAMPLE{mark}S"), "EXAMPLE'S", repr(mark))
+        for mark in ("\u201c", "\u201d", "\u201e", "\u201f", "\u2033"):
+            self.assertEqual(checker_module.fold_dashes(f"{mark}A{mark}"), '"A"', repr(mark))
+        self.assertEqual(checker_module.fold_dashes("CO\u2013PRODUCTION"), "CO-PRODUCTION")   # ขีดคงเดิม
+
+    def test_a_title_differing_only_in_the_quote_is_exact(self):
+        page = "AN APPLICATION OF THE GAP MODEL TO EXAMPLE'S CAFES"
+        compared = checker_module.compare_reference_text(page, page.replace("'", "\u2019"), "title")
+        self.assertEqual(compared["status"], "exact")
+
+    def test_a_name_differing_only_in_the_quote_is_exact(self):
+        page = "SOMCHAI O'EXAMPLE"
+        compared = checker_module.compare_reference_text(page, "SOMCHAI O\u2019EXAMPLE", "student_name")
+        self.assertEqual(compared["status"], "exact")
+
+    def test_the_diff_names_only_the_missing_words(self):
+        for case in (False, True):
+            analysis = checker_module.analyze_diff(self.BOOK, self.SYSTEM, case=case)
+            self.assertEqual(analysis.text, 'ขาด "CUSTOMER LOYALTY AND"')
+            self.assertNotIn("EXAMPLE", analysis.text)
+            self.assertTrue(all("EXAMPLE" not in step for step in analysis.steps), analysis.steps)
+
+    def test_a_real_letter_difference_is_still_reported(self):
+        """ควบคุมเชิงลบ — คำที่สะกดต่างจริงข้างอัญประกาศยังชี้"""
+        analysis = checker_module.analyze_diff(self.BOOK.replace("EXAMPLE'S", "EXAMPEL'S"), self.SYSTEM)
+        self.assertIn("EXAMPEL'S", analysis.text)
+
+
+class Update1122DrawnThaiAbstract(unittest.TestCase):
+    """บทคัดย่อไทยที่ข้อความเป็นเส้นวาด ไม่ใช่ตัวอักษร (อัปเดต 1.12.2 เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    COVER = "AN EXAMPLE TITLE" + NEWLINE + "SOMCHAI EXAMPLE" + NEWLINE + "AN INDEPENDENT STUDY"
+    ABSTRACT = ("iv" + NEWLINE + "AN EXAMPLE TITLE" + NEWLINE + "SOMCHAI EXAMPLE 6700000 GRBS/M" + NEWLINE
+                + "M.A.S. (BUSINESS STRATEGY)" + NEWLINE + "ABSTRACT" + NEWLINE + "Some text.")
+    TOC = ("viii" + NEWLINE + "TABLE OF CONTENTS" + NEWLINE + "Page" + NEWLINE + "ABSTRACT (ENGLISH) iv" + NEWLINE
+           + "ABSTRACT (THAI) vi" + NEWLINE + "CHAPTER 1 INTRODUCTION 1")
+    CHAPTER = "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION" + NEWLINE + "Body text."
+
+    def test_the_threshold(self):
+        self.assertTrue(checker_module.drawn_text_page(32, 3499))     # เล่มจริง หน้า vi
+        self.assertTrue(checker_module.drawn_text_page(18, 1071))     # เล่มจริง หน้า vii
+        # ควบคุมเชิงลบ — หน้าลงนามที่มีเส้นประ หน้าแผนภาพ/ตารางที่มีตัวอักษรกำกับ หน้าเส้นโค้งน้อย
+        for chars, curves in ((879, 324), (2015, 321), (890, 142), (0, 120), (40, 299)):
+            self.assertFalse(checker_module.drawn_text_page(chars, curves), (chars, curves))
+
+    def test_which_page_is_the_drawn_abstract(self):
+        labels = {3: "iv", 4: "v", 5: "vi", 6: "vii", 7: "viii"}
+        toc = [{"kind": "abstract_en", "page_label": "iv"}, {"kind": "abstract_th", "page_label": "vi"}]
+        find = checker_module.drawn_abstract_page
+        self.assertEqual(find(toc, labels, {5, 6}, 3, [3, 7]), 5)
+        self.assertEqual(find(toc, labels, {6}, 3, [3, 7]), 6)                # สารบัญคลาดหนึ่งหน้า
+        self.assertEqual(find([], labels, {5, 6}, 3, [3, 7]), 5)              # ไม่มีสารบัญ: หน้าถัดจากบทคัดย่ออังกฤษ
+        # ควบคุมเชิงลบ — ไม่มีหน้าเส้นวาด / หน้าเส้นวาดอยู่หลังส่วนถัดไปและสารบัญไม่ได้ชี้
+        self.assertIsNone(find(toc, labels, set(), 3, [3, 7]))
+        self.assertIsNone(find([], labels, {8}, 3, [3, 7]))
+
+    def _run(self, drawn=True, toc=True):
+        import tempfile
+        pages = [(self.COVER, 0), (self.ABSTRACT, 0), ("v" + NEWLINE + "More abstract text.", 0),
+                 ("vi", 400 if drawn else 0), ("vii", 400 if drawn else 0)]
+        pages += [(self.TOC, 0)] if toc else []
+        pages += [(self.CHAPTER, 0)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_drawn_pages(pages))
+            result = checker_module.run_check(str(path), {
+                "program_language": "thai_english", "title_en": "AN EXAMPLE TITLE",
+                "title_th": "ชื่อเรื่องตัวอย่าง", "student_name": "SOMCHAI EXAMPLE", "student_id": "6700000",
+                "degree_abbr_en": "M.A.S. (BUSINESS STRATEGY)", "degree_abbr_th": "ศศ.วท.ม. (กลยุทธ์ทางธุรกิจ)"},
+                skip_identity_check=True)
+        issues = [(zone, i) for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+        checks = [(g["topic"], c["location"], c["status"], c["detail"])
+                  for g in result["verification"] for c in g["checks"]]
+        return issues, checks
+
+    def test_the_drawn_page_is_orange_not_missing(self):
+        issues, checks = self._run()
+        abstract = [(z, i) for z, i in issues if "บทคัดย่อ" in i["location"]]
+        self.assertFalse([i for _z, i in abstract if "ขาดบทคัดย่อ" in i["found"]], abstract)
+        self.assertFalse([i for _z, i in abstract if "กินพื้นที่" in i["found"]], abstract)
+        [(zone, card)] = [(z, i) for z, i in issues if i["rule_id"] == "UNCERTAIN.REVIEW"]
+        self.assertEqual(zone, "ORANGE")
+        self.assertTrue(card["location"].startswith("บทคัดย่อภาษาไทย (หน้า vi"), card["location"])
+        self.assertEqual(card["found"], "ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะข้อความเป็นภาพหรือเส้น ไม่ใช่ตัวอักษร")
+        self.assertEqual(card["expected"], "เจ้าหน้าที่ตรวจข้อมูลบทคัดย่อภาษาไทยด้วยตา")
+        drawn_rows = [c for c in checks if c[3] == "ไม่ได้ตรวจ — ข้อความเป็นภาพ"]
+        self.assertEqual({c[0] for c in drawn_rows},
+                         {"ชื่อเรื่อง (ตาม บฑ.1)", "รหัสนักศึกษา", "ชื่อปริญญา"}, checks)
+        self.assertTrue(all(c[2] == "skipped" and "(หน้า vi" in c[1] for c in drawn_rows), drawn_rows)
+        self.assertFalse([c for c in checks if "เล่มไม่มีหน้าบทคัดย่อ" in c[3]], checks)
+
+    def test_without_a_toc_the_page_after_the_english_abstract_counts(self):
+        issues, _checks = self._run(toc=False)
+        self.assertEqual(len([i for _z, i in issues if i["rule_id"] == "UNCERTAIN.REVIEW"]), 1)
+        self.assertFalse([i for _z, i in issues if "ขาดบทคัดย่อ" in i["found"]])
+
+    def test_a_book_without_the_drawn_page_is_unchanged(self):
+        """ควบคุมเชิงลบ — หน้าที่มีแต่เลขหน้า ไม่มีเส้นวาด ยังแดงขาดบทคัดย่อไทยเหมือนเดิม"""
+        issues, checks = self._run(drawn=False)
+        self.assertTrue([i for z, i in issues if z == "RED" and "ขาดบทคัดย่อภาษาไทย" in i["found"]], issues)
+        self.assertFalse([i for _z, i in issues if i["location"].startswith("บทคัดย่อภาษาไทย")])
+        self.assertIn(("ชื่อเรื่อง (ตาม บฑ.1)", "บทคัดย่อภาษาไทย", "skipped", "เล่มไม่มีหน้าบทคัดย่อภาษานี้"), checks)
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(
+            i18n.tr_en("ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะข้อความเป็นภาพหรือเส้น ไม่ใช่ตัวอักษร", pairs),
+            "The system cannot read the text on this page because it is an image or drawn lines, not characters")
+        self.assertEqual(i18n.tr_en("เจ้าหน้าที่ตรวจข้อมูลบทคัดย่อภาษาไทยด้วยตา", pairs), "Staff to check the Thai abstract by eye")
+        self.assertEqual(i18n.tr_en("ไม่ได้ตรวจ — ข้อความเป็นภาพ", pairs), "Not checked — the text is an image")
+
+
+class Update1122ChapterTitlesWrappedOnBothSides(unittest.TestCase):
+    """ชื่อบทที่ตัดบรรทัดคนละตำแหน่งในสารบัญกับในเนื้อหา (อัปเดต 1.12.2 เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    FULL = "STRATEGIC OPTIONS AND IMPROVEMENT ALTERNATIVES"
+    join = staticmethod(checker_module.chapter_title_wrapped_join)
+
+    def test_different_wrap_points_are_the_same_title(self):
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "IMPROVEMENT ALTERNATIVES",
+                                   "STRATEGIC OPTIONS AND IMPROVEMENT", "ALTERNATIVES"), self.FULL)
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "IMPROVEMENT ALTERNATIVES 44",
+                                   "STRATEGIC OPTIONS AND IMPROVEMENT", "ALTERNATIVES"), self.FULL)
+        # สารบัญบรรทัดเดียว เนื้อหาตัดบรรทัด / สารบัญตัดบรรทัด เนื้อหาบรรทัดเดียว
+        self.assertEqual(self.join(self.FULL, "4.1 Option A 45", "STRATEGIC OPTIONS AND", "IMPROVEMENT ALTERNATIVES"),
+                         self.FULL)
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "IMPROVEMENT ALTERNATIVES", self.FULL, "4.1 Option A"),
+                         self.FULL)
+
+    def test_a_real_difference_still_differs(self):
+        """ควบคุมเชิงลบ — คำต่างจริง หรือบรรทัดต่อเป็นหัวข้อย่อย/บทถัดไป ไม่ถือว่าตรง"""
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "IMPROVEMENT CHOICES",
+                                   "STRATEGIC OPTIONS AND IMPROVEMENT", "ALTERNATIVES"), "")
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "4.1 Improvement alternatives 45",
+                                   "STRATEGIC OPTIONS AND IMPROVEMENT", "ALTERNATIVES"), "")
+        self.assertEqual(self.join("STRATEGIC OPTIONS AND", "CHAPTER 5 CONCLUSION 50",
+                                   "STRATEGIC OPTIONS AND IMPROVEMENT", "ALTERNATIVES"), "")
+
+    def test_both_comparisons_use_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("chapter_title_wrapped_join(_toc_chapter_title(t_raw), t_next, title, _next_line)", source)
+        self.assertIn("chapter_title_wrapped_join(toc_title, toc_next, body_title, body_next)", source)
