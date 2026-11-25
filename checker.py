@@ -310,7 +310,8 @@ def font_damage_score(page, text=None):
     - อักขระจากฟอนต์สูตรคณิตศาสตร์ (x̄ ในตารางสถิติ ดู _MATH_FONT)
     """
     bad = formula_cids = page_cids = 0
-    for c in (getattr(page, 'chars', None) or []):
+    # รหัสของฟอนต์ TH Sarabun New ที่ถอดกลับได้ตรงตัว (อัปเดต 1.12.1) ไม่ใช่ร่องรอยฟอนต์เพี้ยน
+    for c in _decode_sarabun_cids(getattr(page, 'chars', None) or []):
         t = fix_thai_pua(c.get('text'))
         wide = float(c.get('x1', 0)) - float(c.get('x0', 0)) >= 0.5
         if _MATH_FONT.search(c.get('fontname') or ''):
@@ -402,6 +403,62 @@ _LEADER_RUN_MIN = 4
 _GLYPH_BETWEEN_WORDS = re.compile('(?<!\\w)\ufffd+|\ufffd+(?!\\w)')
 
 
+# ฟอนต์ TH Sarabun New ที่ฝังมาโดยตาราง ToUnicode ไม่ครบ (อัปเดต 1.12.1 เล่มจริง 25 พ.ย. 2569 เจ้าของ "แจ้งว่าไม่พบภาคผนวก
+# จริงๆมีนะ") — ภาคผนวกที่คัดแบบฟอร์มมาวางใช้ฟอนต์ย่อยชุดนี้ อักษรไทยออกมาเป็นรหัส "(cid:N)" ทั้งหัวข้อ "ภาคผนวก ก" ระบบจึงหาไม่เจอ
+# N = เลข glyph ของฟอนต์ต้นฉบับ (ฟอนต์ย่อยคงเลขเดิม) ตารางนี้ได้จากลำดับ glyph ของ TH Sarabun New ทั้ง 4 แบบ (ปกติ หนา เอียง
+# หนาเอียง ลำดับเดียวกันทุกตัว): ชื่อ glyph uni0E01 ... และรูปสำรอง (uni0E48.alt1 = ไม้เอกตัวต่ำ ฯลฯ) ใช้อักษรจริงตัวเดียวกัน
+# 496 = space · ไม่ได้ใช้เลื่อนค่าคงที่ เพราะลำดับ glyph กระโดดที่ ฿ (272) และรูปสำรองอยู่ช่วง 342-370
+_SARABUN_NEW_GLYPHS = {
+    96: '\u0e33', 99: '\u0e4e', 214: '\u0e01', 215: '\u0e02', 216: '\u0e03', 217: '\u0e04', 218: '\u0e05',
+    219: '\u0e06', 220: '\u0e07', 221: '\u0e08', 222: '\u0e09', 223: '\u0e0a', 224: '\u0e0b', 225: '\u0e0c',
+    226: '\u0e0d', 227: '\u0e0e', 228: '\u0e0f', 229: '\u0e10', 230: '\u0e11', 231: '\u0e12', 232: '\u0e13',
+    233: '\u0e14', 234: '\u0e15', 235: '\u0e16', 236: '\u0e17', 237: '\u0e18', 238: '\u0e19', 239: '\u0e1a',
+    240: '\u0e1b', 241: '\u0e1c', 242: '\u0e1d', 243: '\u0e1e', 244: '\u0e1f', 245: '\u0e20', 246: '\u0e21',
+    247: '\u0e22', 248: '\u0e23', 249: '\u0e24', 250: '\u0e25', 251: '\u0e26', 252: '\u0e27', 253: '\u0e28',
+    254: '\u0e29', 255: '\u0e2a', 256: '\u0e2b', 257: '\u0e2c', 258: '\u0e2d', 259: '\u0e2e', 260: '\u0e2f',
+    261: '\u0e30', 262: '\u0e31', 263: '\u0e32', 264: '\u0e33', 265: '\u0e34', 266: '\u0e35', 267: '\u0e36',
+    268: '\u0e37', 269: '\u0e38', 270: '\u0e39', 271: '\u0e3a', 272: '\u0e3f', 273: '\u0e40', 274: '\u0e41',
+    275: '\u0e42', 276: '\u0e43', 277: '\u0e44', 278: '\u0e45', 279: '\u0e46', 280: '\u0e47', 281: '\u0e48',
+    282: '\u0e49', 283: '\u0e4a', 284: '\u0e4b', 285: '\u0e4c', 286: '\u0e4d', 287: '\u0e4e', 288: '\u0e4f',
+    289: '\u0e50', 290: '\u0e51', 291: '\u0e52', 292: '\u0e53', 293: '\u0e54', 294: '\u0e55', 295: '\u0e56',
+    296: '\u0e57', 297: '\u0e58', 298: '\u0e59', 299: '\u0e5a', 300: '\u0e5b', 342: '\u0e10', 343: '\u0e34',
+    344: '\u0e35', 345: '\u0e36', 346: '\u0e37', 347: '\u0e48', 348: '\u0e49', 349: '\u0e4a', 350: '\u0e4b',
+    351: '\u0e4c', 352: '\u0e48', 353: '\u0e49', 354: '\u0e4a', 355: '\u0e4b', 356: '\u0e4c', 357: '\u0e0d',
+    358: '\u0e31', 359: '\u0e4d', 360: '\u0e47', 361: '\u0e48', 362: '\u0e49', 363: '\u0e4a', 364: '\u0e4b',
+    365: '\u0e4c', 366: '\u0e38', 367: '\u0e39', 368: '\u0e3a', 369: '\u0e0f', 370: '\u0e2c', 496: ' ',
+    497: '\u0e4f', 498: '\u0e24', 499: '\u0e26', 500: '\u0e0e',
+}
+_SARABUN_NEW_FONT = re.compile(r'(?:^|\+)THSarabunNew', re.I)
+_CID_NUMBER = re.compile(r'\(cid:(\d+)\)')
+# ตัดสินต่อฟอนต์ย่อย (ชื่อฟอนต์มีรหัส subset นำหน้า) — รหัสที่อ่านไม่ได้ของฟอนต์ย่อยนี้ต้องอยู่ในตารางเกือบทั้งหมด
+# ฟอนต์ย่อยที่เรียงเลข glyph ใหม่ (1, 2, 3, ...) ตกเกณฑ์นี้เอง จึงไม่ถอดผิดเป็นอักษรไทยมั่ว ๆ · ไม่แตะอักษรที่ไฟล์บอกได้แล้ว
+# (อักษรละตินมีเครื่องหมายอย่าง "Thomé" ในบรรณานุกรมเป็นอักษรที่อ่านได้ ไม่ใช่รหัส จึงไม่ถูกถอด)
+_SARABUN_MIN_GLYPHS = 3
+_SARABUN_IN_TABLE = 0.9
+
+
+def _decode_sarabun_cids(chars):
+    """ถอดรหัส (cid:N) ของฟอนต์ย่อย TH Sarabun New ที่ไม่มี ToUnicode กลับเป็นอักษรไทย (อัปเดต 1.12.1)"""
+    ids_by_font = {}
+    for c in chars:
+        m = _CID_NUMBER.fullmatch(c.get('text') or '')
+        if m:
+            ids_by_font.setdefault(c.get('fontname') or '', []).append(int(m.group(1)))
+    fonts = {font for font, ids in ids_by_font.items()
+             if _SARABUN_NEW_FONT.search(font) and len(ids) >= _SARABUN_MIN_GLYPHS
+             and sum(i in _SARABUN_NEW_GLYPHS for i in ids) >= _SARABUN_IN_TABLE * len(ids)}
+    if not fonts:
+        return chars
+    out = []
+    for c in chars:
+        m = _CID_NUMBER.fullmatch(c.get('text') or '')
+        if m and c.get('fontname') in fonts and int(m.group(1)) in _SARABUN_NEW_GLYPHS:
+            out.append({**c, 'text': _SARABUN_NEW_GLYPHS[int(m.group(1))]})
+        else:
+            out.append(c)
+    return out
+
+
 def _readable_cid_glyphs(chars):
     """แทนรหัส (cid:N) ก่อนประกอบข้อความ — ห้ามนับรหัสเป็นอักษร วงเล็บ หรือตัวพิมพ์ของข้อความในเล่ม
 
@@ -410,7 +467,7 @@ def _readable_cid_glyphs(chars):
     และคงไว้เมื่ออยู่กลางคำ (อักษรที่อ่านไม่ได้) Report.add ใช้ตัวนี้ตัดสินว่าข้อความยืนยันไม่ได้ (ส้ม)
     ไม่ผูกกับเลข cid หรือชื่อฟอนต์ — เลข cid ของ glyph เดียวกันต่างกันไปตามฟอนต์ย่อยของแต่ละไฟล์
     """
-    out = list(chars)
+    out = list(_decode_sarabun_cids(chars))         # อัปเดต 1.12.1: ฟอนต์ TH Sarabun New ที่ไม่มี ToUnicode
     k = 0
     while k < len(out):
         if not _CID_GLYPH.fullmatch(out[k].get('text') or ''):
@@ -2038,6 +2095,37 @@ def _report_footer_text(rep, footers):
                 "ท้ายกระดาษต้องไม่มีข้อความ",
                 "ลบข้อความท้ายกระดาษออก (ถ้าเป็นป้ายระดับความลับของ Office ให้ปิดป้ายหรือเปลี่ยนเป็นไม่มีป้ายก่อนบันทึก PDF)",
                 "PAGE.FOOTER_TEXT")
+
+
+# สัดส่วนอักษรที่อ่านไม่ได้ (\ufffd จาก _readable_cid_glyphs) ที่ถือว่า "อ่านหน้านี้ไม่ออก" — อัปเดต 1.12.1
+_UNREADABLE_PAGE_SHARE = 0.3
+_UNREADABLE_PAGE_MIN = 10
+
+
+def page_text_unreadable(text):
+    """หน้านี้อ่านข้อความไม่ออก — อักษรที่ไฟล์ไม่บอกว่าเป็นตัวอะไรตั้งแต่ 30% ของอักษรทั้งหน้า (ไม่นับช่องว่าง)"""
+    letters = re.sub(r'\s', '', text or '')
+    return (len(letters) >= _UNREADABLE_PAGE_MIN
+            and letters.count(_UNREADABLE_GLYPH) >= _UNREADABLE_PAGE_SHARE * len(letters))
+
+
+def _toc_target_page(toc_lines, toc_idx, terms, printed, pages):
+    """แผ่นที่สารบัญอ้างถึง (บรรทัดแรกที่มีคำใน terms ลงท้ายด้วยเลขหน้า) ถ้าแผ่นนั้นมีอยู่และอ่านข้อความไม่ออก · ไม่ใช่ = None"""
+    for page_idx, line in toc_lines:
+        if page_idx != toc_idx or not any(w in norm(line) for w in terms):
+            continue
+        m = re.search(r'(\d+)\s*$', line.strip())
+        if not m:
+            return None
+        target = next((i for i, v in sorted(printed.items()) if v == int(m.group(1))), None)
+        if target is None or target >= len(pages):
+            return None
+        # หัวข้ออาจขึ้นหน้าถัดจากที่สารบัญบอกหนึ่งหน้า (เลขหน้าในสารบัญคลาด) — ดูสองแผ่น
+        for idx in (target, target + 1):
+            if idx < len(pages) and page_text_unreadable(pages[idx]):
+                return idx
+        return None
+    return None
 
 
 def front_span_location(name, ref):
@@ -9958,7 +10046,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if has_appendix_body and not toc_has_appendix and not (approved and toc_pages):
         rep.add("RED", "front_matter", toc_location, "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ",
                 "หัวข้อภาคผนวกต้องอยู่ในสารบัญ", "เพิ่ม APPENDIX/ภาคผนวก ในสารบัญ", "FRONT.TOC")
-    if toc_has_appendix and not has_appendix_body:
+    # กันชั้นสอง (อัปเดต 1.12.1): หน้าที่สารบัญอ้างถึงมีอยู่แต่อ่านข้อความไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) = ยืนยันไม่ได้ ไม่ใช่ "ไม่พบ"
+    appendix_unreadable = (_toc_target_page(toc_lines, appendix_toc_idx, N_APPENDIX, printed, pages)
+                           if toc_has_appendix and not has_appendix_body else None)
+    if appendix_unreadable is not None:
+        rep.add(UNCERTAIN_ZONE, "end_matter", page_ref(appendix_unreadable),
+                'ระบบอ่านข้อความหน้านี้ไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" ตามที่สารบัญระบุ',
+                "เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ", "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
+    elif toc_has_appendix and not has_appendix_body:
         rep.add("RED", "front_matter", f"สารบัญ ({page_ref(appendix_toc_idx)})", "สารบัญระบุภาคผนวก (APPENDIX) แต่ไม่พบในเนื้อหาเล่ม",
                 "สารบัญต้องตรงกับเนื้อหาจริง", "ลบออกจากสารบัญ หรือเพิ่มภาคผนวกในเล่ม", "FRONT.TOC")
 

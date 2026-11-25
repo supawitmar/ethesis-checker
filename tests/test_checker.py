@@ -13347,3 +13347,74 @@ class AcademicRankInTheQualificationSlot(unittest.TestCase):
                  "'First name Last name, Qualification'")):
             self.assertEqual(i18n.tr_en(thai, pairs), english)
         self.assertEqual(rule_zone("FRONT.ABSTRACT_QUALIFICATION"), "ORANGE")
+
+
+
+class SarabunNewGlyphCodesAreDecoded(unittest.TestCase):
+    """ฟอนต์ย่อย TH Sarabun New ที่ไม่มี ToUnicode: รหัส glyph ถอดกลับเป็นไทย (เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    APPENDIX = (245, 263, 217, 241, 238, 252, 214)          # ภ า ค ผ น ว ก (เลข glyph ของ TH Sarabun New)
+
+    @staticmethod
+    def _chars(codes, font="ABCDEF+THSarabunNew", top=100):
+        out, x = [], 50.0
+        for code in codes:
+            text = code if isinstance(code, str) else f"(cid:{code})"
+            out.append({"text": text, "fontname": font, "x0": x, "x1": x + 8, "top": top, "bottom": top + 14,
+                        "size": 16, "upright": True})
+            x += 8
+        return out
+
+    def test_glyph_codes_become_thai(self):
+        chars = checker_module._decode_sarabun_cids(self._chars(self.APPENDIX))
+        self.assertEqual("".join(c["text"] for c in chars), "ภาคผนวก")
+        # รูปสำรอง: ไม้เอกตัวต่ำ (352) ไม้โทตัวต่ำ (353) · 496 = ช่องว่าง
+        chars = checker_module._decode_sarabun_cids(self._chars((214, 352, 496, 215, 353)))
+        self.assertEqual("".join(c["text"] for c in chars), "ก่ ข้")
+
+    def test_the_page_text_reads_the_heading(self):
+        class _Page:
+            chars = self._chars(self.APPENDIX + (496, 214))
+            width, height = 595, 842
+
+            def extract_text(self):
+                return ""
+        self.assertEqual(checker_module._page_text(_Page()).strip(), "ภาคผนวก ก")
+
+    def test_other_fonts_and_real_letters_are_untouched(self):
+        # อักษรละตินมีเครื่องหมายที่ไฟล์บอกได้ ("Thomé") ไม่ใช่รหัส — ไม่ถอด
+        latin = self._chars(("T", "h", "o", "m", "é"), font="AAAAAI+THSarabunNew")
+        self.assertEqual(checker_module._decode_sarabun_cids(latin), latin)
+        # ฟอนต์อื่นที่ไม่ใช่ TH Sarabun New
+        other = self._chars(self.APPENDIX, font="ABCDEF+CordiaNew")
+        self.assertEqual(checker_module._decode_sarabun_cids(other), other)
+        # ฟอนต์ย่อยที่เรียงเลข glyph ใหม่ (1, 2, 3 ...) ตกเกณฑ์ ไม่ถอดเป็นไทยมั่ว ๆ
+        renumbered = self._chars((1, 2, 3, 4, 5, 214))
+        self.assertEqual(checker_module._decode_sarabun_cids(renumbered), renumbered)
+
+    def test_decoded_glyphs_are_not_font_damage(self):
+        class _Page:
+            chars = self._chars(self.APPENDIX)
+        self.assertEqual(checker_module.font_damage_score(_Page(), ""), 0)
+
+    def test_an_unreadable_appendix_page_is_not_reported_missing(self):
+        unreadable = "161" + NEWLINE + "\ufffd" * 20 + NEWLINE + "\ufffd" * 30
+        toc_lines = [(0, "สารบัญ"), (0, "ภาคผนวก 161"), (0, "ประวัติผู้วิจัย 163")]
+        pages = ["สารบัญ", "ภาคผนวก ข้อความ", unreadable]
+        printed = {1: 160, 2: 161}
+        target = checker_module._toc_target_page(toc_lines, 0, checker_module.N_APPENDIX, printed, pages)
+        self.assertEqual(target, 2)
+        pages[2] = "161" + NEWLINE + "ภาคผนวก ก แบบฟอร์มตัวอย่าง"
+        self.assertIsNone(checker_module._toc_target_page(toc_lines, 0, checker_module.N_APPENDIX, printed, pages))
+        self.assertTrue(checker_module.page_text_unreadable(unreadable))
+        self.assertFalse(checker_module.page_text_unreadable("ภาคผนวก ก แบบฟอร์มตัวอย่างการใช้งาน"))
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(
+            i18n.tr_en('ระบบอ่านข้อความหน้านี้ไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" ตามที่สารบัญระบุ', pairs),
+            'The system cannot read the text on this page (abnormal font encoding), so it cannot confirm the '
+            '"ภาคผนวก" heading listed in the table of contents')
+        self.assertEqual(i18n.tr_en("เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ", pairs),
+                         "Staff to check by eye that this page is the heading listed in the table of contents")

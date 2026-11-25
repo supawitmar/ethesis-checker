@@ -803,6 +803,11 @@ var TR = [
   [/ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย/g, 'The thesis title on the abstract page has a dotted line or ellipsis (.....) after it'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา/g, 'The thesis title on the abstract page must contain only the title, with no dotted line or ellipsis'],
   [/ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก/g, 'Remove the dotted line or ellipsis below the thesis title'],
+  // อัปเดต 1.12.1: หน้าที่สารบัญอ้างถึงอ่านไม่ออก (ฟอนต์เข้ารหัสผิดปกติ)
+  [/^ระบบอ่านข้อความหน้านี้ไม่ออก \(ฟอนต์เข้ารหัสผิดปกติ\) จึงยืนยันไม่ได้ว่ามี ("[^"]*") ตามที่สารบัญระบุ$/g,
+   'The system cannot read the text on this page (abnormal font encoding), so it cannot confirm the $1 heading listed in the table of contents'],
+  [/^เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ$/g,
+   'Staff to check by eye that this page is the heading listed in the table of contents'],
   // อัปเดต 1.12: คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ (FRONT.ABSTRACT_QUALIFICATION)
   [/^คุณวุฒิของกรรมการเป็นตำแหน่งทางวิชาการ ไม่ใช่วุฒิการศึกษา: ((?:"[^"]*"(?:, )?)+)$/g,
    'A committee member\'s qualification is an academic rank, not a degree: $1'],
