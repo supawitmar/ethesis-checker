@@ -13195,3 +13195,75 @@ class TheNewOrangeRulesHaveEnglish(unittest.TestCase):
         self.assertEqual(rule_zone("PAGE.SIGNATURE_DOTS"), "RED")          # เจ้าของ "ก ข แดง ง ส้ม"
         self.assertEqual(rule_zone("FRONT.LIST_HEADER_ONLY"), "RED")
         self.assertEqual(rule_zone("PAGE.FOOTER_TEXT"), "ORANGE")
+
+
+
+class DotsUnderTheTitleOnSignaturePages(unittest.TestCase):
+    """เส้นประใต้ชื่อเรื่องบนหน้าลงนาม ไม่ใช่จุดตัดการค้นชื่อปริญญา และแจ้งเป็นข้อใหม่ (เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    TH_DEGREE = "ศิลปศาสตรมหาบัณฑิต (สาขาตัวอย่าง)"
+    EN_DEGREE = "Master of Arts (Example Studies)"
+
+    def _thai(self, dots=True):
+        lines = ["ก", "วิทยานิพนธ์", "เรื่อง", "การศึกษาตัวอย่างของชุมชนสมมติ", "ในพื้นที่ตัวอย่าง"]
+        if dots:
+            lines.append("." * 80)
+        lines += ["ได้รับการพิจารณาให้นับเป็นส่วนหนึ่งของการศึกษาตามหลักสูตร", "ปริญญา" + self.TH_DEGREE,
+                  "วันที่ 1 ตุลาคม 2569", "คณะกรรมการที่ปรึกษาวิทยานิพนธ์", "อาจารย์ที่ปรึกษาหลัก",
+                  "………………………………………………… …………………………………………………", "สมชาย ใจดี มานี ดีใจ",
+                  "ผู้วิจัย Ph.D. (Example)"]
+        return NEWLINE.join(lines)
+
+    def _english(self, dots=True):
+        lines = ["ii", "Thesis", "entitled", "A STUDY OF AN EXAMPLE COMMUNITY"]
+        if dots:
+            lines.append("…" * 40)
+        lines += ["was submitted to the Faculty of Graduate Studies, Mahidol University",
+                  "for the degree of " + self.EN_DEGREE, "on 1 October 2026",
+                  "………………………………………………… …………………………………………………", "Somchai Jaidee Manee Deejai",
+                  "Candidate Ph.D. (Example)"]
+        return NEWLINE.join(lines)
+
+    def test_the_degree_line_is_found_below_the_dots(self):
+        for page, degree in ((self._thai(), self.TH_DEGREE), (self._english(), self.EN_DEGREE)):
+            compared = checker_module.compare_reference_text(page, degree, "degree", degree_line=True)
+            self.assertEqual(compared["status"], "exact", page.splitlines()[3])
+            self.assertIn(checker_module.norm(degree), checker_module.norm(checker_module._degree_search_text(page)))
+
+    def test_the_new_item_on_each_signature_page(self):
+        pages = [self._thai(), self._english()]
+        rep = Report()
+        checker_module._report_signature_title_dots(rep, pages, [0, 1], lambda i: f"หน้า {'กข'[i]}")
+        items = rep.zones["RED"]
+        self.assertEqual([i["location"] for i in items], ["หน้าลงนาม 1 (หน้า ก)", "หน้าลงนาม 2 (หน้า ข)"])
+        self.assertEqual(items[0]["found"], "ชื่อเรื่องบนหน้าลงนามมีเส้นประหรือจุดไข่ปลา (.....) ต่อท้าย")
+        self.assertEqual(items[0]["expected"], "ใต้ชื่อเรื่องต้องไม่มีเส้นประหรือจุดไข่ปลา")
+        self.assertEqual(items[0]["fix"], "ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก")
+        self.assertEqual(items[0]["rule_id"], "FRONT.APPROVAL_TITLE_DOTS")
+
+    def test_a_normal_signature_page_has_no_item(self):
+        """ไม่มีเส้นประใต้ชื่อเรื่อง — เส้นประของช่องลงนามใต้หัวข้อ/วันที่สอบไม่นับ"""
+        for page in (self._thai(dots=False), self._english(dots=False)):
+            self.assertFalse(checker_module.signature_title_has_dots(page))
+        rep = Report()
+        checker_module._report_signature_title_dots(rep, [self._thai(False), self._english(False)], [0, 1], lambda i: "หน้า ก")
+        self.assertEqual(rep.zones["RED"], [])
+
+    def test_no_bottom_edge_means_no_verdict(self):
+        """หาบรรทัดวันที่สอบ/หัวข้อคณะกรรมการไม่เจอ ไม่ฟันธงว่าเป็นเศษใต้ชื่อเรื่อง"""
+        self.assertFalse(checker_module.signature_title_has_dots(
+            NEWLINE.join(["ชื่อเรื่องตัวอย่าง", "." * 80, "สมชาย ใจดี"])))
+
+    def test_the_cover_still_stops_at_dots(self):
+        """หน้าปกไม่มีบรรทัดวันที่สอบ/หัวข้อคณะกรรมการ — เส้นประยังเป็นจุดตัดเหมือนเดิม"""
+        cover = NEWLINE.join(["ชื่อเรื่องตัวอย่าง", "ปริญญา" + self.TH_DEGREE, "." * 80, "ปร.ด. (สาขาอื่น)"])
+        self.assertNotIn("ปร.ด.", checker_module._degree_search_text(cover))
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("ชื่อเรื่องบนหน้าลงนามมีเส้นประหรือจุดไข่ปลา (.....) ต่อท้าย", pairs),
+                         "The thesis title on the signature page has a dotted line or ellipsis (.....) after it")
+        self.assertEqual(i18n.tr_en("ใต้ชื่อเรื่องต้องไม่มีเส้นประหรือจุดไข่ปลา", pairs),
+                         "There must be no dotted line or ellipsis below the thesis title")
+        self.assertEqual(rule_zone("FRONT.APPROVAL_TITLE_DOTS"), "RED")

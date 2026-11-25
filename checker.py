@@ -52,6 +52,8 @@ SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
 SIG_DOTS_ZONE = rule_zone("PAGE.SIGNATURE_DOTS", "RED")
 LIST_HEADER_ONLY_ZONE = rule_zone("FRONT.LIST_HEADER_ONLY", "RED")
 FOOTER_TEXT_ZONE = rule_zone("PAGE.FOOTER_TEXT", "ORANGE")
+# อัปเดต 1.11.1: เส้นประใต้ชื่อเรื่องบนหน้าลงนาม — แดง (เจ้าของยืนยัน 25 พ.ย. 2569 "แดง") เหมือนข้อบทคัดย่อ
+SIG_TITLE_DOTS_ZONE = rule_zone("FRONT.APPROVAL_TITLE_DOTS", "RED")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -1891,6 +1893,35 @@ def signature_dot_overflow(pdf_page):
             if not (i > 0 and wraps[i - 1] and side in sides[i - 1]):
                 count += 1
     return count
+
+
+def signature_title_has_dots(page_text):
+    """หน้าลงนามมีเส้นประ/จุดไข่ปลาใต้ชื่อเรื่อง — บรรทัดเส้นประก่อนบรรทัดวันที่สอบหรือหัวข้อคณะกรรมการ (อัปเดต 1.11.1)
+
+    ช่องลงนามอยู่ใต้บรรทัดวันที่สอบ (อังกฤษ "on ...") และหัวข้อคณะกรรมการ (ไทย) เสมอ เส้นประที่อยู่เหนือขึ้นไปจึงเป็นเศษ template
+    ที่ลืมลบ · หาขอบล่างไม่เจอ (ไม่มีทั้งสองอย่าง) = ไม่ฟันธง คืน False
+    """
+    lines = [soft(line) for line in (page_text or "").splitlines()]
+    bottom = next((i for i, line in enumerate(lines)
+                   if _EXAM_DATE_LINE.match(line)
+                   or (_DEGREE_SEARCH_STOP.match(line) and not _DOT_LEADER_LINE.match(line))), None)
+    if bottom is None:
+        return False
+    return any(_DOT_LEADER_LINE.match(line) or re.search(r'[…]{3,}|\.{6,}\s*$', line) for line in lines[:bottom])
+
+
+def _report_signature_title_dots(rep, pages, sig_pages, page_ref):
+    """ใต้ชื่อเรื่องบนหน้าลงนามต้องไม่มีเส้นประ/จุดไข่ปลา — ข้อเดียวต่อหน้าลงนาม แบบ _report_abstract_title_dots
+
+    เล่มจริง (25 พ.ย. 2569 เจ้าของ "เส้นประที่น่าจะลืมลบ"): "......" ใต้ชื่อเรื่องทั้งหน้า ก และ ข · สีแดง (เจ้าของยืนยัน "แดง")
+    """
+    for idx in sig_pages[:2]:
+        if idx < len(pages) and signature_title_has_dots(pages[idx]):
+            rep.add(SIG_TITLE_DOTS_ZONE, "front_matter",
+                    f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
+                    "ชื่อเรื่องบนหน้าลงนามมีเส้นประหรือจุดไข่ปลา (.....) ต่อท้าย",
+                    "ใต้ชื่อเรื่องต้องไม่มีเส้นประหรือจุดไข่ปลา",
+                    "ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก", "FRONT.APPROVAL_TITLE_DOTS")
 
 
 def _report_signature_dot_overflow(rep, pdf_path, sig_pages, page_ref):
@@ -6437,14 +6468,25 @@ def _degree_search_text(page_text, abstract=False):
     # "ส.ม." แล้วฟ้องผิดว่าไม่พบ) จึงไม่ใช่จุดตัด — โซนกรรมการของหน้านี้ตัดด้วยหัวข้อ
     # "คณะกรรมการที่ปรึกษา/ADVISORY COMMITTEE" เท่านั้น · เส้นประใต้ชื่อเรื่องฟ้องแยกเอง
     # (_report_abstract_title_dots) · หน้าลงนาม/หน้าปกใช้เส้นประเป็นจุดตัดตามเดิม
+    # หน้าลงนาม (อัปเดต 1.11.1 เล่มจริง 25 พ.ย. 2569): เส้นประที่อยู่ "ก่อน" บรรทัดวันที่สอบหรือหัวข้อคณะกรรมการ เป็นเศษ template
+    # ใต้ชื่อเรื่อง ไม่ใช่ช่องลงนาม (ช่องลงนามอยู่ใต้สองอย่างนี้เสมอ) — เดิมหยุดค้นที่เส้นประนั้น บรรทัด "ปริญญา..." หลุดออกจาก
+    # โซนค้น แล้วระบบยกบรรทัดชื่อเรื่องมาฟ้องแดงว่าเป็นชื่อปริญญาทั้งสองหน้า · หน้าปกไม่มีทั้งสองอย่าง จึงหยุดที่เส้นประเหมือนเดิม
+    matches = list(_DEGREE_SEARCH_STOP.finditer(text))
     stop = None
-    for m in _DEGREE_SEARCH_STOP.finditer(text):
-        if abstract and _DOT_LEADER_LINE.match(m.group(0)):
+    for m in matches:
+        if _DOT_LEADER_LINE.match(m.group(0)) and (abstract or _signature_block_follows(text, m.end(), matches)):
             continue
         stop = m
         break
     head = text[:stop.start()] if stop else text
     return head if soft(head) else text
+
+
+def _signature_block_follows(text, pos, stops):
+    """หลังตำแหน่ง pos ยังมีบรรทัดวันที่สอบหรือหัวข้อคณะกรรมการ — เส้นประก่อนหน้านั้นจึงยังไม่ใช่โซนลงนาม"""
+    if any(m.start() >= pos and not _DOT_LEADER_LINE.match(m.group(0)) for m in stops):
+        return True
+    return any(_EXAM_DATE_LINE.match(soft(line)) for line in text[pos:].splitlines())
 
 
 # บรรทัดวันที่สอบบนหน้าลงนามตาม template: ต่อจากบรรทัดชื่อปริญญาเสมอ และขึ้นต้นด้วย "on" (อังกฤษ)
@@ -9329,6 +9371,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # เลขหน้าลงนาม i/ii หรือ ก/ข
     _report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)
     _report_signature_dot_overflow(rep, pdf_path, sig_pages, page_ref)    # อัปเดต 1.11 (เจ้าของ 25 พ.ย. 2569)
+    _report_signature_title_dots(rep, pages, sig_pages, page_ref)         # อัปเดต 1.11.1 (เจ้าของ 25 พ.ย. 2569)
     sig_label_reported = _report_signature_page_labels(
         rep, sig_pages, pages, page_ref, label_style=front_label_style)
 

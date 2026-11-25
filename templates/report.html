@@ -803,6 +803,10 @@ var TR = [
   [/ชื่อเรื่องบนหน้าบทคัดย่อมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย/g, 'The thesis title on the abstract page has a dotted line or ellipsis (.....) after it'],
   [/ชื่อเรื่องบนหน้าบทคัดย่อต้องมีเฉพาะชื่อเรื่อง ไม่มีเส้นประหรือจุดไข่ปลา/g, 'The thesis title on the abstract page must contain only the title, with no dotted line or ellipsis'],
   [/ลบเส้นประหรือจุดไข่ปลาที่อยู่ใต้ชื่อเรื่องออก/g, 'Remove the dotted line or ellipsis below the thesis title'],
+  // อัปเดต 1.11.1: เส้นประใต้ชื่อเรื่องบนหน้าลงนาม (FRONT.APPROVAL_TITLE_DOTS)
+  [/^ชื่อเรื่องบนหน้าลงนามมีเส้นประหรือจุดไข่ปลา \(\.\.\.\.\.\) ต่อท้าย$/g,
+   'The thesis title on the signature page has a dotted line or ellipsis (.....) after it'],
+  [/^ใต้ชื่อเรื่องต้องไม่มีเส้นประหรือจุดไข่ปลา$/g, 'There must be no dotted line or ellipsis below the thesis title'],
   // ---- บทคัดย่อไม่ครบตามหลักสูตร (ประโยคเต็ม) ----
   [/บทคัดย่อไม่ครบถ้วน ขาดบทคัดย่อภาษาอังกฤษ \(พบเฉพาะบทคัดย่อภาษาไทย \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete: the English abstract is missing (only the Thai abstract was found, page $1)'],
   [/บทคัดย่อไม่ครบถ้วน ขาดบทคัดย่อภาษาไทย \(พบเฉพาะบทคัดย่อภาษาอังกฤษ \(หน้า (\S+)\)\)/g, 'The abstracts are incomplete: the Thai abstract is missing (only the English abstract was found, page $1)'],
