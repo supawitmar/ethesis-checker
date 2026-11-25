@@ -13011,3 +13011,187 @@ class TheTemplateWordsAfterTheCoverDegree(unittest.TestCase):
         page = self._cover("FOR THE DEGREE OF MASTER OF ENGINEERING",
                            "(EXAMPLE ENGINEERING) MAHIDOL UNIVERSITY FACULTY OF GRADUATE STUDIES", "2026")
         self.assertIn("MAHIDOL UNIVERSITY", checker_module.degree_line_extras(page, self.DEGREE))
+
+
+
+class SignatureDotsOverflowOneLine(unittest.TestCase):
+    """เส้นประลงนามล้นเกินหนึ่งบรรทัด = แดง ข้อเดียวต่อหน้า (เจ้าของ 25 พ.ย. 2569 "ก ข แดง ง ส้ม" · ข้อมูลสมมติ)"""
+
+    class _Page:
+        def __init__(self, words):
+            self.height, self.width, self._words = 842, 595, words
+
+        def extract_words(self, *a, **k):
+            return self._words
+
+    @staticmethod
+    def _dots(top, sides=("L", "R")):
+        x = {"L": (60, 280), "R": (320, 540)}
+        return [{"text": "………………………………", "top": top, "x0": x[s][0], "x1": x[s][1]} for s in sides]
+
+    @staticmethod
+    def _names(top):
+        return [{"text": "SOMCHAI", "top": top, "x0": 60, "x1": 110}, {"text": "MANEE", "top": top, "x0": 320, "x1": 360}]
+
+    def test_two_dotted_lines_in_a_row_are_counted_per_column(self):
+        words = self._dots(100) + self._dots(115) + self._names(130)        # ล้นทั้งสองคอลัมน์
+        words += self._dots(190, ("R",)) + self._dots(205, ("R",)) + self._names(220)   # ล้นเฉพาะขวา
+        words += self._dots(280) + self._names(295)                           # บรรทัดเดียว ไม่นับ
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 3)
+
+    def test_a_single_dotted_line_per_box_is_fine(self):
+        words = []
+        for top in (100, 190, 280, 370):
+            words += self._dots(top) + self._names(top + 15)
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 0)
+
+    def test_dotted_lines_two_lines_apart_are_template_gaps(self):
+        words = self._dots(100) + self._dots(140) + self._names(155)
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 0)
+
+    def test_one_dotted_word_across_both_columns_counts_for_both(self):
+        """แถวล่าง: เส้นประซ้ายกับขวาติดกันเป็นคำเดียวคร่อมกึ่งกลาง แล้วล้นทั้งสองฝั่ง = 2 ช่อง (QA 25 พ.ย. 2569)"""
+        words = [{"text": "………………………………………………………………", "top": 646, "x0": 43, "x1": 548}]
+        words += self._dots(664) + self._names(682)
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 2)
+
+    def test_a_right_column_starting_just_past_the_page_middle_is_one_side(self):
+        """ช่องขวาเริ่มที่ x0 297.5 (เลยกึ่งกลางหน้า 297.66 นิดเดียว) — ไม่ใช่เส้นประคร่อมสองฝั่ง"""
+        words = [{"text": "………………………………", "top": 286, "x0": 43, "x1": 288},
+                 {"text": "………………………………", "top": 286, "x0": 297.5, "x1": 543},
+                 {"text": "…………...…………", "top": 304, "x0": 297.5, "x1": 390}]
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 1)
+
+    def test_three_lines_are_still_one_box(self):
+        words = self._dots(100, ("L",)) + self._dots(115, ("L",)) + self._dots(130, ("L",)) + self._names(145)
+        self.assertEqual(checker_module.signature_dot_overflow(self._Page(words)), 1)
+
+    def test_one_item_per_signature_page(self):
+        page = self._Page(self._dots(100) + self._dots(115) + self._names(130))
+
+        class _Pdf:
+            pages = [page, page]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        rep = Report()
+        with mock.patch.object(checker_module.pdfplumber, "open", return_value=_Pdf()):
+            checker_module._report_signature_dot_overflow(rep, "x.pdf", [0, 1], lambda i: f"หน้า {'กข'[i]}")
+        self.assertEqual(rep.zones["ORANGE"], [])
+        items = rep.zones["RED"]
+        self.assertEqual([i["location"] for i in items], ["หน้าลงนาม 1 (หน้า ก)", "หน้าลงนาม 2 (หน้า ข)"])
+        self.assertEqual(items[0]["found"], "เส้นประสำหรับลงนามยาวเกินหนึ่งบรรทัด (ล้นขึ้นบรรทัดใหม่) 2 ช่อง")
+        self.assertEqual(items[0]["expected"], "เส้นประของแต่ละช่องต้องอยู่ในบรรทัดเดียว")
+        self.assertEqual(items[0]["rule_id"], "PAGE.SIGNATURE_DOTS")
+
+
+class ListPageWithOnlyColumnHeadings(unittest.TestCase):
+    """หน้าสารบัญตาราง/รูปภาพที่มีแต่หัวคอลัมน์ = แดง วิธีแก้ ลบหน้านี้ออก (เจ้าของ 25 พ.ย. 2569 "ก ข แดง ง ส้ม" · ข้อมูลสมมติ)"""
+
+    def test_header_only_pages(self):
+        f = checker_module.list_header_only_page
+        self.assertEqual(f("ฌ" + NEWLINE + "ตาราง หน้า"), "ตาราง/หน้า")
+        self.assertEqual(f("ญ" + NEWLINE + "รูปภาพ หน้า"), "รูปภาพ/หน้า")
+        self.assertEqual(f("ix" + NEWLINE + "Table Page"), "Table/Page")
+        self.assertEqual(f("x" + NEWLINE + "Figure Page"), "Figure/Page")
+
+    def test_pages_with_entries_or_other_words_are_fine(self):
+        f = checker_module.list_header_only_page
+        self.assertEqual(f("ซ" + NEWLINE + "ตาราง หน้า" + NEWLINE + "4.1 ตัวอย่างตาราง 41"), "")
+        self.assertEqual(f("ช" + NEWLINE + "สารบัญตาราง" + NEWLINE + "ตาราง หน้า"), "")
+        self.assertEqual(f("ฌ" + NEWLINE + "ตาราง"), "")          # ไม่มีหัวคอลัมน์เลขหน้า
+        self.assertEqual(f("ฌ"), "")
+        self.assertEqual(f(""), "")
+
+    def test_one_red_item_per_page_and_not_on_skipped_pages(self):
+        pages = ["ปก", "ซ" + NEWLINE + "ตาราง หน้า" + NEWLINE + "4.1 ตัวอย่าง 41", "ฌ" + NEWLINE + "ตาราง หน้า",
+                 "ญ" + NEWLINE + "รูปภาพ หน้า"]
+        rep = Report()
+        checker_module._report_list_header_only(rep, pages, 20, {3}, lambda i: f"หน้า {'กซฌญ'[i]}")
+        self.assertEqual(rep.zones["ORANGE"], [])
+        items = rep.zones["RED"]
+        self.assertEqual([i["location"] for i in items], ["หน้า ฌ"])
+        self.assertEqual(items[0]["found"], 'หน้านี้มีแต่หัวคอลัมน์ "ตาราง/หน้า" ไม่มีรายการ')
+        self.assertEqual(items[0]["expected"], "หน้าสารบัญตาราง/รูปภาพต้องมีรายการ")
+        self.assertEqual(items[0]["fix"], "ลบหน้านี้ออก")
+        self.assertEqual(items[0]["rule_id"], "FRONT.LIST_HEADER_ONLY")
+
+    def test_only_the_front_matter_is_read(self):
+        rep = Report()
+        checker_module._report_list_header_only(rep, ["x"] * 20 + ["ตาราง หน้า"], 20, set(), lambda i: "หน้า 1")
+        self.assertEqual(rep.zones["RED"], [])
+
+
+class RepeatedFooterText(unittest.TestCase):
+    """ข้อความเดียวกันซ้ำในท้ายกระดาษตั้งแต่ 3 หน้า = ส้ม ข้อเดียว (เจ้าของ 25 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    @staticmethod
+    def _words(*items):
+        out = []
+        for text, top in items:
+            x = 20
+            for tok in text.split():
+                out.append({"text": tok, "top": top, "x0": x})
+                x += 40
+        return out
+
+    def test_footer_band_lines(self):
+        words = self._words(("เนื้อหาบรรทัดสุดท้าย", 754), ("## RESTRICTED ##", 819), ("- 12 -", 810))
+        self.assertEqual(checker_module.footer_lines(words, 842), ["## RESTRICTED ##"])
+
+    def test_the_same_text_on_three_pages_is_one_item(self):
+        footers = [[], ["## RESTRICTED ##"], ["## RESTRICTED ##"], ["## RESTRICTED ##", "1 ตัวอย่างเชิงอรรถ"],
+                   ["## RESTRICTED ##"]]
+        rep = Report()
+        checker_module._report_footer_text(rep, footers)
+        items = rep.zones["ORANGE"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["location"], "ท้ายกระดาษ")
+        self.assertEqual(items[0]["found"],
+                         'ท้ายกระดาษมีข้อความ "## RESTRICTED ##" 4 หน้า (แผ่นที่ 2 ถึง 5 ของไฟล์ PDF)')
+        self.assertEqual(items[0]["expected"], "ท้ายกระดาษต้องไม่มีข้อความ")
+        self.assertEqual(items[0]["rule_id"], "PAGE.FOOTER_TEXT")
+
+    def test_text_that_does_not_repeat_is_fine(self):
+        footers = [["1 เชิงอรรถหนึ่ง"], ["2 เชิงอรรถสอง"], ["CONFIDENTIAL"], ["CONFIDENTIAL"], []]
+        rep = Report()
+        checker_module._report_footer_text(rep, footers)
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_page_numbers_and_lone_marks_at_the_bottom_are_not_text(self):
+        # "·" เดี่ยว ๆ: เล่มจริงใน regress มีจุดนี้ในท้ายกระดาษ 123 หน้า ไม่ใช่ป้ายข้อความ
+        for text in ("12", "- 12 -", "(12)", "iv", "ก", "·", "* * *"):
+            self.assertEqual(checker_module.footer_lines(self._words((text, 810)), 842), [], text)
+
+
+class TheNewOrangeRulesHaveEnglish(unittest.TestCase):
+    """คำแปลอังกฤษของกฎใหม่ 3 ข้อ (อัปเดต 1.11) ครบ ไม่มีไทยเหลือ ค่าในเครื่องหมายคำพูดคงเดิม"""
+
+    def test_translations(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        for thai, english in (
+                ("เส้นประสำหรับลงนามยาวเกินหนึ่งบรรทัด (ล้นขึ้นบรรทัดใหม่) 5 ช่อง",
+                 "The signature dotted line is longer than one line (it wraps onto a new line) in 5 boxes"),
+                ("เส้นประของแต่ละช่องต้องอยู่ในบรรทัดเดียว", "Each box's dotted line must fit on one line"),
+                ("ลดความยาวเส้นประให้อยู่ในบรรทัดเดียว", "Shorten the dotted line so it fits on one line"),
+                ('หน้านี้มีแต่หัวคอลัมน์ "ตาราง/หน้า" ไม่มีรายการ',
+                 'This page has only the column headings "ตาราง/หน้า" and no entries'),
+                ("หน้าสารบัญตาราง/รูปภาพต้องมีรายการ", "A list of tables/figures page must contain entries"),
+                ("ลบหน้านี้ออก", "Remove this page"),
+                ("ท้ายกระดาษ", "Footer"),
+                ('ท้ายกระดาษมีข้อความ "## RESTRICTED ##" 83 หน้า (แผ่นที่ 14 ถึง 96 ของไฟล์ PDF)',
+                 'The footer contains the text "## RESTRICTED ##" on 83 pages (sheets 14 to 96 of the PDF file)'),
+                ("ท้ายกระดาษต้องไม่มีข้อความ", "The footer must not contain any text")):
+            self.assertEqual(i18n.tr_en(thai, pairs), english)
+        fix = ("ลบข้อความท้ายกระดาษออก (ถ้าเป็นป้ายระดับความลับของ Office ให้ปิดป้ายหรือเปลี่ยนเป็นไม่มีป้ายก่อนบันทึก PDF)")
+        self.assertNotRegex(i18n.tr_en(fix, pairs), "[ก-๙]")
+
+    def test_zones(self):
+        self.assertEqual(rule_zone("PAGE.SIGNATURE_DOTS"), "RED")          # เจ้าของ "ก ข แดง ง ส้ม"
+        self.assertEqual(rule_zone("FRONT.LIST_HEADER_ONLY"), "RED")
+        self.assertEqual(rule_zone("PAGE.FOOTER_TEXT"), "ORANGE")

@@ -47,6 +47,11 @@ TOC_RANGE_ZONE = rule_zone("FRONT.TOC_PAGE_RANGE", "ORANGE")
 ABSTRACT_COMMA_ZONE = rule_zone("FRONT.ABSTRACT_COMMA", "YELLOW")
 DEGREE_SPACING_ZONE = rule_zone("FORM.DEGREE_SPACING", "YELLOW")
 SIG_LABEL_ZONE = rule_zone("PAGE.SIGNATURE_LABEL", "ORANGE")
+# อัปเดต 1.11 (เจ้าของ 25 พ.ย. 2569 "ก ข แดง ง ส้ม"): เส้นประลงนามล้น · หน้าสารบัญตาราง/รูปภาพมีแต่หัวคอลัมน์ = แดง
+# ข้อความท้ายกระดาษซ้ำ = ส้ม
+SIG_DOTS_ZONE = rule_zone("PAGE.SIGNATURE_DOTS", "RED")
+LIST_HEADER_ONLY_ZONE = rule_zone("FRONT.LIST_HEADER_ONLY", "RED")
+FOOTER_TEXT_ZONE = rule_zone("PAGE.FOOTER_TEXT", "ORANGE")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -1832,6 +1837,174 @@ def _report_empty_pages(rep, empty_pages, page_labels):
     rep.add(EMPTY_PAGE_ZONE, "-", "หน้าว่าง", found,
             "ไฟล์รูปเล่มต้องไม่มีหน้าว่างที่ไม่มีข้อความ รูป หรือเลขหน้า", remove, "PAGE.EMPTY",
             fail_text=remove)
+
+
+def signature_dot_overflow(pdf_page):
+    """จำนวนช่องลงนามที่เส้นประยาวจนล้นขึ้นบรรทัดใหม่ (อัปเดต 1.11 เจ้าของ 25 พ.ย. 2569 · ข้อแดง)
+
+    ช่องที่ล้น = คอลัมน์เดียวกันมีบรรทัดเส้นประล้วนต่อกันสองบรรทัด ห่างกันไม่เกินหนึ่งบรรทัด (_SIG_DOTS_WRAP_GAP ตัวเดียวกับที่
+    signature_committee_slots ใช้รวมเส้นที่ตัดบรรทัดเป็นเส้นเดียว) · เส้นประบรรทัดเดียวที่ยาวพอดีคอลัมน์ไม่นับ · เส้นประติดกันที่
+    ห่างเกินหนึ่งบรรทัดคือช่องว่างของ template ไม่นับ · ล้นสามบรรทัดยังนับเป็นช่องเดียว · แบ่งคอลัมน์ด้วยกึ่งกลางของคำ
+    ยกเว้นเส้นประที่คร่อมกึ่งกลางหน้า (ซ้ายกับขวาติดกันเป็นคำเดียว) นับเป็นเส้นประของทั้งสองฝั่ง
+    """
+    words = [w for w in _sig_words(pdf_page) if not _is_white_fill(w.get("non_stroking_color"))]
+    if not words:
+        return 0
+    mid = float(getattr(pdf_page, 'width', 595) or 595) / 2
+    # เส้นแบ่งคอลัมน์จากเส้นประช่องขวาเหมือน signature_committee_slots — ช่องขวาเริ่มที่ x0 297.5 ซึ่งเลยกึ่งกลางหน้า (297.66)
+    # ไปนิดเดียว ถ้าใช้กึ่งกลางหน้า เส้นประช่องขวาทุกเส้นจะ "คร่อมกึ่งกลาง" แล้วถูกนับเป็นสองฝั่ง
+    dot_starts = [float(w['x0']) for w in words if _sig_is_dotted(w['text']) and float(w['x0']) > mid * 0.6]
+    if dot_starts:
+        mid = min(dot_starts) - 2.0
+    lines = []
+    for w in sorted(words, key=lambda w: (round(float(w['top'])), float(w['x0']))):
+        top = float(w['top'])
+        if lines and abs(lines[-1]['top'] - top) <= 6:
+            lines[-1]['words'].append(w)
+        else:
+            lines.append({'top': top, 'words': [w]})
+
+    def dotted_sides(line):
+        sides = {}
+        for w in line['words']:
+            x0 = float(w['x0'])
+            x1 = float(w.get('x1', x0 + 5 * len(w.get('text', ''))))
+            dotted = _sig_is_dotted(w['text'])
+            # เส้นประซ้ายกับขวาที่พิมพ์ติดกันเป็นคำเดียวคร่อมกึ่งกลางหน้า = เส้นประของทั้งสองช่อง — เล่มตัวอย่าง
+            # (25 พ.ย. 2569) แถวคณบดี/ประธานหลักสูตรบนหน้าลงนาม 2 เคยถูกจัดไปฝั่งซ้ายฝั่งเดียว ช่องขวาที่ล้นจึงหายไป
+            # (QA หัวหน้าทีม) · คำที่ไม่ใช่เส้นประยังแบ่งด้วยกึ่งกลางคำเหมือนเดิม
+            if dotted and x0 < mid < x1:
+                for side in ('L', 'R'):
+                    sides.setdefault(side, []).append(True)
+                continue
+            side = 'R' if (x0 + x1) / 2 >= mid else 'L'
+            sides.setdefault(side, []).append(dotted)
+        return {side for side, flags in sides.items() if all(flags)}
+
+    sides = [dotted_sides(line) for line in lines]
+    wraps = [lines[i + 1]['top'] - lines[i]['top'] <= _SIG_DOTS_WRAP_GAP for i in range(len(lines) - 1)]
+    count = 0
+    for i in range(len(lines) - 1):
+        if not wraps[i]:
+            continue
+        for side in sides[i] & sides[i + 1]:
+            if not (i > 0 and wraps[i - 1] and side in sides[i - 1]):
+                count += 1
+    return count
+
+
+def _report_signature_dot_overflow(rep, pdf_path, sig_pages, page_ref):
+    """เส้นประลงนามล้นเกินหนึ่งบรรทัด — ข้อเดียวต่อหน้าลงนาม บอกจำนวนช่อง (สีแดง อัปเดต 1.11 เจ้าของ 25 พ.ย. 2569)"""
+    if not sig_pages:
+        return
+    counts = {}
+    try:
+        with pdfplumber.open(pdf_path) as _pl:
+            for idx in sig_pages[:2]:
+                if 0 <= idx < len(_pl.pages):
+                    counts[idx] = signature_dot_overflow(_pl.pages[idx])
+    except Exception:
+        return
+    for idx in sig_pages[:2]:
+        if counts.get(idx):
+            rep.add(SIG_DOTS_ZONE, "front_matter",
+                    f"{signature_page_position(sig_pages, idx)} ({page_ref(idx)})",
+                    f"เส้นประสำหรับลงนามยาวเกินหนึ่งบรรทัด (ล้นขึ้นบรรทัดใหม่) {counts[idx]} ช่อง",
+                    "เส้นประของแต่ละช่องต้องอยู่ในบรรทัดเดียว",
+                    "ลดความยาวเส้นประให้อยู่ในบรรทัดเดียว", "PAGE.SIGNATURE_DOTS")
+
+
+# หัวคอลัมน์ของสารบัญตาราง/รูปภาพ (ไทย/อังกฤษ) — หน้าต่อที่มีแค่คำพวกนี้กับเลขหน้า = ไม่มีรายการ (อัปเดต 1.11)
+_LIST_COLUMN_HEADS = frozenset(norm(w) for w in (
+    "ตาราง", "รูปภาพ", "ภาพ", "รูป", "แผนภาพ", "Table", "Tables", "Figure", "Figures"))
+_LIST_PAGE_HEADS = frozenset(norm(w) for w in ("หน้า", "Page", "Pages"))
+
+
+def list_header_only_page(page_text):
+    """หัวคอลัมน์ตามที่พิมพ์ ("ตาราง/หน้า") ถ้าหน้านี้มีแต่หัวคอลัมน์ของสารบัญตาราง/รูปภาพกับเลขหน้า ไม่มีรายการเลย · '' ถ้าไม่ใช่
+
+    เล่มจริง (25 พ.ย. 2569) หน้า ฌ มีแค่ "ตาราง หน้า" ต่อจากหน้าสารบัญตารางที่รายการหมดแล้ว ต้องมีทั้งหัวคอลัมน์รายการ
+    (ตาราง/รูปภาพ/Table/Figure) และหัวคอลัมน์เลขหน้า (หน้า/Page) และไม่มีคำอื่นเลยนอกจากเลขหน้าของหน้านั้น
+    """
+    words = (page_text or "").split()
+    label = _extract_page_label(page_text or "")
+    if label:
+        keys = [norm(w) for w in words]
+        if norm(label) in keys:
+            del words[keys.index(norm(label))]
+    heads = [w for w in words if norm(w) in _LIST_COLUMN_HEADS]
+    page_heads = [w for w in words if norm(w) in _LIST_PAGE_HEADS]
+    if heads and page_heads and len(heads) + len(page_heads) == len(words):
+        return "/".join(words)
+    return ""
+
+
+def _report_list_header_only(rep, pages, front_limit, skip, page_ref):
+    """หน้าสารบัญตาราง/รูปภาพที่มีแต่หัวคอลัมน์ — สีแดง ข้อละหน้า วิธีแก้ "ลบหน้านี้ออก" (อัปเดต 1.11 เจ้าของ 25 พ.ย. 2569)
+
+    ดูเฉพาะส่วนนำ (front_limit แผ่นแรก) · ข้ามหน้าว่างจริง/หน้าภาพ (skip) ไม่ให้ซ้อนกับ PAGE.EMPTY/PAGE.BLANK
+    """
+    for idx in range(min(front_limit, len(pages))):
+        if idx in skip:
+            continue
+        heads = list_header_only_page(pages[idx])
+        if heads:
+            rep.add(LIST_HEADER_ONLY_ZONE, "front_matter", page_ref(idx),
+                    f'หน้านี้มีแต่หัวคอลัมน์ "{heads}" ไม่มีรายการ',
+                    "หน้าสารบัญตาราง/รูปภาพต้องมีรายการ", "ลบหน้านี้ออก", "FRONT.LIST_HEADER_ONLY")
+
+
+# แถบท้ายกระดาษ = ใต้พื้นที่พิมพ์ (ขอบล่าง template 1 นิ้ว = 72 pt เผื่อบรรทัดสุดท้ายของเนื้อหา 4 pt) — อัปเดต 1.11
+# เล่มจริง (25 พ.ย. 2569) ป้าย "## RESTRICTED ##" ที่ Office ใส่ให้เองอยู่ที่ 23 pt จากขอบล่าง · บรรทัดสุดท้ายของเนื้อหาจบที่ 72 pt
+_FOOTER_BAND = 68.0
+_FOOTER_MIN_PAGES = 3
+# เลขหน้าล้วน (ท้ายกระดาษของบางเล่ม) ไม่ใช่ข้อความ — เลขต่างกันทุกหน้าอยู่แล้ว ตัดทิ้งก่อนกันพลาด
+_FOOTER_PAGE_NUMBER = re.compile(r'[\s\-–—()]*(?:\d+|[ivxlcdm]+|[ก-ฮ]{1,2})[\s\-–—()]*', re.I)
+
+
+def footer_lines(words, height):
+    """ข้อความแต่ละบรรทัดในแถบท้ายกระดาษ (ไม่รวมบรรทัดที่เป็นเลขหน้าล้วน และบรรทัดที่ไม่มีตัวอักษร/ตัวเลขเลย)
+
+    เครื่องหมายเดี่ยว ๆ ไม่ใช่ข้อความ — เล่มจริงใน regress (25 พ.ย. 2569) มีจุด "·" ขนาด 9 pt ในท้ายกระดาษ 123 หน้า
+    (น่าจะเป็นย่อหน้าว่างใน footer ของ Word) ไม่ใช่ป้ายแบบ "## RESTRICTED ##" ที่เจ้าของสั่ง
+    """
+    band = [w for w in words or [] if float(w['top']) >= float(height or 0) - _FOOTER_BAND]
+    rows = []
+    for w in sorted(band, key=lambda w: (float(w['top']), float(w['x0']))):
+        if rows and abs(rows[-1][0] - float(w['top'])) <= 3:
+            rows[-1][1].append(w)
+        else:
+            rows.append([float(w['top']), [w]])
+    out = []
+    for _top, ws in rows:
+        text = soft(" ".join(w['text'] for w in sorted(ws, key=lambda w: float(w['x0']))))
+        if re.search(r'[A-Za-zก-๙0-9]', text) and not _FOOTER_PAGE_NUMBER.fullmatch(text):
+            out.append(text)
+    return out
+
+
+def repeated_footer_texts(footers):
+    """[(ข้อความ, [ดัชนีหน้า])] ของข้อความท้ายกระดาษที่ซ้ำกันตั้งแต่ _FOOTER_MIN_PAGES หน้า เรียงตามหน้าแรกที่พบ"""
+    seen = {}
+    for idx, lines in enumerate(footers):
+        for text in dict.fromkeys(lines):
+            seen.setdefault(text, []).append(idx)
+    found = [(text, idxs) for text, idxs in seen.items() if len(idxs) >= _FOOTER_MIN_PAGES]
+    return sorted(found, key=lambda item: item[1][0])
+
+
+def _report_footer_text(rep, footers):
+    """ข้อความเดียวกันซ้ำในท้ายกระดาษตั้งแต่ 3 หน้า — สีส้ม (อัปเดต 1.11 เจ้าของ 25 พ.ย. 2569)
+
+    ข้อเดียวต่อข้อความ (ปกติมีข้อความเดียว จึงเป็นข้อเดียวทั้งเล่ม) บอกจำนวนหน้าและช่วงแผ่นของไฟล์ PDF
+    (แผ่นที่ ไม่ใช่เลขหน้าที่พิมพ์ — ภาคผนวกบางเล่มไม่มีเลขหน้า) · เชิงอรรถ/ข้อความเนื้อหาใกล้ขอบล่างไม่ซ้ำ จึงไม่เข้าข้อนี้
+    """
+    for text, idxs in repeated_footer_texts(footers):
+        rep.add(FOOTER_TEXT_ZONE, "-", "ท้ายกระดาษ",
+                f'ท้ายกระดาษมีข้อความ "{text}" {len(idxs)} หน้า (แผ่นที่ {idxs[0] + 1} ถึง {idxs[-1] + 1} ของไฟล์ PDF)',
+                "ท้ายกระดาษต้องไม่มีข้อความ",
+                "ลบข้อความท้ายกระดาษออก (ถ้าเป็นป้ายระดับความลับของ Office ให้ปิดป้ายหรือเปลี่ยนเป็นไม่มีป้ายก่อนบันทึก PDF)",
+                "PAGE.FOOTER_TEXT")
 
 
 def front_span_location(name, ref):
@@ -8928,6 +9101,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     empty_pages = set()        # หน้าว่างจริง — ข้อ PAGE.EMPTY (อัปเดต 1.7)
     edge_numbered = set()      # หน้าที่แถบหัว/ท้ายกระดาษมีสิ่งที่อาจเป็นเลขหน้า (edge_page_number_hint อัปเดต 1.8)
     rotated_labels = {}        # เลขหน้าที่พิมพ์เป็นอักษรหมุน (rotated_page_label อัปเดต 1.8)
+    footers = []               # ข้อความในแถบท้ายกระดาษต่อหน้า — ข้อ PAGE.FOOTER_TEXT (อัปเดต 1.11)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -8960,6 +9134,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             try:
                 _words = _pg.extract_words()
                 header_words.append(header_tokens(_pg, words=_words))
+                footers.append(footer_lines(_words, float(_pg.height or 0)))
                 if edge_page_number_hint(_words, float(_pg.width or 0), float(_pg.height or 0)):
                     edge_numbered.add(_i)
                 _rotated = rotated_page_label(_words, float(_pg.width or 0), float(_pg.height or 0))
@@ -8967,6 +9142,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     rotated_labels[_i] = _rotated
             except Exception:
                 header_words.append([])
+                del footers[_i:]
+                footers.append([])
                 edge_numbered.add(_i)          # อ่านแถบขอบไม่ได้ = ไม่ฟันธงว่าไม่มีเลขหน้า
             try:
                 _pg.flush_cache()
@@ -9145,9 +9322,13 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                        skip=list(scanned_sig) + sorted(empty_pages),
                        sequence_reported=BODY_RULES['check_page_sequence'])
     _report_empty_pages(rep, empty_pages, page_labels)
+    # อัปเดต 1.11 (เจ้าของ 25 พ.ย. 2569): หน้าสารบัญตาราง/รูปภาพที่มีแต่หัวคอลัมน์ · ข้อความท้ายกระดาษซ้ำ
+    _report_list_header_only(rep, pages, front_limit, empty_pages | image_pages | set(scanned_sig), page_ref)
+    _report_footer_text(rep, footers)
 
     # เลขหน้าลงนาม i/ii หรือ ก/ข
     _report_signature_page_count(rep, sig_pages, scanned_sig, front_label_style)
+    _report_signature_dot_overflow(rep, pdf_path, sig_pages, page_ref)    # อัปเดต 1.11 (เจ้าของ 25 พ.ย. 2569)
     sig_label_reported = _report_signature_page_labels(
         rep, sig_pages, pages, page_ref, label_style=front_label_style)
 
