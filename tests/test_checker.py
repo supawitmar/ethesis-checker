@@ -13817,3 +13817,210 @@ class Update114DegreeLineNeedsTheWordParinya(unittest.TestCase):
                          f'This line must read "ปริญญา{self.DEGREE}", as in the template')
         self.assertEqual(i18n.tr_en('เติมคำว่า "ปริญญา" หน้าชื่อปริญญา', pairs),
                          'Add the word "ปริญญา" (degree) before the degree name')
+
+
+
+def _pdf_with_styled_lines(pages):
+    """PDF เล็ก ๆ ที่วางข้อความตามพิกัด พร้อมขนาดและตัวหนา — แต่ละหน้าเป็นรายการ (x, y, ข้อความ, ขนาด, ตัวหนาไหม) (อัปเดต 1.15)"""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", None,
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
+    kids = []
+    for lines in pages:
+        stream = " ".join(f"BT /F{2 if bold else 1} {size} Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET"
+                          for x, y, text, size, bold in lines).encode("ascii")
+        objects.append(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+                       + stream + b"\nendstream")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources "
+                       f"<< /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {len(objects)} 0 R >>".encode("ascii"))
+        kids.append(f"{len(objects)} 0 R")
+    objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode("ascii")
+    pdf, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii") + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    pdf.extend("".join(f"{offset:010d} 00000 n \n" for offset in offsets).encode("ascii"))
+    pdf.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+               .encode("ascii"))
+    return bytes(pdf)
+
+
+class Update115OneLineChapterHeading(unittest.TestCase):
+    """หัวบท "บทที่ N <ชื่อบท>" บรรทัดเดียว — อ่านบทได้ แล้วแจ้งส้มข้อเดียวทั้งเล่ม (อัปเดต 1.15 เจ้าของ 26 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    @staticmethod
+    def _row(x0, top, text, size=16.0, font="THSarabunNew"):
+        """คำกับตัวอักษรของบรรทัดหนึ่ง (ตัวอักษรละ 8 จุด ช่องว่าง 8 จุด) — ใช้ทดสอบ styled_one_line_chapters โดยตรง"""
+        words, chars, x = [], [], x0
+        for word in text.split():
+            width = 8 * len(word)
+            words.append({"text": word, "x0": x, "x1": x + width, "top": top, "bottom": top + size})
+            chars += [{"text": ch, "x0": x + 8 * k, "x1": x + 8 * k + 8, "top": top, "bottom": top + size,
+                       "size": size, "fontname": font} for k, ch in enumerate(word)]
+            x += width + 8
+        return words, chars
+
+    def _page(self, *rows):
+        words, chars = [], []
+        for row in rows:
+            w, c = self._row(*row)
+            words += w
+            chars += c
+        return words, chars
+
+    # ---------- อ่านบรรทัด ----------
+    def test_the_line_reader(self):
+        self.assertEqual(checker_module.one_line_chapter("บทที่ 1 บทนำ"), (1, "บทนำ", "บทที่ 1"))
+        self.assertEqual(checker_module.one_line_chapter("บทที่  5  แผนการเงินสมมติ"), (5, "แผนการเงินสมมติ", "บทที่ 5"))
+        self.assertEqual(checker_module.one_line_chapter("CHAPTER 2 METHODS"), (2, "METHODS", "CHAPTER 2"))
+        self.assertEqual(checker_module.one_line_chapter("Chapter II. Literature Review")[:2], (2, "Literature Review"))
+        for line in ("บทที่ 1", "CHAPTER 3", "บทที่ 2 1.1 หัวข้อย่อย", "บทที่ 3 (ต่อ)", "CHAPTER 3 INTRODUCTION (CONTINUED)",
+                     "บทที่ 4 -", "ข้อความทั่วไป บทที่ 4 บทนำ", "CHAPTERS 1 TO 3"):
+            self.assertIsNone(checker_module.one_line_chapter(line), line)
+
+    # ---------- หน้าตาหัวบท ----------
+    BODY_ROWS = ((72, 300, "ก" * 58), (72, 330, "ข้อความเนื้อหาบรรทัดที่สองสมมติ"))     # พื้นที่พิมพ์ 72–536 กึ่งกลาง 304
+
+    def test_a_centred_bold_heading_counts(self):
+        # หัวบทกว้าง 12 ตัวอักษร (รวมช่องว่าง) = 96 จุด เริ่ม 258 = กึ่งกลาง 306
+        words, chars = self._page((258, 81, "บทที่ 1 บทนำ", 18.0, "THSarabunNew-Bold"), *self.BODY_ROWS)
+        self.assertEqual(checker_module.styled_one_line_chapters(words, chars),
+                         {1: {checker_module.norm("บทที่ 1 บทนำ")}})
+        # ไม่หนาแต่ใหญ่กว่าเนื้อหา ก็นับ · หัวบทกลางหน้า (บรรทัดที่ 8 ต่อจากเนื้อหาบทก่อน) ก็นับ
+        words, chars = self._page(*self.BODY_ROWS, (254, 500, "บทที่ 5 บทสรุป", 18.0))
+        self.assertEqual(set(checker_module.styled_one_line_chapters(words, chars)), {5})
+
+    def test_a_body_sentence_is_not_a_heading(self):
+        """ควบคุมเชิงลบ — ประโยคเนื้อหาที่ขึ้นต้นด้วย "บทที่ N" ชิดซ้ายขนาดเท่าเนื้อหา / กึ่งกลางแต่ไม่หนาไม่ใหญ่ / หนาแต่ชิดซ้าย"""
+        sentence = "บทที่ 4 จึงรวมปัญหาสมมติลำดับที่ 1 และ 2 เป็นโจทย์เดียวเพื่อวิเคราะห์ต่อไปในส่วนถัดไป"
+        for row in ((72, 360, sentence), (258, 360, "บทที่ 4 บทนำ"), (72, 360, "บทที่ 4 บทนำ", 16.0, "THSarabunNew-Bold")):
+            words, chars = self._page(*self.BODY_ROWS, row)
+            self.assertEqual(checker_module.styled_one_line_chapters(words, chars), {}, row)
+        self.assertEqual(checker_module.styled_one_line_chapters([], []), {})
+
+    # ---------- ข้อความแจ้ง ----------
+    def _items(self, heads):
+        rep = checker_module.Report()
+        checker_module._report_one_line_headings(rep, heads)
+        return [dict(i, zone=zone) for zone in ("RED", "ORANGE", "YELLOW") for i in rep.zones[zone]]
+
+    def test_one_orange_item_for_the_whole_book(self):
+        items = self._items([(n, False) for n in (1, 2, 3, 4, 5)])
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual((item["zone"], item["rule_id"]), ("ORANGE", "BODY.CHAPTER_HEADING_LINES"))
+        self.assertEqual(item["found"], 'หัวบทเขียน "บทที่ N" กับชื่อบทในบรรทัดเดียวกัน: บทที่ 1–5')
+        self.assertEqual(item["expected"], 'ตาม template "บทที่ N" กับชื่อบทต้องแยกเป็น 2 บรรทัด')
+        self.assertEqual(item["fix"], 'แยกชื่อบทขึ้นบรรทัดใหม่ใต้ "บทที่ N"')
+        self.assertIn('"CHAPTER N"', self._items([(1, True), (3, True)])[0]["found"])
+        self.assertTrue(self._items([(1, True), (3, True)])[0]["found"].endswith("บทที่ 1, 3"))
+        self.assertTrue(self._items([(1, False), (2, False)])[0]["found"].endswith("บทที่ 1, 2"))
+        self.assertEqual(self._items([]), [])
+        self.assertEqual(__import__("ethesis_rules").RULE_CATALOG["BODY.CHAPTER_HEADING_LINES"]["failure_zone"], "ORANGE")
+
+    def test_the_english_report_translates_it(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en('หัวบทเขียน "CHAPTER N" กับชื่อบทในบรรทัดเดียวกัน: บทที่ 1–5', pairs),
+                         'The chapter heading has "CHAPTER N" and the chapter title on the same line: chapter 1–5')
+        self.assertEqual(i18n.tr_en('ตาม template "CHAPTER N" กับชื่อบทต้องแยกเป็น 2 บรรทัด', pairs),
+                         'As in the template, "CHAPTER N" and the chapter title must be on 2 separate lines')
+        self.assertEqual(i18n.tr_en('แยกชื่อบทขึ้นบรรทัดใหม่ใต้ "CHAPTER N"', pairs),
+                         'Move the chapter title to a new line below "CHAPTER N"')
+        self.assertEqual(i18n.tr_en("หัวบทในเนื้อหา", pairs), "Chapter headings in the body")
+
+    # ---------- ทั้งเล่ม (PDF สมมติ เล่มอังกฤษ) ----------
+    def _run(self, chapter_pages):
+        import tempfile
+        toc = [(300, 800, "iii", 12, False), (230, 770, "TABLE OF CONTENTS", 12, True),
+               (72, 740, "CHAPTER 1 INTRODUCTION 1", 12, False), (72, 724, "CHAPTER 2 METHODS 2", 12, False)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_styled_lines([toc, *chapter_pages]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+
+    def _body(self, y, n=3):
+        return [(72, y - 16 * k, self.BODY, 12, False) for k in range(n)]
+
+    def test_one_line_english_headings_are_found(self):
+        # บทที่ 1 ต้นหน้า · บทที่ 2 กลางหน้า (บรรทัดที่ 8) ต่อจากประโยคเนื้อหา "CHAPTER 2 then ..." ชิดซ้ายขนาดเท่าเนื้อหา
+        chapter1 = [(300, 800, "1", 12, False), (205, 770, "CHAPTER 1 INTRODUCTION", 14, True), *self._body(730)]
+        chapter2 = [(300, 800, "2", 12, False), *self._body(770),
+                    (72, 722, "CHAPTER 2 then explains the methods used in this made-up study.", 12, False),
+                    *self._body(706), (230, 600, "CHAPTER 2 METHODS", 14, True), *self._body(560)]
+        issues = self._run([chapter1, chapter2])
+        self.assertFalse([i for i in issues if i["rule_id"] == "FRONT.TOC"], issues)
+        heads = [i for i in issues if i["rule_id"] == "BODY.CHAPTER_HEADING_LINES"]
+        self.assertEqual([i["found"] for i in heads],
+                         ['หัวบทเขียน "CHAPTER N" กับชื่อบทในบรรทัดเดียวกัน: บทที่ 1, 2'])
+
+    def test_a_body_sentence_alone_is_not_a_chapter(self):
+        """ควบคุมเชิงลบ — หน้าที่มีแค่ประโยค "CHAPTER 2 then ..." ชิดซ้าย ไม่นับเป็นบทที่ 2 (เนื้อหาจึงมี 1 บท)"""
+        chapter1 = [(300, 800, "1", 12, False), (205, 770, "CHAPTER 1 INTRODUCTION", 14, True), *self._body(730)]
+        page2 = [(300, 800, "2", 12, False), *self._body(770),
+                 (72, 722, "CHAPTER 2 then explains the methods used in this made-up study.", 12, False), *self._body(706)]
+        issues = self._run([chapter1, page2])
+        self.assertTrue([i for i in issues if i["rule_id"] == "FRONT.TOC" and "เนื้อหามี 1 บท" in i["found"]], issues)
+
+    def test_two_line_headings_get_no_orange(self):
+        """ควบคุมเชิงลบ — หัวบท 2 บรรทัดตาม template (ตัวหนา กึ่งกลาง) ไม่มีข้อส้ม"""
+        chapter1 = [(300, 800, "1", 12, False), (255, 770, "CHAPTER 1", 14, True),
+                    (240, 752, "INTRODUCTION", 14, True), *self._body(720)]
+        chapter2 = [(300, 800, "2", 12, False), (255, 770, "CHAPTER 2", 14, True),
+                    (255, 752, "METHODS", 14, True), *self._body(720)]
+        issues = self._run([chapter1, chapter2])
+        self.assertFalse([i for i in issues if i["rule_id"] in ("BODY.CHAPTER_HEADING_LINES", "FRONT.TOC")], issues)
+
+    def test_the_body_scan_uses_it(self):
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("styled_one_line_chapters(_words, _pg.chars)", source)
+        self.assertIn("norm(line) not in one_line_heads[i].get(hit[0], ())", source)
+        self.assertIn("_report_one_line_headings(rep, one_line_found)", source)
+
+
+
+class Update115CoverTitleIsNotAHeader(unittest.TestCase):
+    """ชื่อเรื่องบนปกที่ขึ้นราว 91 จุดจากขอบบนไม่ใช่หัวกระดาษ (อัปเดต 1.15 · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    def _run(self, cover_number):
+        import tempfile
+        # หน้า A4 สูง 842 · ชื่อเรื่องขอบบนราว 88-91 จุด (เกิน 8% = 67 แต่ไม่ถึง 11% = 92.6) บรรทัดถัดไปห่างมาก
+        cover = ([(297, 800, "1")] if cover_number else []) + [
+            (150, 742, "A MADE-UP STUDY OF SOMETHING"), (230, 500, "JOHN DOE"),
+            (100, 300, "A THESIS SUBMITTED IN PARTIAL FULFILLMENT"), (100, 284, "OF THE REQUIREMENTS FOR"),
+            (100, 268, "THE DEGREE OF MASTER OF SCIENCE"), (100, 252, "FACULTY OF GRADUATE STUDIES"),
+            (100, 236, "MAHIDOL UNIVERSITY"), (250, 220, "2026")]
+        toc = [(300, 800, "iii"), (230, 730, "TABLE OF CONTENTS"), (72, 700, "CHAPTER 1 INTRODUCTION 1")]
+        chapter1 = [(300, 800, "1"), (270, 730, "CHAPTER 1"), (255, 714, "INTRODUCTION"), (72, 690, self.BODY)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_placed_lines([cover, toc, chapter1]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+
+    def test_the_cover_title_is_not_header_text(self):
+        issues = self._run(False)
+        self.assertFalse([i for i in issues if i["rule_id"] == "PAGE.HEADER"], issues)
+        self.assertFalse([i for i in issues if i["found"] == "หน้าปกมีเลขหน้า"], issues)
+
+    def test_a_cover_page_number_is_still_reported(self):
+        """ควบคุมเชิงลบ — หน้าปกที่มีเลขหน้ายังแจ้ง "หน้าปกมีเลขหน้า" ตามเดิม"""
+        issues = self._run(True)
+        self.assertTrue([i for i in issues if i["found"] == "หน้าปกมีเลขหน้า"], issues)
+
+    def test_the_fixed_band_only_applies_to_the_cover(self):
+        words = [{"text": "TITLE", "x0": 150, "x1": 250, "top": 88, "bottom": 100},
+                 {"text": "NAME", "x0": 230, "x1": 280, "top": 330, "bottom": 342},
+                 {"text": "LINE", "x0": 100, "x1": 150, "top": 530, "bottom": 542}]
+        page = mock.Mock(height=842)
+        self.assertEqual(checker_module.header_tokens(page, words=words), ["TITLE"])          # แถบขยายเดิม
+        self.assertEqual(checker_module.header_tokens(page, words=words, widen=False), [])
+        source = inspect.getsource(checker_module.run_check)
+        self.assertIn("if front and i == cover_idx and i in fixed_band_headers:", source)

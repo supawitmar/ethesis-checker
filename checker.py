@@ -57,6 +57,7 @@ SIG_TITLE_DOTS_ZONE = rule_zone("FRONT.APPROVAL_TITLE_DOTS", "RED")
 # อัปเดต 1.12 (เจ้าของ 25 พ.ย. 2569): คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ = ส้ม
 ABSTRACT_QUALIFICATION_ZONE = rule_zone("FRONT.ABSTRACT_QUALIFICATION", "ORANGE")
 DEGREE_PREFIX_ZONE = rule_zone("FORM.DEGREE_PREFIX", "ORANGE")
+CHAPTER_HEADING_LINES_ZONE = rule_zone("BODY.CHAPTER_HEADING_LINES", "ORANGE")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -751,17 +752,18 @@ def header_band_bottom(words, height):
     return cutoff
 
 
-def header_tokens(pdf_page, words=None):
+def header_tokens(pdf_page, words=None, widen=True):
     """คำทั้งหมดในแถบหัวกระดาษ (บนสุดของหน้า) เรียงตามที่ pdfplumber อ่านได้
 
     เลขหน้าอยู่ในระยะขอบบน (~5-6% ของความสูง) ส่วนเนื้อความเริ่ม ~9%+ จึงตัดที่ 8%
     เพื่อดูเฉพาะแถบหัวกระดาษ · words = คำของหน้าที่ดึงไว้แล้ว (ไม่ต้องดึงซ้ำ)
+    widen=False = ตัดที่ 8% ตายตัว ไม่ขยายแถบตามบรรทัดบนสุด (header_band_bottom) — ใช้กับหน้าปก (อัปเดต 1.15)
     """
     height = float(getattr(pdf_page, 'height', 0) or 0)
     if not height:
         return []
     words = (pdf_page.extract_words() if words is None else words) or []
-    cutoff = header_band_bottom(words, height)
+    cutoff = header_band_bottom(words, height) if widen else height * _HEADER_BAND
     tokens = []
     for word in words:
         if float(word.get('top', height)) >= cutoff:
@@ -9077,6 +9079,85 @@ def chapter_lines_far_right(words):
             if all(x > middle + _HEADING_RIGHT_SLACK for x in xs)}
 
 
+# หัวบทบรรทัดเดียว "บทที่ 1 บทนำ" / "CHAPTER 1 INTRODUCTION" (อัปเดต 1.15) — ข้อความหลังเลขบทเป็นชื่อบท
+_ONE_LINE_CHAPTER = re.compile(r'^\s*(?:CHAPTER|บทท[ั-๎\s]*)\s*(\d{1,2}|[IVXL]+)(?=[\s.:])[\s.:]+(\S.*)$', re.I)
+# หัวบทจริงอยู่กึ่งกลาง: ศูนย์กลางบรรทัดห่างกึ่งกลางพื้นที่พิมพ์ไม่เกินครึ่งนิ้ว
+_HEADING_CENTER_SLACK = 36
+
+
+def one_line_chapter(line):
+    """("บทที่ 1 บทนำ") → (1, "บทนำ", "บทที่ 1") · ไม่ใช่หัวบทบรรทัดเดียว = None
+
+    ชื่อบทต้องมีตัวอักษร และไม่ขึ้นต้นด้วยตัวเลข (บรรทัด "บทที่ 1" เปล่า ๆ และ "บทที่ 1 1.1 ..." ไม่ใช่) · "(ต่อ)" = บทเดิม ไม่ใช่
+    """
+    match = _ONE_LINE_CHAPTER.match(soft(line))
+    if not match:
+        return None
+    token, title = match.group(1), match.group(2).strip()
+    number = int(token) if token.isdigit() else _roman_to_int(token.upper())
+    if (number is None or re.match(r'\d', title) or not re.search(r'[A-Za-zก-๙]', title)
+            or is_continuation_heading(line)):
+        return None
+    return number, title, soft(match.group(0)[:match.end(1)])
+
+
+def styled_one_line_chapters(words, chars):
+    """บรรทัด "บทที่ N <ชื่อบท>" บนหน้านี้ที่หน้าตาเป็นหัวบท: กึ่งกลางพื้นที่พิมพ์ และตัวหนาหรือใหญ่กว่าเนื้อหา (อัปเดต 1.15)
+
+    คืน {เลขบท: {ข้อความบรรทัดนั้นหลัง norm()}} — ตอนสแกนหัวบทรับเฉพาะบรรทัดที่ข้อความตรงกัน ไม่ใช่ทุกบรรทัดที่เลขบทตรง
+    (หน้าเดียวกันอาจมีประโยคเนื้อหา "บทที่ 2 จะ..." อยู่ก่อนหัวบทที่ 2 จริงที่ขึ้นกลางหน้า)
+
+    เจ้าของ 26 พ.ย. 2569 *"เล่มที่ระบบแจ้งว่า ชื่อบท ในเนื้อหา = 0 เป็นเพราะชื่ออยู่ไม่ได้อยู่ 2 บรรทัดใช่ไหม ควรทำให้อ่านได้ด้วยไหม"*
+    — เล่มจริง (IS ไทย 84 แผ่น) หัวบททุกบทเป็น "บทที่ 1 บทนำ" บรรทัดเดียว TH Sarabun New ตัวหนา 18 จุด กึ่งกลาง เนื้อหา 16 จุด
+    ต้องไม่จับประโยคในเนื้อหาที่ขึ้นต้นด้วย "บทที่ N" (เล่มจริงอีกเล่ม "บทที่ 4 จึงรวมสาเหตุรากลำดับที่ 1 และ 2 ...") — ประโยคแบบนั้น
+    ชิดซ้ายและขนาดเท่าเนื้อหา · บรรทัดสารบัญชิดซ้ายมีเลขหน้าต่อท้าย จึงไม่ผ่านเกณฑ์กึ่งกลาง
+    """
+    if not words:
+        return {}
+    left = min(float(w["x0"]) for w in words)
+    right = max(float(w["x1"]) for w in words)
+    middle = (left + right) / 2
+    sizes = [round(float(c.get("size") or 0), 1) for c in chars if str(c.get("text", "")).strip()]
+    body_size = max(set(sizes), key=sizes.count) if sizes else 0
+    found = {}
+    for row in _word_rows(words):
+        text = " ".join(w["text"] for w in row)
+        hit = one_line_chapter(text)
+        if not hit:
+            continue
+        x0, x1 = float(row[0]["x0"]), float(row[-1]["x1"])
+        if abs((x0 + x1) / 2 - middle) > _HEADING_CENTER_SLACK:
+            continue
+        top = min(float(w["top"]) for w in row) - 1
+        bottom = max(float(w["bottom"]) for w in row) + 1
+        own = [c for c in chars if str(c.get("text", "")).strip()
+               and float(c["top"]) >= top and float(c["bottom"]) <= bottom
+               and float(c["x0"]) >= x0 - 1 and float(c["x1"]) <= x1 + 1]
+        if not own:
+            continue
+        bold = sum("bold" in str(c.get("fontname", "")).lower() for c in own) * 2 >= len(own)
+        row_size = sorted(round(float(c.get("size") or 0), 1) for c in own)[len(own) // 2]
+        if bold or (body_size and row_size >= body_size + 1):
+            found.setdefault(hit[0], set()).add(norm(text))
+    return found
+
+
+def _report_one_line_headings(rep, heads):
+    """ส้มข้อเดียวทั้งเล่ม — หัวบทที่เขียน "บทที่ N" กับชื่อบทในบรรทัดเดียวกัน (อัปเดต 1.15) · heads = [(เลขบท, ภาษาอังกฤษไหม)]"""
+    if not heads:
+        return
+    numbers = sorted({number for number, _english in heads})
+    word = "CHAPTER N" if all(english for _number, english in heads) else "บทที่ N"
+    if len(numbers) > 2 and numbers == list(range(numbers[0], numbers[-1] + 1)):
+        listed = f"{numbers[0]}–{numbers[-1]}"
+    else:
+        listed = ", ".join(str(number) for number in numbers)
+    rep.add(CHAPTER_HEADING_LINES_ZONE, "body", "หัวบทในเนื้อหา",
+            f'หัวบทเขียน "{word}" กับชื่อบทในบรรทัดเดียวกัน: บทที่ {listed}',
+            f'ตาม template "{word}" กับชื่อบทต้องแยกเป็น 2 บรรทัด',
+            f'แยกชื่อบทขึ้นบรรทัดใหม่ใต้ "{word}"', "BODY.CHAPTER_HEADING_LINES")
+
+
 def resolve_option(body_ch, approved, chapters_mode):
     """Resolve document option without forcing canonical titles in free mode.
 
@@ -9463,6 +9544,9 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     footers = []               # ข้อความในแถบท้ายกระดาษต่อหน้า — ข้อ PAGE.FOOTER_TEXT (อัปเดต 1.11)
     drawn_pages = set()        # หน้าส่วนนำที่ข้อความเป็นเส้นวาด ไม่ใช่ตัวอักษร (drawn_text_page อัปเดต 1.12.2)
     table_chapter_cells = {}   # ดัชนีหน้า → เลขบทที่ "บทที่ N" เป็นเซลล์ตาราง ไม่ใช่หัวบท (chapter_lines_far_right อัปเดต 1.12.3)
+    # หัวกระดาษแบบแถบ 8% ตายตัวของแผ่นที่อาจเป็นหน้าปก (find_cover_page ดู 10 แผ่นแรก · อัปเดต 1.15)
+    fixed_band_headers = {}
+    one_line_heads = {}        # ดัชนีหน้า → {เลขบท: ข้อความบรรทัด} ของหัวบทบรรทัดเดียวที่หน้าตาเป็นหัวบท (styled_one_line_chapters อัปเดต 1.15)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
         if n == 0:
@@ -9500,6 +9584,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             try:
                 _words = _pg.extract_words()
                 header_words.append(header_tokens(_pg, words=_words))
+                if _i < 10:
+                    fixed_band_headers[_i] = header_tokens(_pg, words=_words, widen=False)
                 footers.append(footer_lines(_words, float(_pg.height or 0)))
                 if edge_page_number_hint(_words, float(_pg.width or 0), float(_pg.height or 0)):
                     edge_numbered.add(_i)
@@ -9509,6 +9595,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 _cells = chapter_lines_far_right(_words)
                 if _cells:
                     table_chapter_cells[_i] = _cells
+                if any(one_line_chapter(line) for line in pages[-1].splitlines()):
+                    _heads = styled_one_line_chapters(_words, _pg.chars)
+                    if _heads:
+                        one_line_heads[_i] = _heads
             except Exception:
                 header_words.append([])
                 del footers[_i:]
@@ -9805,6 +9895,25 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     if not chapter_number_is_arabic(l):
                         non_arabic_heads.append((cn, soft(l), i))
                 break
+    # หัวบทบรรทัดเดียว "บทที่ N <ชื่อบท>" (อัปเดต 1.15) — เฉพาะหน้าที่บรรทัดนั้นหน้าตาเป็นหัวบท (กึ่งกลาง ตัวหนา/ใหญ่กว่าเนื้อหา)
+    # ค้นทั้งหน้า ไม่ใช่แค่บรรทัดต้นหน้า: เล่มจริงขึ้นบทใหม่กลางหน้าต่อจากเนื้อหาบทก่อน · บทที่หาเจอแบบ 2 บรรทัดแล้วไม่นับซ้ำ
+    one_line_found = []        # (เลขบท, หัวบทเป็นภาษาอังกฤษไหม)
+    _toc_source_pages = {c[4] for c in toc_ch} | set(toc_pages)    # บรรทัดสารบัญไม่ใช่หัวบท
+    for i in sorted(one_line_heads):
+        if i in _toc_source_pages:
+            continue
+        page_lines = [soft(line) for line in pages[i].splitlines() if soft(line)]
+        for j, line in enumerate(page_lines):
+            hit = one_line_chapter(line)
+            if (not hit or norm(line) not in one_line_heads[i].get(hit[0], ())
+                    or any(c[0] == hit[0] for c in body_ch)):
+                continue
+            cn, title, head = hit
+            body_ch.append((cn, title, i, printed.get(i), page_lines[j + 1] if j + 1 < len(page_lines) else ""))
+            one_line_found.append((cn, norm(head).startswith("CHAPTER")))
+            if not chapter_number_is_arabic(head):
+                non_arabic_heads.append((cn, soft(head), i))
+    _report_one_line_headings(rep, one_line_found)
     # บทที่พิมพ์แค่ชื่อบท ไม่มีบรรทัด "บทที่ N" (เล่มจริง 10 พ.ย. 2569: เลขบทในเนื้อหาเป็น 1, 2, 4, 5, 6 แล้วระบบแจ้งว่ายังไม่มีบทที่ 6)
     # นับว่าพบบทนั้น แล้วแจ้งที่หน้านั้นข้อเดียว — ไม่ให้ข้อจำนวนบทไม่เท่ากัน ข้อน้อยกว่าประกาศ และย่อหน้ายื่นขอคงโครงบทตามมา
     for _number, _title, _idx, _printed_word in chapters_missing_number_line(body_ch, toc_ch, pages, printed):
@@ -10114,6 +10223,11 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     if body_ch:
         def header_extra_at(i, front):
             words = header_words[i] if i < len(header_words) else []
+            # หน้าปกไม่ขยายแถบหัวกระดาษ (อัปเดต 1.15): ชื่อเรื่องบนปกเล่มจริงขึ้นที่ 91 จุดจากขอบบน (11% ของหน้า A4 = 92.6)
+            # ตัวอักษรเท่าบรรทัดอื่น และห่างบรรทัดถัดไปมาก จึงเข้าเกณฑ์ "หัวกระดาษที่อยู่ต่ำ" แล้วถูกแจ้งว่ามีข้อความอื่นในหัวกระดาษ
+            # ข้อ "หน้าปกมีเลขหน้า" (cover_page_label) ยังอ่านจาก header_words เดิม
+            if front and i == cover_idx and i in fixed_band_headers:
+                words = fixed_band_headers[i]
             return header_extra_text(None, front=front, tokens=words,
                                      front_style=front_label_style)
 
