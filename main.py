@@ -266,6 +266,79 @@ MAX_KEPT_JOBS = 40
 JOBS_LOCK = threading.Lock()
 DOC_TYPES = {"THESIS", "THEMATIC PAPER", "INDEPENDENT STUDY"}
 
+# ---------- ถอยกลับไปแก้ไขจากขั้นที่ 1 (อัปเดต 1.13 เจ้าของสั่ง 26 พ.ย. 2569) ----------
+# "เพิ่มปุ่ม ถอยกลับ ในหน้า ตรวจหน้าลงนาม เผื่ออัปโหลดไฟล์ผิด จะได้ถอยกลับมาแก้ไขไฟล์หรืออัปโหลดใหม่ได้"
+# กดถอยกลับ = ทิ้งงานตรวจเดิม (cancelled) แล้วย้ายค่าที่กรอกกับไฟล์ที่อัปโหลดไว้มาเก็บเป็น "ฉบับร่าง" ใต้รหัสสุ่ม
+# หน้าแบบฟอร์ม /?restore=<รหัส> เติมค่ากลับครบทุกช่อง ไฟล์ที่ไม่เปลี่ยนใช้ของเดิมจากฝั่งเซิร์ฟเวอร์ ส่งใหม่ = งานใหม่
+# ฉบับร่างใช้ได้ครั้งเดียว (/check ที่สำเร็จรับไป) และหมดอายุพร้อมกติกาเดียวกับผลตรวจ (JOB_TTL) ไฟล์ถูกลบตาม
+# เข้า "/" ตามปกติยังล้างฟอร์มเหมือนเดิมทุกอย่าง (resetCheckForm เจ้าหน้าที่สั่ง ก.ย. 2569)
+DRAFTS = {}
+MAX_KEPT_DRAFTS = 40
+# ช่องของแบบฟอร์มที่เติมกลับ — ชื่อเดียวกับ name ในหน้า index.html (วันที่ = ช่องซ่อน yyyy-mm-dd ค.ศ.)
+RESTORE_FIELDS = (
+    "doc_type", "format", "program_language", "chapters_mode", "title_en", "title_th",
+    "student_id", "student_name", "student_name_th", "degree_cover_en", "degree_cover_th",
+    "degree_sig_en", "degree_sig_th", "degree_abbr_en", "degree_abbr_th", "exam_date", "year",
+    "faculty", "program", "committees_json", "ethesis_doc_type",
+    "submitted_date", "queue_date", "checked_date",
+)
+
+
+class JobCancelled(Exception):
+    """งานตรวจถูกทิ้งเพราะเจ้าหน้าที่ถอยกลับไปแก้ไข (อัปเดต 1.13) — หยุดตรวจเบื้องหลังที่จุดรายงานความคืบหน้าถัดไป"""
+
+
+def _job_cancelled(job_id):
+    with JOBS_LOCK:
+        return bool((JOBS.get(job_id) or {}).get("cancelled"))
+
+
+def _form_state(raw):
+    """สภาพของหน้าแบบฟอร์มที่ไม่ได้ใช้ตรวจ (ช่องที่เติมจากไฟล์ eThesis ชื่อไฟล์ eThesis ช่องตัวย่อที่ระบบไม่มี)
+
+    เก็บไว้เติมกลับตอนถอยกลับไปแก้ไขเท่านั้น — ค่าผิดรูปทิ้งไป ไม่ปฏิเสธการตรวจ
+    """
+    try:
+        data = json.loads(raw) if raw and len(raw) <= 8192 else {}
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict) or not data:
+        return {}
+    names = data.get("autofilled")
+    abbr = data.get("abbr_not_found")
+    abbr = abbr if isinstance(abbr, dict) else {}
+    return {
+        "autofilled": [n for n in names if n in RESTORE_FIELDS][:40] if isinstance(names, list) else [],
+        "ethesis_name": str(data.get("ethesis_name") or "")[:200],
+        "abbr_not_found": {"en": abbr.get("en") is True, "th": abbr.get("th") is True},
+    }
+
+
+def _draft_view(token):
+    """ฉบับร่างในรูปที่หน้าแบบฟอร์มใช้เติมกลับ — None ถ้าไม่มี (หมดอายุ/ใช้ไปแล้ว)"""
+    with JOBS_LOCK:
+        draft = DRAFTS.get(token)
+        draft = dict(draft) if draft else None
+    if not draft:
+        return None
+    files = {}
+    for key, path, name in (("book", draft.get("pdf_path"), draft.get("pdf_name")),
+                            ("turnitin", draft.get("turnitin_path"), (draft.get("turnitin") or {}).get("name"))):
+        try:
+            size = Path(path).stat().st_size if path else None
+        except OSError:
+            size = None
+        if size is not None:
+            files[key] = {"name": name or "", "size": size}
+    return {"token": token, "form": draft.get("form") or {}, "state": draft.get("state") or {}, "files": files}
+
+
+def _return_draft(token, draft):
+    """คืนฉบับร่างที่ /check หยิบไปแล้วตรวจไม่สำเร็จ เจ้าหน้าที่จะได้แก้แล้วส่งใหม่ได้อีก"""
+    if token and draft:
+        with JOBS_LOCK:
+            DRAFTS.setdefault(token, draft)
+
 
 def _positive_env_int(name, default):
     try:
@@ -516,7 +589,13 @@ def _prune_jobs():
                 remove += [path, job.get("turnitin_path")]
                 job["pdf_path"] = None
                 job["turnitin_path"] = None
-        referenced = {str(Path(j[key])) for j in JOBS.values()
+        # ฉบับร่างที่ถอยกลับมาแก้ไข (อัปเดต 1.13) หมดอายุตามกติกาเดียวกับผลตรวจ ไฟล์ถูกลบตาม
+        old_drafts = sorted(((d["ts"], k) for k, d in DRAFTS.items()), reverse=True)
+        for ts, k in old_drafts:
+            if now - ts > JOB_TTL or k in {key for _ts, key in old_drafts[MAX_KEPT_DRAFTS:]}:
+                gone = DRAFTS.pop(k, {})
+                remove += [gone.get("pdf_path"), gone.get("turnitin_path")]
+        referenced = {str(Path(j[key])) for j in list(JOBS.values()) + list(DRAFTS.values())
                       for key in ("pdf_path", "turnitin_path") if j.get(key)}
     for path in remove:
         _remove_book(path)
@@ -527,14 +606,25 @@ def _run_job(job_id, tmp_path, approved, chapters_mode, turnitin=None):
     turnitin_copy = (_get_job(job_id) or {}).get("turnitin_path")
 
     def progress(msg):
+        # ถอยกลับไปแก้ไขแล้ว (อัปเดต 1.13) = หยุดตรวจที่จุดนี้ ไม่กินช่องงานตรวจต่อ
+        if _job_cancelled(job_id):
+            raise JobCancelled()
         _update_job(job_id, stage=msg)
 
     try:
         report = run_check(tmp_path, approved, chapters_mode=chapters_mode, progress=progress,
                            turnitin=turnitin)
+        if _job_cancelled(job_id):
+            raise JobCancelled()
         _update_job(job_id, report=report, report_system=report, stage="เสร็จสิ้น")
         _settle_turnitin(job_id)        # ตอบขั้นที่ 1 เรื่อง Turnitin ไว้ก่อนตรวจเสร็จ (อัปเดต 1.7)
+    except JobCancelled:
+        # ไฟล์ย้ายไปอยู่กับฉบับร่างแล้ว ห้ามลบ · ไม่เก็บผลตรวจ
+        _update_job(job_id, stage="ยกเลิกแล้ว")
     except Exception:
+        if _job_cancelled(job_id):
+            _update_job(job_id, stage="ยกเลิกแล้ว")
+            return
         tb = traceback.format_exc()
         print(f"job {job_id} failed\n{tb}", flush=True)
         # ตรวจไม่สำเร็จ = ไม่มีหน้ารายงานให้เปิดไฟล์ ไม่ต้องเก็บไว้
@@ -595,8 +685,11 @@ def logout():
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html", context={})
+def index(request: Request, restore: str = ""):
+    # /?restore=<รหัส> = ถอยกลับมาแก้ไขจากขั้นที่ 1 (อัปเดต 1.13) · ไม่มีรหัส = ฟอร์มว่างเหมือนเดิม
+    view = _draft_view(restore.strip()) if restore.strip() else None
+    return templates.TemplateResponse(request=request, name="index.html", context={
+        "restore": view, "restore_missing": bool(restore.strip()) and view is None})
 
 
 @app.post("/parse-ethesis")
@@ -636,7 +729,8 @@ async def parse_ethesis(pdf: UploadFile = File(...)):
 
 @app.post("/check")
 async def check(
-    pdf: UploadFile = File(...),
+    # ไม่แนบไฟล์เล่ม/Turnitin มาได้เมื่อส่งจากฟอร์มที่ถอยกลับมาแก้ไข (restore_token) — ใช้ไฟล์เดิมจากฝั่งเซิร์ฟเวอร์ (อัปเดต 1.13)
+    pdf: UploadFile = File(None),
     # ไฟล์รายงาน Turnitin บังคับแนบทุกเล่ม (อัปเดต 1.4) — รับเป็น None ก่อน แล้วตอบข้อความไทยเองถ้าไม่ได้แนบ
     turnitin: UploadFile = File(None),
     doc_type: str = Form(...),
@@ -663,6 +757,8 @@ async def check(
     queue_date: str = Form(""),
     checked_date: str = Form(""),
     submitted_date: str = Form(""),
+    restore_token: str = Form(""),
+    form_state: str = Form(""),
 ):
     _prune_jobs()
     if doc_type not in DOC_TYPES or (ethesis_doc_type and ethesis_doc_type not in DOC_TYPES):
@@ -705,7 +801,21 @@ async def check(
             status_code=400,
             detail="กรุณากรอกข้อมูลอ้างอิงให้ครบก่อนตรวจ: " + ", ".join(missing),
         )
+    # ฉบับร่างที่ถอยกลับมาแก้ไข (อัปเดต 1.13) — หยิบออกก่อน ตรวจไม่สำเร็จแล้วคืน (_return_draft)
+    restore_token = restore_token.strip()
+    with JOBS_LOCK:
+        draft = DRAFTS.pop(restore_token, None) if restore_token else None
+    pdf_given = pdf is not None and bool((pdf.filename or "").strip())
+    tii_given = turnitin is not None and bool((turnitin.filename or "").strip())
+    kept_pdf = (draft or {}).get("pdf_path") if not pdf_given else None
+    kept_tii = (draft or {}).get("turnitin_path") if not tii_given else None
+    if not pdf_given and not (kept_pdf and Path(kept_pdf).exists()):
+        _return_draft(restore_token, draft)
+        raise HTTPException(status_code=400, detail="กรุณาแนบไฟล์รูปเล่มอิเล็กทรอนิกส์ (PDF) ก่อนตรวจเล่ม")
+    if kept_tii and not Path(kept_tii).exists():
+        kept_tii = None
     if not JOB_SLOTS.acquire(blocking=False):
+        _return_draft(restore_token, draft)
         raise HTTPException(status_code=429, detail="มีงานตรวจเต็มจำนวน กรุณารอสักครู่แล้วลองใหม่")
 
     # ประเภทเล่มที่อนุมัติ = ค่าที่เจ้าหน้าที่เลือกในแบบฟอร์มเสมอ (เจ้าหน้าที่สั่ง ก.ย. 2569
@@ -732,30 +842,39 @@ async def check(
 
     tmp_path = None
     turnitin_path = None
+    own_pdf = own_tii = False       # ไฟล์ที่อัปโหลดรอบนี้ (ลบได้เมื่อล้ม) — ไฟล์เดิมของฉบับร่างห้ามลบ
+    pdf_name = pdf.filename if pdf_given else (draft or {}).get("pdf_name") or ""
     try:
-        total = 0
-        header = b""
-        BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(prefix=BOOK_PREFIX, suffix=".pdf",
-                                         dir=BOOKS_DIR, delete=False) as tmp:
-            tmp_path = tmp.name
-            while chunk := await pdf.read(UPLOAD_CHUNK_BYTES):
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"ไฟล์มีขนาดเกิน {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
-                    )
-                if len(header) < 1024:
-                    header += chunk[:1024 - len(header)]
-                tmp.write(chunk)
+        if pdf_given:
+            total = 0
+            header = b""
+            BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(prefix=BOOK_PREFIX, suffix=".pdf",
+                                             dir=BOOKS_DIR, delete=False) as tmp:
+                tmp_path, own_pdf = tmp.name, True
+                while chunk := await pdf.read(UPLOAD_CHUNK_BYTES):
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"ไฟล์มีขนาดเกิน {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+                        )
+                    if len(header) < 1024:
+                        header += chunk[:1024 - len(header)]
+                    tmp.write(chunk)
 
-        if total == 0:
-            raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่มีข้อมูล")
-        if b"%PDF-" not in header:
-            raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
+            if total == 0:
+                raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่มีข้อมูล")
+            if b"%PDF-" not in header:
+                raise HTTPException(status_code=400, detail="ไฟล์ที่อัปโหลดไม่ใช่ไฟล์ PDF")
+        else:
+            tmp_path = kept_pdf
 
-        turnitin_info, turnitin_path = await _read_turnitin(turnitin)
+        if kept_tii:
+            turnitin_info, turnitin_path = dict(draft.get("turnitin") or {}), kept_tii
+        else:
+            turnitin_info, turnitin_path = await _read_turnitin(turnitin)
+            own_tii = True
 
         # โพรบว่าอ่านข้อความได้ไหม (สุ่มไม่กี่หน้า เร็วแม้ไฟล์ใหญ่) แล้วปฏิเสธทันที
         readability_issue = await asyncio.to_thread(_pdf_readability_issue, tmp_path)
@@ -763,10 +882,17 @@ async def check(
             raise HTTPException(status_code=422, detail=readability_issue)
 
         job_id = uuid.uuid4().hex
+        # ค่าที่กรอกตามชื่อช่องในแบบฟอร์ม — ใช้เติมกลับตอนถอยกลับไปแก้ไขเท่านั้น (อัปเดต 1.13)
+        form = {**form_values, "doc_type": doc_type, "format": format, "program_language": program_language,
+                "chapters_mode": chapters_mode, "faculty": faculty.strip(), "program": program.strip(),
+                "committees_json": committees_json.strip(), "ethesis_doc_type": ethesis_doc_type,
+                "submitted_date": submitted_date, "queue_date": queue_date, "checked_date": checked_date}
         with JOBS_LOCK:
             JOBS[job_id] = {
                 "stage": "รอเริ่มตรวจ...", "done": False, "error": None,
-                "report": None, "pdf_name": pdf.filename, "approved": approved,
+                "report": None, "pdf_name": pdf_name, "approved": approved,
+                "form": {key: form.get(key, "") for key in RESTORE_FIELDS},
+                "form_state": _form_state(form_state),
                 # เก็บไว้กับงาน ไม่ปนกับข้อมูลอนุมัติที่ใช้ตัดสินเล่ม — ใช้ตอนบันทึกลงชีท
                 "queue_date": queue_date, "checked_date": checked_date,
                 "submitted_date": submitted_date,
@@ -782,11 +908,17 @@ async def check(
             args=(job_id, tmp_path, approved, chapters_mode, turnitin_info),
             daemon=True,
         ).start()
+        # ไฟล์เดิมที่เปลี่ยนแล้ว (อัปโหลดไฟล์ใหม่แทน) ไม่มีใครใช้อีก ลบเลย
+        for path in ((draft or {}).get("pdf_path"), (draft or {}).get("turnitin_path")):
+            if path and path not in (tmp_path, turnitin_path):
+                _remove_book(path)
         return JSONResponse({"job_id": job_id})
     except Exception:
-        if tmp_path:
+        if tmp_path and own_pdf:
             Path(tmp_path).unlink(missing_ok=True)
-        _remove_book(turnitin_path)     # อัปโหลดล้มหลังเก็บไฟล์ Turnitin แล้ว (เช่น เล่มอ่านข้อความไม่ได้)
+        if own_tii:
+            _remove_book(turnitin_path)     # อัปโหลดล้มหลังเก็บไฟล์ Turnitin แล้ว (เช่น เล่มอ่านข้อความไม่ได้)
+        _return_draft(restore_token, draft)
         JOB_SLOTS.release()
         raise
 
@@ -861,6 +993,16 @@ def _layout_items(choice_id=SIGNATURE_LAYOUT_WRONG):
             for n, text in signature_layout_items(wrong["text"])]
 
 
+def _cancelled_page(job):
+    """งานที่ถอยกลับไปแก้ไขแล้ว (อัปเดต 1.13) — ลิงก์ /precheck หรือ /result เดิมไม่พาไปผลเก่า"""
+    token = job.get("restore_token") or ""
+    with JOBS_LOCK:
+        draft_alive = token in DRAFTS
+    again = (f"<a href='/?restore={token}'>← กลับไปแก้ไขข้อมูลต่อ</a> · " if draft_alive else "")
+    return HTMLResponse("<h3>งานตรวจนี้ถูกยกเลิกแล้ว เพราะถอยกลับไปแก้ไขข้อมูลหรือไฟล์</h3>"
+                        f"<p>{again}<a href='/'>ตรวจเล่มใหม่</a></p>", status_code=410)
+
+
 def _sig_preview(job_id, job):
     """หน้าลงนามของเล่ม (อ่านครั้งเดียวแล้วเก็บกับงาน)"""
     if job.get("sig_preview") is not None:
@@ -879,6 +1021,8 @@ async def precheck_page(request: Request, job_id: str):
     job = _get_job(job_id)
     if not job:
         return HTMLResponse("<h3>ไม่พบงานตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
+    if job.get("cancelled"):
+        return _cancelled_page(job)
     preview = await asyncio.to_thread(_sig_preview, job_id, job)
     approved = job.get("approved") or {}
     _check, wrong = STAFF_CHOICE_BY_ID[SIGNATURE_LAYOUT_WRONG]
@@ -911,11 +1055,36 @@ async def precheck_page_image(job_id: str, k: int):
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@app.post("/precheck/{job_id}/back")
+def precheck_back(job_id: str):
+    """ถอยกลับไปแก้ไข (อัปเดต 1.13) — ทิ้งงานตรวจนี้ ย้ายค่าที่กรอกกับไฟล์ไปเป็นฉบับร่าง แล้วบอกที่อยู่หน้าแบบฟอร์ม
+
+    กดซ้ำได้ (ปุ่มสองที่ / กดสองครั้ง) ได้ฉบับร่างเดิม · ไม่มีอะไรลงชีท
+    """
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job or "form" not in job:
+            return JSONResponse({"error": "ไม่พบงานตรวจ (อาจหมดอายุ) กรุณาเริ่มตรวจเล่มใหม่"}, status_code=404)
+        token = job.get("restore_token")
+        if not (token and token in DRAFTS):
+            token = uuid.uuid4().hex
+            DRAFTS[token] = {"form": dict(job["form"]), "state": dict(job.get("form_state") or {}),
+                             "pdf_path": job.get("pdf_path"), "pdf_name": job.get("pdf_name") or "",
+                             "turnitin_path": job.get("turnitin_path"), "turnitin": job.get("turnitin"),
+                             "ts": time.time()}
+            # ไฟล์ย้ายไปอยู่กับฉบับร่าง — งานเดิมไม่ชี้ถึงแล้ว (/book /turnitin ของงานเดิมเปิดไม่ได้) และไม่มีผลตรวจให้เปิด
+            job.update(cancelled=True, restore_token=token, pdf_path=None, turnitin_path=None,
+                       report=None, report_system=None)
+    return {"url": f"/?restore={token}"}
+
+
 @app.post("/precheck/{job_id}")
 async def precheck_answer(job_id: str, request: Request):
     job = _get_job(job_id)
     if not job:
         return JSONResponse({"error": "job not found"}, status_code=404)
+    if job.get("cancelled"):
+        return JSONResponse({"error": "งานตรวจนี้ถูกยกเลิกแล้ว (ถอยกลับไปแก้ไข)", "cancelled": True}, status_code=410)
     try:
         payload = await request.json()
     except Exception:
@@ -961,6 +1130,8 @@ def progress(job_id: str):
     job = _get_job(job_id)
     if not job:
         return JSONResponse({"error": "job not found"}, status_code=404)
+    if job.get("cancelled"):
+        return {"stage": "ยกเลิกแล้ว", "done": True, "error": False, "cancelled": True}
     return {"stage": job["stage"], "done": job["done"],
             "error": bool(job["error"])}
 
@@ -1202,6 +1373,8 @@ def result(request: Request, job_id: str):
     job = _get_job(job_id)
     if not job:
         return HTMLResponse("<h3>ไม่พบผลตรวจ (อาจหมดอายุ)</h3><a href='/'>← ตรวจใหม่</a>", status_code=404)
+    if job.get("cancelled"):
+        return _cancelled_page(job)
     # ต้องตรวจหน้าลงนามก่อนเสมอ (อัปเดต 1.4) — เปิดลิงก์ผลตรวจตรง ๆ โดยยังไม่ได้ตรวจ ถูกพาไปหน้าต่างนั้น
     # งานจาก /check รุ่น 1.4 มีคีย์ "precheck" ตั้งต้นเป็น None — งานที่ไม่มีคีย์นี้ (ผลตรวจที่ระบบอื่นสร้างไว้) เปิดได้ตามเดิม
     if "precheck" in job and job["precheck"] is None and not job["error"]:

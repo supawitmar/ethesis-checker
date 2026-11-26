@@ -123,6 +123,21 @@ def main():
                         str(image.status_code)))
     passed.append(check("หน้าตรวจหน้าลงนามบอกค่า Turnitin เกินเกณฑ์",
                         "31%" in pre.text and "เกินเกณฑ์" in pre.text))
+    # ---- ถอยกลับไปแก้ไข (อัปเดต 1.13) — ทิ้งงานเดิม แบบฟอร์มได้ค่าเดิม ส่งใหม่ด้วยไฟล์เดิมโดยไม่แนบใหม่ ----
+    passed.append(check("หน้าตรวจหน้าลงนามมีปุ่มถอยกลับไปแก้ไข 2 ที่", pre.text.count("data-back>") == 2))
+    back = client.post(f"/precheck/{job}/back")
+    url = (back.json() if back.status_code == 200 else {}).get("url", "")
+    passed.append(check("ถอยกลับไปแก้ไขได้", url.startswith("/?restore="), str(back.status_code)))
+    restored = client.get(url) if url else None
+    passed.append(check("แบบฟอร์มได้ค่าและไฟล์เดิมกลับมา",
+                        restored is not None and f'"name": "{book}.pdf"' in restored.text
+                        and json.dumps(form.get("student_id", "")) in restored.text))
+    passed.append(check("ลิงก์งานเดิมบอกว่ายกเลิกแล้ว", client.get(f"/precheck/{job}").status_code == 410))
+    again = client.post("/check", data={**form, "restore_token": url.split("=", 1)[-1]})
+    job = (again.json() if again.status_code == 200 else {}).get("job_id")
+    passed.append(check("ส่งใหม่ด้วยไฟล์เดิมได้งานใหม่", bool(job), str(again.status_code)))
+    if not job:
+        return 1
     # อัปเดต 1.5: ติ้กว่ารายชื่อคณะกรรมการสอบ (บฑ.2) ไม่ถูกต้อง = ข้อ 3
     answer = {"sections_ok": ["advisory", "exam", "program_head", "faculty_head"],
               "name_items": [3],

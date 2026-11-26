@@ -167,6 +167,15 @@
        background:linear-gradient(135deg,var(--navy) 0%,var(--navy-3) 100%); white-space:nowrap; }
   .go[disabled] { opacity:.45; cursor:not-allowed; }
   .go:focus-visible { outline:none; box-shadow:var(--ring); }
+  /* ถอยกลับไปแก้ไข (อัปเดต 1.13 เจ้าของสั่ง 26 พ.ย. 2569) — ปุ่มรอง ไม่เด่นกว่า "ตรวจต่อ" */
+  .back { border:1px solid var(--line-2); background:#fff; color:var(--navy-2); border-radius:99px;
+       padding:10px 18px; font-size:.9rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .back:hover:not([disabled]) { background:var(--navy-soft); border-color:#cddcee; }
+  .back:focus-visible { outline:none; box-shadow:var(--ring); }
+  .back[disabled] { opacity:.5; cursor:progress; }
+  .hero-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px 16px; flex-wrap:wrap; }
+  .hero-head h1 { flex:1 1 320px; }
+  .back-top { padding:7px 14px; font-size:.84rem; }
 
   .overlay { position:fixed; inset:0; z-index:50; display:none; place-items:center; background:rgba(22,33,46,.45); }
   .overlay.on { display:grid; }
@@ -184,8 +193,11 @@
     .page { padding:16px 16px 140px; }
     .topbar-in, .bar-in { padding:10px 16px; }
     .item { grid-template-columns:1fr; }
-    .bar-in { flex-direction:column; align-items:stretch; gap:8px; }
-    .go { width:100%; }
+    /* จอแคบ: ข้อความบนสุด ใต้ลงมาเป็นปุ่มถอยกลับคู่ปุ่มตรวจต่อในแถวเดียวกัน */
+    .bar-in { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; }
+    .bar .left { grid-column:1 / -1; order:-1; }
+    .go { width:100%; padding:12px 16px; }
+    .back { padding:10px 14px; }
   }
 </style>
 </head>
@@ -203,7 +215,10 @@
 
 <main class="page">
   <div class="hero">
-    <h1>ขั้นที่ 1 · ตรวจหน้าลงนาม ค่าปรับ และ Turnitin</h1>
+    <div class="hero-head">
+      <h1>ขั้นที่ 1 · ตรวจหน้าลงนาม ค่าปรับ และ Turnitin</h1>
+      <button type="button" class="back back-top" data-back>← ถอยกลับไปแก้ไข</button>
+    </div>
     <p>ดูหน้าลงนามคู่กับรายชื่อที่ได้รับอนุมัติ ติ้กยืนยันให้ครบ แล้วกด "ตรวจต่อ" — ระบบตรวจส่วนอื่นของเล่มไปพร้อมกันแล้ว</p>
     <p class="who">
       {% if student.student_name or student.student_name_th %}<b>{{ student.student_name_th or student.student_name }}</b>{% endif %}
@@ -380,6 +395,7 @@
 
 <div class="bar">
   <div class="bar-in">
+    <button type="button" class="back" data-back>← ถอยกลับไปแก้ไข</button>
     <div class="left" id="bar-msg" aria-live="polite"></div>
     <button type="button" class="go" id="go" disabled>ตรวจต่อ →</button>
   </div>
@@ -629,7 +645,7 @@
   // ความคืบหน้าของการตรวจส่วนอื่น (เบื้องหลัง)
   var bg = document.getElementById('bg-status');
   var ovStage = document.getElementById('ov-stage');
-  var waiting = false, failures = 0;
+  var waiting = false, failures = 0, leaving = false;
   function poll(){
     var ctrl = new AbortController();
     var to = setTimeout(function(){ ctrl.abort(); }, 8000);
@@ -640,8 +656,9 @@
       if (!r.ok) throw new Error('poll ' + r.status);
       return r.json();
     }).then(function(p){
-      if (!p) return;
+      if (!p || leaving) return;
       failures = 0;
+      if (p.cancelled) { window.location.reload(); return; }
       if (p.done){
         bg.textContent = p.error ? 'ตรวจส่วนอื่นไม่สำเร็จ' : 'ตรวจส่วนอื่นของเล่มเสร็จแล้ว';
         bg.classList.add('done');
@@ -664,6 +681,42 @@
     });
   }
   poll();
+
+  // ---- ถอยกลับไปแก้ไข (อัปเดต 1.13 เจ้าของสั่ง 26 พ.ย. 2569 "เผื่ออัปโหลดไฟล์ผิด จะได้ถอยกลับมาแก้ไขไฟล์หรืออัปโหลดใหม่ได้") ----
+  // ทิ้งงานตรวจนี้แล้วเปิดแบบฟอร์มพร้อมค่าที่กรอกและไฟล์เดิมครบ (ไม่ใช่ history.back() — หน้าแบบฟอร์มล้างค่าทุกครั้งที่เปิด)
+  // ตอบข้อใดในหน้านี้ไปแล้ว = ถามก่อน เพราะคำตอบหายไปพร้อมงานเดิม · ยังไม่ตอบ = กลับทันที
+  var backButtons = Array.from(document.querySelectorAll('[data-back]'));
+  function answeredSomething(){
+    return ticks.some(function(t){ return t.checked; }) || nameBoxes.some(function(b){ return b.checked; })
+      || Object.keys(answers).some(function(k){ return !!answers[k]; }) || !!tiiChoice()
+      || !!(tiiInput && String(tiiInput.value || '').trim());
+  }
+  function goBack(){
+    if (answeredSomething() && !window.confirm('คำตอบในหน้านี้จะหายไป ถอยกลับไปแก้ไขไหม')) return;
+    backButtons.forEach(function(b){ b.disabled = true; });
+    go.disabled = true;
+    fetch('/precheck/' + JOB + '/back', {method: 'POST', headers: {'Accept': 'application/json'}})
+      .then(function(r){
+        if (r.status === 401) { window.location.href = LOGIN_AGAIN; return new Promise(function(){}); }
+        return r.json().then(function(b){ return {ok: r.ok, body: b}; },
+                             function(){ return {ok: false, body: {error: 'ถอยกลับไม่สำเร็จ (' + r.status + ')'}}; });
+      })
+      .then(function(res){
+        if (!res.ok) throw new Error(res.body.error || 'ถอยกลับไม่สำเร็จ');
+        leaving = true;
+        waiting = false;
+        window.location.href = res.body.url;
+      })
+      .catch(function(err){
+        backButtons.forEach(function(b){ b.disabled = false; });
+        refresh();
+        barMsg.className = 'left err';
+        barMsg.textContent = err.message;
+      });
+  }
+  backButtons.forEach(function(b){ b.addEventListener('click', goBack); });
+  // กลับมาหน้านี้จากแคชของเบราว์เซอร์ (กดย้อนกลับ) — โหลดสถานะจริงจากเซิร์ฟเวอร์ งานที่ถอยกลับไปแล้วต้องขึ้นว่ายกเลิก
+  window.addEventListener('pageshow', function(e){ if (e.persisted) window.location.reload(); });
 
   go.addEventListener('click', function(){
     if (go.disabled) return;

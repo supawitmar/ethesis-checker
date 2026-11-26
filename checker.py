@@ -2156,8 +2156,17 @@ def drawn_abstract_page(toc_entries, page_labels, drawn_pages, abs_en_idx, front
     return None
 
 
-def _toc_target_page(toc_lines, toc_idx, terms, printed, pages):
-    """แผ่นที่สารบัญอ้างถึง (บรรทัดแรกที่มีคำใน terms ลงท้ายด้วยเลขหน้า) ถ้าแผ่นนั้นมีอยู่และอ่านข้อความไม่ออก · ไม่ใช่ = None"""
+def page_is_picture_only(idx, pages, picture_pages):
+    """แผ่นที่เป็นรูปภาพ/สแกน และชั้นข้อความมีแค่เลขหน้า (เกณฑ์เดียวกับ PAGE.BLANK "มีเฉพาะเลขหน้ากับรูปภาพ") — อัปเดต 1.13"""
+    return idx in picture_pages and _is_blank_page_text(pages[idx])
+
+
+def _toc_target_page(toc_lines, toc_idx, terms, printed, pages, picture_pages=()):
+    """แผ่นที่สารบัญอ้างถึง (บรรทัดแรกที่มีคำใน terms ลงท้ายด้วยเลขหน้า) ถ้าแผ่นนั้นมีอยู่และอ่านข้อความไม่ออก · ไม่ใช่ = None
+
+    อ่านไม่ออก = ฟอนต์เข้ารหัสผิดปกติ (page_text_unreadable · 1.12.1) หรือเป็นรูปภาพทั้งหน้าที่มีแต่เลขหน้า
+    (page_is_picture_only · อัปเดต 1.13 เจ้าของ 26 พ.ย. 2569 "เล่มนี้มีภาคผนวกนะหน้า 149 ตรวจสอบด้วย")
+    """
     for page_idx, line in toc_lines:
         if page_idx != toc_idx or not any(w in norm(line) for w in terms):
             continue
@@ -2169,7 +2178,8 @@ def _toc_target_page(toc_lines, toc_idx, terms, printed, pages):
             return None
         # หัวข้ออาจขึ้นหน้าถัดจากที่สารบัญบอกหนึ่งหน้า (เลขหน้าในสารบัญคลาด) — ดูสองแผ่น
         for idx in (target, target + 1):
-            if idx < len(pages) and page_text_unreadable(pages[idx]):
+            if idx < len(pages) and (page_text_unreadable(pages[idx])
+                                     or page_is_picture_only(idx, pages, picture_pages)):
                 return idx
         return None
     return None
@@ -10178,11 +10188,18 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
         rep.add("RED", "front_matter", toc_location, "เล่มมีภาคผนวก (APPENDIX) แต่ไม่ปรากฏในสารบัญ",
                 "หัวข้อภาคผนวกต้องอยู่ในสารบัญ", "เพิ่ม APPENDIX/ภาคผนวก ในสารบัญ", "FRONT.TOC")
     # กันชั้นสอง (อัปเดต 1.12.1): หน้าที่สารบัญอ้างถึงมีอยู่แต่อ่านข้อความไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) = ยืนยันไม่ได้ ไม่ใช่ "ไม่พบ"
-    appendix_unreadable = (_toc_target_page(toc_lines, appendix_toc_idx, N_APPENDIX, printed, pages)
+    appendix_unreadable = (_toc_target_page(toc_lines, appendix_toc_idx, N_APPENDIX, printed, pages, image_pages)
                            if toc_has_appendix and not has_appendix_body else None)
     if appendix_unreadable is not None:
-        rep.add(UNCERTAIN_ZONE, "end_matter", page_ref(appendix_unreadable),
-                'ระบบอ่านข้อความหน้านี้ไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" ตามที่สารบัญระบุ',
+        # ถ้อยคำแยกตามสาเหตุ (อัปเดต 1.13): หน้าเป็นรูปภาพทั้งหน้า (ภาคผนวกที่สแกน/วางเป็นภาพ) หรือฟอนต์เข้ารหัสผิดปกติ (1.12.1)
+        # เจ้าของตัดสิน 25 พ.ย. 2569 เรื่องหน้าที่ระบบอ่านไม่ได้ "ขึ้นว่าไม่สามารถอ่านได้ ให้ staff ตรวจ สีส้ม"
+        if page_text_unreadable(pages[appendix_unreadable]):
+            unreadable_found = ('ระบบอ่านข้อความหน้านี้ไม่ออก (ฟอนต์เข้ารหัสผิดปกติ) จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" '
+                                'ตามที่สารบัญระบุ')
+        else:
+            unreadable_found = ('ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะหน้านี้เป็นรูปภาพ จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" '
+                                'ตามที่สารบัญระบุ')
+        rep.add(UNCERTAIN_ZONE, "end_matter", page_ref(appendix_unreadable), unreadable_found,
                 "เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ", "ตรวจด้วยตา", "UNCERTAIN.REVIEW")
     elif toc_has_appendix and not has_appendix_body:
         rep.add("RED", "front_matter", f"สารบัญ ({page_ref(appendix_toc_idx)})", "สารบัญระบุภาคผนวก (APPENDIX) แต่ไม่พบในเนื้อหาเล่ม",

@@ -2836,3 +2836,217 @@ class Update183VerdictPillIsOneLanguage(unittest.TestCase):
         table = self.HTML.split("var VERDICT_PILL = {", 1)[1].split("};", 1)[0]
         for row in table.strip().splitlines():
             self.assertRegex(row, r"'(Passed|Not passed|Pending confirmation)'\],$")
+
+
+
+class Update113BackToEditFromThePrecheck(unittest.TestCase):
+    """ปุ่มถอยกลับไปแก้ไขในขั้นที่ 1 (อัปเดต 1.13 เจ้าของสั่ง 26 พ.ย. 2569 · ข้อมูลสมมติ)
+
+    "เพิ่มปุ่ม ถอยกลับ ในหน้า ตรวจหน้าลงนาม เผื่ออัปโหลดไฟล์ผิด จะได้ถอยกลับมาแก้ไขไฟล์หรืออัปโหลดใหม่ได้"
+    """
+
+    STATE = {"autofilled": ["title_en", "student_name"], "ethesis_name": "ethesis-sample.pdf",
+             "abbr_not_found": {"en": False, "th": True}}
+    COMMITTEES = {"advisory": [{"name": "ADVISOR EXAMPLE", "role": "Major advisor"}], "exam": []}
+
+    def setUp(self):
+        self.client = TestClient(main.app)
+        self.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+        self._clear()
+
+    def tearDown(self):
+        self._clear()
+
+    def _clear(self):
+        with main.JOBS_LOCK:
+            paths = [j.get(k) for j in list(main.JOBS.values()) + list(main.DRAFTS.values())
+                     for k in ("pdf_path", "turnitin_path")]
+            main.JOBS.clear()
+            main.DRAFTS.clear()
+        for path in paths:
+            main._remove_book(path)
+
+    def _form(self, **extra):
+        return {**FORM, "chapters_mode": "free", "committees_json": json.dumps(self.COMMITTEES),
+                "form_state": json.dumps(self.STATE), **extra}
+
+    def _start(self):
+        started = self.client.post("/check", data=self._form(), files={
+            "pdf": ("wrong-book.pdf", make_pdf("WRONG BOOK"), "application/pdf"), **turnitin_file(17)})
+        self.assertEqual(started.status_code, 200, started.text)
+        return started.json()["job_id"]
+
+    def _back(self, job_id):
+        answer = self.client.post(f"/precheck/{job_id}/back")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        url = answer.json()["url"]
+        self.assertTrue(url.startswith("/?restore="), url)
+        return url, url.split("=", 1)[1]
+
+    def _restore_data(self, url):
+        page = self.client.get(url)
+        self.assertEqual(page.status_code, 200)
+        blob = page.text.split('id="restore-data">', 1)[1].split("</script>", 1)[0]
+        return json.loads(blob)
+
+    def test_the_precheck_page_has_the_button_twice(self):
+        page = self.client.get(f"/precheck/{self._start()}").text
+        self.assertEqual(page.count("data-back>← ถอยกลับไปแก้ไข</button>"), 2)
+        # อยู่หัวหน้าใกล้หัวข้อขั้นที่ 1 และในแถบล่างก่อนปุ่มตรวจต่อ (ปุ่มรอง ไม่ใช่คลาส go)
+        self.assertLess(page.index("ขั้นที่ 1 · ตรวจหน้าลงนาม"), page.index("data-back>"))
+        bar = page.split('<div class="bar">', 1)[1]
+        self.assertLess(bar.index("data-back>"), bar.index('id="go"'))
+        self.assertIn("คำตอบในหน้านี้จะหายไป ถอยกลับไปแก้ไขไหม", page)
+        self.assertIn("'/precheck/' + JOB + '/back'", page)
+
+    def test_the_form_comes_back_with_every_value_and_the_files(self):
+        job_id = self._start()
+        url, token = self._back(job_id)
+        data = self._restore_data(url)
+        self.assertFalse(data["missing"])
+        restore = data["restore"]
+        self.assertEqual(restore["token"], token)
+        form = restore["form"]
+        for key in ("doc_type", "format", "program_language", "title_en", "student_name", "student_id",
+                    "degree_cover_en", "degree_sig_en", "degree_abbr_en", "exam_date", "year",
+                    "queue_date", "checked_date", "submitted_date"):
+            self.assertEqual(form[key], FORM[key], key)
+        self.assertEqual(form["chapters_mode"], "free")
+        self.assertEqual(json.loads(form["committees_json"]), self.COMMITTEES)
+        self.assertEqual(restore["state"], self.STATE)
+        self.assertEqual(restore["files"]["book"]["name"], "wrong-book.pdf")
+        self.assertEqual(restore["files"]["turnitin"]["name"], "turnitin.pdf")
+        self.assertGreater(restore["files"]["book"]["size"], 0)
+        # กดซ้ำ (ปุ่มสองที่ / กดสองครั้ง) ได้ฉบับร่างเดิม
+        self.assertEqual(self._back(job_id)[1], token)
+
+    def test_the_plain_form_page_stays_empty(self):
+        """เข้า "/" ตามปกติยังล้างฟอร์มเหมือนเดิม — ไม่มีฉบับร่าง"""
+        self._back(self._start())
+        data = self._restore_data("/")
+        self.assertEqual(data, {"restore": None, "missing": False})
+        self.assertEqual(self._restore_data("/?restore=" + "0" * 32), {"restore": None, "missing": True})
+
+    def test_changing_only_the_book_keeps_the_turnitin_file(self):
+        old_id = self._start()
+        old = main._get_job(old_id)
+        old_book, old_tii = old["pdf_path"], old["turnitin_path"]
+        _url, token = self._back(old_id)
+        again = self.client.post("/check", data=self._form(restore_token=token),
+                                 files={"pdf": ("right-book.pdf", make_pdf("RIGHT BOOK"), "application/pdf")})
+        self.assertEqual(again.status_code, 200, again.text)
+        new = main._get_job(again.json()["job_id"])
+        self.assertEqual(new["pdf_name"], "right-book.pdf")
+        self.assertNotEqual(new["pdf_path"], old_book)
+        self.assertEqual(new["turnitin_path"], old_tii)
+        self.assertEqual(new["turnitin"]["similarity"], 17)
+        self.assertEqual(new["turnitin"]["name"], "turnitin.pdf")
+        self.assertFalse(Path(old_book).exists())             # ไฟล์ที่ผิดถูกลบ ไม่มีใครใช้แล้ว
+        self.assertTrue(Path(old_tii).exists())
+        # ฉบับร่างใช้ได้ครั้งเดียว
+        self.assertNotIn(token, main.DRAFTS)
+        self.assertEqual(self._restore_data("/?restore=" + token), {"restore": None, "missing": True})
+
+    def test_sending_again_without_any_file_uses_both_old_files(self):
+        old_id = self._start()
+        old = main._get_job(old_id)
+        _url, token = self._back(old_id)
+        again = self.client.post("/check", data=self._form(restore_token=token))
+        self.assertEqual(again.status_code, 200, again.text)
+        new = main._get_job(again.json()["job_id"])
+        self.assertEqual((new["pdf_path"], new["turnitin_path"]), (old["pdf_path"], old["turnitin_path"]))
+        self.assertEqual(new["pdf_name"], "wrong-book.pdf")
+        self.assertEqual(new["form_state"], self.STATE)
+        # ส่งซ้ำด้วยรหัสเดิมไม่ได้ (ใช้ไปแล้ว) และไม่มีรหัสก็ต้องแนบไฟล์เล่มเหมือนเดิม
+        reused = self.client.post("/check", data=self._form(restore_token=token))
+        self.assertEqual(reused.status_code, 400)
+        self.assertIn("รูปเล่ม", reused.json()["detail"])
+
+    def test_a_refused_resend_keeps_the_draft(self):
+        _url, token = self._back(self._start())
+        refused = self.client.post("/check", data=self._form(restore_token=token),
+                                   files={"pdf": ("scan.pdf", make_pdf(""), "application/pdf")})
+        self.assertGreaterEqual(refused.status_code, 400)
+        self.assertIn(token, main.DRAFTS)
+        for key in ("pdf_path", "turnitin_path"):
+            self.assertTrue(Path(main.DRAFTS[token][key]).exists(), key)
+
+    def test_the_old_job_is_dropped(self):
+        job_id = self._start()
+        self._back(job_id)
+        for path in (f"/precheck/{job_id}", f"/result/{job_id}"):
+            page = self.client.get(path, follow_redirects=False)
+            self.assertEqual(page.status_code, 410, path)
+            self.assertIn("ถูกยกเลิกแล้ว", page.text)
+            self.assertIn("/?restore=", page.text)             # ฉบับร่างยังอยู่ = มีลิงก์กลับไปแก้ไขต่อ
+        progress = self.client.get(f"/progress/{job_id}").json()
+        self.assertTrue(progress["cancelled"] and progress["done"])
+        self.assertEqual(self.client.post(f"/precheck/{job_id}", json=PRECHECK_ALL_PASS).status_code, 410)
+        self.assertEqual(self.client.post(f"/summary/{job_id}", json={}).status_code, 404)
+        with mock.patch.object(main, "SHEET_ENABLED", True), \
+                mock.patch.object(main, "SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/TEST/exec"), \
+                mock.patch.object(main, "SHEET_WEBHOOK_TOKEN", "secret-token"), \
+                mock.patch.object(main, "_post_to_sheet", side_effect=AssertionError("ห้ามลงชีท")):
+            self.assertEqual(self.client.post(f"/sheet/{job_id}", json={}).status_code, 404)
+        self.assertEqual(self.client.get(f"/book/{job_id}").status_code, 404)
+        self.assertEqual(self.client.get(f"/turnitin/{job_id}").status_code, 404)
+
+    def test_the_background_check_stops(self):
+        calls = []
+
+        def slow_check(path, approved, chapters_mode="strict", progress=None, turnitin=None):
+            for k in range(500):
+                calls.append(k)
+                progress(f"step {k}")
+                time.sleep(0.01)
+            return {"issues_by_zone": {}}
+
+        with mock.patch.object(main, "run_check", side_effect=slow_check):
+            job_id = self._start()
+            for _ in range(200):
+                if calls:
+                    break
+                time.sleep(0.01)
+            self._back(job_id)
+            for _ in range(500):
+                if main._get_job(job_id)["done"]:
+                    break
+                time.sleep(0.01)
+        job = main._get_job(job_id)
+        self.assertTrue(job["done"])
+        self.assertLess(len(calls), 500)
+        self.assertIsNone(job["report"])
+        self.assertIsNone(job["error"])
+        self.assertEqual(job["stage"], "ยกเลิกแล้ว")
+        # ไฟล์ย้ายไปอยู่กับฉบับร่าง — งานที่หยุดต้องไม่ลบ
+        draft = main.DRAFTS[job["restore_token"]]
+        self.assertTrue(Path(draft["pdf_path"]).exists())
+
+    def test_an_expired_draft_takes_its_files_with_it(self):
+        _url, token = self._back(self._start())
+        paths = [main.DRAFTS[token]["pdf_path"], main.DRAFTS[token]["turnitin_path"]]
+        main._prune_jobs()
+        self.assertIn(token, main.DRAFTS)                     # ยังไม่หมดอายุ = ไม่ใช่ไฟล์กำพร้า
+        self.assertTrue(all(Path(p).exists() for p in paths))
+        with main.JOBS_LOCK:
+            main.DRAFTS[token]["ts"] = time.time() - main.JOB_TTL - 10
+        main._prune_jobs()
+        self.assertNotIn(token, main.DRAFTS)
+        self.assertFalse(any(Path(p).exists() for p in paths))
+
+    def test_odd_form_state_is_ignored(self):
+        self.assertEqual(main._form_state("not json"), {})
+        self.assertEqual(main._form_state("[1, 2]"), {})
+        state = main._form_state(json.dumps({"autofilled": ["title_en", "<script>", 3],
+                                             "abbr_not_found": {"en": "yes"}}))
+        self.assertEqual(state["autofilled"], ["title_en"])
+        self.assertEqual(state["abbr_not_found"], {"en": False, "th": False})
+
+    def test_the_form_page_script_restores_after_the_reset(self):
+        html = (Path(__file__).resolve().parents[1] / "templates" / "index.html").read_text(encoding="utf-8")
+        script = html.split("function resetCheckForm() {", 1)[1].split("window.addEventListener('pageshow', resetCheckForm);", 1)[0]
+        self.assertLess(script.index("document.getElementById('f').reset();"), script.index("applyRestore(RESTORE)"))
+        self.assertIn('name="restore_token"', html)
+        self.assertIn('name="form_state"', html)
+        # ใช้ฉบับร่างแล้ว ย้อนกลับมาหน้านี้ต้องได้ฟอร์มว่าง
+        self.assertIn("if (RESTORE) { RESTORE = null; RESTORE_MISSING = false; history.replaceState(null, '', '/'); }", html)

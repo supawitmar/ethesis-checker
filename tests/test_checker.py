@@ -13692,3 +13692,63 @@ class Update1123ChapterNumberInATableCell(unittest.TestCase):
         source = inspect.getsource(checker_module.run_check)
         self.assertIn("table_chapter_cells[_i] = _cells", source)
         self.assertIn("cn in table_chapter_cells.get(i, ())", source)
+
+
+
+class Update113PictureAppendixPage(unittest.TestCase):
+    """หน้าภาคผนวกที่เป็นรูปภาพทั้งหน้า มีแต่เลขหน้า = อ่านไม่ได้ ไม่ใช่ไม่พบ (อัปเดต 1.13 เจ้าของ 26 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    TOC = [(0, "สารบัญ"), (0, "ภาคผนวก 149"), (0, "ประวัติผู้วิจัย 151")]
+    PRINTED = {1: 148, 2: 149, 3: 150}
+
+    def _target(self, pages, pictures):
+        return checker_module._toc_target_page(self.TOC, 0, checker_module.N_APPENDIX, self.PRINTED, pages, pictures)
+
+    def test_a_picture_page_with_only_its_number_counts_as_unreadable(self):
+        pages = ["สารบัญ", "148" + NEWLINE + "รายการอ้างอิง", "149", "150"]
+        self.assertEqual(self._target(pages, {2, 3}), 2)
+        # หัวข้อขึ้นหน้าถัดไปหนึ่งหน้า (เลขหน้าในสารบัญคลาด) ก็นับ
+        self.assertEqual(self._target(["สารบัญ", "148", "149" + NEWLINE + "ข้อความอื่น", "150"], {3}), 3)
+
+    def test_a_readable_page_still_is_not(self):
+        """ควบคุมเชิงลบ — หน้าเป็นข้อความอื่นที่อ่านได้ / หน้าที่มีแต่เลขหน้าแต่ไม่ใช่รูปภาพ = ยังแดง "ไม่พบ" ตามเดิม"""
+        pages = ["สารบัญ", "148", "149" + NEWLINE + "ข้อความอื่นที่อ่านได้ปกติ", "150" + NEWLINE + "ข้อความอื่น"]
+        self.assertIsNone(self._target(pages, {2, 3}))
+        self.assertIsNone(self._target(["สารบัญ", "148", "149", "150"], set()))
+        self.assertIsNone(self._target(["สารบัญ", "148", "149", "150"], ()))      # ผู้เรียกเดิม (ไม่ส่งชุดหน้าภาพ)
+
+    def _run(self, appendix_page):
+        import tempfile
+        toc = "iii" + NEWLINE + "TABLE OF CONTENTS" + NEWLINE + "CHAPTER 1 INTRODUCTION 1" + NEWLINE + \
+              "APPENDIX 2" + NEWLINE + "BIOGRAPHY 3"
+        pages = [toc, "1" + NEWLINE + "CHAPTER 1" + NEWLINE + "INTRODUCTION" + NEWLINE + "Body text.",
+                 appendix_page, "3" + NEWLINE + "BIOGRAPHY" + NEWLINE + "Name Example"]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_pages(pages))
+            result = checker_module.run_check(str(path), None, "free")
+        return [(zone, i) for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]
+                if "ภาคผนวก" in i["found"]]
+
+    def test_the_book_gets_orange_not_red(self):
+        [(zone, issue)] = self._run(("2", "595 0 0 842 0 0"))          # ภาพเต็มหน้า ชั้นข้อความมีแค่เลขหน้า
+        self.assertEqual(zone, "ORANGE")
+        self.assertEqual(issue["rule_id"], "UNCERTAIN.REVIEW")
+        self.assertEqual(issue["found"], 'ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะหน้านี้เป็นรูปภาพ จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" '
+                                         'ตามที่สารบัญระบุ')
+        self.assertEqual(issue["expected"], "เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ")
+
+    def test_controls(self):
+        """ควบคุมเชิงลบ — ภาคผนวกเป็นตัวอักษรปกติ = ไม่มีข้อ · แผ่นนั้นเป็นข้อความอื่น = ยังแดง"""
+        self.assertEqual(self._run("2" + NEWLINE + "APPENDIX" + NEWLINE + "Example form"), [])
+        [(zone, issue)] = self._run("2" + NEWLINE + "Some other text on this page")
+        self.assertEqual(zone, "RED")
+        self.assertIn("ไม่พบในเนื้อหาเล่ม", issue["found"])
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(
+            i18n.tr_en('ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะหน้านี้เป็นรูปภาพ จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" ตามที่สารบัญระบุ', pairs),
+            'The system cannot read the text on this page because the page is an image, so it cannot confirm the '
+            '"ภาคผนวก" heading listed in the table of contents')

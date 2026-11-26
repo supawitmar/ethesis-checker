@@ -810,6 +810,9 @@ var TR = [
   // อัปเดต 1.12.1: หน้าที่สารบัญอ้างถึงอ่านไม่ออก (ฟอนต์เข้ารหัสผิดปกติ)
   [/^ระบบอ่านข้อความหน้านี้ไม่ออก \(ฟอนต์เข้ารหัสผิดปกติ\) จึงยืนยันไม่ได้ว่ามี ("[^"]*") ตามที่สารบัญระบุ$/g,
    'The system cannot read the text on this page (abnormal font encoding), so it cannot confirm the $1 heading listed in the table of contents'],
+  // อัปเดต 1.13: หน้าที่สารบัญอ้างถึงเป็นรูปภาพทั้งหน้า
+  [/^ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะหน้านี้เป็นรูปภาพ จึงยืนยันไม่ได้ว่ามี ("[^"]*") ตามที่สารบัญระบุ$/g,
+   'The system cannot read the text on this page because the page is an image, so it cannot confirm the $1 heading listed in the table of contents'],
   [/^เจ้าหน้าที่ตรวจด้วยตาว่าหน้านี้เป็นหัวข้อตามสารบัญ$/g,
    'Staff to check by eye that this page is the heading listed in the table of contents'],
   // อัปเดต 1.12: คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ (FRONT.ABSTRACT_QUALIFICATION)

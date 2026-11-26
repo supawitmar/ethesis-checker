@@ -138,6 +138,11 @@
   .drop-ico { flex:none; display:grid; place-items:center; width:44px; height:44px; border-radius:11px;
        background:#fff; border:1px solid var(--line); font-size:1.35rem; line-height:1; }
   .drop.has-file .drop-ico { background:#d6efdf; border-color:transparent; }
+  /* ไฟล์เดิมจากการถอยกลับมาแก้ไข (อัปเดต 1.13) — กล่องทั้งกล่องกดเลือกไฟล์ใหม่ได้ ป้าย "เปลี่ยนไฟล์" บอกให้เห็น */
+  .change-file { display:none; flex:none; margin-left:auto; padding:5px 12px; border-radius:99px; font-size:.78rem;
+       font-weight:600; color:var(--navy); background:#fff; border:1px solid var(--line-2); white-space:nowrap; }
+  .drop.kept .change-file { display:inline-block; }
+  .drop.kept:hover .change-file { background:var(--navy); border-color:var(--navy); color:#fff; }
   .drop-main { font-weight:600; font-size:.88rem; color:var(--navy); }
   .drop-sub { font-size:.78rem; color:var(--ink-3); margin-top:2px; overflow-wrap:anywhere; }
   .drop .drop-main, .drop .drop-sub { display:block; }
@@ -312,6 +317,7 @@
               <span class="drop-sub" id="drop-ethesis-name">ไฟล์ข้อมูลนักศึกษา (pdf.) ที่พิมพ์จากระบบ eThesis</span>
             </span>
             <input type="file" id="ethesis-pdf" accept=".pdf">
+            <span class="change-file" aria-hidden="true">เปลี่ยนไฟล์</span>
           </label>
           <div class="slot-foot">
             <button type="button" class="secondary" id="parse-ethesis-pdf">อ่านค่าและเติมแบบฟอร์ม</button>
@@ -327,6 +333,7 @@
               <span class="drop-sub" id="drop-book-name">ยังไม่ได้เลือกไฟล์</span>
             </span>
             <input type="file" id="book-pdf" name="pdf" accept=".pdf" required>
+            <span class="change-file" aria-hidden="true">เปลี่ยนไฟล์</span>
           </label>
           <div class="slot-foot">
             <p class="hint">PDF ไม่เกิน 25 MB ที่ระบบดึงข้อความได้ ไม่รองรับไฟล์ที่มีรหัสผ่านหรือเป็นภาพสแกนทั้งเล่ม</p>
@@ -343,6 +350,7 @@
               <span class="drop-sub" id="drop-turnitin-name">ยังไม่ได้เลือกไฟล์</span>
             </span>
             <input type="file" id="turnitin-pdf" name="turnitin" accept=".pdf" required>
+            <span class="change-file" aria-hidden="true">เปลี่ยนไฟล์</span>
           </label>
           <div class="slot-foot">
             <p class="hint">ระบบอ่านค่า Overall Similarity (ต้องไม่เกิน 25%) และเปิดดูไฟล์ได้จากหน้าผลตรวจ</p>
@@ -478,6 +486,9 @@
       <input type="hidden" name="committees_json" id="committees-json">
       <!-- ประเภทเล่มตามไฟล์ eThesis — เซิร์ฟเวอร์ใช้ค่านี้เป็นประเภทที่อนุมัติ ก่อนช่องที่เลือกเอง -->
       <input type="hidden" name="ethesis_doc_type" id="ethesis-doc-type">
+      <!-- ถอยกลับมาแก้ไขจากขั้นที่ 1 (อัปเดต 1.13): รหัสฉบับร่างที่เก็บไฟล์เดิม · สภาพฟอร์มที่ไม่ได้ใช้ตรวจ (ช่องสีเขียว ชื่อไฟล์ eThesis) -->
+      <input type="hidden" name="restore_token" id="restore-token">
+      <input type="hidden" name="form_state" id="form-state">
       <div id="committee-box" class="committee-box" style="display:none;">
         <div class="committee-head">👥 <b>รายชื่อกรรมการจาก eThesis</b> (ใช้ตรวจชื่อและลำดับบนหน้าลงนาม)<br>
           <span style="color:var(--ink-3);">อ่านจากข้อมูลนักศึกษา (pdf. จากระบบ) เท่านั้น แก้ไม่ได้ —
@@ -519,7 +530,16 @@
   </div>
 </div>
 
+{# ฉบับร่างที่ถอยกลับมาแก้ไข (อัปเดต 1.13) แยกเป็นก้อนข้อมูล สคริปต์หลักจึงไม่มีแท็กของ template ปน #}
+<script type="application/json" id="restore-data">{{ {"restore": restore, "missing": restore_missing or false} | tojson }}</script>
 <script>
+// ถอยกลับมาแก้ไขจากขั้นที่ 1 (อัปเดต 1.13 เจ้าของสั่ง 26 พ.ย. 2569) — null = เข้าหน้านี้ตามปกติ ฟอร์มว่าง
+const RESTORE_DATA = JSON.parse(document.getElementById('restore-data').textContent || '{}');
+let RESTORE = RESTORE_DATA.restore || null;
+let RESTORE_MISSING = !!RESTORE_DATA.missing;
+// ไฟล์เดิมที่ฝั่งเซิร์ฟเวอร์เก็บไว้ {id ช่องไฟล์: {name, size}} — ไม่เลือกไฟล์ใหม่ = ใช้ไฟล์นี้
+const KEPT_FILES = {};
+const FILE_REQUIRED = {'ethesis-pdf': false, 'book-pdf': true, 'turnitin-pdf': true};
 const IMPORT_LABELS = {
   doc_type:'ประเภทเล่ม', format:'รูปแบบล่าสุด', program_language:'หลักสูตร', title_en:'ชื่อเรื่องภาษาอังกฤษ',
   title_th:'ชื่อเรื่องภาษาไทย', student_name:'ชื่อภาษาอังกฤษ',
@@ -666,8 +686,13 @@ function wireDrop(dropId, inputId, nameId, emptyText){
   const nameEl = document.getElementById(nameId);
   function show(){
     const f = input.files[0];
-    drop.classList.toggle('has-file', !!f);
-    nameEl.textContent = f ? `✓ ${f.name} (${humanSize(f.size)})` : emptyText;
+    const kept = !f && KEPT_FILES[inputId];
+    drop.classList.toggle('has-file', !!f || !!kept);
+    drop.classList.toggle('kept', !!kept);
+    nameEl.textContent = f ? `✓ ${f.name} (${humanSize(f.size)})`
+      : kept ? `✓ ${kept.name}${kept.size ? ' (' + humanSize(kept.size) + ')' : ''} · ไฟล์เดิม` +
+               (inputId === 'ethesis-pdf' ? ' (ค่าที่อ่านไว้อยู่ในแบบฟอร์มแล้ว)' : '')
+      : emptyText;
   }
   input.addEventListener('change', show);
   ['dragenter','dragover'].forEach(function(ev){
@@ -776,7 +801,48 @@ document.querySelector('select[name="doc_type"]').addEventListener('change', upd
 // จากแคชพร้อมค่าเดิมทุกช่อง (และหน้าจอ "กำลังตรวจ" ค้างทับอยู่) ส่วน Firefox เติมค่าเดิม
 // กลับให้เองตอนรีเฟรช pageshow เกิดหลังทั้งสองกรณี จึงล้างได้ทุกทาง
 const IMPORT_STATUS_DEFAULT = document.getElementById('import-status').textContent;
+// ไฟล์เดิม = ช่องนี้ไม่บังคับเลือกใหม่ (เซิร์ฟเวอร์ใช้ไฟล์เดิม) · ล้าง = กลับเป็นบังคับเหมือนเดิม
+function setKeptFile(inputId, file) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  if (file) { KEPT_FILES[inputId] = file; input.dataset.kept = '1'; input.required = false; }
+  else { delete KEPT_FILES[inputId]; delete input.dataset.kept; input.required = FILE_REQUIRED[inputId]; }
+}
+const RESTORE_DATE_IDS = {submitted_date: 'submitted-date', queue_date: 'queue-date', checked_date: 'checked-date'};
+function applyRestore(r) {
+  const form = r.form || {};
+  Object.keys(form).forEach(function(name){
+    if (RESTORE_DATE_IDS[name]) { setDateFromIso(RESTORE_DATE_IDS[name], form[name]); return; }
+    const field = document.querySelector(`#f [name="${name}"]`);
+    if (field && field.type !== 'file') field.value = form[name] == null ? '' : form[name];
+  });
+  try {
+    const committees = JSON.parse(form.committees_json || 'null');
+    if (committees && (committees.advisory || committees.exam)) renderCommitteeSummary(committees);
+  } catch (e) { /* ค่าผิดรูป = ไม่แสดงรายชื่อ เหมือนตอนไม่ได้นำเข้า */ }
+  const state = r.state || {};
+  (state.autofilled || []).forEach(function(name){
+    const field = document.querySelector(`#f [name="${name}"]`);
+    if (field) field.classList.add('autofilled');
+  });
+  abbrNotFound = {en: !!(state.abbr_not_found || {}).en, th: !!(state.abbr_not_found || {}).th};
+  const files = r.files || {};
+  setKeptFile('book-pdf', files.book || null);
+  setKeptFile('turnitin-pdf', files.turnitin || null);
+  setKeptFile('ethesis-pdf', state.ethesis_name ? {name: state.ethesis_name} : null);
+  document.getElementById('restore-token').value = r.token || '';
+  updateConditionalRequirements();
+  updateAbbrHints();
+  updateDocTypeNote();
+  ['ethesis-pdf', 'book-pdf', 'turnitin-pdf'].forEach(function(id){
+    document.getElementById(id).dispatchEvent(new Event('change', {bubbles: true}));
+  });
+  setStatus('ok', 'ถอยกลับมาแก้ไขแล้ว — ข้อมูลที่กรอกและไฟล์ที่อัปโหลดไว้ยังอยู่ครบ เปลี่ยนเฉพาะไฟล์หรือช่องที่ผิด แล้วกดตรวจเล่มอีกครั้ง');
+}
 function resetCheckForm() {
+  ['ethesis-pdf', 'book-pdf', 'turnitin-pdf'].forEach(function(id){ setKeptFile(id, null); });
+  document.getElementById('restore-token').value = '';
+  document.getElementById('form-state').value = '';
   document.getElementById('f').reset();
   clearImportedFields();
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
@@ -788,6 +854,9 @@ function resetCheckForm() {
   // reset() ไม่ล้างช่องซ่อน (ค่าของ type=hidden คือ attribute) — ตั้งช่องซ่อนตามช่องพิมพ์ที่เพิ่งว่างลง
   syncAllDateFields();
   updateConditionalRequirements();
+  // ถอยกลับมาแก้ไข (อัปเดต 1.13) — เติมค่าเดิมหลังล้าง · เข้า "/" ตามปกติไม่มีฉบับร่าง ฟอร์มจึงว่างเหมือนเดิม
+  if (RESTORE) applyRestore(RESTORE);
+  else if (RESTORE_MISSING) setStatus('warn', 'ข้อมูลที่ถอยกลับมาแก้ไขหมดอายุหรือถูกใช้ตรวจไปแล้ว กรุณาเลือกไฟล์และกรอกข้อมูลใหม่');
 }
 window.addEventListener('pageshow', resetCheckForm);
 
@@ -809,6 +878,13 @@ document.getElementById('f').addEventListener('submit', async function(e){
   const stage = document.getElementById('stage');
   overlay.style.display = 'block';
   stage.textContent = 'กำลังอัปโหลดไฟล์...';
+  // สภาพฟอร์มที่ไม่ได้ใช้ตรวจ — เก็บไว้กับงาน ใช้เติมกลับถ้าถอยกลับมาแก้ไขอีก (อัปเดต 1.13)
+  const ethesisFile = document.getElementById('ethesis-pdf').files[0];
+  document.getElementById('form-state').value = JSON.stringify({
+    autofilled: Array.from(document.querySelectorAll('#f .autofilled')).map(function(el){ return el.name; }).filter(Boolean),
+    ethesis_name: ethesisFile ? ethesisFile.name : ((KEPT_FILES['ethesis-pdf'] || {}).name || ''),
+    abbr_not_found: abbrNotFound
+  });
   try {
     const resp = await fetch('/check', {method:'POST', body:new FormData(this)});
     if (loginExpired(resp)) return;
@@ -817,6 +893,8 @@ document.getElementById('f').addEventListener('submit', async function(e){
       throw new Error(errorBody.detail || ('อัปโหลดไม่สำเร็จ (' + resp.status + ')'));
     }
     const {job_id} = await resp.json();
+    // ฉบับร่างถูกใช้แล้ว — กดย้อนกลับมาหน้านี้จากแคชต้องได้ฟอร์มว่าง ไม่ใช่ค่าเดิม (อัปเดต 1.13)
+    if (RESTORE) { RESTORE = null; RESTORE_MISSING = false; history.replaceState(null, '', '/'); }
     // อัปเดต 1.4: ตรวจหน้าลงนามและค่าปรับก่อน ระบบตรวจส่วนอื่นอยู่เบื้องหลัง หน้านั้นรอผลแล้วพาไปหน้ารายงานเอง
     stage.textContent = 'อัปโหลดเสร็จ กำลังเปิดหน้าตรวจหน้าลงนาม…';
     window.location.href = '/precheck/' + job_id;
@@ -845,7 +923,8 @@ function stepSelector() {
 function stepFields(sec) {
   if (!sec) return [];
   const own = stepSelector();
-  return Array.from(sec.querySelectorAll('input[required], select[required], textarea[required]'))
+  // ช่องไฟล์ที่ใช้ไฟล์เดิม (ถอยกลับมาแก้ไข อัปเดต 1.13) ไม่บังคับเลือกใหม่ แต่นับว่าครบ
+  return Array.from(sec.querySelectorAll('input[required], select[required], textarea[required], input[data-kept]'))
     .filter(function(f){ return f.closest(own) === sec; });
 }
 function updateProgress() {
@@ -854,7 +933,7 @@ function updateProgress() {
   items.forEach(function(li){
     const sec = document.getElementById(li.dataset.sec);
     const fields = stepFields(sec);
-    const ok = fields.length > 0 && fields.every(function(f){ return f.validity.valid; });
+    const ok = fields.length > 0 && fields.every(function(f){ return f.dataset.kept === '1' || f.validity.valid; });
     li.classList.toggle('done', ok);
     if (ok) done += 1;
   });
