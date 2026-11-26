@@ -56,6 +56,7 @@ FOOTER_TEXT_ZONE = rule_zone("PAGE.FOOTER_TEXT", "ORANGE")
 SIG_TITLE_DOTS_ZONE = rule_zone("FRONT.APPROVAL_TITLE_DOTS", "RED")
 # อัปเดต 1.12 (เจ้าของ 25 พ.ย. 2569): คุณวุฒิของกรรมการบนหน้าบทคัดย่อเป็นตำแหน่งทางวิชาการ = ส้ม
 ABSTRACT_QUALIFICATION_ZONE = rule_zone("FRONT.ABSTRACT_QUALIFICATION", "ORANGE")
+DEGREE_PREFIX_ZONE = rule_zone("FORM.DEGREE_PREFIX", "ORANGE")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -6548,6 +6549,52 @@ def cover_degree_line_expected(expected, thai_book):
     return f"ปริญญา{expected}" if thai_book else expected
 
 
+_DEGREE_WORD = norm("ปริญญา")
+
+
+def degree_line_missing_prefix(page_text, expected):
+    """บรรทัดชื่อปริญญา (เล่มหลักสูตรไทย) ที่ชื่อตรงข้อมูลอนุมัติแต่ไม่มีคำว่า "ปริญญา" นำหน้า — คืนข้อความที่พิมพ์ · มี/หาไม่เจอ = ""
+
+    อัปเดต 1.14 เจ้าของ 26 พ.ย. 2569: *"กรณี ที่ไม่มีคำว่า ปริญญา นำหน้าชื่อปริญญา สีส้ม"* — การเทียบชื่อปริญญาตัดถ้อยคำ template
+    (รวมคำว่า "ปริญญา") ทิ้งก่อนเทียบ (_without_degree_template_words) "ศิลปศาสตรมหาบัณฑิต (การจัดการ)" เฉย ๆ จึงผ่านเหมือน
+    "ปริญญาศิลปศาสตรมหาบัณฑิต (การจัดการ)"
+    หาบรรทัดแบบเดียวกับ degree_line_extras (หน้าต่าง 1-3 บรรทัดที่ตัดถ้อยคำ template แล้วเท่ากับชื่อปริญญา) แล้วดูว่าข้อความ
+    ก่อนชื่อปริญญา (รวมบรรทัดก่อนหน้า — ตัดบรรทัดตรงคำว่า "ปริญญา" ได้) ลงท้ายด้วย "ปริญญา" ไหม เทียบด้วย norm()
+    ประโยค "...ตามหลักสูตรปริญญา..." บรรทัดเดียวกันก็ลงท้ายด้วยคำนี้ จึงนับว่ามี
+    """
+    want = norm(expected)
+    if not want:
+        return ""
+    lines = [line for line in degree_line_search_text(page_text).splitlines() if soft(line)]
+    for size in (1, 2, 3):
+        for start in range(len(lines) - size + 1):
+            chunk = " ".join(lines[start:start + size])
+            if _without_degree_template_words(norm(chunk)) != want:
+                continue
+            before = norm(" ".join(lines[max(0, start - 1):start + size]))
+            at = before.rfind(want)
+            if at < 0 or before[:at].endswith(_DEGREE_WORD):
+                return ""
+            return soft(chunk)
+    return ""
+
+
+def _report_degree_prefix(rep, spot_name, spot_text, expected_degree, expected_line):
+    """ส้ม FORM.DEGREE_PREFIX ข้อเดียวต่อตำแหน่ง (หน้าปก / หน้าลงนามแต่ละหน้า) — คืน True ถ้าแจ้ง (อัปเดต 1.14)
+
+    แยกตามตำแหน่งแบบเดียวกับข้อชื่อปริญญาอื่น ข้อความสรุปจัดเป็นหมวด "หน้าปก" / "หน้าลงนาม" อยู่แล้ว นักศึกษาแก้ทีละหน้า
+    """
+    printed = degree_line_missing_prefix(spot_text, expected_degree)
+    if not printed:
+        return False
+    rep.add_verification("ชื่อปริญญา", spot_name, "pending", f'ไม่มีคำว่า "ปริญญา" นำหน้า: {printed}')
+    rep.add(DEGREE_PREFIX_ZONE, "front_matter", spot_name,
+            f'บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า: "{printed}"',
+            f'บรรทัดนี้ต้องเป็น "{expected_line}" ตาม template',
+            'เติมคำว่า "ปริญญา" หน้าชื่อปริญญา', "FORM.DEGREE_PREFIX")
+    return True
+
+
 def degree_line_search_text(page_text, abstract=False):
     """ส่วนของหน้าที่บรรทัดชื่อปริญญาอยู่ได้: ก่อนโซนรายชื่อกรรมการ และไม่รวมบรรทัดชื่อ-รหัสนักศึกษา"""
     return "\n".join(line for line in _degree_search_text(page_text, abstract).splitlines()
@@ -10899,6 +10946,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                             "ลบข้อความเกินออกจากบรรทัดชื่อปริญญา", "FORM.APPROVED_MATCH")
                     continue
                 if compared['status'] == 'exact':
+                    # เล่มหลักสูตรไทย: ชื่อตรงแต่ไม่มีคำว่า "ปริญญา" นำหน้า = ส้ม (อัปเดต 1.14) · เล่มอังกฤษ ("for the degree of") ไม่อยู่ในกฎนี้
+                    if thai_book and own_line and _report_degree_prefix(rep, spot_name, spot_text,
+                                                                        expected_degree, expected_line):
+                        continue
                     rep.add_verification("ชื่อปริญญา", spot_name, "pass")
                     continue
                 if degree_differs_only_in_spacing(expected_degree, spot_text):

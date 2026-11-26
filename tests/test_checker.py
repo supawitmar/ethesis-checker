@@ -13752,3 +13752,68 @@ class Update113PictureAppendixPage(unittest.TestCase):
             i18n.tr_en('ระบบอ่านข้อความหน้านี้ไม่ได้ เพราะหน้านี้เป็นรูปภาพ จึงยืนยันไม่ได้ว่ามี "ภาคผนวก" ตามที่สารบัญระบุ', pairs),
             'The system cannot read the text on this page because the page is an image, so it cannot confirm the '
             '"ภาคผนวก" heading listed in the table of contents')
+
+
+
+class Update114DegreeLineNeedsTheWordParinya(unittest.TestCase):
+    """เล่มไทย: บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า = ส้ม (อัปเดต 1.14 เจ้าของ 26 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    DEGREE = "ศิลปศาสตรมหาบัณฑิต (การจัดการตัวอย่าง)"
+    SIG_HEAD = "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร"
+
+    def _cover(self, degree_line):
+        return NEWLINE.join(["ชื่อเรื่องตัวอย่าง", "สมชาย ตัวอย่าง", "การค้นคว้าอิสระนี้เป็นส่วนหนึ่งของการศึกษาตามหลักสูตร",
+                             degree_line, "บัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล", "พ.ศ. 2569"])
+
+    def test_a_missing_word_is_found(self):
+        self.assertEqual(checker_module.degree_line_missing_prefix(self._cover(self.DEGREE), self.DEGREE), self.DEGREE)
+
+    def test_the_word_in_its_usual_places_is_fine(self):
+        """ควบคุมเชิงลบ — บรรทัดเดียวกัน · ตัดบรรทัดตรงคำว่าปริญญา · อยู่บรรทัดเดียวกับประโยค template · ช่องว่างคั่น"""
+        for page in (self._cover("ปริญญา" + self.DEGREE),
+                     self._cover("ปริญญา " + self.DEGREE),
+                     NEWLINE.join(["ชื่อเรื่องตัวอย่าง", self.SIG_HEAD + "ปริญญา", self.DEGREE, "วันที่ 1 ตุลาคม 2569"]),
+                     NEWLINE.join(["ชื่อเรื่องตัวอย่าง", self.SIG_HEAD + "ปริญญา" + self.DEGREE, "วันที่ 1 ตุลาคม 2569"]),
+                     NEWLINE.join(["ชื่อเรื่องตัวอย่าง", self.SIG_HEAD, "ปริญญา" + self.DEGREE, "วันที่ 1 ตุลาคม 2569"])):
+            self.assertEqual(checker_module.degree_line_missing_prefix(page, self.DEGREE), "", page)
+
+    def test_a_wrong_name_is_not_this_rule(self):
+        """ควบคุมเชิงลบ — ชื่อปริญญาไม่ตรง หาบรรทัดที่เท่ากับชื่อไม่เจอ = ไม่ใช่ข้อนี้ (แดงเดิมอย่างเดียว)"""
+        self.assertEqual(checker_module.degree_line_missing_prefix(
+            self._cover("ศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการตัวอย่าง (หลักสูตรภาคพิเศษ)"), self.DEGREE), "")
+        self.assertEqual(checker_module.degree_line_missing_prefix(self._cover("ปริญญา....................."),
+                                                                   self.DEGREE), "")
+
+    def test_the_card_and_the_table_row(self):
+        report = checker_module.Report()
+        expected_line = checker_module.cover_degree_line_expected(self.DEGREE, True)
+        self.assertTrue(checker_module._report_degree_prefix(report, "หน้าปก", self._cover(self.DEGREE),
+                                                             self.DEGREE, expected_line))
+        [card] = report.zones["ORANGE"]
+        self.assertEqual(card["rule_id"], "FORM.DEGREE_PREFIX")
+        self.assertEqual(card["found"], f'บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า: "{self.DEGREE}"')
+        self.assertEqual(card["expected"], f'บรรทัดนี้ต้องเป็น "ปริญญา{self.DEGREE}" ตาม template')
+        self.assertEqual(card["fix"], 'เติมคำว่า "ปริญญา" หน้าชื่อปริญญา')
+        [row] = report.verification[0]["checks"]
+        self.assertEqual(row["status"], "pending")
+        # มีคำนำหน้าแล้ว = ไม่มีการ์ด ไม่มีแถว (ผู้เรียกลงแถว "ตรง" เอง)
+        report = checker_module.Report()
+        self.assertFalse(checker_module._report_degree_prefix(report, "หน้าปก", self._cover("ปริญญา" + self.DEGREE),
+                                                              self.DEGREE, expected_line))
+        self.assertEqual((report.zones["ORANGE"], report.verification), ([], []))
+
+    def test_only_thai_books_and_only_after_an_exact_match(self):
+        source = inspect.getsource(checker_module.run_check)
+        branch = source.split("if compared['status'] == 'exact':", 1)[1].split("continue", 1)[0]
+        self.assertIn("thai_book and own_line and _report_degree_prefix(", branch)
+        self.assertLess(source.index("if extras:"), source.index("_report_degree_prefix("))
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(f'บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า: "{self.DEGREE}"', pairs),
+                         f'The degree line does not start with the word "ปริญญา" (degree): "{self.DEGREE}"')
+        self.assertEqual(i18n.tr_en(f'บรรทัดนี้ต้องเป็น "ปริญญา{self.DEGREE}" ตาม template', pairs),
+                         f'This line must read "ปริญญา{self.DEGREE}", as in the template')
+        self.assertEqual(i18n.tr_en('เติมคำว่า "ปริญญา" หน้าชื่อปริญญา', pairs),
+                         'Add the word "ปริญญา" (degree) before the degree name')

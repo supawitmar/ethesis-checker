@@ -855,6 +855,11 @@ var TR = [
   [/^ชื่อนักศึกษา$/g, 'The student name'],
   [/^ชื่อปริญญา$/g, 'The degree name'],
   [/^ชื่อปริญญาแบบย่อ$/g, 'The abbreviated degree name'],
+  // อัปเดต 1.14: บรรทัดชื่อปริญญาเล่มไทยไม่มีคำว่า "ปริญญา" นำหน้า (FORM.DEGREE_PREFIX)
+  [/^บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า: ("[^"]*")$/g, 'The degree line does not start with the word "ปริญญา" (degree): $1'],
+  [/^บรรทัดนี้ต้องเป็น ("[^"]*") ตาม template$/g, 'This line must read $1, as in the template'],
+  [/^เติมคำว่า "ปริญญา" หน้าชื่อปริญญา$/g, 'Add the word "ปริญญา" (degree) before the degree name'],
+  [/^ไม่มีคำว่า "ปริญญา" นำหน้า: (.+)$/g, 'No word "ปริญญา" (degree) before the degree name: $1'],
   [/บรรทัดชื่อปริญญาแบบย่อมีข้อความเกิน: ("[^"]+")/g, 'The abbreviated degree line has extra text: $1'],
   [/บรรทัดชื่อปริญญามีข้อความเกิน: ("[^"]+")/g, 'The degree line has extra text: $1'],
   [/บรรทัดชื่อปริญญาในเล่มเขียนว่า ("[^"]+")/g, 'The degree line in the document reads $1'],
