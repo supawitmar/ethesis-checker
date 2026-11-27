@@ -2424,6 +2424,18 @@ class CoverYearLineTests(unittest.TestCase):
         rep = self._run("การประเมินผลกระทบ พ.ศ. 2569 ของโครงการ\nบัณฑิตวิทยาลัย")
         self.assertIn("ไม่ได้อยู่ในบรรทัดปีของตัวเอง", rep.zones["RED"][0]["found"])
 
+    def test_the_summary_keeps_both_year_shapes(self):
+        """ข้อความสรุปพิมพ์ทั้งประโยค ไม่ย่อเหลือ 'ต้องแก้เป็น "พ.ศ. 2569"' (อัปเดต 1.17.3)"""
+        [issue] = self._run("การประเมินผลกระทบ พ.ศ. 2569 ของโครงการ\nบัณฑิตวิทยาลัย").zones["RED"]
+        expected = 'หน้าปกต้องมีบรรทัดปี เช่น "2569" หรือ "พ.ศ. 2569" โดยไม่มีข้อความอื่นในบรรทัดนั้น'
+        self.assertEqual(issue["expected"], expected)
+        self.assertEqual(checker_module._corrected_value(issue), "")
+        self.assertEqual(checker_module._summary_sentence(issue).splitlines()[-1].strip(), expected)
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(expected, pairs),
+                         'The cover must have a year line such as "2569" or "พ.ศ. 2569", with no other text on that line')
+
     def test_missing_year_is_flagged(self):
         rep = self._run("ชื่อเรื่อง\nบัณฑิตวิทยาลัย มหาวิทยาลัยมหิดล")
         self.assertIn("ไม่พบปี 2569", rep.zones["RED"][0]["found"])
@@ -14226,7 +14238,7 @@ class Update1172TocContinuationAndMisnamedReferences(unittest.TestCase):
         [item] = [i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")]
         self.assertEqual(item["location"], "รายการอ้างอิง ในสารบัญ (หน้า iii) และในเนื้อหา (หน้า 2)")
         self.assertEqual(item["found"], 'หัวข้อนี้ในเล่มเขียนว่า "LITERATURE CITED"')
-        self.assertEqual(item["expected"], 'ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY"')
+        self.assertEqual(item["expected"], 'ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ทั้งในสารบัญและในเนื้อหา')
         self.assertEqual(item["fix"], 'แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ทั้งในสารบัญและในเนื้อหา')
         self.assertEqual(item["rule_id"], "END.STRUCTURE")
         self.assertFalse([i for i in issues if "ไม่พบหน้ารายการอ้างอิง" in i["found"]], issues)
@@ -14236,7 +14248,8 @@ class Update1172TocContinuationAndMisnamedReferences(unittest.TestCase):
         issues = self._run("LITERATURE CITED", "REFERENCES")
         [item] = [i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")]
         self.assertEqual(item["location"], "รายการอ้างอิง ในเนื้อหา (หน้า 2)")
-        self.assertEqual(item["fix"], 'แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY"')
+        self.assertEqual(item["expected"], 'ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ในเนื้อหา')     # อัปเดต 1.17.3
+        self.assertEqual(item["fix"], 'แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ในเนื้อหา')
 
     def test_a_book_without_references_keeps_the_old_item(self):
         """ควบคุมเชิงลบ — ไม่มีหน้านี้จริง = "ไม่พบหน้ารายการอ้างอิง" ตามเดิม · ชื่อถูก = ไม่มีข้อชื่อผิด"""
@@ -14258,4 +14271,258 @@ class Update1172TocContinuationAndMisnamedReferences(unittest.TestCase):
                          'It must be changed to "REFERENCES" or "BIBLIOGRAPHY"')
         self.assertEqual(i18n.tr_en('แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ทั้งในสารบัญและในเนื้อหา', pairs),
                          'Change the heading to "REFERENCES" or "BIBLIOGRAPHY" in both the table of contents and the body')
+
+
+class Update1173SummaryMisMenuAndProgrammeName(unittest.TestCase):
+    """ข้อความสรุปพิมพ์ประโยคเต็ม · ลูกศรกล่อง MIS · ชื่อหลักสูตรช่องขวาหลายบรรทัด (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    # ---------- ก. ข้อความสรุป ----------
+    def test_the_summary_keeps_both_choices_and_where(self):
+        for where in (" ทั้งในสารบัญและในเนื้อหา", " ในสารบัญ", " ในเนื้อหา"):
+            expected = f'ต้องแก้เป็น "รายการอ้างอิง" หรือ "บรรณานุกรม"{where}'
+            issue = {"rule_id": "END.STRUCTURE", "location": "รายการอ้างอิง ในเนื้อหา (หน้า 164)",
+                     "found": 'หัวข้อนี้ในเล่มเขียนว่า "เอกสารอ้างอิง"', "expected": expected, "fix": "แก้"}
+            self.assertEqual(checker_module._corrected_value(issue), "", where)      # ไม่ย่อเหลือค่าเดียว
+            self.assertIn(expected, checker_module._summary_sentence(issue), where)
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en('ต้องแก้เป็น "รายการอ้างอิง" หรือ "บรรณานุกรม" ทั้งในสารบัญและในเนื้อหา', pairs),
+                         'It must be changed to "รายการอ้างอิง" or "บรรณานุกรม" in both the table of contents and the body')
+        self.assertEqual(i18n.tr_en('ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ในสารบัญ', pairs),
+                         'It must be changed to "REFERENCES" or "BIBLIOGRAPHY" in the table of contents')
+        self.assertEqual(i18n.tr_en('แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ในเนื้อหา', pairs),
+                         'Change the heading to "REFERENCES" or "BIBLIOGRAPHY" in the body')
+
+    # ---------- ข. ลูกศรกล่อง MIS ----------
+    def test_the_mis_box_shows_a_down_arrow(self):
+        html = (Path(__file__).resolve().parents[1] / "templates" / "index.html").read_text(encoding="utf-8")
+        summary = html.split('<details class="mis-paste" id="mis-paste">', 1)[1].split("</summary>", 1)[0]
+        self.assertIn('class="mis-arrow" aria-hidden="true"', summary)
+        self.assertIn('d="M2.5 4.5 6 8l3.5-3.5"', summary)                         # chevron ชี้ลง
+        for css in (".mis-paste > summary::-webkit-details-marker { display:none; }",
+                    ".mis-paste > summary:hover { background:var(--navy-soft); }",
+                    ".mis-paste[open] > summary .mis-arrow { transform:rotate(180deg); }", "cursor:pointer"):
+            self.assertIn(css, html, css)
+
+    # ---------- ค. ชื่อหลักสูตรช่องขวา ----------
+    DEGREE_TH = "ศิลปศาสตรมหาบัณฑิต (การจัดการทรัพยากรมนุษย์และองค์การสมมติ)"
+    DEGREE_EN = "Master of Science (Made-up Tropical Things and Other Studies)"
+
+    def _items(self, bottom, right, english=False):
+        rep = checker_module.Report()
+        checker_module._check_programme_name(rep, self.DEGREE_EN if english else self.DEGREE_TH,
+                                             checker_module.BottomText(bottom, right), english, True, "ประธานหลักสูตร")
+        return rep.zones["ORANGE"]
+
+    def test_a_name_wrapped_over_two_lines_with_the_left_box_in_between(self):
+        # ทั้งแถว: ช่องซ้ายแทรกกลางชื่อสาขา · ช่องขวาอย่างเดียว: สองบรรทัดต่อกัน
+        bottom = ("คณบดีบัณฑิตวิทยาลัย ประธานหลักสูตรศิลปศาสตรมหาบัณฑิต มหาวิทยาลัยสมมติ สาขาวิชาการจัดการทรัพยากรมนุษย์"
+                  " บัณฑิตวิทยาลัย และองค์การสมมติ")
+        right = "ประธานหลักสูตรศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการทรัพยากรมนุษย์ และองค์การสมมติ"
+        self.assertEqual(self._items(bottom, right), [])
+        self.assertTrue(self._items(bottom, ""))            # ควบคุมเชิงลบ — ไม่มีข้อความช่องขวา = ส้มแบบเดิม
+
+    def test_a_name_wrapped_over_three_lines(self):
+        right = "ประธานหลักสูตร ศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการ ทรัพยากรมนุษย์และ องค์การสมมติ"
+        self.assertEqual(self._items("คณบดีบัณฑิตวิทยาลัย บัณฑิตวิทยาลัย ทรัพยากร", right), [])
+
+    BASE = "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด"
+    WANT_TH = "ศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการทรัพยากรมนุษย์และองค์การสมมติ"
+
+    def test_a_misspelled_name_is_still_orange(self):
+        """ผิดจริงยังส้ม และบอกว่าช่องขวาเขียนว่าอะไร + จุดต่าง (เจ้าของ 27 พ.ย. 2569 "Yes, show it")"""
+        right = "ประธานหลักสูตร ศิลปศาสตรมหาบัณทิต สาขาวิชาการจัดการทรัพยากรมนุษย์ และองค์การสมมติ"     # ท แทน ฑ
+        [item] = self._items("คณบดีบัณฑิตวิทยาลัย บัณฑิตวิทยาลัย " + right, right)
+        self.assertEqual(item["found"], self.BASE + ' เขียนว่า "ศิลปศาสตรมหาบัณทิต สาขาวิชาการจัดการทรัพยากรมนุษย์'
+                         ' และองค์การสมมติ" ต่างที่ "ทิ" ต้องเป็น "ฑิ"')
+        self.assertEqual(item["expected"], f'ต้องแก้เป็น "{self.WANT_TH}"')
+        self.assertEqual(item["rule_id"], "FRONT.COMMITTEE")
+        self.assertNotIn("คณบดี", item["found"])                 # ยกจากช่องขวาเท่านั้น ไม่มีข้อความช่องซ้ายปน
+        summary = checker_module._summary_sentence(item)
+        self.assertIn('เขียนว่า "ศิลปศาสตรมหาบัณทิต', summary)
+        self.assertIn(f'ต้องแก้เป็น "{self.WANT_TH}"', summary)
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        english = i18n.tr_en(item["found"], pairs)
+        self.assertTrue(english.startswith("The programme director box (bottom right) shows the wrong programme name;"
+                                           ' it reads "ศิลปศาสตรมหาบัณทิต'), english)
+        self.assertNotRegex(english.split('"')[-1], "[ก-๙]")       # ท้ายประโยค (จุดต่าง) แปลแล้ว ไม่เหลือคำไทย
+
+    def test_the_quote_keeps_whole_words_and_drops_the_role(self):
+        """หน้าต่างของ _closest_run ตัดกลางคำได้ — ยกมาทั้งคำ ไม่มี "ประธานหลักสูตร" ติดหน้า"""
+        right = "ประธานหลักสูตรวิทยาศาสตรมหาบัณฑิต สาขาวิชาการจัดการทรัพยากรธรรมชาติและองค์กรสมมุติ"   # ต่างหลายจุด
+        [item] = self._items(right, right)
+        self.assertEqual(item["found"], self.BASE + ' เขียนว่า "วิทยาศาสตรมหาบัณฑิต'
+                         ' สาขาวิชาการจัดการทรัพยากรธรรมชาติและองค์กรสมมุติ"')   # เกิน 2 จุด = เขียนว่า อย่างเดียว
+        self.assertNotIn("ต่างที่", item["found"])
+
+    def test_no_close_text_keeps_the_old_wording(self):
+        for right in ("ประธานหลักสูตร มหาวิทยาลัยสมมติ", ""):
+            [item] = self._items("คณบดีบัณฑิตวิทยาลัย " + right, right)
+            self.assertEqual(item["found"], self.BASE, right)
+            self.assertEqual(item["expected"], f'ต้องแก้เป็น "{self.WANT_TH}"')
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(self.BASE, pairs),
+                         "The programme director box (bottom right) shows the wrong programme name")
+
+    def test_an_english_misspelling_is_quoted(self):
+        right = "Program Director Master of Science Program in Made-up Tropicel Things and Other Studies"
+        [item] = self._items("Dean Faculty of Graduate Studies " + right, right, english=True)
+        self.assertEqual(item["found"], self.BASE + ' เขียนว่า "Master of Science Program in Made-up Tropicel Things'
+                         ' and Other Studies" ต่างที่ "Tropicel" ต้องเป็น "Tropical"')
+        self.assertEqual(item["expected"],
+                         'ต้องแก้เป็น "Master of Science Program in Made-up Tropical Things and Other Studies"')
+
+    def test_an_english_quote_drops_the_role_and_faculty_words(self):
+        """เล่มจริงพิมพ์ชื่อหลักสูตรขาด "Program" ต่อด้วยชื่อคณะ — ไม่ยก "Director" / ", Faculty" มาด้วย
+        และจุดต่างใช้ตัวพิมพ์ตามเล่ม (ไม่ขึ้นตัวใหญ่หมด)"""
+        right = ("Program Director Master of Science in Made-up Tropical Things and Other Studies,"
+                 " Faculty of Made-up Things, Mahidol University")
+        [item] = self._items("Dean Faculty of Graduate Studies " + right, right, english=True)
+        self.assertEqual(item["found"], self.BASE + ' เขียนว่า "Master of Science in Made-up Tropical Things and Other'
+                         ' Studies" ขาด "Program"')
+        right = "Program Director Master of Science Program in Made-up Tropical Things and Other Study"
+        [item] = self._items(right, right, english=True)
+        self.assertTrue(item["found"].endswith('ต่างที่ "Study" ต้องเป็น "Studies"'), item["found"])
+
+    # ---------- ง. ติ๊กชีททั้งสองส่วน ----------
+    def test_an_end_matter_item_fixed_in_the_contents_too_ticks_both(self):
+        """เจ้าของ 27 พ.ย. 2569 "กรณีที่เป็นหน้าควบแบบนี้ ควรต้องเพิ่มติ้กในส่วน ทั้งคู่ด้วย" """
+        both = {"rule_id": "END.STRUCTURE", "part": "end_matter", "location": "รายการอ้างอิง ในสารบัญ (หน้า ฌ) และในเนื้อหา (หน้า 164)",
+                "found": 'หัวข้อนี้ในเล่มเขียนว่า "เอกสารอ้างอิง"',
+                "expected": 'ต้องแก้เป็น "รายการอ้างอิง" หรือ "บรรณานุกรม" ทั้งในสารบัญและในเนื้อหา'}
+        self.assertEqual(checker_module.summary_section(both), "ส่วนท้ายเล่ม")
+        self.assertEqual(checker_module.sheet_columns_of(both), {"Reference", "LoC"})
+        toc_only = dict(both, location="รายการอ้างอิง ในสารบัญ (หน้า ฌ)",
+                        expected='ต้องแก้เป็น "รายการอ้างอิง" หรือ "บรรณานุกรม" ในสารบัญ')
+        self.assertEqual(checker_module.sheet_columns_of(toc_only), {"Reference", "LoC"})
+        body_only = dict(both, location="รายการอ้างอิง ในเนื้อหา (หน้า 164)",
+                         expected='ต้องแก้เป็น "รายการอ้างอิง" หรือ "บรรณานุกรม" ในเนื้อหา')
+        self.assertEqual(checker_module.sheet_columns_of(body_only), {"Reference"})
+        missing = {"rule_id": "END.STRUCTURE", "part": "end_matter", "location": "ส่วนท้ายเล่ม", "found": "ไม่พบหน้ารายการอ้างอิง",
+                   "expected": "ต้องมีหน้ารายการอ้างอิง"}
+        self.assertEqual(checker_module.sheet_columns_of(missing), {"Reference"})
+
+    def test_a_contents_only_item_does_not_gain_a_second_tick(self):
+        """ข้อที่แก้เฉพาะสารบัญ ("สารบัญ (…) กับ<ส่วน> (…)") ติ๊ก LoC อย่างเดียวเหมือนเดิม"""
+        issue = {"rule_id": "FRONT.TOC_CONTENT", "part": "front_matter", "location": "สารบัญ (หน้า ฌ) กับรายการอ้างอิง (หน้า 164)",
+                 "found": "เลขหน้าในสารบัญไม่ตรงกับหน้าจริง", "expected": 'ต้องแก้เป็น "164"'}
+        self.assertNotEqual(checker_module.summary_section(issue), "ส่วนท้ายเล่ม")
+        self.assertEqual(checker_module.sheet_columns_of(issue), {"LoC"})
+
+    def test_an_english_programme_wrapped(self):
+        bottom = ("Dean Faculty of Graduate Studies Program Director Master of Science Mahidol University"
+                  " Program in Made-up Tropical Things Faculty of Graduate Studies and Other Studies")
+        right = "Program Director Master of Science Program in Made-up Tropical Things and Other Studies"
+        self.assertEqual(self._items(bottom, right, english=True), [])
+        self.assertTrue(self._items(bottom, "", english=True))
+
+    def test_the_signature_reader_keeps_wrapped_rows_on_the_right(self):
+        """ช่องขวาตัดสามบรรทัด ช่องซ้ายสองบรรทัดอยู่แถวเดียวกัน — _right_box_words เก็บครบทั้งสามบรรทัดของช่องขวา"""
+        def words(x0, top, text):
+            out, x = [], x0
+            for token in text.split():
+                out.append({"text": token, "x0": x, "x1": x + 6 * len(token), "top": top, "bottom": top + 12})
+                x += 6 * len(token) + 4
+            return out
+        band = (words(80, 700, "Dean") + words(330, 700, "Program Director")
+                + words(70, 714, "Faculty of Graduate Studies") + words(320, 714, "Master of Science Program in")
+                + words(340, 728, "Made-up Tropical Things") + words(350, 742, "and Other Studies"))
+        right = " ".join(w["text"] for w in checker_module._right_box_words(band, 297))
+        self.assertEqual(right, "Program Director Master of Science Program in Made-up Tropical Things and Other Studies")
+
+
+class Update1173EnglishDegreePrefix(unittest.TestCase):
+    """เล่มอังกฤษขาดแค่ "for the degree of" หน้าชื่อปริญญา = ส้ม FORM.DEGREE_PREFIX กติกาเดียวกับเล่มไทย 1.14
+    (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    DEGREE = "Master of Science (Made-up Studies)"
+    LEAD = "was submitted to the Faculty of Graduate Studies, Mahidol University"
+    COVER_SENTENCE = "A THESIS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE DEGREE OF"
+    COVER_DEGREE = "MASTER OF SCIENCE (MADE-UP STUDIES)"
+
+    def _sig(self, *middle):
+        return NEWLINE.join(["Made-up Title of a Study", "Mr. Somchai Example", "Candidate",
+                             *middle, "on October 1, 2026", "Thesis Advisory Committee"])
+
+    def _template_items(self, page, thai_book=False):
+        rep = checker_module.Report()
+        checker_module._report_signature_template(rep, "หน้าลงนาม 1 (หน้า i)", page,
+                                                  checker_module.SIGNATURE_TEMPLATE_EN, self.DEGREE, thai_book)
+        return rep
+
+    def test_only_the_prefix_missing_is_one_orange(self):
+        rep = self._template_items(self._sig(self.LEAD, "Master of Science", "(Made-up Studies)"))
+        self.assertEqual(rep.zones["RED"], [])
+        [card] = rep.zones["ORANGE"]
+        self.assertEqual(card["rule_id"], "FORM.DEGREE_PREFIX")
+        self.assertEqual(card["location"], "หน้าลงนาม 1 (หน้า i)")
+        self.assertEqual(card["found"], f'บรรทัดชื่อปริญญาไม่มีคำว่า "for the degree of" นำหน้า: "{self.DEGREE}"')
+        self.assertEqual(card["expected"], f'บรรทัดนี้ต้องเป็น "for the degree of {self.DEGREE}" ตาม template')
+        self.assertEqual(card["fix"], 'เติมคำว่า "for the degree of" หน้าชื่อปริญญา')
+        [row] = rep.verification[0]["checks"]
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(checker_module.sheet_columns_of(card), {"Cover"})
+        # บรรทัดเดียวกันกับประโยคก็นับ
+        rep = self._template_items(self._sig(f"{self.LEAD} {self.DEGREE}"))
+        self.assertEqual((len(rep.zones["RED"]), len(rep.zones["ORANGE"])), (0, 1))
+
+    def test_a_complete_sentence_has_no_item(self):
+        rep = self._template_items(self._sig(self.LEAD, f"for the degree of {self.DEGREE}"))
+        self.assertEqual((rep.zones["RED"], rep.zones["ORANGE"]), ([], []))
+
+    def test_another_missing_word_stays_red(self):
+        """ควบคุมเชิงลบ — ขาด "the" ด้วย / ขาด "for the" เหลือ "degree of" = แดงข้อ template เดิม ไม่มีส้ม"""
+        for page in (self._sig("was submitted to Faculty of Graduate Studies, Mahidol University", self.DEGREE),
+                     self._sig(self.LEAD, f"degree of {self.DEGREE}")):
+            rep = self._template_items(page)
+            self.assertEqual(rep.zones["ORANGE"], [], page)
+            [card] = rep.zones["RED"]
+            self.assertEqual(card["rule_id"], "FRONT.APPROVAL")
+
+    def test_a_wrong_degree_stays_red(self):
+        rep = self._template_items(self._sig(self.LEAD, "Master of Arts (Made-up Studies)"))
+        self.assertEqual(rep.zones["ORANGE"], [])
+        self.assertEqual([card["rule_id"] for card in rep.zones["RED"]], ["FRONT.APPROVAL"])
+
+    def test_a_thai_book_is_not_this_rule(self):
+        rep = self._template_items(self._sig(self.LEAD, self.DEGREE), thai_book=True)
+        self.assertEqual(rep.zones["ORANGE"], [])
+
+    def test_the_cover(self):
+        cover = NEWLINE.join(["MADE-UP TITLE OF A STUDY", "MR. SOMCHAI EXAMPLE",
+                              "A THESIS SUBMITTED IN PARTIAL FULFILLMENT", "OF THE REQUIREMENTS",
+                              "MASTER OF SCIENCE", "(MADE-UP STUDIES)", "FACULTY OF GRADUATE STUDIES",
+                              "MAHIDOL UNIVERSITY", "2026", "COPYRIGHT OF MAHIDOL UNIVERSITY"])
+        missing = checker_module.english_degree_prefix_missing
+        self.assertEqual(missing(cover, self.COVER_SENTENCE, self.COVER_DEGREE), self.COVER_DEGREE)
+        full = cover.replace("OF THE REQUIREMENTS", "OF THE REQUIREMENTS FOR THE DEGREE OF")
+        self.assertEqual(missing(full, self.COVER_SENTENCE, self.COVER_DEGREE), "")
+        self.assertEqual(missing(cover.replace("OF THE REQUIREMENTS", "OF THE REQUIREMENT"),
+                                 self.COVER_SENTENCE, self.COVER_DEGREE), "")
+        self.assertEqual(missing(cover, self.COVER_SENTENCE, "MASTER OF ARTS (MADE-UP STUDIES)"), "")
+        # หน้าปก: ส้มแทนแดง "ข้อความประเภทงาน" — เช็คก่อนหาข้อความที่ใกล้ที่สุดในลูปข้อความบังคับ
+        source = inspect.getsource(checker_module.run_check)
+        loop = source.split("for label, expected_text in missing_cover_items:", 1)[1]
+        self.assertLess(loop.index("english_degree_prefix_missing("), loop.index("_best_cover_match("))
+        self.assertIn('label == "ข้อความประเภทงาน"', loop.split("_best_cover_match(", 1)[0])
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en(f'บรรทัดชื่อปริญญาไม่มีคำว่า "for the degree of" นำหน้า: "{self.DEGREE}"', pairs),
+                         f'The degree line does not start with "for the degree of": "{self.DEGREE}"')
+        self.assertEqual(i18n.tr_en(f'บรรทัดชื่อปริญญาไม่มีคำว่า "FOR THE DEGREE OF" นำหน้า: "{self.COVER_DEGREE}"',
+                                    pairs),
+                         f'The degree line does not start with "FOR THE DEGREE OF": "{self.COVER_DEGREE}"')
+        self.assertEqual(i18n.tr_en(f'บรรทัดนี้ต้องเป็น "for the degree of {self.DEGREE}" ตาม template', pairs),
+                         f'This line must read "for the degree of {self.DEGREE}", as in the template')
+        self.assertEqual(i18n.tr_en('เติมคำว่า "for the degree of" หน้าชื่อปริญญา', pairs),
+                         'Add "for the degree of" before the degree name')
+        self.assertEqual(i18n.tr_en(f'ไม่มีคำว่า "for the degree of" นำหน้า: {self.DEGREE}', pairs),
+                         f'No "for the degree of" before the degree name: {self.DEGREE}')
+        # ของเดิม (ไทย 1.14) ไม่เปลี่ยน
+        self.assertEqual(i18n.tr_en('เติมคำว่า "ปริญญา" หน้าชื่อปริญญา', pairs),
+                         'Add the word "ปริญญา" (degree) before the degree name')
 

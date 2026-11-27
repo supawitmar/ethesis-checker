@@ -2448,6 +2448,15 @@ def _report_signature_template(rep, spot, page_text, sig_template, sig_degree, t
     # และลงท้ายด้วยเครื่องหมายคำพูด ข้อความสรุปจึงดึงไปเขียนเป็น "ต้องแก้เป็น ..." ได้
     wanted = f'"{sig_template}"'
     expected_msg = f"ต้องเป็น {wanted}"
+    # เล่มอังกฤษขาดแค่ "for the degree of" หน้าชื่อปริญญาที่ถูกต้อง = ส้มข้อเดียว FORM.DEGREE_PREFIX ไม่ใช่แดงข้อนี้
+    # (อัปเดต 1.17.3 — กติกาเดียวกับเล่มไทยที่ไม่มีคำว่า "ปริญญา" 1.14)
+    printed = ("" if thai_book or spelled_in(sig_template, page_text)
+               else english_degree_prefix_missing(page_text, sig_template, sig_degree))
+    if printed:
+        rep.add_verification("ข้อความ template ใต้ชื่อหัวข้อ", spot, "pending",
+                             f'ไม่มีคำว่า "{ENGLISH_DEGREE_PREFIX}" นำหน้า: {printed}')
+        _add_degree_prefix(rep, spot, printed, ENGLISH_DEGREE_PREFIX, f"{ENGLISH_DEGREE_PREFIX} {soft(sig_degree)}")
+        return
     # ประโยคตายตัวต้องสะกดตรงทุกตัวรวมวรรณยุกต์/สระ (เจ้าหน้าที่สั่ง 6 ต.ค. 2569) — ดู spelling_key
     if spelled_in(sig_template, page_text):
         if extra_line:
@@ -2628,7 +2637,7 @@ def _check_programme_name(rep, degree, bottom_text, english, box_read, loc):
     """หน้าลงนาม 1 ช่องประธานหลักสูตร: ชื่อหลักสูตรเต็ม (อัปเดต 1.7 เจ้าของยืนยัน 27 ต.ค. 2569)
 
     เดิมตรวจแยกสองข้อ (ชื่อสาขา / ชื่อปริญญา) — ตอนนี้ข้อเดียว 'ระบุชื่อหลักสูตรผิด' + 'ต้องแก้เป็น "<ชื่อเต็ม>"'
-    โดยไม่มีบรรทัด "เขียนว่า …" หรือ "ต่างที่ …" · รับทั้ง "สาขาวิชา" และ "สาขา" (อังกฤษ Program/Programme in)
+    (อัปเดต 1.17.3: ต่อท้ายด้วย "เขียนว่า …" + จุดต่างจากข้อความช่องขวา ดู programme_name_found) · รับทั้ง "สาขาวิชา" และ "สาขา" (อังกฤษ Program/Programme in)
     วงเล็บท้ายชื่อ เช่น "(ภาคพิเศษ)" "(International Program)" ไม่ดู (ค้นแบบ substring อยู่แล้ว)
 
     แถวล่างสุดอ่านได้สองแบบต่อกัน (ลำดับการอ่าน + แยกคอลัมน์ ดู signature_committee_slots) ช่องซ้ายอาจคั่นกลาง
@@ -2646,16 +2655,79 @@ def _check_programme_name(rep, degree, bottom_text, english, box_read, loc):
     joints = ("Program in", "Programme in") if english else ("สาขาวิชา", "สาขา")
     full = [f"{degree_name} {joint} {subject}" if english else f"{degree_name} {joint}{subject}"
             for joint in joints]
-    if any(spelled_in(text, bottom_text) for text in full):
-        return
     tails = [f"{joint} {subject}" for joint in joints]
-    if spelled_in(degree_name, bottom_text) and any(spelled_in(tail, bottom_text) for tail in tails):
-        return
+    # ข้อความช่องล่างขวาอย่างเดียว (BottomText.right — แยกจากพิกัด บรรทัดต่อกัน) ก่อนแล้วจึงทั้งแถว (อัปเดต 1.17.3)
+    # เจ้าของ 27 พ.ย. 2569 "ช่วยขยายการอ่านเป็น 2-3 บรรทัดด้วยเผื่อหลักสูตรเขาชื่อยาววว ถ้าผิดก็ให้แจ้งไว้ถ้าผิดว่าผิด" —
+    # ทั้งแถวอ่านช่องซ้าย-ขวาปนกัน ชื่อสาขาที่ยาวจนตัดบรรทัดจึงมีข้อความช่องซ้ายแทรกกลาง หาไม่เจอ แล้วแจ้งส้มผิด
+    # spelled_in ไม่สนช่องว่าง บรรทัดที่ต่อกันด้วยช่องว่างจึงเทียบได้ทั้งไทยและอังกฤษ
+    for text in (getattr(bottom_text, "right", "") or "", bottom_text):
+        if any(spelled_in(name, text) for name in full):
+            return
+        if spelled_in(degree_name, text) and any(spelled_in(tail, text) for tail in tails):
+            return
     shown = match_printed_case(want, bottom_text) if english else want
-    rep.add("ORANGE", "front_matter", loc,
-            "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด",
+    rep.add("ORANGE", "front_matter", loc, programme_name_found(want, getattr(bottom_text, "right", "")),
             f'ต้องแก้เป็น "{shown}"',
             "แก้ชื่อหลักสูตรในช่องประธานหลักสูตรให้ตรงตามที่ได้รับอนุมัติ", "FRONT.COMMITTEE")
+
+
+# ข้อความในช่องขวาที่ใกล้ชื่อหลักสูตรน้อยกว่านี้ ไม่ยกมา (อาจเป็นข้อความอื่นในช่อง) — ใช้ถ้อยคำเดิมไม่มี "เขียนว่า"
+_PROGRAMME_QUOTE_MIN_RATIO = 0.75
+# จุดต่างเกินนี้ บอกแค่ "เขียนว่า …" ไม่ไล่ทุกจุด (แบบข้อรหัสนักศึกษา/ชื่อเรื่อง)
+_PROGRAMME_DIFF_POINTS_MAX = 2
+
+
+# ตำแหน่งที่ template พิมพ์นำหน้าชื่อหลักสูตรในช่องขวา — ไม่ยกมาเป็นส่วนของชื่อ
+_PROGRAMME_ROLE_PREFIX = re.compile(r"^(?:ประธานหลักสูตร|Program(?:me)? Director)\s*", re.I)
+
+
+def _whole_words_run(text, run, want):
+    """ขยาย run (ช่วงใน text) ให้ครบคำที่ขอบ แล้วตัดคำหัว-ท้ายที่ไม่ใช่ส่วนของชื่อ
+
+    หน้าต่างของ _closest_run ตัดกลางคำได้ (ชื่อปริญญาอื่นทั้งคำ "วิทยาศาสตรมหาบัณฑิต" เหลือ "ศาสตรมหาบัณฑิต"
+    ซึ่งอ่านเหมือนเล่มพิมพ์ตก) และเกินขอบได้ 2 ตัว (เล่มจริงติด "Director" หน้าและ ", Faculty" ท้าย)
+    คำหัว-ท้ายที่ตัดแล้วใกล้ชื่อหลักสูตรเท่าเดิมหรือมากขึ้น = ไม่ใช่ส่วนของชื่อ · ตำแหน่ง "ประธานหลักสูตร" ที่ติดหน้าตัดออก
+    """
+    start = text.find(run)
+    if start < 0:
+        return run
+    end = start + len(run)
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    words = _PROGRAMME_ROLE_PREFIX.sub("", text[start:end]).split()
+
+    def close(part):
+        return difflib.SequenceMatcher(None, norm(" ".join(part)), norm(want)).ratio()
+
+    while len(words) > 1 and close(words[1:]) >= close(words):
+        words = words[1:]
+    while len(words) > 1 and close(words[:-1]) >= close(words):
+        words = words[:-1]
+    return " ".join(words).strip(" ,;") or run
+
+
+def programme_name_found(want, right_text):
+    """ถ้อยคำ "ที่พบ" ของข้อชื่อหลักสูตรผิด (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569 "Yes, show it")
+
+    บอกว่าช่องขวาเขียนว่าอะไรและต่างตรงไหน — เปลี่ยนจากคำตัดสิน 27 ต.ค. 2569 ที่ไม่มีบรรทัด "เขียนว่า …"
+    ยกมาเฉพาะข้อความในช่องขวา (BottomText.right — ไม่มีข้อความช่องซ้าย/ชื่อคณะปน) ช่วงที่ใกล้ชื่อหลักสูตรที่สุด
+    ใกล้ไม่พอ = ถ้อยคำเดิม · จุดต่างเกิน 2 จุด = "เขียนว่า …" อย่างเดียว
+    """
+    base = "ช่องประธานหลักสูตร (มุมล่างขวา) ระบุชื่อหลักสูตรผิด"
+    near = _closest_run(right_text or "", want, min_ratio=_PROGRAMME_QUOTE_MIN_RATIO)
+    if near:
+        near = _whole_words_run(soft(right_text), near, want)
+    # ช่วงที่ใกล้ที่สุดสะกดตรงแล้ว (ชื่อผิดอยู่นอกช่วงนี้) — ยกมาจะดูเหมือนเล่มถูก ใช้ถ้อยคำเดิม
+    if not near or same_spelling(soft(near), soft(want)):
+        return base
+    quoted = f'{base} เขียนว่า "{near}"'
+    # จุดต่างใช้ตัวพิมพ์ตามที่เล่มพิมพ์ (แบบ _institution_mismatch) — ไม่ขึ้น "ต้องเป็น "SCIENCES"" ตัวใหญ่หมด
+    analysis = analyze_diff(near, match_printed_case(want, near))
+    if analysis.text and 0 < len(analysis.steps) <= _PROGRAMME_DIFF_POINTS_MAX:
+        return found_with_diff(quoted, analysis)
+    return quoted
 
 
 def _check_signature_institution(rep, kind, bottom_text, approved, english_book,
@@ -3853,7 +3925,9 @@ def _check_cover_year(rep, year, cover_text):
     if year_lines:
         rep.add("RED", "front_matter", "หน้าปก",
                 f'พบปี {year} บนหน้าปกแต่ไม่ได้อยู่ในบรรทัดปีของตัวเอง: "{year_lines[0]}"',
-                f'หน้าปกต้องมีบรรทัดที่เป็นปีเพียงอย่างเดียว เช่น "{year}" หรือ "พ.ศ. {year}"',
+                # ไม่จบด้วยเครื่องหมายคำพูด ข้อความสรุปจึงพิมพ์ทั้งประโยค ไม่ย่อเหลือ 'ต้องแก้เป็น "พ.ศ. <ปี>"'
+                # ตัวเดียว (ดู _corrected_value · อัปเดต 1.17.3 หัวหน้าทีมรับข้อเสนอ 27 พ.ย. 2569)
+                f'หน้าปกต้องมีบรรทัดปี เช่น "{year}" หรือ "พ.ศ. {year}" โดยไม่มีข้อความอื่นในบรรทัดนั้น',
                 "เพิ่มหรือแก้บรรทัดปีบนหน้าปกให้มีเฉพาะปี", "FRONT.COVER")
     elif other_year_line:
         # มีบรรทัดปีอยู่แล้วแต่เป็นปีอื่น (เล่มจริง ต.ค. 2569 พิมพ์ปีที่ส่งเล่ม ไม่ใช่ปีที่สอบผ่าน)
@@ -6278,6 +6352,10 @@ _SHEET_LOCATION_COLUMNS = (
 )
 
 
+# ตำแหน่งของข้อส่วนท้ายเล่มที่บอกว่าผิด "ในสารบัญ (…)" ด้วย (อัปเดต 1.17.3)
+_SHEET_IN_TOC = re.compile(r"ในสารบัญ \(")
+
+
 # ข้อ "จำนวนบทไม่เป็นไปตามประกาศ" รู้จากถ้อยคำที่พบ ไม่ใช่จากรหัสกฎ — รหัส BODY.OPTION1
 # ใช้ร่วมกับข้อชื่อบทรายบทด้วย ถ้าแยกด้วยรหัสกฎ ข้อชื่อบททุกข้อจะติ๊ก Other ตามไปหมด
 _CHAPTER_COUNT_FOUND = re.compile(r"^พบ \d+ บท")
@@ -6300,6 +6378,10 @@ def sheet_columns_of(issue):
         blob = " ".join(str(issue.get(key) or "")
                         for key in ("location", "found", "expected"))
         found = {column for column, pattern in _SHEET_END_COLUMNS if pattern.search(blob)}
+        # ข้อที่ต้องแก้ในสารบัญด้วย ("รายการอ้างอิง ในสารบัญ (…) และในเนื้อหา (…)") ติ๊ก LoC ด้วย (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569
+        # "กรณีที่เป็นหน้าควบแบบนี้ ควรต้องเพิ่มติ้กในส่วน ทั้งคู่ด้วย") — แบบเดียวกับข้อชื่อบท ดูจากตำแหน่งอย่างเดียว
+        if _SHEET_IN_TOC.search(issue.get("location") or ""):
+            found.add("LoC")
         return found or {"Other"}
     columns = {SHEET_SECTION_COLUMN.get(section, "Other")}
     location = issue.get("location") or ""
@@ -6591,11 +6673,39 @@ def _report_degree_prefix(rep, spot_name, spot_text, expected_degree, expected_l
     if not printed:
         return False
     rep.add_verification("ชื่อปริญญา", spot_name, "pending", f'ไม่มีคำว่า "ปริญญา" นำหน้า: {printed}')
-    rep.add(DEGREE_PREFIX_ZONE, "front_matter", spot_name,
-            f'บรรทัดชื่อปริญญาไม่มีคำว่า "ปริญญา" นำหน้า: "{printed}"',
-            f'บรรทัดนี้ต้องเป็น "{expected_line}" ตาม template',
-            'เติมคำว่า "ปริญญา" หน้าชื่อปริญญา', "FORM.DEGREE_PREFIX")
+    _add_degree_prefix(rep, spot_name, printed, "ปริญญา", expected_line)
     return True
+
+
+def _add_degree_prefix(rep, spot_name, printed, word, expected_line):
+    """การ์ดส้ม FORM.DEGREE_PREFIX — word = คำนำหน้าชื่อปริญญาตาม template ("ปริญญา" / "for the degree of")"""
+    rep.add(DEGREE_PREFIX_ZONE, "front_matter", spot_name,
+            f'บรรทัดชื่อปริญญาไม่มีคำว่า "{word}" นำหน้า: "{printed}"',
+            f'บรรทัดนี้ต้องเป็น "{expected_line}" ตาม template',
+            f'เติมคำว่า "{word}" หน้าชื่อปริญญา', "FORM.DEGREE_PREFIX")
+
+
+# คำนำหน้าชื่อปริญญาของ template อังกฤษ (หน้าลงนาม / หน้าปกตัวพิมพ์ใหญ่) — อัปเดต 1.17.3
+ENGLISH_DEGREE_PREFIX = "for the degree of"
+
+
+def english_degree_prefix_missing(page_text, sentence, degree):
+    """เล่มอังกฤษ: ประโยค template ครบทุกคำ ยกเว้นขาดแค่ "for the degree of" แล้วต่อด้วยชื่อปริญญาที่ตรงข้อมูลอนุมัติทันที
+    — คืนชื่อปริญญาตามที่พิมพ์ · ไม่ใช่กรณีนี้ = ""
+
+    อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569: *"เป็นกรณีเดียวกันกับ เล่มภาษาไทย ที่ไม่มีคำว่า ปริญญานำหน้าชื่อปริญญา
+    ซึ่งให้ใช้กติกาเดียวกัน"* (1.14 = ส้ม FORM.DEGREE_PREFIX) — เล่มจริงหน้าลงนามพิมพ์ "...Mahidol University" /
+    "Master of ..." / "(…)" / "on <วันที่>" เดิมได้แดงข้อ template ใต้ชื่อหัวข้อหน้าละข้อ
+    sentence = ประโยค template ที่ลงท้ายด้วย "for the degree of" · เทียบด้วย norm() (ไม่สนช่องว่าง ตัดบรรทัดตรงไหนก็ได้
+    ไม่สนตัวพิมพ์) ว่า "ประโยคที่ตัดคำนำหน้าออก" ต่อด้วย "ชื่อปริญญา" ติดกันพอดี — ขาดคำอื่นด้วย หรือชื่อปริญญาไม่ตรง
+    จึงไม่เข้ากรณีนี้ (แดงเดิม)
+    """
+    lead = re.sub(r"\s*" + re.escape(ENGLISH_DEGREE_PREFIX) + r"\s*$", "", sentence, flags=re.I)
+    if lead == sentence or not norm(degree) or norm(lead) + norm(degree) not in norm(page_text):
+        return ""
+    run = _closest_run(page_text, degree, min_ratio=0.9)
+    # ครบคำ (หน้าต่างตัดวงเล็บปิดท้ายทิ้งได้เพราะ norm ไม่นับวงเล็บ)
+    return _whole_words_run(soft(page_text), run, degree) if run else soft(degree)
 
 
 def degree_line_search_text(page_text, abstract=False):
@@ -8712,17 +8822,23 @@ def is_misnamed_reference_heading(line):
 
 
 def _report_misnamed_references(rep, printed, page_idx, toc_idx, page_ref, program_language):
-    """แดงข้อเดียวแบบชื่อบทผิด — บอกตำแหน่งในสารบัญและ/หรือในเนื้อหาตามที่พบ (อัปเดต 1.17.2)"""
+    """แดงข้อเดียวแบบชื่อบทผิด — บอกตำแหน่งในสารบัญและ/หรือในเนื้อหาตามที่พบ (อัปเดต 1.17.2)
+
+    expected ลงท้ายด้วยที่ที่ต้องแก้ ไม่ใช่เครื่องหมายคำพูด (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569 'เขียนเป็น "ต้องแก้เป็น "รายการอ้างอิง"
+    หรือ "บรรณานุกรม" ทั้งในสารบัญและในเนื้อหา" สิ') — เดิมจบด้วยคำพูด _corrected_value ดึงตัวท้ายไป ข้อความสรุปจึงเหลือ
+    'ต้องแก้เป็น "บรรณานุกรม"' ตัวเดียว
+    """
     one, other = reference_term_choice(program_language, printed)
     places = []
     if toc_idx is not None:
         places.append(f"ในสารบัญ ({page_ref(toc_idx)})")
     if page_idx is not None:
         places.append(f"ในเนื้อหา ({page_ref(page_idx)})")
+    where = " ทั้งในสารบัญและในเนื้อหา" if len(places) == 2 else (" ในสารบัญ" if toc_idx is not None else " ในเนื้อหา")
     rep.add("RED", "end_matter", "รายการอ้างอิง " + " และ".join(places),
             f'หัวข้อนี้ในเล่มเขียนว่า "{printed}"',
-            f'ต้องแก้เป็น "{one}" หรือ "{other}"',
-            f'แก้หัวข้อเป็น "{one}" หรือ "{other}"' + (" ทั้งในสารบัญและในเนื้อหา" if len(places) == 2 else ""),
+            f'ต้องแก้เป็น "{one}" หรือ "{other}"{where}',
+            f'แก้หัวข้อเป็น "{one}" หรือ "{other}"{where}',
             "END.STRUCTURE")
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
 # หัวข้อ "ประวัติ" เฉย ๆ — เล่มจริง 6538041 SHPP/D ตั้งหัวข้อหน้าสุดท้ายแบบนี้ ระบบเลยฟ้องผิดว่า
@@ -10685,6 +10801,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             if expected_text and not spelled_in(expected_text, cover_text)
         ]
         for label, expected_text in missing_cover_items:
+            # ปกอังกฤษขาดแค่ "FOR THE DEGREE OF" หน้าชื่อปริญญาที่ถูกต้อง = ส้ม FORM.DEGREE_PREFIX (อัปเดต 1.17.3)
+            cover_degree_en = soft(A.get("degree_cover_en", ""))
+            printed = (english_degree_prefix_missing(cover_text, expected_text, cover_degree_en)
+                       if program_language != "thai" and label == "ข้อความประเภทงาน" else "")
+            if printed:
+                _add_degree_prefix(rep, "หน้าปก", printed, ENGLISH_DEGREE_PREFIX.upper(),
+                                   f"{ENGLISH_DEGREE_PREFIX.upper()} {cover_degree_en}")
+                continue
             snippet, ratio = _best_cover_match(expected_text, cover_text)
             # เกณฑ์ 0.8: ข้อความพิมพ์ผิดเล็กน้อย (ตก S/สลับคำ) จะได้คะแนนสูงกว่านี้
             # ส่วนการบังเอิญไปตรง substring คนละบรรทัด (โดยเฉพาะไทย) จะต่ำกว่า

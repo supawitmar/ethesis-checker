@@ -130,9 +130,18 @@
   .slot-foot .hint { margin:0; }
   /* วางข้อความหน้าประวัตินักศึกษา MIS (อัปเดต 1.16) — ทางรอง พับไว้ใต้ช่องไฟล์ eThesis */
   .mis-paste { margin-top:12px; border:1px dashed var(--line-2); border-radius:12px; padding:10px 14px; }
-  .mis-paste > summary { cursor:pointer; font-size:.86rem; font-weight:600; color:var(--navy); min-height:28px;
-       display:flex; align-items:center; }
-  .mis-paste > summary:focus-visible { outline:none; box-shadow:var(--ring); border-radius:8px; }
+  /* ลูกศรชี้ลงบอกว่ากดแล้วมีช่องให้วางเพิ่ม (อัปเดต 1.17.3 เจ้าของ 27 พ.ย. 2569 "ทำเหมือนลูกศรชี้ลงให้รู้หน่อย") หมุนชี้ขึ้นเมื่อเปิด
+     ตัวชี้ของเบราว์เซอร์หายไปเพราะ summary เป็น flex — ซ่อนให้หมดทุกเบราว์เซอร์แล้ววาดเอง แบบเดียวกับหน้ารายงาน */
+  .mis-paste > summary { cursor:pointer; font-size:.86rem; font-weight:600; color:var(--navy); min-height:36px;
+       display:flex; align-items:center; gap:10px; list-style:none; margin:-4px -8px; padding:4px 8px;
+       border-radius:8px; transition:background .15s; }
+  .mis-paste > summary::-webkit-details-marker { display:none; }
+  .mis-paste > summary:hover { background:var(--navy-soft); }
+  .mis-paste > summary:focus-visible { outline:none; box-shadow:var(--ring); }
+  .mis-sum-text { flex:1; min-width:0; }
+  .mis-arrow { flex:none; width:22px; height:22px; border-radius:99px; display:grid; place-items:center;
+       background:var(--navy-soft); color:var(--navy); transition:transform .2s; }
+  .mis-paste[open] > summary .mis-arrow { transform:rotate(180deg); }
   .mis-paste textarea { margin-top:8px; min-height:110px; font-size:.84rem; }
   .mis-paste .hint { margin-top:6px; }
   .slot-label { font-size:.82rem; font-weight:600; color:var(--ink-2); margin-bottom:8px; }
@@ -334,7 +343,9 @@
             <p class="hint">✓ อ่านรูปแบบเล่ม 1/2 ที่ติ๊กไว้ในไฟล์ได้ด้วย</p>
           </div>
           <details class="mis-paste" id="mis-paste">
-            <summary>นักศึกษายังไม่ส่ง eThesis? วางข้อความจากหน้าประวัตินักศึกษา (MIS)</summary>
+            <summary><span class="mis-sum-text">นักศึกษายังไม่ส่ง eThesis? วางข้อความจากหน้าประวัตินักศึกษา (MIS)</span>
+              <span class="mis-arrow" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></span></summary>
             <label for="mis-text" class="hint">เปิดหน้า "ประวัตินักศึกษา" ในระบบ MIS กด Ctrl+A แล้ว Ctrl+C แล้ววางที่ช่องนี้ (Ctrl+V)</label>
             <textarea id="mis-text" rows="5" placeholder="วางข้อความทั้งหน้าที่คัดลอกมาที่นี่" spellcheck="false" autocomplete="off"></textarea>
             <div class="slot-foot">
