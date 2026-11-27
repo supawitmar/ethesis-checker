@@ -14024,3 +14024,93 @@ class Update115CoverTitleIsNotAHeader(unittest.TestCase):
         self.assertEqual(checker_module.header_tokens(page, words=words, widen=False), [])
         source = inspect.getsource(checker_module.run_check)
         self.assertIn("if front and i == cover_idx and i in fixed_band_headers:", source)
+
+
+class Update117ChapterStartsOnANewPage(unittest.TestCase):
+    """ทุกบทต้องเริ่มที่หน้าใหม่ — หัวบทพิมพ์ต่อท้ายเนื้อหาบทก่อน = แดงรายบท (อัปเดต 1.17 เจ้าของ 26 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    def _body(self, y, n=3):
+        return [(72, y - 16 * k, self.BODY, 12, False) for k in range(n)]
+
+    def _run(self, chapter_pages, toc_titles=("INTRODUCTION 1", "METHODS 2")):
+        import tempfile
+        toc = [(300, 800, "iii", 12, False), (230, 730, "TABLE OF CONTENTS", 12, True)]
+        toc += [(72, 700 - 16 * k, f"CHAPTER {k + 1} {title}", 12, False) for k, title in enumerate(toc_titles)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_styled_lines([toc, *chapter_pages]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]
+                if i["rule_id"] == "BODY.CHAPTER_NEW_PAGE"]
+
+    def _chapter1(self, header=None):
+        page = [(300, 800, "1", 12, False)]
+        if header:
+            page.append((72, 800, header, 10, False))
+        return page + [(255, 730, "CHAPTER 1", 14, True), (240, 712, "INTRODUCTION", 14, True), *self._body(680)]
+
+    def test_a_two_line_heading_under_the_previous_chapter(self):
+        # หัวบท 2 บรรทัดที่บรรทัดที่ 3 ของหน้า (แบบเล่มจริง) — ตัวหาหัวบท 2 บรรทัดดู 4 บรรทัดแรกของหน้า (heading_scan_lines)
+        page2 = [(300, 800, "2", 12, False), *self._body(730, 1),
+                 (255, 700, "CHAPTER 2", 14, True), (255, 682, "METHODS", 14, True), *self._body(650)]
+        [item] = self._run([self._chapter1(), page2])
+        self.assertEqual(item["location"], "บทที่ 2 (หน้า 2)")
+        self.assertEqual(item["found"], "บทที่ 2 ขึ้นต่อจากเนื้อหาของบทก่อนในหน้าเดียวกัน ไม่ได้ขึ้นหน้าใหม่")
+        self.assertEqual(item["expected"], "ตาม template ทุกบทต้องเริ่มที่หน้าใหม่")
+        self.assertEqual(item["fix"], "แทรกตัวแบ่งหน้า (Page Break) ก่อนหัวบท")
+
+    def test_a_one_line_heading_in_the_middle_of_the_page(self):
+        chapter1 = [(300, 800, "1", 12, False), (205, 730, "CHAPTER 1 INTRODUCTION", 14, True), *self._body(690)]
+        page2 = [(300, 800, "2", 12, False), *self._body(770, 6), (230, 600, "CHAPTER 2 METHODS", 14, True),
+                 *self._body(560)]
+        items = self._run([chapter1, page2])
+        self.assertEqual([i["location"] for i in items], ["บทที่ 2 (หน้า 2)"])
+
+    def test_headings_at_the_top_are_fine(self):
+        """ควบคุมเชิงลบ — หัวบทบนสุดใต้เลขหน้า · มีหัวกระดาษ (running head) ในแถบหัวกระดาษ = ไม่แจ้ง"""
+        page2 = [(300, 800, "2", 12, False), (255, 730, "CHAPTER 2", 14, True), (255, 712, "METHODS", 14, True),
+                 *self._body(680)]
+        self.assertEqual(self._run([self._chapter1(), page2]), [])
+        with_header = [(300, 800, "2", 12, False), (72, 800, "A Made-up Running Head", 10, False),
+                       (255, 730, "CHAPTER 2", 14, True), (255, 712, "METHODS", 14, True), *self._body(680)]
+        self.assertEqual(self._run([self._chapter1("A Made-up Running Head"), with_header]), [])
+
+    def test_the_row_reader(self):
+        rows = [(40, "12"), (90, "ข้อความเนื้อหาของบทก่อน"), (130, "บทที่ 3"), (150, "ผลการศึกษา")]
+        self.assertTrue(checker_module.chapter_starts_mid_page(rows, 67, 3))
+        self.assertFalse(checker_module.chapter_starts_mid_page(rows[:1] + rows[2:], 67, 3))       # มีแค่เลขหน้า
+        self.assertFalse(checker_module.chapter_starts_mid_page([(40, "Running head text"), *rows[2:]], 67, 3))
+        self.assertTrue(checker_module.chapter_starts_mid_page([(90, "เนื้อหา"), (130, "บทที่ 3 ผลการศึกษา")], 67, 3))
+        self.assertIsNone(checker_module.chapter_starts_mid_page(rows, 67, 4))                     # หาหัวบทไม่เจอ
+        # ลายน้ำแนวเฉียง (ไม่ตั้งตรง) ไม่นับ
+        words = [{"text": "DRAFT", "x0": 200, "x1": 300, "top": 300, "bottom": 340, "upright": False},
+                 {"text": "CHAPTER", "x0": 250, "x1": 310, "top": 400, "bottom": 414},
+                 {"text": "4", "x0": 315, "x1": 322, "top": 400, "bottom": 414}]
+        rows, header = checker_module.chapter_page_rows(words, 842)
+        self.assertEqual([text for _top, text in rows], ["CHAPTER 4"])
+        self.assertFalse(checker_module.chapter_starts_mid_page(rows, header, 4))
+        # ข้อความสีขาว (มองไม่เห็น) เหนือหัวบทไม่นับ — เล่มจริงมีป้ายสีขาวซ่อนเหนือ "CHAPTER N" ทุกบท
+        white = [{"text": "Hidden", "x0": 209, "x1": 260, "top": 87, "bottom": 101, "non_stroking_color": (1,)},
+                 {"text": "label", "x0": 265, "x1": 300, "top": 87, "bottom": 101, "non_stroking_color": (1, 1, 1)},
+                 {"text": "CHAPTER", "x0": 250, "x1": 310, "top": 135, "bottom": 149, "non_stroking_color": (0,)},
+                 {"text": "4", "x0": 315, "x1": 322, "top": 135, "bottom": 149, "non_stroking_color": (0,)}]
+        rows, header = checker_module.chapter_page_rows(white, 842)
+        self.assertFalse(checker_module.chapter_starts_mid_page(rows, header, 4))
+        # ควบคุมเชิงลบ: สีดำ ลงมากลางหน้า (บรรทัดดำที่ 87 จุดเหนือช่องว่างใหญ่ = หัวกระดาษที่อยู่ต่ำ ตาม header_band_bottom)
+        black = [dict(w, non_stroking_color=(0,), top=w["top"] + 200, bottom=w["bottom"] + 200) for w in white]
+        rows, header = checker_module.chapter_page_rows(black, 842)
+        self.assertTrue(checker_module.chapter_starts_mid_page(rows, header, 4))                   # ควบคุมเชิงลบ
+
+    def test_it_is_red_in_every_mode_and_translated(self):
+        self.assertEqual(__import__("ethesis_rules").RULE_CATALOG["BODY.CHAPTER_NEW_PAGE"]["failure_zone"], "RED")
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("บทที่ 2 ขึ้นต่อจากเนื้อหาของบทก่อนในหน้าเดียวกัน ไม่ได้ขึ้นหน้าใหม่", pairs),
+                         "Chapter 2 continues on the same page after the previous chapter's text instead of starting on a new page")
+        self.assertEqual(i18n.tr_en("ตาม template ทุกบทต้องเริ่มที่หน้าใหม่", pairs),
+                         "As in the template, every chapter must start on a new page")
+        self.assertEqual(i18n.tr_en("แทรกตัวแบ่งหน้า (Page Break) ก่อนหัวบท", pairs),
+                         "Insert a page break before the chapter heading")
+

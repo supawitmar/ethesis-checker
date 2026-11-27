@@ -855,6 +855,11 @@ var TR = [
   [/^ชื่อนักศึกษา$/g, 'The student name'],
   [/^ชื่อปริญญา$/g, 'The degree name'],
   [/^ชื่อปริญญาแบบย่อ$/g, 'The abbreviated degree name'],
+  // อัปเดต 1.17: บทต้องขึ้นหน้าใหม่ (BODY.CHAPTER_NEW_PAGE)
+  [/^บทที่ (\d+) ขึ้นต่อจากเนื้อหาของบทก่อนในหน้าเดียวกัน ไม่ได้ขึ้นหน้าใหม่$/g,
+   'Chapter $1 continues on the same page after the previous chapter\'s text instead of starting on a new page'],
+  [/^ตาม template ทุกบทต้องเริ่มที่หน้าใหม่$/g, 'As in the template, every chapter must start on a new page'],
+  [/^แทรกตัวแบ่งหน้า \(Page Break\) ก่อนหัวบท$/g, 'Insert a page break before the chapter heading'],
   // อัปเดต 1.15: หัวบท "บทที่ N" กับชื่อบทในบรรทัดเดียวกัน (BODY.CHAPTER_HEADING_LINES)
   [/^หัวบทเขียน ("[^"]*") กับชื่อบทในบรรทัดเดียวกัน: บทที่ ([\d,–\s]+)$/g,
    'The chapter heading has $1 and the chapter title on the same line: chapter $2'],

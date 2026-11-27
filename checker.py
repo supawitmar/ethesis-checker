@@ -58,6 +58,7 @@ SIG_TITLE_DOTS_ZONE = rule_zone("FRONT.APPROVAL_TITLE_DOTS", "RED")
 ABSTRACT_QUALIFICATION_ZONE = rule_zone("FRONT.ABSTRACT_QUALIFICATION", "ORANGE")
 DEGREE_PREFIX_ZONE = rule_zone("FORM.DEGREE_PREFIX", "ORANGE")
 CHAPTER_HEADING_LINES_ZONE = rule_zone("BODY.CHAPTER_HEADING_LINES", "ORANGE")
+CHAPTER_NEW_PAGE_ZONE = rule_zone("BODY.CHAPTER_NEW_PAGE", "RED")
 # keyword เกิน 5 คำ = ข้อสังเกต ผ่านได้ (เจ้าหน้าที่สั่ง ก.ย. 2569) กฎอื่นของ
 # FRONT.ABSTRACT (ภาษาครบ จำนวนหน้า ชื่อเรื่อง รายชื่อกรรมการ) ยังเป็นแดงเหมือนเดิม
 KEYWORD_COUNT_ZONE = rule_zone("FRONT.KEYWORD_COUNT", "YELLOW")
@@ -9142,6 +9143,38 @@ def styled_one_line_chapters(words, chars):
     return found
 
 
+def chapter_page_rows(words, height):
+    """แถวข้อความของหน้า (ขอบบน, ข้อความ) เรียงบนลงล่าง + ขอบล่างของแถบหัวกระดาษ — ใช้ดูว่าหัวบทอยู่บนสุดของหน้าไหม (อัปเดต 1.17)
+
+    ไม่นับคำที่ไม่ตั้งตรง (ลายน้ำแนวเฉียง/ข้อความหมุน) และข้อความสีขาว (มองไม่เห็น — เล่มจริงมีป้ายสีขาว 14 จุดซ่อนอยู่เหนือ
+    "CHAPTER N" ทุกบท) · ตำแหน่งจริงจากพิกัด ไม่ใช่ลำดับบรรทัดของ extract_text · words ควรมี non_stroking_color
+    """
+    upright = [w for w in words or () if w.get("upright", True) and not _is_white_fill(w.get("non_stroking_color"))]
+    rows = [(min(float(w["top"]) for w in row), fix_thai_pua(" ".join(w["text"] for w in row)))
+            for row in _word_rows(upright)]
+    return rows, header_band_bottom(upright, height)
+
+
+def chapter_starts_mid_page(rows, header_bottom, number):
+    """หัวบทที่ N บนหน้านี้มีเนื้อหาอยู่เหนือ (ไม่ได้ขึ้นหน้าใหม่) ไหม (อัปเดต 1.17 เจ้าของ 26 พ.ย. 2569 เลือก "ก" = แดง)
+
+    True = มีแถวข้อความที่เป็นเนื้อหา (มีตัวอักษรอย่างน้อย 2 ตัว) อยู่เหนือแถวหัวบท และต่ำกว่าแถบหัวกระดาษ
+    False = หัวบทเป็นข้อความแรกของหน้า (เลขหน้า/หัวกระดาษไม่นับ) · None = หาแถวหัวบทไม่เจอ ไม่ตัดสิน
+    แถวหัวบท = "บทที่ N" / "CHAPTER N" ทั้งแถว (หัวบท 2 บรรทัด) หรือ "บทที่ N <ชื่อบท>" (หัวบทบรรทัดเดียว อัปเดต 1.15)
+    รูป เส้น กรอบเหนือหัวบท (ตกแต่ง) ไม่ใช่ข้อความ จึงไม่นับ
+    """
+    head = None
+    for k, (_top, text) in enumerate(rows):
+        hit = one_line_chapter(text)
+        if _chapter_match(text) == number or (hit and hit[0] == number):
+            head = k
+            break
+    if head is None:
+        return None
+    return any(top >= header_bottom and len(re.findall(r'[A-Za-zก-๙]', text)) >= 2
+               for top, text in rows[:head])
+
+
 def _report_one_line_headings(rep, heads):
     """ส้มข้อเดียวทั้งเล่ม — หัวบทที่เขียน "บทที่ N" กับชื่อบทในบรรทัดเดียวกัน (อัปเดต 1.15) · heads = [(เลขบท, ภาษาอังกฤษไหม)]"""
     if not heads:
@@ -9546,6 +9579,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     table_chapter_cells = {}   # ดัชนีหน้า → เลขบทที่ "บทที่ N" เป็นเซลล์ตาราง ไม่ใช่หัวบท (chapter_lines_far_right อัปเดต 1.12.3)
     # หัวกระดาษแบบแถบ 8% ตายตัวของแผ่นที่อาจเป็นหน้าปก (find_cover_page ดู 10 แผ่นแรก · อัปเดต 1.15)
     fixed_band_headers = {}
+    chapter_rows = {}          # ดัชนีหน้า → (แถวข้อความ, ขอบล่างแถบหัวกระดาษ) ของหน้าที่มี "บทที่/CHAPTER" (อัปเดต 1.17)
     one_line_heads = {}        # ดัชนีหน้า → {เลขบท: ข้อความบรรทัด} ของหัวบทบรรทัดเดียวที่หน้าตาเป็นหัวบท (styled_one_line_chapters อัปเดต 1.15)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
@@ -9599,6 +9633,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     _heads = styled_one_line_chapters(_words, _pg.chars)
                     if _heads:
                         one_line_heads[_i] = _heads
+                _normed = norm(pages[-1])
+                if "บทท" in _normed or "CHAPTER" in _normed:
+                    chapter_rows[_i] = chapter_page_rows(_pg.extract_words(extra_attrs=["non_stroking_color"]),
+                                                         float(_pg.height or 0))
             except Exception:
                 header_words.append([])
                 del footers[_i:]
@@ -9940,6 +9978,14 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 "แก้เลขบทให้เป็นเลขอารบิก", "BODY.CHAPTER_NUMBER")
     rep.add_info("body", "บทที่พบในเนื้อหา",
                  [f"บทที่ {c[0]}: {c[1]} ({page_ref(c[2])})" for c in body_ch])
+    # บทต้องขึ้นหน้าใหม่ (อัปเดต 1.17) — แจ้งรายบท ทุกโหมด · หาแถวหัวบทไม่เจอ (เช่นบทที่ไม่มีบรรทัด "บทที่ N") ไม่ตัดสิน
+    for _cn, _title, _idx, *_rest in body_ch:
+        _rows = chapter_rows.get(_idx)
+        if _rows and chapter_starts_mid_page(_rows[0], _rows[1], _cn):
+            rep.add(CHAPTER_NEW_PAGE_ZONE, "body", f"บทที่ {_cn} ({page_ref(_idx)})",
+                    f"บทที่ {_cn} ขึ้นต่อจากเนื้อหาของบทก่อนในหน้าเดียวกัน ไม่ได้ขึ้นหน้าใหม่",
+                    "ตาม template ทุกบทต้องเริ่มที่หน้าใหม่",
+                    "แทรกตัวแบ่งหน้า (Page Break) ก่อนหัวบท", "BODY.CHAPTER_NEW_PAGE")
 
     # แก้ก่อนตรวจสารบัญ↔เนื้อหา เพราะต้องรู้ว่าบทไหน "ประกาศบังคับชื่อ" — บทที่บังคับ
     # ให้ยึดประกาศเป็นหลัก (เทียบสารบัญกับประกาศ และเนื้อหากับประกาศ แยกกันด้านล่าง)
