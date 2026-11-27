@@ -14174,3 +14174,88 @@ class Update1171TwoLineHeadingDownThePage(unittest.TestCase):
         self.assertLess(source.index("for i in sorted(number_line_heads):"), source.index("for i in sorted(one_line_heads):"))
         self.assertIn("cn in table_chapter_cells.get(i, ())", source.split("for i in sorted(number_line_heads):")[1][:900])
 
+
+class Update1172TocContinuationAndMisnamedReferences(unittest.TestCase):
+    """หน้าที่ 2 ของสารบัญ "(ต่อ)" ไม่ใช่หัวข้อสะกดผิด · หัวข้อรายการอ้างอิงที่ใช้ชื่ออื่น = แดงแบบชื่อผิด (อัปเดต 1.17.2 · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    # ---------- ก. สารบัญ (ต่อ) ----------
+    def test_list_page_headings(self):
+        for line in ("สารบัญ", "สารบัญ (ต่อ)", "สารบัญตาราง", "สารบัญตาราง (ต่อ)", "สารบัญรูปภาพ (ต่อ)",
+                     "TABLE OF CONTENTS (Cont.)", "LIST OF TABLES (CONTINUED)", "LIST OF FIGURES (ต่อ)"):
+            self.assertTrue(checker_module.is_list_page_heading(line), line)
+        for line in ("บทที่ 1 บทนำ", "ภาคผนวก", "สารบัญตารง", "กิตติกรรมประกาศ"):
+            self.assertFalse(checker_module.is_list_page_heading(line), line)
+
+    def test_a_continued_heading_is_not_a_misspelled_entry(self):
+        """เล่มจริง: สารบัญไม่ได้ลง "สารบัญตาราง" และหน้าที่สองขึ้นหัว "สารบัญ (ต่อ)" — เดิมจับคู่เป็นสะกดผิด"""
+        lines = [(0, "สารบัญ"), (0, "บทที่ 1 บทนำ ........ 1"), (1, "สารบัญ (ต่อ)"), (1, "สารบัญ"),
+                 (1, "ภาคผนวก ........ 50")]
+        self.assertIsNone(checker_module._toc_misspelled_heading(lines, "สารบัญตาราง"))
+        # ควบคุมเชิงลบ — รายการที่สะกดผิดจริงยังจับได้
+        self.assertEqual(checker_module._toc_misspelled_heading(lines + [(1, "สารบัญตารง ........ ฉ")], "สารบัญตาราง"),
+                         ("สารบัญตารง", 1))
+
+    # ---------- ข. รายการอ้างอิงที่ใช้ชื่ออื่น ----------
+    def test_other_names_for_the_references(self):
+        for line in ("เอกสารอ้างอิง", "อ้างอิง", "รายการเอกสารอ้างอิง ........ 164", "LITERATURE CITED", "Works Cited",
+                     "เอกสารอ้างอิง (ต่อ)"):
+            self.assertTrue(checker_module.is_misnamed_reference_heading(line), line)
+        for line in ("รายการอ้างอิง", "บรรณานุกรม", "REFERENCES", "การอ้างอิงในบทที่ 2", "ภาคผนวก"):
+            self.assertFalse(checker_module.is_misnamed_reference_heading(line), line)
+
+    def _run(self, reference_heading, toc_reference):
+        import tempfile
+        toc = [(300, 800, "iii"), (230, 730, "TABLE OF CONTENTS"), (72, 700, "CHAPTER 1 INTRODUCTION 1")]
+        if toc_reference:
+            toc.append((72, 684, f"{toc_reference} 2"))
+        toc.append((72, 668, "BIOGRAPHY 3"))
+        chapter1 = [(300, 800, "1"), (270, 730, "CHAPTER 1"), (255, 714, "INTRODUCTION"), (72, 690, self.BODY)]
+        references = [(300, 800, "2")] + ([(250, 730, reference_heading)] if reference_heading else []) + [
+            (72, 700, "Doe, J. (2020). A made-up reference. Journal of Examples, 1, 1-2.")]
+        biography = [(300, 800, "3"), (260, 730, "BIOGRAPHY"), (72, 700, "NAME Made-up Person")]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_placed_lines([toc, chapter1, references, biography]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+
+    def test_a_misnamed_references_page_is_reported_like_a_wrong_chapter_title(self):
+        issues = self._run("LITERATURE CITED", "LITERATURE CITED")
+        [item] = [i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")]
+        self.assertEqual(item["location"], "รายการอ้างอิง ในสารบัญ (หน้า iii) และในเนื้อหา (หน้า 2)")
+        self.assertEqual(item["found"], 'หัวข้อนี้ในเล่มเขียนว่า "LITERATURE CITED"')
+        self.assertEqual(item["expected"], 'ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY"')
+        self.assertEqual(item["fix"], 'แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ทั้งในสารบัญและในเนื้อหา')
+        self.assertEqual(item["rule_id"], "END.STRUCTURE")
+        self.assertFalse([i for i in issues if "ไม่พบหน้ารายการอ้างอิง" in i["found"]], issues)
+        self.assertFalse([i for i in issues if "รายการอ้างอิง/บรรณานุกรม" in i["found"]], issues)    # ไม่แจ้งซ้ำทางสารบัญ
+
+    def test_only_one_side_names_only_that_side(self):
+        issues = self._run("LITERATURE CITED", "REFERENCES")
+        [item] = [i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")]
+        self.assertEqual(item["location"], "รายการอ้างอิง ในเนื้อหา (หน้า 2)")
+        self.assertEqual(item["fix"], 'แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY"')
+
+    def test_a_book_without_references_keeps_the_old_item(self):
+        """ควบคุมเชิงลบ — ไม่มีหน้านี้จริง = "ไม่พบหน้ารายการอ้างอิง" ตามเดิม · ชื่อถูก = ไม่มีข้อชื่อผิด"""
+        issues = self._run(None, None)
+        self.assertTrue([i for i in issues if i["found"] == "ไม่พบหน้ารายการอ้างอิง"], issues)
+        self.assertFalse([i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")], issues)
+        issues = self._run("REFERENCES", "REFERENCES")
+        self.assertFalse([i for i in issues if i["found"].startswith("หัวข้อนี้ในเล่มเขียนว่า")
+                          or i["found"] == "ไม่พบหน้ารายการอ้างอิง"], issues)
+
+    def test_english_wording(self):
+        import tools.check_i18n as i18n
+        _block, pairs = i18n.load_tr()
+        self.assertEqual(i18n.tr_en("รายการอ้างอิง ในสารบัญ (หน้า ฌ) และในเนื้อหา (หน้า 164)", pairs),
+                         "References in the table of contents (page ฌ) and in the body (page 164)")
+        self.assertEqual(i18n.tr_en('หัวข้อนี้ในเล่มเขียนว่า "LITERATURE CITED"', pairs),
+                         'This heading is written in the book as "LITERATURE CITED"')
+        self.assertEqual(i18n.tr_en('ต้องแก้เป็น "REFERENCES" หรือ "BIBLIOGRAPHY"', pairs),
+                         'It must be changed to "REFERENCES" or "BIBLIOGRAPHY"')
+        self.assertEqual(i18n.tr_en('แก้หัวข้อเป็น "REFERENCES" หรือ "BIBLIOGRAPHY" ทั้งในสารบัญและในเนื้อหา', pairs),
+                         'Change the heading to "REFERENCES" or "BIBLIOGRAPHY" in both the table of contents and the body')
+

@@ -8413,6 +8413,18 @@ def _toc_page_label(text):
 _TOC_SECTION_GLOSS = {"appendix": " (APPENDIX)", "biography": " (BIOGRAPHY)"}
 
 
+def is_list_page_heading(line):
+    """บรรทัดนี้เป็นหัวเรื่องของหน้าสารบัญ / สารบัญตาราง / สารบัญรูปภาพ / คำอธิบายสัญลักษณ์ เอง (มี "(ต่อ)" หรือไม่ก็ได้) (อัปเดต 1.17.2)
+
+    เจ้าของ 27 พ.ย. 2569: *"หน้าที่เป็นหน้าที่ต่อไปของสารบัญ ก็สามารถใช้คำว่า สารบัญ (ต่อ) ได้ หรือจะใช้ สารบัญ ก็ได้ หลักการเดียวกันกับ
+    สารบัญประเภทอื่นๆ หน้าที่ 2 เป็นต้นไป ก็ให้ใช้หลักการนี้ได้ ซึ่งถือว่าไม่ผิด"* — เล่มจริงหน้าที่สองของสารบัญขึ้นหัวว่า "สารบัญ (ต่อ)"
+    บรรทัดนี้อยู่ในรายการบรรทัดสารบัญ (toc_lines) แล้วตัวหาหัวข้อสะกดผิดจับคู่กับ "สารบัญตาราง" (ที่สารบัญไม่ได้ลงไว้)
+    ได้แดง 'สารบัญสะกดหัวข้อนี้ผิด เขียนว่า "สารบัญ (ต่อ)"' — หัวเรื่องของหน้าไม่ใช่รายการในสารบัญ จึงไม่นำมาเทียบ
+    """
+    head = without_continuation(line)
+    return is_toc_heading(head) or bool(_toc_section_kind(head).startswith("list_"))
+
+
 def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
     """บรรทัดในสารบัญที่ "น่าจะใช่หัวข้อนี้แต่สะกดผิด" — คืน (หัวข้อที่พบ, ดัชนีหน้า)
 
@@ -8427,7 +8439,7 @@ def _toc_misspelled_heading(toc_lines, want, min_ratio=0.7):
     best, best_ratio = None, min_ratio - 1e-9
     for page_idx, line in toc_lines:
         head = _strip_toc_page_number(line).strip()
-        if not head or _toc_section_kind(line):
+        if not head or _toc_section_kind(line) or is_list_page_heading(head):
             continue
         ratio = difflib.SequenceMatcher(None, norm(head), want_key).ratio()
         if ratio > best_ratio:
@@ -8685,6 +8697,33 @@ N_ENTITLED = ['ENTITLED', norm('เรื่อง')]
 N_SIG_TEMPLATE_SENTENCES = (norm("was submitted to the Faculty of Graduate Studies"), norm(SIGNATURE_TEMPLATE_TH_TAIL))
 N_SIG_COMMITTEE_WORDS = ("COMMITTEE", norm("คณะกรรมการ"))
 N_REF = ['REFERENCES', 'REFERENCE', 'BIBLIOGRAPHY', norm('รายการอ้างอิง'), norm('บรรณานุกรม')]
+# ชื่ออื่นที่นักศึกษาใช้เรียกหน้ารายการอ้างอิง (อัปเดต 1.17.2) — ไม่ใช่ชื่อที่ถูก แต่คือส่วนเดียวกัน แจ้งแบบชื่อผิด ไม่ใช่ "ไม่พบ"
+# เจ้าของ 27 พ.ย. 2569 *"จริงๆ ในเล่มมีส่วนนี้นะ แต่เขาเขียนผิดเป็น "เอกสารอ้างอิง" ซึ่งลักษณะการแจ้งให้แจ้ง น่าจะต้องเป็นเหมือน
+# ที่แจ้งว่าชื่อบทผิด มากกว่า"* · เทียบทั้งบรรทัด (หลัง norm และตัด "(ต่อ)") ไม่ใช่คำที่ขึ้นต้น
+N_REF_OTHER_NAMES = {norm(name) for name in (
+    'เอกสารอ้างอิง', 'อ้างอิง', 'รายการเอกสารอ้างอิง', 'หนังสืออ้างอิง', 'เอกสารและสิ่งอ้างอิง',
+    'LITERATURE CITED', 'LITERATURES CITED', 'WORKS CITED', 'REFERENCE LIST', 'LIST OF REFERENCES',
+    'CITED REFERENCES', 'CITED LITERATURE')}
+
+
+def is_misnamed_reference_heading(line):
+    """หัวเรื่องที่ใช้ชื่ออื่นแทน "รายการอ้างอิง/บรรณานุกรม" (REFERENCES/BIBLIOGRAPHY) ไหม (อัปเดต 1.17.2)"""
+    return norm(without_continuation(_strip_toc_page_number(line or ""))) in N_REF_OTHER_NAMES
+
+
+def _report_misnamed_references(rep, printed, page_idx, toc_idx, page_ref, program_language):
+    """แดงข้อเดียวแบบชื่อบทผิด — บอกตำแหน่งในสารบัญและ/หรือในเนื้อหาตามที่พบ (อัปเดต 1.17.2)"""
+    one, other = reference_term_choice(program_language, printed)
+    places = []
+    if toc_idx is not None:
+        places.append(f"ในสารบัญ ({page_ref(toc_idx)})")
+    if page_idx is not None:
+        places.append(f"ในเนื้อหา ({page_ref(page_idx)})")
+    rep.add("RED", "end_matter", "รายการอ้างอิง " + " และ".join(places),
+            f'หัวข้อนี้ในเล่มเขียนว่า "{printed}"',
+            f'ต้องแก้เป็น "{one}" หรือ "{other}"',
+            f'แก้หัวข้อเป็น "{one}" หรือ "{other}"' + (" ทั้งในสารบัญและในเนื้อหา" if len(places) == 2 else ""),
+            "END.STRUCTURE")
 N_BIO = ['BIOGRAPHY', norm('ประวัติผู้วิจัย'), norm('ประวัติผู้เขียน')]
 # หัวข้อ "ประวัติ" เฉย ๆ — เล่มจริง 6538041 SHPP/D ตั้งหัวข้อหน้าสุดท้ายแบบนี้ ระบบเลยฟ้องผิดว่า
 # "ไม่พบประวัติผู้วิจัย" (เจ้าหน้าที่: "ประวัติผู้วิจัย ... ในส่วนท้ายมีนะ") คำเดียวนี้อาจเป็นหัวข้อ
@@ -10288,6 +10327,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # ---------- ส่วนท้ายเล่ม ----------
     _p("ตรวจส่วนท้ายเล่ม (อ้างอิง/ภาคผนวก/ประวัติ)")
     ref_head = None
+    ref_misnamed = False            # หน้ารายการอ้างอิงที่ใช้ชื่ออื่น แจ้งชื่อผิดแล้ว (อัปเดต 1.17.2)
     bio_page = None
     bio_heading = ""
     last_major = None
@@ -10356,11 +10396,17 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f'{found} {len(header_bad)} หน้า',
                     expected, fix, "PAGE.HEADER")
 
+    # หัวข้อรายการอ้างอิงที่ใช้ชื่ออื่น (อัปเดต 1.17.2) — เฉพาะส่วนท้ายเล่ม: หลังหน้าแรกของบทสุดท้าย ก่อนภาคผนวก/ประวัติ
+    last_chapter_idx = max((c[2] for c in body_ch), default=end_scan_start)
+    ref_other = None                # (หัวเรื่องที่พิมพ์, ดัชนีหน้า)
     for i, t in enumerate(pages):
         if i < end_scan_start:
             continue
         for l in top_lines(t, 3):
             nl = norm(l)
+            if (ref_other is None and i > last_chapter_idx and appendix_page is None and bio_page is None
+                    and is_misnamed_reference_heading(l)):
+                ref_other = (soft(without_continuation(l)), i)
             ref_groups = [
                 ('REFERENCES', 'REFERENCE'), ('BIBLIOGRAPHY',),
                 (norm('รายการอ้างอิง'),), (norm('บรรณานุกรม'),),
@@ -10385,9 +10431,21 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                     f'หัวข้อในหน้านี้เลือกหลายคำ: "{ref_head[0]}"',
                     f"เลือกคำเดียว: {one} หรือ {other}", "ลบคำที่ไม่ใช้")
     else:
-        one, other = reference_term_choice(book_wording_language)
-        rep.add("RED", "end_matter", "ส่วนท้ายเล่ม", "ไม่พบหน้ารายการอ้างอิง",
-                f"ต้องมีหัวข้อ {one} หรือ {other} เสมอ", "")
+        _ref_toc = next(((idx, line) for idx, line in toc_lines if is_misnamed_reference_heading(line)), None)
+        if ref_other:
+            # พบหน้านี้แต่ชื่อผิด — แจ้งแบบชื่อบทผิด แล้วนับหน้านี้เป็นหน้ารายการอ้างอิง (ลำดับส่วนท้ายเล่มตรวจต่อได้)
+            _report_misnamed_references(rep, ref_other[0], ref_other[1], _ref_toc[0] if _ref_toc else None,
+                                        page_ref, book_wording_language)
+            ref_head = (ref_other[0], ref_other[1], 1)
+            ref_misnamed = True
+        else:
+            if _ref_toc:
+                # สารบัญใช้ชื่ออื่น แต่ไม่พบหน้านั้นในเล่ม — บอกชื่อผิดที่สารบัญ และยังแจ้งไม่พบหน้าตามเดิม
+                _report_misnamed_references(rep, soft(without_continuation(_strip_toc_page_number(_ref_toc[1]))),
+                                            None, _ref_toc[0], page_ref, book_wording_language)
+            one, other = reference_term_choice(book_wording_language)
+            rep.add("RED", "end_matter", "ส่วนท้ายเล่ม", "ไม่พบหน้ารายการอ้างอิง",
+                    f"ต้องมีหัวข้อ {one} หรือ {other} เสมอ", "")
     bio_want = expected_biography_heading(book_wording_language, bio_heading)
     if bio_page is None:
         # ตำแหน่งเดียวกับชื่อหมวด ข้อความสรุปจึงไม่พิมพ์ซ้ำ · เดิม "ทั้งเล่ม" ตกหมวดเนื้อหา (เจ้าหน้าที่แก้มือ — อัปเดต 1.8.3)
@@ -11317,6 +11375,8 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
             toc_typos_reported = set()
             for section_kind, (section_label, actual_page_idx) in actual_toc_sections.items():
                 candidates = toc_entries_by_kind.get(section_kind, [])
+                if section_kind == "references" and ref_misnamed and not candidates:
+                    continue                # หัวข้อรายการอ้างอิงที่ใช้ชื่ออื่น แจ้งแบบชื่อผิดไปแล้ว (อัปเดต 1.17.2)
                 if not candidates:
                     # หัวข้อที่ "มีอยู่แต่สะกดผิด" ต้องบอกว่าสะกดผิด ไม่ใช่บอกว่าไม่มี
                     # เพราะวิธีแก้คนละอย่างกัน (แก้ตัวสะกด ไม่ใช่เพิ่มบรรทัดใหม่)

@@ -855,6 +855,16 @@ var TR = [
   [/^ชื่อนักศึกษา$/g, 'The student name'],
   [/^ชื่อปริญญา$/g, 'The degree name'],
   [/^ชื่อปริญญาแบบย่อ$/g, 'The abbreviated degree name'],
+  // อัปเดต 1.17.2: หัวข้อรายการอ้างอิงที่ใช้ชื่ออื่น (END.STRUCTURE)
+  [/^รายการอ้างอิง ในสารบัญ \(หน้า (\S+)\) และในเนื้อหา \(หน้า (\S+)\)$/g,
+   'References in the table of contents (page $1) and in the body (page $2)'],
+  [/^รายการอ้างอิง ในสารบัญ \(หน้า (\S+)\)$/g, 'References in the table of contents (page $1)'],
+  [/^รายการอ้างอิง ในเนื้อหา \(หน้า (\S+)\)$/g, 'References in the body (page $1)'],
+  [/^หัวข้อนี้ในเล่มเขียนว่า ("[^"]*")$/g, 'This heading is written in the book as $1'],
+  [/^ต้องแก้เป็น ("[^"]*") หรือ ("[^"]*")$/g, 'It must be changed to $1 or $2'],
+  [/^แก้หัวข้อเป็น ("[^"]*") หรือ ("[^"]*") ทั้งในสารบัญและในเนื้อหา$/g,
+   'Change the heading to $1 or $2 in both the table of contents and the body'],
+  [/^แก้หัวข้อเป็น ("[^"]*") หรือ ("[^"]*")$/g, 'Change the heading to $1 or $2'],
   // อัปเดต 1.17: บทต้องขึ้นหน้าใหม่ (BODY.CHAPTER_NEW_PAGE)
   [/^บทที่ (\d+) ขึ้นต่อจากเนื้อหาของบทก่อนในหน้าเดียวกัน ไม่ได้ขึ้นหน้าใหม่$/g,
    'Chapter $1 continues on the same page after the previous chapter\'s text instead of starting on a new page'],
