@@ -965,10 +965,16 @@ class TheFormImportsFromTheEthesisFileOnly(unittest.TestCase):
     SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
 
     def test_the_paste_box_and_its_parser_are_gone(self):
+        """ตัวอ่าน/ตารางในหน้าเว็บของทางวางข้อความเดิมต้องไม่กลับมา
+
+        ทางวางข้อความหน้าประวัตินักศึกษา MIS (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569 "วิธีเดิมไป คือก็อปมาใส่" เฉพาะนักศึกษาที่ยังไม่ส่ง
+        eThesis) อ่านฝั่งเซิร์ฟเวอร์ด้วยตารางชุดเดียว — คำว่า "วางข้อความ" จึงกลับมาได้ แต่ตัวอ่านในหน้าเว็บยังห้าม
+        (Update116PasteTheMisProfile)
+        """
         html = self.SOURCE.read_text(encoding="utf-8")
         for gone in ('id="ethesis-source"', 'id="parse-ethesis"', 'id="tab-text"',
                      "parseEthesisText", "formatDegreeAbbreviation", "ethSourceHtml",
-                     "addEventListener('paste'", "วางข้อความ"):
+                     "addEventListener('paste'", "DEGREE_ABBR", "M.Sc."):
             self.assertNotIn(gone, html, gone)
 
     def test_the_file_import_is_still_there(self):
@@ -3050,3 +3056,117 @@ class Update113BackToEditFromThePrecheck(unittest.TestCase):
         self.assertIn('name="form_state"', html)
         # ใช้ฉบับร่างแล้ว ย้อนกลับมาหน้านี้ต้องได้ฟอร์มว่าง
         self.assertIn("if (RESTORE) { RESTORE = null; RESTORE_MISSING = false; history.replaceState(null, '', '/'); }", html)
+
+
+class Update116PasteTheMisProfile(unittest.TestCase):
+    """วางข้อความหน้าประวัตินักศึกษา (MIS) เมื่อนักศึกษายังไม่ส่ง eThesis (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569 · ข้อมูลสมมติ)"""
+
+    SOURCE = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+    PAGE = "\n".join(["รหัสนักศึกษา : 6512345 GRXX/M", "ชื่อ - นามสกุล : นายสมมติ ตัวอย่าง",
+                      "ชื่อภาษาอังกฤษ : Mr. SOMMOT TUAYANG", "ปริญญาที่ได้รับ(EN) : MASTER OF SCIENCE(MADE-UP)",
+                      "อาจารย์ที่ปรึกษาหลัก : อาจารย์ สมชาย ใจดี"])
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app)
+        cls.client.post("/login", data={"password": os.environ["APP_PASSWORD"]})
+
+    def test_the_endpoint_fills_the_form(self):
+        response = self.client.post("/parse-mis", data={"text": self.PAGE})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["student_id"], "6512345 GRXX/M")
+        self.assertEqual(data["degree_abbr_en"], "M.Sc. (MADE-UP)")
+        self.assertEqual(data["committees"]["exam"], [])
+
+    def test_text_that_is_not_the_page(self):
+        for text in ("", "hello", "x" * 50):
+            response = self.client.post("/parse-mis", data={"text": text})
+            self.assertEqual(response.status_code, 422, text)
+            self.assertEqual(response.json()["detail"], "ไม่พบข้อมูลประวัตินักศึกษาในข้อความที่วาง")
+        response = self.client.post("/parse-mis", data={"text": self.PAGE + "x" * main.MIS_TEXT_MAX_CHARS})
+        self.assertEqual(response.status_code, 413)
+
+    def test_it_needs_a_login(self):
+        response = TestClient(main.app).post("/parse-mis", data={"text": self.PAGE}, follow_redirects=False)
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(response.json()["login_required"])
+
+    def test_the_text_is_not_kept(self):
+        """ไม่เขียนไฟล์ ไม่ส่งชีท — ปลายทางเรียกแค่ตัวอ่าน · ช่องข้อความไม่มี name จึงไม่ไปกับ /check และไม่เข้าฉบับร่าง"""
+        source = inspect.getsource(main.parse_mis)
+        for kept in ("open(", "write", "SHEET", "logger", "logging", "print(", "DRAFTS", "JOBS"):
+            self.assertNotIn(kept, source, kept)
+        html = self.SOURCE.read_text(encoding="utf-8")
+        box = html.split('<textarea id="mis-text"', 1)[1].split(">", 1)[0]
+        self.assertNotIn("name=", box)
+        self.assertNotIn("mis_text", main.RESTORE_FIELDS)
+
+    def test_the_page_sends_it_to_the_server_and_fills_like_the_file(self):
+        html = self.SOURCE.read_text(encoding="utf-8")
+        handler = html.split("document.getElementById('parse-mis-text').addEventListener('click'", 1)[1]
+        handler = handler.split("\n});", 1)[0]
+        self.assertIn("fetch('/parse-mis'", handler)
+        self.assertIn("applyParsed(data)", handler)                 # ช่องสีเขียว + ถอยกลับไปแก้ไขคืนค่าได้แบบเดียวกัน
+        self.assertIn("box.value = ''", handler)
+        for manual in ("ประเภทเล่ม", "รูปแบบเล่ม", "ภาษาหลักสูตร", "กรรมการสอบ (บฑ.2)"):
+            self.assertIn(manual, handler, manual)
+        self.assertIn('id="mis-paste"', html)
+        self.assertIn("วันที่สอบจะปรับรูปให้อัตโนมัติเมื่อเลือกภาษาหลักสูตร", handler)
+
+    def test_the_two_date_forms_survive_going_back(self):
+        """ถอยกลับมาแก้ไขแล้วเปลี่ยนภาษายังปรับรูปวันที่ได้ — สองรูปเก็บกับสภาพฟอร์ม · ผิดรูปทิ้ง"""
+        variants = {"thai": {"exam_date": "7 พฤศจิกายน 2569", "year": "2569"},
+                    "english": {"exam_date": "7 November 2026", "year": "2026"}}
+        state = main._form_state(json.dumps({"autofilled": ["exam_date"], "exam_date_variants": variants}))
+        self.assertEqual(state["exam_date_variants"], variants)
+        for bad in ("x", {"thai": variants["thai"]}, {"thai": 1, "english": 2},
+                    {"thai": {"exam_date": 5, "year": "2569"}, "english": variants["english"]}):
+            self.assertNotIn("exam_date_variants", main._form_state(json.dumps({"exam_date_variants": bad})), bad)
+        self.assertNotIn("exam_date_variants", main._form_state(json.dumps({"autofilled": ["title_en"]})))
+        html = self.SOURCE.read_text(encoding="utf-8")
+        self.assertIn("exam_date_variants: examDateVariants", html)
+        self.assertIn("examDateVariants = state.exam_date_variants || null;", html)
+        self.assertIn("addEventListener('change', syncExamDateToLanguage)", html)
+        self.assertIn("ไม่มีในข้อมูลที่นำเข้า", html)                 # กล่องรายชื่อบอกว่าไม่มีกรรมการสอบ
+
+
+class Update116RedBackButton(unittest.TestCase):
+    """ปุ่ม "← ถอยกลับไปแก้ไข" สีแดงเด่นชัด (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569 "ถอยกลับไปแก้ไขของเด่นชัดแบบว่า สีแดง หน่อย")"""
+
+    CSS = (Path(__file__).resolve().parents[1] / "templates" / "precheck.html").read_text(encoding="utf-8")
+
+    def _rule(self, selector):
+        import re
+        return re.search(r"(?m)^  " + re.escape(selector) + r" \{([^}]*)\}", self.CSS).group(1)
+
+    def _token(self, name):
+        import re
+        return re.search(r"--" + name + r":(#[0-9a-f]{6})", self.CSS).group(1)
+
+    @staticmethod
+    def _ratio(a, b):
+        def lum(hex_colour):
+            c = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        hi, lo = sorted((lum(a), lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_red_with_white_text_that_passes_contrast(self):
+        back = self._rule(".back")
+        self.assertIn("background:var(--bad)", back)
+        self.assertIn("color:#fff", back)
+        self.assertIn("background:var(--bad-hover)", self._rule(".back:hover:not([disabled])"))
+        self.assertIn("box-shadow:var(--ring)", self._rule(".back:focus-visible"))
+        for token in ("bad", "bad-hover"):
+            self.assertGreaterEqual(self._ratio("#ffffff", self._token(token)), 4.5, token)
+
+    def test_the_bar_button_is_as_big_as_continue_and_continue_keeps_its_colour(self):
+        back, go = self._rule(".back"), self._rule(".go")
+        for part in ("padding:12px 26px", "font-size:.98rem", "font-weight:700"):
+            self.assertIn(part, back, part)
+            self.assertIn(part, go, part)
+        self.assertIn("var(--navy)", go)
+        self.assertNotIn("--bad", go)
+

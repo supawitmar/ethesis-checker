@@ -128,6 +128,13 @@
   .slot-foot { display:flex; align-items:center; gap:10px; min-height:44px; margin-top:10px; }
   .slot-foot .secondary { margin:0; flex:none; }
   .slot-foot .hint { margin:0; }
+  /* วางข้อความหน้าประวัตินักศึกษา MIS (อัปเดต 1.16) — ทางรอง พับไว้ใต้ช่องไฟล์ eThesis */
+  .mis-paste { margin-top:12px; border:1px dashed var(--line-2); border-radius:12px; padding:10px 14px; }
+  .mis-paste > summary { cursor:pointer; font-size:.86rem; font-weight:600; color:var(--navy); min-height:28px;
+       display:flex; align-items:center; }
+  .mis-paste > summary:focus-visible { outline:none; box-shadow:var(--ring); border-radius:8px; }
+  .mis-paste textarea { margin-top:8px; min-height:110px; font-size:.84rem; }
+  .mis-paste .hint { margin-top:6px; }
   .slot-label { font-size:.82rem; font-weight:600; color:var(--ink-2); margin-bottom:8px; }
   .drop { position:relative; display:flex; align-items:center; gap:14px; width:100%; text-align:left;
        border:1.5px dashed #b9c7d8; background:#fafbfd; border-radius:12px; padding:16px; margin:0;
@@ -307,7 +314,10 @@
         <div><h2>ไฟล์</h2><p class="hint">ข้อมูลนักศึกษา (pdf. จากระบบ) ใช้เติมแบบฟอร์มเท่านั้น · รูปเล่มอิเล็กทรอนิกส์คือไฟล์ที่ระบบตรวจ · ไฟล์ Turnitin ใช้ตรวจค่า Overall Similarity</p></div></div>
       <div class="file-grid">
         {# เจ้าหน้าที่สั่ง (ก.ย. 2569): "เอาการก็อปวาง เพื่อกรอกข้อมูลออก คงไว้เพียงการแนบเอกสาร
-           เพื่ออ่านข้อมูลพอ" — เหลือทางเดียว ตัวอ่านเดียว (ethesis_import.py ฝั่งเซิร์ฟเวอร์) #}
+           เพื่ออ่านข้อมูลพอ" — ตัวอ่านเดียว (ethesis_import.py ฝั่งเซิร์ฟเวอร์) ไม่มีตัวอ่าน/ตารางในหน้าเว็บ
+           ยกเว้น (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569 "วิธีเดิมไป คือก็อปมาใส่"): นักศึกษาที่ยังไม่ส่ง eThesis วางข้อความหน้า
+           ประวัตินักศึกษา (MIS) ได้ — ส่งไปอ่านที่ /parse-mis (ethesis_import.parse_mis_profile) ช่องข้อความไม่มี name
+           จึงไม่ถูกส่งไปกับการตรวจและไม่ถูกเก็บ · แหล่งหลักยังเป็นไฟล์ eThesis #}
         <div class="import-panel" id="panel-file">
           <div class="slot-label">ข้อมูลนักศึกษา (pdf. จากระบบ) <span class="tag">ไม่บังคับ</span></div>
           <label class="drop" id="drop-ethesis">
@@ -323,6 +333,16 @@
             <button type="button" class="secondary" id="parse-ethesis-pdf">อ่านค่าและเติมแบบฟอร์ม</button>
             <p class="hint">✓ อ่านรูปแบบเล่ม 1/2 ที่ติ๊กไว้ในไฟล์ได้ด้วย</p>
           </div>
+          <details class="mis-paste" id="mis-paste">
+            <summary>นักศึกษายังไม่ส่ง eThesis? วางข้อความจากหน้าประวัตินักศึกษา (MIS)</summary>
+            <label for="mis-text" class="hint">เปิดหน้า "ประวัตินักศึกษา" ในระบบ MIS กด Ctrl+A แล้ว Ctrl+C แล้ววางที่ช่องนี้ (Ctrl+V)</label>
+            <textarea id="mis-text" rows="5" placeholder="วางข้อความทั้งหน้าที่คัดลอกมาที่นี่" spellcheck="false" autocomplete="off"></textarea>
+            <div class="slot-foot">
+              <button type="button" class="secondary" id="parse-mis-text">อ่านค่าและเติมแบบฟอร์ม</button>
+            </div>
+            <p class="hint">เติมได้: รหัส ชื่อ ชื่อเรื่อง ชื่อปริญญา วันที่สอบผ่าน อาจารย์ที่ปรึกษา · ต้องกรอก/เลือกเอง: ประเภทเล่ม รูปแบบเล่ม
+              (และภาษาหลักสูตร ถ้าไม่ใช่หลักสูตรนานาชาติ) · หน้านี้ไม่มีกรรมการสอบ (บฑ.2) · ข้อความที่วางไม่ถูกเก็บ</p>
+          </details>
         </div>
         <div>
           <div class="slot-label">รูปเล่มอิเล็กทรอนิกส์ <span class="tag req">จำเป็น</span></div>
@@ -571,8 +591,12 @@ function renderCommitteeSummary(committees) {
         <span class="cm-role">${escapeHtml(m.role || '')}</span></div>`).join('');
     return `<div class="committee-list"><b>${title}</b>${rows}</div>`;
   }
+  // ไม่มีรายชื่อกรรมการสอบ (หน้า MIS ไม่มี บฑ.2 — อัปเดต 1.16) ระบบไม่นับรายชื่อบนหน้าลงนาม 2 ต้องตรวจเทียบเอง
+  const noExam = (committees.advisory || []).length && !(committees.exam || []).length
+    ? '<div class="committee-list"><b>กรรมการสอบ (บฑ.2)</b>ไม่มีในข้อมูลที่นำเข้า — ระบบจะไม่นับรายชื่อบนหน้าลงนาม 2 กรุณาตรวจเทียบ บฑ.2 เอง</div>'
+    : '';
   out.innerHTML = list('อาจารย์ที่ปรึกษา', committees.advisory)
-                + list('กรรมการสอบ', committees.exam);
+                + list('กรรมการสอบ', committees.exam) + noExam;
   box.style.display = '';
 }
 
@@ -602,6 +626,7 @@ function clearImportedFields() {
   const oldCommittees = document.getElementById('committee-box');
   if (oldCommittees) oldCommittees.style.display = 'none';
   abbrNotFound = {en: false, th: false};
+  examDateVariants = null;
   updateAbbrHints();
   updateDocTypeNote();
 }
@@ -640,9 +665,36 @@ function updateDocTypeNote() {
     ' ไม่ตรงกับที่เลือกไว้ ระบบจะตรวจเล่มตามประเภทที่เลือกไว้';
 }
 
+// วันที่สอบสองรูปจากหน้า MIS (อัปเดต 1.16 · หัวหน้าทีม QA) — เล่มไทยใช้ไทย พ.ศ. เล่มไทย-อังกฤษ/นานาชาติใช้อังกฤษ ค.ศ.
+// เซิร์ฟเวอร์ส่งทั้งสองรูปมา (exam_date_variants) หน้านี้แค่เลือกชุดตามภาษา — ไม่มีตารางเดือนในหน้าเว็บ (บทเรียนตารางซ้ำ ก.ย. 2569)
+// เปลี่ยนเฉพาะช่องที่ยังเป็นสีเขียวและยังเป็นค่าที่ระบบเติม (รูปใดรูปหนึ่งในสองรูป) — ช่องที่เจ้าหน้าที่แก้เองไม่ทับ
+// ไฟล์ eThesis ไม่มีสองรูป (ภาษาอ่านจากไฟล์ได้อยู่แล้ว) จึงไม่เปลี่ยนพฤติกรรม
+let examDateVariants = null;
+function applyExamDateVariant(variants, lang, fields) {
+  if (!variants || !lang) return false;
+  const pick = variants[lang === 'thai' ? 'thai' : 'english'] || {};
+  let changed = false;
+  Object.keys(fields).forEach(function(key){
+    const field = fields[key];
+    if (!field || !field.classList.contains('autofilled') || !pick[key]) return;
+    const known = ['thai', 'english'].map(function(form){ return (variants[form] || {})[key]; });
+    if (known.indexOf(field.value) < 0 || field.value === pick[key]) return;
+    field.value = pick[key];
+    changed = true;
+  });
+  return changed;
+}
+function syncExamDateToLanguage() {
+  const changed = applyExamDateVariant(examDateVariants, document.getElementById('program-language').value,
+    {exam_date: document.getElementById('exam-date'), year: document.getElementById('cover-year')});
+  if (changed) document.getElementById('exam-date').dispatchEvent(new Event('input', {bubbles:true}));
+}
+
 function applyParsed(parsed) {
   document.querySelectorAll('.autofilled').forEach(field => field.classList.remove('autofilled'));
   clearImportedFields();
+  examDateVariants = (parsed.exam_date_variants && typeof parsed.exam_date_variants === 'object')
+    ? parsed.exam_date_variants : null;
   const ethType = document.getElementById('ethesis-doc-type');
   if (ethType) ethType.value = parsed.doc_type || '';
   const filled = [];
@@ -764,6 +816,41 @@ document.getElementById('parse-ethesis-pdf').addEventListener('click', function(
   });
 });
 
+// วางข้อความหน้าประวัตินักศึกษา MIS (อัปเดต 1.16) — อ่านฝั่งเซิร์ฟเวอร์ แล้วเติมด้วย applyParsed ตัวเดียวกับไฟล์ eThesis
+// (ช่องสีเขียว · ถอยกลับไปแก้ไขคืนค่าได้เหมือนกัน) ล้างช่องข้อความเมื่ออ่านสำเร็จ ข้อความไม่ถูกเก็บที่ไหน
+document.getElementById('parse-mis-text').addEventListener('click', function(){
+  const btn = this;
+  const box = document.getElementById('mis-text');
+  const text = box.value;
+  if (!text.trim()) { setStatus('err', 'กรุณาวางข้อความจากหน้าประวัตินักศึกษา (MIS) ก่อน'); return; }
+  withBusy(btn, 'กำลังอ่านข้อความ...', async function(){
+    setStatus('', 'กำลังอ่านข้อความจากหน้าประวัตินักศึกษา (MIS)...');
+    try {
+      const body = new FormData();
+      body.append('text', text);
+      const resp = await fetch('/parse-mis', {method:'POST', body});
+      if (loginExpired(resp)) return;
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || ('อ่านข้อความไม่สำเร็จ (' + resp.status + ')'));
+      }
+      const {data} = await resp.json();
+      const filled = applyParsed(data);
+      box.value = '';
+      const manual = ['ประเภทเล่ม', 'รูปแบบเล่ม'];
+      if (!data.program_language) manual.push('ภาษาหลักสูตร');
+      setStatus('warn',
+        `เติมจากหน้าประวัตินักศึกษา (MIS) แล้ว ${filled.length} ช่อง (ช่องสีเขียว) กรุณาตรวจทานทุกช่อง — ` +
+        `ต้องกรอก/เลือกเอง: ${manual.join(', ')} · หน้านี้ไม่มีกรรมการสอบ (บฑ.2) ระบบจะไม่นับรายชื่อบนหน้าลงนาม 2` +
+        (!data.program_language && data.exam_date_variants
+          ? ' · วันที่สอบจะปรับรูปให้อัตโนมัติเมื่อเลือกภาษาหลักสูตร' : ''),
+        filled);
+    } catch(err) {
+      setStatus('err', err.message);
+    }
+  });
+});
+
 function updateConditionalRequirements() {
   const program = document.getElementById('program-language').value;
   const requiresThai = program === 'thai' || program === 'thai_english';
@@ -782,6 +869,7 @@ function updateConditionalRequirements() {
 }
 
 document.getElementById('program-language').addEventListener('change', updateConditionalRequirements);
+document.getElementById('program-language').addEventListener('change', syncExamDateToLanguage);
 // ต้องมาก่อนตัวอัปเดตชิปความพร้อม (updateProgress) — ชิปอ่าน required ที่ตั้งที่นี่
 ['input', 'change'].forEach(function(ev){
   document.getElementById('f').addEventListener(ev, function(e){
@@ -826,6 +914,7 @@ function applyRestore(r) {
     if (field) field.classList.add('autofilled');
   });
   abbrNotFound = {en: !!(state.abbr_not_found || {}).en, th: !!(state.abbr_not_found || {}).th};
+  examDateVariants = state.exam_date_variants || null;     // ถอยกลับมาแก้ไขแล้วเปลี่ยนภาษายังปรับรูปวันที่ได้ (อัปเดต 1.16)
   const files = r.files || {};
   setKeptFile('book-pdf', files.book || null);
   setKeptFile('turnitin-pdf', files.turnitin || null);
@@ -883,7 +972,8 @@ document.getElementById('f').addEventListener('submit', async function(e){
   document.getElementById('form-state').value = JSON.stringify({
     autofilled: Array.from(document.querySelectorAll('#f .autofilled')).map(function(el){ return el.name; }).filter(Boolean),
     ethesis_name: ethesisFile ? ethesisFile.name : ((KEPT_FILES['ethesis-pdf'] || {}).name || ''),
-    abbr_not_found: abbrNotFound
+    abbr_not_found: abbrNotFound,
+    exam_date_variants: examDateVariants
   });
   try {
     const resp = await fetch('/check', {method:'POST', body:new FormData(this)});

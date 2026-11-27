@@ -66,7 +66,7 @@ from checker import (
     summary_verdict,
     zone_counts,
 )
-from ethesis_import import parse_ethesis_pdf
+from ethesis_import import parse_ethesis_pdf, parse_mis_profile
 from ethesis_rules import FORM_FIELD_LABELS, FRONT_MATTER_RULES
 import release_check
 
@@ -307,11 +307,31 @@ def _form_state(raw):
     names = data.get("autofilled")
     abbr = data.get("abbr_not_found")
     abbr = abbr if isinstance(abbr, dict) else {}
-    return {
+    state = {
         "autofilled": [n for n in names if n in RESTORE_FIELDS][:40] if isinstance(names, list) else [],
         "ethesis_name": str(data.get("ethesis_name") or "")[:200],
         "abbr_not_found": {"en": abbr.get("en") is True, "th": abbr.get("th") is True},
     }
+    variants = _exam_date_variants(data.get("exam_date_variants"))
+    if variants:
+        state["exam_date_variants"] = variants
+    return state
+
+
+def _exam_date_variants(raw):
+    """วันที่สอบสองรูปจากหน้า MIS (อัปเดต 1.16) — ถอยกลับมาแก้ไขแล้วเปลี่ยนภาษาหลักสูตรยังปรับรูปได้ · ผิดรูป = ไม่มี"""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for lang in ("thai", "english"):
+        item = raw.get(lang)
+        if not isinstance(item, dict):
+            return None
+        out[lang] = {key: str(item.get(key) or "")[:80] for key in ("exam_date", "year")
+                     if isinstance(item.get(key, ""), str)}
+        if len(out[lang]) != 2:
+            return None
+    return out
 
 
 def _draft_view(token):
@@ -473,7 +493,7 @@ def _safe_next(path):
 
 
 # ปลายทางที่หน้าเว็บเรียกด้วย fetch เท่านั้น (ไม่ใช่การเปิดหน้าเว็บตรง ๆ)
-JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/summary/", "/progress/", "/sheet/", "/update/")
+JSON_ENDPOINTS = ("/check", "/parse-ethesis", "/parse-mis", "/summary/", "/progress/", "/sheet/", "/update/")
 
 
 def _wants_json(request):
@@ -725,6 +745,28 @@ async def parse_ethesis(pdf: UploadFile = File(...)):
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+
+
+# ข้อความที่วางจากหน้าประวัตินักศึกษา MIS ยาวไม่เกินนี้ (หน้าจริงราว 3-5 พันตัวอักษร) — เกินนี้ไม่ใช่หน้านั้นแน่นอน
+MIS_TEXT_MAX_CHARS = 200_000
+MIS_NOT_FOUND = "ไม่พบข้อมูลประวัตินักศึกษาในข้อความที่วาง"
+
+
+@app.post("/parse-mis")
+async def parse_mis(text: str = Form("")):
+    """ข้อความที่คัดลอกจากหน้าประวัตินักศึกษา (MIS) → ค่าที่เติมแบบฟอร์ม (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569)
+
+    ใช้เมื่อนักศึกษายังไม่ส่ง eThesis — ตัวช่วยกรอกเท่านั้นเหมือน /parse-ethesis · ข้อความไม่ถูกเก็บลงไฟล์ ชีท หรือ log
+    """
+    if len(text) > MIS_TEXT_MAX_CHARS:
+        raise HTTPException(status_code=413, detail="ข้อความที่วางยาวเกินไป — คัดลอกเฉพาะหน้าประวัตินักศึกษา")
+    try:
+        data = parse_mis_profile(text) if text.strip() else {}
+    except Exception:
+        data = {}
+    if not data:
+        raise HTTPException(status_code=422, detail=MIS_NOT_FOUND)
+    return JSONResponse({"data": data})
 
 
 @app.post("/check")

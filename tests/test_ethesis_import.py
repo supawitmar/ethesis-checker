@@ -312,5 +312,164 @@ class TheExamDateIsWrittenDayFirst(unittest.TestCase):
                          "การกำหนดรูปแบบรูปเล่ม")
 
 
+class Update116MisProfileText(unittest.TestCase):
+    """ข้อความที่คัดลอกจากหน้าประวัตินักศึกษา (MIS) — ข้อมูลสมมติทั้งหมด ตามโครงหน้าจริง (อัปเดต 1.16 เจ้าของ 26 พ.ย. 2569)"""
+
+    PAGE = "\n".join([
+        "ประวัตินักศึกษา",
+        "หน้าหลัก",
+        "|||| Student Profile",
+        "รหัสนักศึกษา : 6512345 GRXX/M",
+        "Menu",
+        "ชื่อ - นามสกุล : นางสาวสมหญิง ทดสอบดี",
+        "ชื่อภาษาอังกฤษ : Miss SOMYING THODSOBDEE",
+        "ระดับปริญญา : ปริญญาโท",
+        "Menu ประเภท : ภาคพิเศษ",
+        "แผนการศึกษา : วิทยานิพนธ์",
+        "รูปแบบการศึกษา : ในเวลาราชการ",
+        "Grade report : -",
+        "รหัสหลักสูตร : 1234M01",
+        "หลักสูตร(TH) : ศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการสมมติ",
+        "หลักสูตร (EN) : Master of Arts Program in Made-up Management",
+        "Soft Skills ปริญญาที่ได้รับ(TH) : ศิลปศาสตรมหาบัณฑิต (การจัดการสมมติ)",
+        "ปริญญาที่ได้รับ(EN) : MASTER OF ARTS(MADE-UP MANAGEMENT)",
+        "AUN-QA วันที่สอบโครงร่าง : 1 มิถุนายน 2569",
+        "วันที่สอบวิทยานิพนธ์ : 3 พฤศจิกายน 2569",
+        "วันที่สอบวิทยานิพนธ์ผ่าน : 7 พฤศจิกายน 2569",
+        "ชื่อวิทยานิพนธ์ (อังกฤษ) : A MADE-UP STUDY OF SOMETHING",
+        "VERY LONG",
+        "ชื่อวิทยานิพนธ์ (ไทย) : การศึกษาสมมติของบางสิ่ง",
+        "ที่ยาวมาก",
+        "อาจารย์ที่ปรึกษาหลัก : รองศาสตราจารย์ ดร. สมชาย ใจดี",
+        "อาจารย์ที่ปรึกษาร่วม : ผศ.ดร. สมศรี มีสุข",
+        "ส่งรูปเล่มออนไลน์ : -",
+    ])
+
+    def _parse(self, text):
+        from ethesis_import import parse_mis_profile
+        return parse_mis_profile(text)
+
+    def test_every_field_it_can_fill(self):
+        data = self._parse(self.PAGE)
+        self.assertEqual(data["student_id"], "6512345 GRXX/M")
+        self.assertEqual(data["student_name"], "SOMYING THODSOBDEE")
+        self.assertEqual(data["student_name_th"], "สมหญิง ทดสอบดี")
+        self.assertEqual(data["title_en"], "A MADE-UP STUDY OF SOMETHING VERY LONG")
+        self.assertEqual(data["title_th"], "การศึกษาสมมติของบางสิ่งที่ยาวมาก")       # ไทยต่อชิด
+        self.assertEqual(data["program"], "ศิลปศาสตรมหาบัณฑิต สาขาวิชาการจัดการสมมติ")
+        self.assertEqual(data["degree_cover_en"], "MASTER OF ARTS (MADE-UP MANAGEMENT)")    # เติมวรรคก่อนวงเล็บ
+        self.assertEqual(data["degree_sig_en"], "Master of Arts (Made-Up Management)")
+        self.assertEqual(data["degree_abbr_en"], "M.A. (MADE-UP MANAGEMENT)")
+        self.assertEqual(data["degree_cover_th"], "ศิลปศาสตรมหาบัณฑิต (การจัดการสมมติ)")
+        self.assertEqual(data["degree_abbr_th"], "ศศ.ม. (การจัดการสมมติ)")
+        # วันที่สอบผ่าน ไม่ใช่วันที่สอบ / วันที่สอบโครงร่าง · ไม่รู้ภาษาหลักสูตร = คงรูปไทยตามหน้าเว็บ
+        self.assertEqual((data["exam_date"], data["year"]), ("7 พฤศจิกายน 2569", "2569"))
+        self.assertEqual(data["committees"], {"advisory": [
+            {"name": "สมชาย ใจดี", "role": "อาจารย์ที่ปรึกษาหลัก"},
+            {"name": "สมศรี มีสุข", "role": "อาจารย์ที่ปรึกษาร่วม"}], "exam": []})
+
+    def test_what_it_never_fills(self):
+        """ไม่เดาประเภทเล่มจาก "แผนการศึกษา" · ไม่มีรูปแบบเล่ม คณะ กรรมการสอบ · ไม่ใช่นานาชาติ = ไม่เติมภาษาหลักสูตร"""
+        data = self._parse(self.PAGE)
+        for key in ("doc_type", "format", "faculty", "program_language"):
+            self.assertNotIn(key, data, key)
+
+    def test_an_international_programme(self):
+        page = self.PAGE.replace("Made-up Management", "Made-up Management (International Program)")
+        data = self._parse(page)
+        self.assertEqual(data["program_language"], "international")
+        self.assertEqual((data["exam_date"], data["year"]), ("7 November 2026", "2026"))
+        page = self.PAGE.replace("สาขาวิชาการจัดการสมมติ", "สาขาวิชาการจัดการสมมติ (หลักสูตรนานาชาติ)")
+        self.assertEqual(self._parse(page)["program_language"], "international")
+
+    def test_labels_and_values_on_separate_lines_with_tabs(self):
+        page = "\n".join([
+            "รหัสนักศึกษา", "6512345 GRXX/M",
+            "ชื่อ - นามสกุล\tนายสมมติ ตัวอย่าง",
+            "ชื่อภาษาอังกฤษ:Mr. SOMMOT TUAYANG",
+            "ปริญญาที่ได้รับ(EN)", "\tMASTER OF SCIENCE(MADE-UP SCIENCE)",
+            "ชื่อวิทยานิพนธ์ (อังกฤษ)", "A SHORT MADE-UP TITLE",
+            "อาจารย์ที่ปรึกษาหลัก :", "อาจารย์ สมชาย ใจดี",
+            "อาจารย์ที่ปรึกษาร่วม : -",
+        ])
+        data = self._parse(page)
+        self.assertEqual(data["student_id"], "6512345 GRXX/M")
+        self.assertEqual(data["student_name_th"], "สมมติ ตัวอย่าง")
+        self.assertEqual(data["student_name"], "SOMMOT TUAYANG")
+        self.assertEqual(data["degree_abbr_en"], "M.Sc. (MADE-UP SCIENCE)")
+        self.assertEqual(data["title_en"], "A SHORT MADE-UP TITLE")
+        # ไม่มีที่ปรึกษาร่วม ("-") = ที่ปรึกษาหลักคนเดียว
+        self.assertEqual(data["committees"]["advisory"], [{"name": "สมชาย ใจดี", "role": "อาจารย์ที่ปรึกษาหลัก"}])
+
+    def test_several_co_advisors(self):
+        """ที่ปรึกษาร่วมหลายคน: คั่นจุลภาค · ขึ้นบรรทัดใหม่ (ขึ้นต้นด้วยตำแหน่งวิชาการ) · ป้ายซ้ำ"""
+        base = self.PAGE.split("อาจารย์ที่ปรึกษาร่วม")[0]
+        for tail in ("อาจารย์ที่ปรึกษาร่วม : ผศ.ดร. สมศรี มีสุข, อาจารย์ สมปอง รักดี",
+                     "อาจารย์ที่ปรึกษาร่วม : ผศ.ดร. สมศรี มีสุข\nอาจารย์ สมปอง รักดี",
+                     "อาจารย์ที่ปรึกษาร่วม : ผศ.ดร. สมศรี มีสุข\nอาจารย์ที่ปรึกษาร่วม : อาจารย์ สมปอง รักดี"):
+            data = self._parse(base + tail + "\nส่งรูปเล่มออนไลน์ : -")
+            self.assertEqual([m["name"] for m in data["committees"]["advisory"]],
+                             ["สมชาย ใจดี", "สมศรี มีสุข", "สมปอง รักดี"], tail)
+        # บรรทัดต่อที่ไม่ขึ้นต้นด้วยตำแหน่งวิชาการ (เมนู ข้อความอื่น) ไม่นับเป็นอาจารย์
+        data = self._parse(base + "อาจารย์ที่ปรึกษาร่วม : ผศ.ดร. สมศรี มีสุข\nติดต่อเรา\nเว็บบอร์ด")
+        self.assertEqual(len(data["committees"]["advisory"]), 2)
+
+    def test_a_foreign_student_without_a_thai_name(self):
+        page = self.PAGE.replace("ชื่อ - นามสกุล : นางสาวสมหญิง ทดสอบดี", "ชื่อ - นามสกุล : -")
+        self.assertEqual(self._parse(page)["student_name_th"], "SOMYING THODSOBDEE")
+
+    def test_an_exam_date_falls_back_to_the_exam_day(self):
+        page = self.PAGE.replace("วันที่สอบวิทยานิพนธ์ผ่าน : 7 พฤศจิกายน 2569", "วันที่สอบวิทยานิพนธ์ผ่าน : -")
+        self.assertEqual(self._parse(page)["exam_date"], "3 พฤศจิกายน 2569")
+        page = page.replace("วันที่สอบวิทยานิพนธ์ : 3 พฤศจิกายน 2569", "วันที่สอบวิทยานิพนธ์ :")
+        self.assertNotIn("exam_date", self._parse(page))
+
+    def test_an_unknown_degree_has_no_abbreviation(self):
+        page = self.PAGE.replace("MASTER OF ARTS(MADE-UP MANAGEMENT)", "MASTER OF MADE-UP ARTS(SOMETHING)")
+        data = self._parse(page)
+        self.assertEqual(data["degree_cover_en"], "MASTER OF MADE-UP ARTS (SOMETHING)")
+        self.assertNotIn("degree_abbr_en", data)
+
+    def test_text_that_is_not_the_profile_page(self):
+        for text in ("", "hello world", "รหัสนักศึกษา : 6512345 GRXX/M",            # ป้ายเดียว ไม่พอ
+                     "ข้อความทั่วไป\nชื่อวิทยานิพนธ์ (อังกฤษ) : A TITLE\nหลักสูตร(TH) : ก"):   # ไม่มีรหัสนักศึกษา
+            self.assertEqual(self._parse(text), {}, text)
+
+    def test_missing_labels_are_skipped(self):
+        page = "\n".join(line for line in self.PAGE.splitlines()
+                         if not line.startswith(("ปริญญาที่ได้รับ", "Soft Skills", "อาจารย์")))
+        data = self._parse(page)
+        self.assertEqual(data["student_id"], "6512345 GRXX/M")
+        for key in ("degree_cover_en", "degree_cover_th", "committees"):
+            self.assertNotIn(key, data)
+
+    def test_both_date_forms_come_back(self):
+        """หน้าแบบฟอร์มเลือกรูปตามภาษาหลักสูตร — เซิร์ฟเวอร์ส่งทั้งสองรูป (หัวหน้าทีม QA 1.16)"""
+        variants = self._parse(self.PAGE)["exam_date_variants"]
+        self.assertEqual(variants, {"thai": {"exam_date": "7 พฤศจิกายน 2569", "year": "2569"},
+                                    "english": {"exam_date": "7 November 2026", "year": "2026"}})
+        # หน้าเว็บพิมพ์วันที่เป็นอังกฤษ ก็ได้รูปไทย พ.ศ. ด้วย
+        page = self.PAGE.replace("วันที่สอบวิทยานิพนธ์ผ่าน : 7 พฤศจิกายน 2569", "วันที่สอบวิทยานิพนธ์ผ่าน : November 7, 2026")
+        data = self._parse(page)
+        self.assertEqual(data["exam_date_variants"]["thai"], {"exam_date": "7 พฤศจิกายน 2569", "year": "2569"})
+        self.assertEqual((data["exam_date"], data["year"]), ("7 พฤศจิกายน 2569", "2569"))   # ยังไม่รู้ภาษา = รูปไทย
+        # ไม่มีวันที่ = ไม่มีสองรูป
+        page = self.PAGE.replace(": 7 พฤศจิกายน 2569", ": -").replace(": 3 พฤศจิกายน 2569", ": -")
+        self.assertNotIn("exam_date_variants", self._parse(page))
+
+    def test_the_ethesis_file_keeps_one_date(self):
+        """ควบคุมเชิงลบ — ไฟล์ eThesis รู้ภาษาจากไฟล์อยู่แล้ว ไม่มีสองรูป พฤติกรรมเดิม"""
+        import inspect
+        import ethesis_import
+        self.assertNotIn("exam_date_variants", inspect.getsource(ethesis_import.parse_ethesis_pdf))
+
+    def test_the_degree_fields_are_shared_with_the_ethesis_file(self):
+        import inspect
+        import ethesis_import
+        self.assertIn("data.update(_degree_fields(english, thai))", inspect.getsource(ethesis_import.parse_ethesis_pdf))
+        self.assertIn("_degree_fields(value('degree_en'), value('degree_th'))",
+                      inspect.getsource(ethesis_import.parse_mis_profile))
+
+
 if __name__ == "__main__":
     unittest.main()

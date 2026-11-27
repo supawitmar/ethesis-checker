@@ -10,6 +10,8 @@
 กรณีนั้นจะไม่ส่งค่า format กลับ เพื่อให้เจ้าหน้าที่เลือกเอง
 """
 import re
+import unicodedata
+
 import pdfplumber
 
 from thai_text import fix_thai_pua, fold_sara_am, strip_student_title
@@ -30,6 +32,7 @@ THAI_MONTHS = {
 # ชื่อที่ไม่อยู่ในตารางคืน '' เพื่อให้เจ้าหน้าที่กรอกเอง ดีกว่าเดาผิดแล้วฟ้องเล่มที่ถูก
 # ตารางนี้เป็นชุดเดียวของระบบ — หน้าเว็บเคยมีตารางซ้ำสำหรับทางวางข้อความ (หลุดกันจริง ขาด
 # D.N.S. / D.P.A. / Dr. P.H. / M.P.A.) ทางนั้นถูกถอดออกแล้ว (ก.ย. 2569) อย่าเพิ่มตารางซ้ำกลับไป
+# ทางวางข้อความหน้าประวัตินักศึกษา MIS (อัปเดต 1.16) อ่านฝั่งเซิร์ฟเวอร์ด้วย parse_mis_profile ซึ่งใช้ตารางนี้ ไม่มีตารางในหน้าเว็บ
 DEGREE_ABBR = {
     'DOCTOR OF PHILOSOPHY': 'Ph.D.',
     'DOCTOR OF NURSING SCIENCE': 'D.N.S.',      # ยืนยันจากเล่มจริง (เล่มที่ 6)
@@ -470,6 +473,31 @@ def english_name_only(value):
     return ' '.join(words)
 
 
+def _degree_fields(english, thai):
+    """ช่องชื่อปริญญาทั้งหมดจากชื่อปริญญาอังกฤษ/ไทย — ชุดเดียวของไฟล์ eThesis และหน้า MIS (อัปเดต 1.16 แยกออกมาจาก parse_ethesis_pdf)
+
+    แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis เป็นตัวพิมพ์ใหญ่เสมอ, หน้าลงนาม = Sentence
+    case สำหรับอังกฤษ (ไทยคงเดิม), บทคัดย่อ = ตัวย่อ
+    ปกอังกฤษ .upper() เสมอ (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569) — ไฟล์ eThesis บางคนพิมพ์
+    "Doctor of Applied Thai Traditional Medicine" ตัวเล็กปนใหญ่ ข้อหน้าปกจึงสั่งให้แก้เป็น "Doctor of…"
+    ชื่อปริญญาที่ไม่มีในตารางตัวย่อ = ไม่มีช่องตัวย่อ (หน้าฟอร์มบอกให้กรอกเอง)
+    """
+    data = {}
+    if english:
+        data['degree_cover_en'] = _spaced_degree(english).upper()
+        data['degree_sig_en'] = _degree_name(english)
+        abbr = _degree_abbr(english)
+        if abbr:
+            data['degree_abbr_en'] = abbr
+    if thai:
+        data['degree_cover_th'] = _spaced_degree(thai)
+        data['degree_sig_th'] = _spaced_degree(thai)
+        abbr_th = _degree_abbr_th(thai)
+        if abbr_th:
+            data['degree_abbr_th'] = abbr_th
+    return data
+
+
 def parse_ethesis_pdf(pdf_path):
     """คืน dict ของค่าที่ดึงได้ (เฉพาะช่องที่พบ) สำหรับเติมแบบฟอร์ม"""
     with pdfplumber.open(pdf_path) as pdf:
@@ -529,22 +557,7 @@ def parse_ethesis_pdf(pdf_path):
         english = next((c for c in candidates
                         if re.search(r'[A-Za-z]', c) and not re.search(r'[ก-๙]', c)), '')
         thai = next((c for c in candidates if re.search(r'[ก-๙]', c)), '')
-        # แยกตามตำแหน่งที่ใช้ตรวจ: ปก = ต้นฉบับ eThesis เป็นตัวพิมพ์ใหญ่เสมอ, หน้าลงนาม = Sentence
-        # case สำหรับอังกฤษ (ไทยคงเดิม), บทคัดย่อ = ตัวย่อ
-        # ปกอังกฤษ .upper() เสมอ (อัปเดต 1.8.2 เจ้าของสั่ง 28 ต.ค. 2569) — ไฟล์ eThesis บางคนพิมพ์
-        # "Doctor of Applied Thai Traditional Medicine" ตัวเล็กปนใหญ่ ข้อหน้าปกจึงสั่งให้แก้เป็น "Doctor of…"
-        if english:
-            data['degree_cover_en'] = _spaced_degree(english).upper()
-            data['degree_sig_en'] = _degree_name(english)
-            abbr = _degree_abbr(english)
-            if abbr:
-                data['degree_abbr_en'] = abbr
-        if thai:
-            data['degree_cover_th'] = _spaced_degree(thai)
-            data['degree_sig_th'] = _spaced_degree(thai)
-            abbr_th = _degree_abbr_th(thai)
-            if abbr_th:
-                data['degree_abbr_th'] = abbr_th
+        data.update(_degree_fields(english, thai))
 
     exam_value = _find(lines, 'วันที่สอบผ่าน')[0]
     use_english = data.get('program_language') != 'thai'
@@ -579,3 +592,262 @@ def parse_ethesis_pdf(pdf_path):
         data['doc_type'] = 'INDEPENDENT STUDY'
 
     return {key: value for key, value in data.items() if value}
+
+
+# ---------- หน้า "ประวัตินักศึกษา" (Student Profile) ของระบบ MIS ที่คัดลอกมาวาง (อัปเดต 1.16) ----------
+# เจ้าของ 26 พ.ย. 2569: "ข้อมูลนักศึกษาจาก eThesis ... ใช้ได้กับกรณีที่นักศึกษาส่งไฟล์เข้าระบบแล้ว แต่กรณีที่นักศึกษายังไม่ได้ส่ง
+# ทำยังไงดี" แล้วเลือก "วิธีเดิมไป คือก็อปมาใส่" — ยกเว้นคำสั่ง ก.ย. 2569 ที่ถอดทางวางข้อความออก เฉพาะกรณีนักศึกษายังไม่ส่ง eThesis
+# ตัวอ่านอยู่ฝั่งเซิร์ฟเวอร์ตัวเดียวนี้ และใช้ตาราง/ตัวจัดรูปชุดเดียวกับไฟล์ eThesis (ต้นเหตุที่ทางเดิมถูกถอดคือตารางซ้ำในหน้าเว็บ)
+# ข้อความที่วางใช้เติมฟอร์มอย่างเดียว ไม่เก็บลงไฟล์หรือชีท
+#
+# หน้าเว็บเป็นแถว "ป้าย : ค่า" และเมนูซ้ายปนอยู่ในบรรทัดเดียวกับป้ายได้ ("Menu ประเภท :" "Soft Skills ปริญญาที่ได้รับ(TH) :")
+# ป้ายจึงหาได้ทุกตำแหน่งในบรรทัด เทียบแบบตัดช่องว่างทิ้ง ("หลักสูตร(TH)" กับ "หลักสูตร (EN)" วรรคไม่เหมือนกัน) และเลือกป้ายที่ยาวที่สุด
+# ("วันที่สอบวิทยานิพนธ์ผ่าน" ไม่ใช่ "วันที่สอบวิทยานิพนธ์") · ค่าอยู่ท้ายป้ายหรือบรรทัดถัดไป คั่นด้วย ":" แท็บ หรือช่องว่าง
+_MIS_FIELDS = (
+    ('student_id', 'รหัสนักศึกษา'),
+    ('name_th', 'ชื่อ-นามสกุล'),
+    ('name_en', 'ชื่อภาษาอังกฤษ'),
+    ('program_th', 'หลักสูตร(TH)'),
+    ('program_en', 'หลักสูตร(EN)'),
+    ('degree_th', 'ปริญญาที่ได้รับ(TH)'),
+    ('degree_en', 'ปริญญาที่ได้รับ(EN)'),
+    ('exam_passed', 'วันที่สอบวิทยานิพนธ์ผ่าน'),
+    ('exam', 'วันที่สอบวิทยานิพนธ์'),
+    ('title_en', 'ชื่อวิทยานิพนธ์(อังกฤษ)'),
+    ('title_th', 'ชื่อวิทยานิพนธ์(ไทย)'),
+    ('advisor', 'อาจารย์ที่ปรึกษาหลัก'),
+    ('co_advisor', 'อาจารย์ที่ปรึกษาร่วม'),
+)
+# ป้ายอื่นในหน้าเดียวกัน — ไม่ใช้ค่า แต่เป็นจุดจบของค่าที่ตัดบรรทัด (ไม่เติมประเภทเล่มจาก "แผนการศึกษา" — ห้ามเดา)
+_MIS_OTHER_LABELS = (
+    'ระดับปริญญา', 'สถานภาพปัจจุบัน', 'ประเภทการศึกษาต่อ', 'แผนการศึกษา', 'รูปแบบการศึกษา', 'แขนง/สาขาวิชาเอก(TH)',
+    'แขนง/สาขาวิชาเอก(EN)', 'รหัสหลักสูตร', 'ประธานหลักสูตรปัจจุบัน', 'สอบวัดคุณสมบัติ', 'สอบประมวลความรู้', 'สอบปากเปล่า',
+    'อาจารย์ที่ปรึกษาโครงร่าง', 'วันที่สอบโครงร่าง', 'วันที่สอบผ่านโครงร่าง', 'วันที่อนุมัติหัวข้อ', 'วันที่สำเร็จการศึกษา',
+    'สภาอนุมัติปริญญาครั้งที่', 'ปีการศึกษาที่สภาอนุมัติปริญญา', 'ส่งรูปเล่มออนไลน์', 'การเผยแพร่ผลงานวิจัย', 'วันที่ส่งรูปเล่ม',
+    'ผลการสอบภาษาอังกฤษ',
+)
+_MIS_BLANK = re.compile(r'[\s​﻿]+')
+# ค่าที่ตัดบรรทัดต่อได้ (ชื่อเรื่อง) — บรรทัดต่อต้องไม่ใช่แถว "ป้ายสั้น ๆ :" ของช่องอื่น
+_MIS_LABEL_ROW = re.compile(r'^[^:：]{1,40}[:：]')
+# บรรทัดที่ปรึกษาร่วมคนถัดไป (ขึ้นบรรทัดใหม่) ต้องขึ้นต้นด้วยตำแหน่งวิชาการหรือเลขลำดับ — กันเมนู/ข้อความอื่นถูกนับเป็นอาจารย์
+_MIS_PERSON_START = re.compile(
+    r'^\s*(?:\d+\s*[.)]\s*)?(?:ศาสตราจารย์|รองศาสตราจารย์|ผู้ช่วยศาสตราจารย์|อาจารย์|ผศ\.|รศ\.|ศ\.|ดร\.|'
+    r'(?:Assoc(?:iate)?|Asst|Assistant)\.?\s*Prof|Prof(?:essor)?\b|Dr\.)', re.I)
+_EN_ACADEMIC_TITLE_RE = re.compile(
+    r'^\s*(?:(?:Assoc(?:iate)?|Asst|Assistant)\.?\s+)?(?:Prof(?:essor)?\.?\s+)?(?:Dr\.?\s+)?', re.I)
+_MIS_MAX_CHARS = 200_000
+
+
+_EN_TO_TH_MONTH = {english: thai for thai, english in THAI_MONTHS.items()}
+
+
+def _thai_exam_date(value):
+    """วันที่สอบรูปไทย พ.ศ. (คู่กลับของ _exam_date) — วันที่ที่เป็นไทยอยู่แล้วคงตามที่พิมพ์ · อ่านไม่ออก = คืนค่าเดิม"""
+    v = re.sub(r'\s+', ' ', value or '').strip()
+    month_first = _MONTH_FIRST_DATE.match(v)
+    if month_first:
+        v = f'{int(month_first.group(2))} {month_first.group(1)} {month_first.group(3)}'
+    m = re.match(r'^(\d{1,2})\s+(\S+)\s+(25\d{2}|20\d{2})$', v)
+    if not m or m.group(2) in THAI_MONTHS:
+        return v
+    month = _EN_TO_TH_MONTH.get(m.group(2).capitalize())
+    if not month:
+        return v
+    year = int(m.group(3))
+    return f'{int(m.group(1))} {month} {year + 543 if year < 2400 else year}'
+
+
+def _exam_date_variant(date, english):
+    """{exam_date, year} ของวันที่รูปหนึ่ง — ปีตามรูปนั้น (อังกฤษ ค.ศ. / ไทย พ.ศ.)"""
+    match = re.search(r'\b(25\d{2}|20\d{2})\b', date)
+    year = ''
+    if match:
+        year_value = int(match.group(1))
+        if english and year_value > 2400:
+            year_value -= 543
+        elif not english and year_value < 2400:
+            year_value += 543
+        year = str(year_value)
+    return {'exam_date': date, 'year': year}
+
+
+def _mis_compact(line):
+    """บรรทัดที่ตัดช่องว่างทิ้ง + ตำแหน่งของแต่ละตัวในบรรทัดเดิม (ไว้ตัดค่าจากบรรทัดเดิม)"""
+    chars, where = [], []
+    for k, ch in enumerate(line):
+        if not _MIS_BLANK.fullmatch(ch):
+            chars.append(ch)
+            where.append(k)
+    return ''.join(chars), where
+
+
+_MIS_KEYS = sorted([(re.sub(r'\s+', '', label), key) for key, label in _MIS_FIELDS]
+                   + [(re.sub(r'\s+', '', label), None) for label in _MIS_OTHER_LABELS],
+                   key=lambda item: -len(item[0]))
+
+
+def _mis_labels_in(line):
+    """ป้ายในบรรทัดนี้ เรียงซ้ายไปขวา: [(key หรือ None, ตำแหน่งเริ่ม, ตำแหน่งหลังป้าย)] ในบรรทัดเดิม"""
+    compact, where = _mis_compact(line)
+    found, pos = [], 0
+    while pos < len(compact):
+        for label, key in _MIS_KEYS:
+            if compact.startswith(label, pos):
+                end = pos + len(label)
+                found.append((key, where[pos], where[end - 1] + 1))
+                pos = end
+                break
+        else:
+            pos += 1
+    return found
+
+
+def _mis_value(text):
+    """ค่าหลังป้าย — ตัด ":" แท็บ และช่องว่างหน้า-หลัง · "-" = ไม่มีค่า"""
+    value = re.sub(r'^[\s:：]+', '', text or '')
+    value = re.sub(r'\s+', ' ', value).strip()
+    return '' if value in ('-', '–', '—') else value
+
+
+def _mis_rows(text):
+    """[(key, ค่า, ดัชนีบรรทัด)] ตามลำดับในข้อความ — ค่าว่างท้ายป้ายใช้บรรทัดถัดไปที่ไม่ใช่ป้าย"""
+    lines = [fold_sara_am(unicodedata.normalize('NFC', line)) for line in (text or '').splitlines()]
+    labelled = [_mis_labels_in(line) for line in lines]
+    rows = []
+    for index, labels in enumerate(labelled):
+        for k, (key, _start, end) in enumerate(labels):
+            stop = labels[k + 1][1] if k + 1 < len(labels) else len(lines[index])
+            value = _mis_value(lines[index][end:stop])
+            if not value and k + 1 == len(labels):
+                following = next((j for j in range(index + 1, min(index + 3, len(lines))) if lines[j].strip()), None)
+                if following is not None and not labelled[following] and not _MIS_LABEL_ROW.match(lines[following]):
+                    value = _mis_value(lines[following])
+                    index_used = following
+                else:
+                    index_used = index
+            else:
+                index_used = index
+            if key:
+                rows.append((key, value, index_used))
+    return rows, lines, labelled
+
+
+def _mis_continuation(lines, labelled, index, accept, limit=3):
+    """บรรทัดต่อของค่าที่ตัดบรรทัด (หลังบรรทัด index) จนกว่าจะเจอป้าย/แถวป้าย หรือบรรทัดที่ accept ไม่รับ"""
+    out = []
+    for j in range(index + 1, min(index + 1 + limit, len(lines))):
+        line = lines[j].strip()
+        if not line:
+            if out:
+                break
+            continue
+        if labelled[j] or _MIS_LABEL_ROW.match(line) or not accept(line):
+            break
+        out.append(re.sub(r'\s+', ' ', line))
+    return out
+
+
+def _mis_join(parts):
+    """ต่อค่าที่ตัดบรรทัด — ไทยต่อชิด อังกฤษ/ตัวเลข/วงเล็บเว้นวรรค (กติกาเดียวกับ _cell_value ของไฟล์ eThesis)"""
+    out = ''
+    for part in parts:
+        if out and (re.match(r'[A-Za-z0-9(]', part) or re.search(r'[A-Za-z0-9)]$', out)):
+            out += ' '
+        out += part
+    return out
+
+
+def _mis_person(text):
+    """ชื่ออาจารย์ — ตัดเลขลำดับและตำแหน่งวิชาการ (ตัวตัดเดียวกับรายชื่อกรรมการจาก eThesis + คำนำหน้าภาษาอังกฤษ)"""
+    name = re.sub(r'^\s*\d+\s*[.)]\s*', '', text or '')
+    name = _ACADEMIC_TITLE_RE.sub('', name).strip()
+    name = _EN_ACADEMIC_TITLE_RE.sub('', name).strip()
+    name = re.sub(r'\s+', ' ', name)
+    return '' if not re.search(r'[A-Za-zก-๙]', name) or re.search(r'\d', name) else name
+
+
+def _mis_people(values):
+    """ค่าช่องอาจารย์ (หลายบรรทัด/หลายป้ายได้) → รายชื่อ · คั่นด้วยจุลภาค อัฒภาค หรือเลขลำดับได้"""
+    people = []
+    for value in values:
+        for part in re.split(r'\s*[,;、]\s*|\s+(?=\d+\s*[.)]\s)', value or ''):
+            name = _mis_person(part)
+            if name and name not in people:
+                people.append(name)
+    return people
+
+
+def parse_mis_profile(text):
+    """ข้อความที่คัดลอกจากหน้าประวัตินักศึกษา (MIS) → dict ของค่าที่เติมฟอร์มได้ (รูปเดียวกับ parse_ethesis_pdf)
+
+    คืน {} ถ้าไม่ใช่หน้านี้ (ต้องพบรหัสนักศึกษา และป้ายอื่นที่มีค่าอย่างน้อย 2 ป้าย) · ป้ายที่หาไม่เจอข้ามไป ไม่ล้ม
+    ไม่เติม: ประเภทเล่ม รูปแบบเล่ม กรรมการสอบ (บฑ.2) คณะ · ภาษาหลักสูตรเติมเฉพาะหลักสูตรนานาชาติ
+    (หน้านี้ไม่มีช่อง "ภาษาที่เขียน" ที่ eThesis ใช้แยกหลักสูตรไทยกับไทย-อังกฤษ — ให้เจ้าหน้าที่เลือกเอง ห้ามเดา)
+    """
+    text = (text or '')[:_MIS_MAX_CHARS]
+    rows, lines, labelled = _mis_rows(text)
+    first = {}
+    for key, value, index in rows:
+        if value and key not in first:
+            first[key] = (value, index)
+    student_id = _student_id(first.get('student_id', ('', 0))[0])
+    if not student_id or len([key for key in first if key != 'student_id']) < 2:
+        return {}
+
+    def value(key):
+        return first.get(key, ('', 0))[0]
+
+    data = {'student_id': student_id}
+    name_th, name_en = value('name_th'), value('name_en')
+    if name_en:
+        data['student_name'] = english_name_only(name_en)
+    if name_th and re.search(r'[ก-๙]', name_th):
+        data['student_name_th'] = strip_student_title(name_th)
+    elif data.get('student_name'):
+        data['student_name_th'] = data['student_name']     # นักศึกษาต่างชาติไม่มีชื่อไทย — กติกาเดียวกับ eThesis
+
+    for key in ('title_en', 'title_th'):
+        if key not in first:
+            continue
+        title, index = first[key]
+        if key == 'title_en':
+            accept = lambda line: bool(re.search(r'[A-Za-z]', line)) and not re.search(r'[ก-๙]', line)
+        else:
+            accept = lambda line: bool(re.search(r'[ก-๙]', line))
+        data[key] = _mis_join([title] + _mis_continuation(lines, labelled, index, accept))
+
+    program_th, program_en = value('program_th'), value('program_en')
+    if program_th or program_en:
+        data['program'] = re.sub(r'\s*\[[^\]]*\]\s*$', '', program_th or program_en).strip()
+    if re.search(r'นานาชาติ', program_th) or re.search(r'international', program_en, re.I):
+        data['program_language'] = 'international'
+
+    data.update(_degree_fields(value('degree_en'), value('degree_th')))
+
+    exam_value = value('exam_passed')
+    if not _looks_like_a_date(exam_value):
+        exam_value = value('exam')                # ถอยไปใช้วันที่สอบ — กติกาเดียวกับ eThesis (เจ้าหน้าที่ ก.ย. 2569)
+    if _looks_like_a_date(exam_value):
+        # ส่งทั้งสองรูปมาพร้อมกัน (หัวหน้าทีม QA 1.16) — หน้าแบบฟอร์มเลือกรูปตามภาษาหลักสูตรที่เจ้าหน้าที่เลือก
+        # (thai = ไทย พ.ศ. · thai_english/international = อังกฤษ ค.ศ. กติกาเดียวกับ eThesis) ไม่มีตารางเดือนในหน้าเว็บ
+        # ช่องที่เติมตอนนี้: นานาชาติ = อังกฤษ · ยังไม่รู้ภาษา = รูปไทยตามที่หน้าเว็บพิมพ์ จนกว่าจะเลือกภาษา
+        variants = {'thai': _exam_date_variant(_thai_exam_date(exam_value), False),
+                    'english': _exam_date_variant(_exam_date(exam_value, True), True)}
+        chosen = variants['english' if data.get('program_language') == 'international' else 'thai']
+        data['exam_date'], data['year'] = chosen['exam_date'], chosen['year']
+        data['exam_date_variants'] = variants
+
+    advisors = []
+    for key, role in (('advisor', 'อาจารย์ที่ปรึกษาหลัก'), ('co_advisor', 'อาจารย์ที่ปรึกษาร่วม')):
+        values = []
+        for row_key, row_value, index in rows:
+            if row_key == key and row_value:
+                values.append(row_value)
+                values += _mis_continuation(lines, labelled, index, lambda line: bool(_MIS_PERSON_START.match(line)))
+        for name in _mis_people(values):
+            if all(name != person['name'] for person in advisors):
+                advisors.append({'name': name, 'role': role})
+    if advisors:
+        data['committees'] = {'advisory': advisors, 'exam': []}
+    return {key: item for key, item in data.items() if item}
+
