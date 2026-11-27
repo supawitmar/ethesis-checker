@@ -14114,3 +14114,63 @@ class Update117ChapterStartsOnANewPage(unittest.TestCase):
         self.assertEqual(i18n.tr_en("แทรกตัวแบ่งหน้า (Page Break) ก่อนหัวบท", pairs),
                          "Insert a page break before the chapter heading")
 
+
+class Update1171TwoLineHeadingDownThePage(unittest.TestCase):
+    """หัวบท 2 บรรทัดที่ขึ้นกลางหน้าลึกกว่า heading_scan_lines (อัปเดต 1.17.1 เจ้าของ 27 พ.ย. 2569 "Yes, fix it" · ข้อมูลสมมติ)"""
+
+    BODY = "This paragraph is ordinary body text that runs across the full width of the page."
+
+    def _body(self, y, n=3):
+        return [(72, y - 16 * k, self.BODY, 12, False) for k in range(n)]
+
+    def _run(self, pages, toc_extra=()):
+        import tempfile
+        toc = [(300, 800, "iii", 12, False), (230, 730, "TABLE OF CONTENTS", 12, True),
+               (72, 700, "CHAPTER 1 INTRODUCTION 1", 12, False), (72, 684, "CHAPTER 2 METHODS 2", 12, False),
+               *toc_extra]
+        chapter1 = [(300, 800, "1", 12, False), (255, 730, "CHAPTER 1", 14, True), (240, 712, "INTRODUCTION", 14, True),
+                    *self._body(680)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "book.pdf"
+            path.write_bytes(_pdf_with_styled_lines([toc, chapter1, *pages]))
+            result = checker_module.run_check(str(path), None, "free")
+        return [i for zone in ("RED", "ORANGE", "YELLOW") for i in result["issues_by_zone"][zone]]
+
+    def _page2(self, heading_x=255, bold=True, size=14):
+        """หัวบทที่ 2 ที่บรรทัดที่ 8 ของหน้า ต่อจากเนื้อหาบทที่ 1 หกบรรทัด"""
+        return [(300, 800, "2", 12, False), *self._body(770, 6),
+                (heading_x, 650, "CHAPTER 2", size, bold), (heading_x, 632, "METHODS", size, bold), *self._body(600)]
+
+    def test_a_heading_on_line_8_is_found_and_reported_as_not_on_a_new_page(self):
+        issues = self._run([self._page2()])
+        self.assertFalse([i for i in issues if i["rule_id"] == "FRONT.TOC"], issues)       # ไม่มีแดงจำนวนบท/ชื่อบท
+        self.assertEqual([i["location"] for i in issues if i["rule_id"] == "BODY.CHAPTER_NEW_PAGE"], ["บทที่ 2 (หน้า 2)"])
+
+    def test_a_plain_left_aligned_line_is_not_a_heading(self):
+        """ควบคุมเชิงลบ — บรรทัด "CHAPTER 2" ชิดซ้าย ขนาดและน้ำหนักเท่าเนื้อหา กลางหน้า = ไม่นับ (เนื้อหาจึงมี 1 บท)"""
+        issues = self._run([self._page2(heading_x=72, bold=False, size=12)])
+        self.assertTrue([i for i in issues if i["rule_id"] == "FRONT.TOC" and "เนื้อหามี 1 บท" in i["found"]], issues)
+        self.assertFalse([i for i in issues if i["rule_id"] == "BODY.CHAPTER_NEW_PAGE"], issues)
+
+    def test_a_table_cell_is_not_a_heading(self):
+        """ควบคุมเชิงลบ — "CHAPTER 2" ตัวหนาในเซลล์ตารางคอลัมน์ขวา (แบบเล่มของ 1.12.3) = ไม่นับ"""
+        table = [(300, 800, "2", 12, False), *self._body(770, 6), (72, 650, "Factor", 12, False),
+                 (200, 650, "Detail", 12, False), (370, 650, "Items to do in", 12, False),
+                 (370, 634, "CHAPTER 2", 12, True), (370, 618, "METHODS", 12, True), *self._body(580)]
+        issues = self._run([table])
+        self.assertTrue([i for i in issues if i["rule_id"] == "FRONT.TOC" and "เนื้อหามี 1 บท" in i["found"]], issues)
+
+    def test_the_table_of_contents_is_not_scanned(self):
+        """ควบคุมเชิงลบ — สารบัญที่พิมพ์หัวบทกึ่งกลางตัวหนา 2 บรรทัดลึกลงไปในหน้า ไม่นับเป็นบทในเนื้อหา"""
+        extra = [(72, 668 - 16 * k, f"Section line {k}", 12, False) for k in range(4)]
+        extra += [(255, 590, "CHAPTER 2", 14, True), (255, 572, "METHODS", 14, True)]
+        issues = self._run([[(300, 800, "2", 12, False), *self._body(770, 8)]], toc_extra=extra)
+        self.assertTrue([i for i in issues if i["rule_id"] == "FRONT.TOC" and "เนื้อหามี 1 บท" in i["found"]], issues)
+
+    def test_headings_found_the_old_way_come_first(self):
+        source = inspect.getsource(checker_module.run_check)
+        old = source.index("tls = top_lines(t, BODY_RULES['heading_scan_lines'])")
+        self.assertLess(old, source.index("for i in sorted(number_line_heads):"))
+        self.assertLess(source.index("for i in sorted(number_line_heads):"), source.index("for i in sorted(one_line_heads):"))
+        self.assertIn("cn in table_chapter_cells.get(i, ())", source.split("for i in sorted(number_line_heads):")[1][:900])
+

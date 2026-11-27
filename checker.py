@@ -9113,6 +9113,21 @@ def styled_one_line_chapters(words, chars):
     ต้องไม่จับประโยคในเนื้อหาที่ขึ้นต้นด้วย "บทที่ N" (เล่มจริงอีกเล่ม "บทที่ 4 จึงรวมสาเหตุรากลำดับที่ 1 และ 2 ...") — ประโยคแบบนั้น
     ชิดซ้ายและขนาดเท่าเนื้อหา · บรรทัดสารบัญชิดซ้ายมีเลขหน้าต่อท้าย จึงไม่ผ่านเกณฑ์กึ่งกลาง
     """
+    return _styled_heading_rows(words, chars, lambda text: (one_line_chapter(text) or (None,))[0])
+
+
+def styled_number_lines(words, chars):
+    """บรรทัด "บทที่ N" / "CHAPTER N" (ทั้งบรรทัด — บรรทัดแรกของหัวบท 2 บรรทัด) ที่หน้าตาเป็นหัวบท (อัปเดต 1.17.1)
+
+    เจ้าของ 27 พ.ย. 2569 "Yes, fix it" — ตัวหาหัวบท 2 บรรทัดเดิมดูแค่ 4 บรรทัดต้นหน้า (heading_scan_lines) หัวบทที่ขึ้นกลางหน้า
+    ต่อจากเนื้อหาบทก่อนจึงหาไม่เจอ ได้แดง "สารบัญมี N บท เนื้อหามี N−1 บท" แทนแดงบทไม่ขึ้นหน้าใหม่ (1.17) · เกณฑ์เดียวกับ 1.15
+    (กึ่งกลาง ±36 จุด ตัวหนาหรือใหญ่กว่าเนื้อหา) คืน {เลขบท: {ข้อความบรรทัดหลัง norm()}}
+    """
+    return _styled_heading_rows(words, chars, _chapter_match)
+
+
+def _styled_heading_rows(words, chars, chapter_of):
+    """แถวคำที่ chapter_of(ข้อความ) ให้เลขบท และอยู่กึ่งกลางพื้นที่พิมพ์ ตัวหนาหรือใหญ่กว่าขนาดที่พบมากที่สุดบนหน้า ≥ 1 จุด"""
     if not words:
         return {}
     left = min(float(w["x0"]) for w in words)
@@ -9123,8 +9138,8 @@ def styled_one_line_chapters(words, chars):
     found = {}
     for row in _word_rows(words):
         text = " ".join(w["text"] for w in row)
-        hit = one_line_chapter(text)
-        if not hit:
+        number = chapter_of(text)
+        if number is None:
             continue
         x0, x1 = float(row[0]["x0"]), float(row[-1]["x1"])
         if abs((x0 + x1) / 2 - middle) > _HEADING_CENTER_SLACK:
@@ -9139,7 +9154,7 @@ def styled_one_line_chapters(words, chars):
         bold = sum("bold" in str(c.get("fontname", "")).lower() for c in own) * 2 >= len(own)
         row_size = sorted(round(float(c.get("size") or 0), 1) for c in own)[len(own) // 2]
         if bold or (body_size and row_size >= body_size + 1):
-            found.setdefault(hit[0], set()).add(norm(text))
+            found.setdefault(number, set()).add(norm(text))
     return found
 
 
@@ -9580,6 +9595,7 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
     # หัวกระดาษแบบแถบ 8% ตายตัวของแผ่นที่อาจเป็นหน้าปก (find_cover_page ดู 10 แผ่นแรก · อัปเดต 1.15)
     fixed_band_headers = {}
     chapter_rows = {}          # ดัชนีหน้า → (แถวข้อความ, ขอบล่างแถบหัวกระดาษ) ของหน้าที่มี "บทที่/CHAPTER" (อัปเดต 1.17)
+    number_line_heads = {}     # ดัชนีหน้า → {เลขบท: ข้อความ} ของบรรทัด "บทที่ N" ที่หน้าตาเป็นหัวบท (styled_number_lines อัปเดต 1.17.1)
     one_line_heads = {}        # ดัชนีหน้า → {เลขบท: ข้อความบรรทัด} ของหัวบทบรรทัดเดียวที่หน้าตาเป็นหัวบท (styled_one_line_chapters อัปเดต 1.15)
     with pdfplumber.open(pdf_path) as _pdf:
         n = len(_pdf.pages)
@@ -9629,6 +9645,10 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 _cells = chapter_lines_far_right(_words)
                 if _cells:
                     table_chapter_cells[_i] = _cells
+                if any(_chapter_match(line) is not None for line in pages[-1].splitlines()):
+                    _numbers = styled_number_lines(_words, _pg.chars)
+                    if _numbers:
+                        number_line_heads[_i] = _numbers
                 if any(one_line_chapter(line) for line in pages[-1].splitlines()):
                     _heads = styled_one_line_chapters(_words, _pg.chars)
                     if _heads:
@@ -9935,8 +9955,25 @@ def run_check(pdf_path, approved, chapters_mode="strict", progress=None,
                 break
     # หัวบทบรรทัดเดียว "บทที่ N <ชื่อบท>" (อัปเดต 1.15) — เฉพาะหน้าที่บรรทัดนั้นหน้าตาเป็นหัวบท (กึ่งกลาง ตัวหนา/ใหญ่กว่าเนื้อหา)
     # ค้นทั้งหน้า ไม่ใช่แค่บรรทัดต้นหน้า: เล่มจริงขึ้นบทใหม่กลางหน้าต่อจากเนื้อหาบทก่อน · บทที่หาเจอแบบ 2 บรรทัดแล้วไม่นับซ้ำ
-    one_line_found = []        # (เลขบท, หัวบทเป็นภาษาอังกฤษไหม)
     _toc_source_pages = {c[4] for c in toc_ch} | set(toc_pages)    # บรรทัดสารบัญไม่ใช่หัวบท
+    # หัวบท 2 บรรทัดที่ขึ้นกลางหน้าลึกกว่า heading_scan_lines (อัปเดต 1.17.1) — เฉพาะบทที่วิธีเดิมหาไม่เจอ ค้นทั้งหน้า
+    # รับเฉพาะบรรทัด "บทที่ N" ที่หน้าตาเป็นหัวบท (ข้อความตรงแถว) · ชื่อบท = บรรทัดถัดไป (กติกาเดิม) · ไม่ใช่เซลล์ตาราง ไม่ใช่ "(ต่อ)"
+    for i in sorted(number_line_heads):
+        if i in _toc_source_pages:
+            continue
+        page_lines = [soft(line) for line in pages[i].splitlines() if soft(line)]
+        for j, line in enumerate(page_lines[:-1]):
+            cn = _chapter_match(line)
+            if (cn is None or norm(line) not in number_line_heads[i].get(cn, ())
+                    or cn in table_chapter_cells.get(i, ()) or any(c[0] == cn for c in body_ch)):
+                continue
+            title = page_lines[j + 1]
+            if is_continuation_heading(line) or is_continuation_heading(title) or re.match(r'\d', title):
+                continue
+            body_ch.append((cn, title, i, printed.get(i), page_lines[j + 2] if j + 2 < len(page_lines) else ""))
+            if not chapter_number_is_arabic(line):
+                non_arabic_heads.append((cn, soft(line), i))
+    one_line_found = []        # (เลขบท, หัวบทเป็นภาษาอังกฤษไหม)
     for i in sorted(one_line_heads):
         if i in _toc_source_pages:
             continue
